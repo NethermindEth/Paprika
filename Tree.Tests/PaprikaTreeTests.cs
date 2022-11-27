@@ -9,31 +9,31 @@ public class PaprikaTreeTests
     [Test]
     public void Test()
     {
-        using var db = new TestMemoryDb(16 * 1024 * 1024);
+        using var db = new TestMemoryDb((int)(1.9 * 1024 * 1024 * 1024));
 
         var tree = new PaprikaTree(db);
 
-        const int count = 32000;
-        
+        const int count = 2_600_000;
+
         foreach (var (key, value) in Build(count))
         {
             tree.Set(key.AsSpan(), value.AsSpan());
         }
-        
+
         foreach (var (key, value) in Build(count))
         {
             Assert.True(tree.TryGet(key.AsSpan(), out var retrieved), $"for key {key.Field0}");
             Assert.True(retrieved.SequenceEqual(value.AsSpan()));
         }
-        
-        var percentage = (int)(((double)db.Position)/db.Size * 100); 
-        
+
+        var percentage = (int)(((double)db.Position) / db.Size * 100);
+
         Console.WriteLine($"used {percentage}%");
     }
 
     private const int NibbleSize = 4;
 
-    
+
     private static IEnumerable<KeyValuePair<Keccak, Keccak>> Build(int number)
     {
         // builds the values so no extensions in the tree are required
@@ -53,7 +53,7 @@ public class PaprikaTreeTests
 
             Keccak key = default;
             Keccak value = default;
-            
+
             BinaryPrimitives.WriteInt32LittleEndian(key.AsSpan(), (int)n);
             BinaryPrimitives.WriteInt32LittleEndian(value.AsSpan(), (int)i);
 

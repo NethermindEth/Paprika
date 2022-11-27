@@ -29,11 +29,20 @@ public unsafe class TestMemoryDb : IDb, IDisposable
     public long Write(ReadOnlySpan<byte> payload)
     {
         var length = payload.Length;
+
+        if (Position + length > Size)
+        {
+            throw new Exception("Not enough memory!");
+        }
+        
         payload.CopyTo(new Span<byte>(_memory + Position, length));
+        
+        
+        
         var key= Id.Encode(Position, length, FileNumber);
         
         Position += length;
-
+        
         return key;
     }
 

@@ -161,6 +161,13 @@ public class PaprikaTree
         return buildTo.Slice(0, copy.Length + 1);
     }
 
+    /// <summary>
+    /// Trims the existing written key by one nibble in front. This is done in an efficient manner.
+    /// </summary>
+    /// <param name="nextNibble">The next nibble of the key, absolute, not relative.</param>
+    /// <param name="original">The original key that was written to a leaf.</param>
+    /// <param name="buildTo">The span to build to.</param>
+    /// <returns></returns>
     private static ReadOnlySpan<byte> TrimKeyTo(int nextNibble, ReadOnlySpan<byte> original, Span<byte> buildTo)
     {
         if (nextNibble % 2 == 0)
@@ -246,7 +253,8 @@ public class PaprikaTree
                     return false;
                 }
             }
-            else if ((first & BranchType) == BranchType)
+
+            if ((first & BranchType) == BranchType)
             {
                 var count = (first & BranchChildCountMask) + BranchMinChildCount;
                 var newNibble = GetNibble(nibble, key[nibble / 2]);
@@ -273,10 +281,8 @@ public class PaprikaTree
                 value = default;
                 return false;
             }
-            else
-            {
-                throw new Exception("Type not handled!");
-            }
+
+            throw new Exception("Type not handled!");
         }
 
         value = default;

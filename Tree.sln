@@ -4,6 +4,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tree", "Tree\Tree.csproj", 
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tree.Tests", "Tree.Tests\Tree.Tests.csproj", "{74D5D451-4C57-4778-94DB-9691D897F59A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Tree.Runner", "Tree.Runner\Tree.Runner.csproj", "{756973B2-BF89-4238-A7E4-2894C21FD676}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -18,5 +20,9 @@ Global
 		{74D5D451-4C57-4778-94DB-9691D897F59A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{74D5D451-4C57-4778-94DB-9691D897F59A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{74D5D451-4C57-4778-94DB-9691D897F59A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{756973B2-BF89-4238-A7E4-2894C21FD676}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{756973B2-BF89-4238-A7E4-2894C21FD676}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{756973B2-BF89-4238-A7E4-2894C21FD676}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{756973B2-BF89-4238-A7E4-2894C21FD676}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
