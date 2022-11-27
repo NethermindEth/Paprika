@@ -9,11 +9,11 @@ public class PaprikaTreeTests
     [Test]
     public void Test()
     {
-        using var db = new TestMemoryDb(1024 * 1024);
+        using var db = new TestMemoryDb(16 * 1024 * 1024);
 
         var tree = new PaprikaTree(db);
 
-        const int count = 16;
+        const int count = 32000;
         
         foreach (var (key, value) in Build(count))
         {
@@ -25,6 +25,10 @@ public class PaprikaTreeTests
             Assert.True(tree.TryGet(key.AsSpan(), out var retrieved), $"for key {key.Field0}");
             Assert.True(retrieved.SequenceEqual(value.AsSpan()));
         }
+        
+        var percentage = (int)(((double)db.Position)/db.Size * 100); 
+        
+        Console.WriteLine($"used {percentage}%");
     }
 
     private const int NibbleSize = 4;

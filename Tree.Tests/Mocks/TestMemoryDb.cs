@@ -7,10 +7,12 @@ public unsafe class TestMemoryDb : IDb, IDisposable
     private const int FileNumber = 13;
     
     private byte* _memory;
-    private int _position;
+    public int Size { get; }
+    public int Position { get; private set; }
 
     public TestMemoryDb(int size)
     {
+        Size = size;
         _memory = (byte*)NativeMemory.Alloc((UIntPtr)size);
     }
 
@@ -27,10 +29,10 @@ public unsafe class TestMemoryDb : IDb, IDisposable
     public long Write(ReadOnlySpan<byte> payload)
     {
         var length = payload.Length;
-        payload.CopyTo(new Span<byte>(_memory + _position, length));
-        var key= Id.Encode(_position, length, FileNumber);
+        payload.CopyTo(new Span<byte>(_memory + Position, length));
+        var key= Id.Encode(Position, length, FileNumber);
         
-        _position += length;
+        Position += length;
 
         return key;
     }

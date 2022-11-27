@@ -1,6 +1,5 @@
 ﻿using System.Buffers;
 using System.Buffers.Binary;
-using Microsoft.Win32.SafeHandles;
 
 namespace Tree;
 
@@ -38,129 +37,110 @@ public class PaprikaTree
         _db = db;
     }
 
-    public void Set(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)
+    public void Set(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value) => _root = Set(_root, 0, key, value);
+
+    private long Set(long current, int nibble, ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)
     {
-        Span<long> path = stackalloc long[NibbleCount];
-        path[0] = _root;
-
-        int nibble = 0;
-        for (; nibble < NibbleCount + 1; nibble++)
+        if (current == Null)
         {
-            ref var current = ref path[nibble];
+            return WriteLeaf(key, value);
+        }
 
-            if (current == Null)
+        var node = _db.Read(current);
+
+        ref readonly var first = ref node[0];
+
+        if ((first & LeafType) == LeafType)
+        {
+            // ReSharper disable once StackAllocInsideLoop
+            Span<byte> destination = stackalloc byte[key.Length];
+
+            var leaf = node.Slice(PrefixLength);
+            var builtKey = BuildKey(nibble, key, destination);
+            var keyLength = builtKey.Length;
+            var sameKey = leaf.StartsWith(builtKey);
+
+            if (sameKey)
             {
-                current = WriteLeaf(key, value);
-                break;
+                // update in place, making it walk up the tree
+                return WriteLeaf(builtKey, value);
             }
 
-            var node = _db.Read(current);
+            // nibbles are always written to the first byte, small half
+            var newNibble = (byte)(builtKey[0] & NibbleMask);
+            var oldNibble = (byte)(leaf[0] & NibbleMask);
 
-            ref readonly var first = ref node[0];
-
-            if ((first & LeafType) == LeafType)
+            if (newNibble == oldNibble)
             {
-                // ReSharper disable once StackAllocInsideLoop
-                Span<byte> destination = stackalloc byte[key.Length];
-
-                var leaf = node.Slice(PrefixLength);
-                var builtKey = BuildKey(nibble, key, destination);
-                var keyLength = builtKey.Length;
-                var sameKey = leaf.StartsWith(builtKey);
-
-                if (sameKey)
-                {
-                    // update in place, making it walk up the tree
-                    current = WriteLeaf(builtKey, value);
-                    break;
-                }
-
-                // as keys are truncated to the current depth, use GetNibble for even or odd
-                var newNibble = GetNibble(nibble & 1, builtKey[0]);
-                var oldNibble = GetNibble(nibble & 1, leaf[0]);
-
-                if (newNibble == oldNibble)
-                {
-                    throw new Exception("Extension case. It is not handled now.");
-                }
-                else
-                {
-                    // split to branch, on the next nibble
-                    
-                    // build the key for the nested nibble, this one exist and 1lvl deeper is needed
-                    builtKey = BuildKey(nibble + 1, key, destination);
-                    var @new = WriteLeaf(builtKey, value);
-
-                    // build the key for the existing one,
-                    builtKey = TrimKeyTo(nibble + 1, leaf.Slice(0, keyLength), destination);
-                    var @old = WriteLeaf(builtKey, leaf.Slice(keyLength));
-
-                    // 1. write branch
-                    current = WriteBranch(new NibbleEntry(oldNibble, @old), new NibbleEntry(newNibble, @new));
-                    break;
-                }
-            }
-            else if ((first & BranchType) == BranchType)
-            {
-                var count = (first & BranchChildCountMask) + BranchMinChildCount;
-                var newNibble = GetNibble(nibble, key[nibble / 2]);
-                var found = false;
-
-                for (var i = 0; i < count; i++)
-                {
-                    var (branchNibble, branchNode) = NibbleEntry.Read(node.Slice(PrefixLength + i * NibbleEntry.Size));
-                    if (branchNibble == newNibble)
-                    {
-                        // found descendant, set it and follow
-                        path[nibble + 1] = branchNode;
-                        found = true;
-                        break;
-                    }
-                }
-
-                if (found)
-                {
-                    // continue the outer loop
-                    continue;
-                }
-
-                // not found, must add
-                // 1. add new leaf
-                // 2. add it to the branch
-
-                // 1. add the leaf
-                // ReSharper disable once StackAllocInsideLoop
-                Span<byte> destination = stackalloc byte[key.Length];
-                var builtKey = BuildKey(nibble + 1, key, destination);
-                var added = WriteLeaf(builtKey, value);
-
-                current = AddToBranch(node, count, new NibbleEntry(newNibble, added));
-                break;
+                throw new Exception("Extension case. It is not handled now.");
             }
             else
             {
-                throw new Exception("Type not handled!");
+                // split to branch, on the next nibble
+
+                // build the key for the nested nibble, this one exist and 1lvl deeper is needed
+                builtKey = BuildKey(nibble + 1, key, destination);
+                var @new = WriteLeaf(builtKey, value);
+
+                // build the key for the existing one,
+                builtKey = TrimKeyTo(nibble + 1, leaf.Slice(0, keyLength), destination);
+                var @old = WriteLeaf(builtKey, leaf.Slice(keyLength));
+
+                // 1. write branch
+                return WriteBranch(new NibbleEntry(oldNibble, @old), new NibbleEntry(newNibble, @new));
             }
         }
 
-        // propagate write up now!
-        // nodes above can be either extensions or branches
-        // for (var i = nibble - 1; i >= 0; i--)
-        // {
-        //     path[i]
-        // }
-        
-        
-        // TODO: propagate write up, with hashes!
-        // currently, not needed, but hashes should be recalculated and propagated up!
-        // for (var i = nibble; i >= 0; i--)
-        // {
-        //     build hash up, write a new node
-        // }
+        if ((first & BranchType) == BranchType)
+        {
+            var count = (first & BranchChildCountMask) + BranchMinChildCount;
+            var newNibble = GetNibble(nibble, key[nibble / 2]);
+            var found = false;
 
-        _root = path[0];
+            Span<byte> updated = stackalloc byte[node.Length + NibbleEntry.Size];
+            int copied = 0;
+            
+            for (var i = 0; i < count; i++)
+            {
+                var rawEntry = node.Slice(PrefixLength + i * NibbleEntry.Size);
+                var (branchNibble, branchNode) = NibbleEntry.Read(rawEntry);
+                var updateTo = updated.Slice(PrefixLength + copied * NibbleEntry.Size);
+                
+                if (branchNibble != newNibble)
+                {
+                    rawEntry.CopyTo(updateTo);
+                    copied++;
+                }
+                else
+                {
+                    var @new = Set(branchNode, nibble + 1, key, value);
+                    new NibbleEntry(newNibble, @new).Write(updateTo);
+                    copied++;
+                    found = true;
+                }
+            }
+
+            // not found, must add
+            // 1. add new leaf
+            // 2. add it to the branch
+            if (!found)
+            {
+                Span<byte> destination = stackalloc byte[key.Length];
+                var builtKey = BuildKey(nibble + 1, key, destination);
+                var @new = WriteLeaf(builtKey, value);
+                
+                var updateTo = updated.Slice(PrefixLength + copied * NibbleEntry.Size);
+                new NibbleEntry(newNibble, @new).Write(updateTo);
+                copied++;
+            }
+
+            updated[0] = (byte)(BranchType | (copied - BranchMinChildCount));
+            return _db.Write(updated.Slice(0, PrefixLength + copied * NibbleEntry.Size));
+        }
+
+        throw new Exception("Type not handled!");
     }
-    
+
     // module nibble get fast
     private static byte GetNibble(int nibble, int value) =>
         (byte)((value >> ((nibble & 1) * NibbleBitSize)) & NibbleMask);
@@ -180,13 +160,13 @@ public class PaprikaTree
         copy.CopyTo(buildTo.Slice(1));
         return buildTo.Slice(0, copy.Length + 1);
     }
-    
+
     private static ReadOnlySpan<byte> TrimKeyTo(int nextNibble, ReadOnlySpan<byte> original, Span<byte> buildTo)
     {
         if (nextNibble % 2 == 0)
         {
             // this was odd key, just slice, removing odd nibble in front
-            original.Slice(1);
+            return original.Slice(1);
         }
 
         // the key was even, to make it odd, do as in BuildKey
@@ -232,19 +212,6 @@ public class PaprikaTree
         return _db.Write(branch);
     }
 
-    private long AddToBranch(ReadOnlySpan<byte> currentBranch, int currentCount, NibbleEntry toAdd)
-    {
-        Span<byte> branch = stackalloc byte[PrefixLength + (currentCount + 1) * NibbleEntry.Size];
-
-        currentBranch.CopyTo(branch);
-
-        branch[0] = (byte)(BranchType | (currentCount + 1 - BranchMinChildCount));
-
-        toAdd.Write(branch.Slice(PrefixLength + NibbleEntry.Size * currentCount));
-
-        return _db.Write(branch);
-    }
-
     public bool TryGet(ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value)
     {
         if (_root == Null)
@@ -264,7 +231,7 @@ public class PaprikaTree
             {
                 var leaf = node.Slice(PrefixLength);
                 Span<byte> destination = stackalloc byte[key.Length];
-                
+
                 var builtKey = BuildKey(nibble, key, destination);
                 var sameKey = leaf.StartsWith(builtKey);
 
