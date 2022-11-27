@@ -8,12 +8,17 @@ Additionally, this means that Paprika uses **almost no managed memory**, delegat
 
 The database assumes no deletes and keeping the last root in the memory. If deletes or pruning is required, it can be added later on. For example, by copying only values that are alive. The roots can be captured and stored elsewhere. They map to a single long and one can easily amend paprika to get old data by its root.
 
+The current implementation **does not include**:
+
+- Keccak compute nor storage
+- RLP encoding
+
 ## Benchmarks
 
 15 millions of key value pairs, with keys being 32 bytes (Keccak) and values being 32 bytes.
 
-Writing of 15 millions of items took 00:00:25.1832635
-Reading of 15 millions of items took 00:00:23.9572717
+- Writing of 15 millions of items took 00:00:25.1832635
+- Reading of 15 millions of items took 00:00:23.9572717
 
 ### Memory Profiling
 
