@@ -5,14 +5,18 @@ namespace Tree;
 
 public class PersistentDb : IDb
 {
-    private const int ChunkSize = 256 * 1024 * 1024;
-    private readonly List<File> _files = new();
+    private readonly string _dir;
+    public const string Ext = "db";
     
+    private const int ChunkSize = 1024 * 1024 * 1024;
+    private readonly List<File> _files = new();
+
     private Chunk _current;
     private int _currentNumber;
     
-    public PersistentDb()
+    public PersistentDb(string dir)
     {
+        _dir = dir;
         BuildFile();
     }
 
@@ -20,7 +24,7 @@ public class PersistentDb : IDb
     {
         var (position, lenght, file) = Id.Decode(id);
 
-        var chunk = (file == _currentNumber) ? _current : _files[file].Chunk;
+        var chunk = file == _currentNumber ? _current : _files[file].Chunk;
         
         return chunk.Read(position, lenght);
     }
@@ -52,14 +56,14 @@ public class PersistentDb : IDb
 
     private void BuildFile(int number = -1)
     {
-        var file = new File(number + 1);
+        var file = new File(_dir, number + 1);
         _files.Add(file);
         
         _current = file.Chunk;
         _currentNumber = file.Number;
     }
 
-    private static string FormatName(int number) => $"{number:D6}.db";
+    private static string FormatName(string dir, int number) => Path.Combine(dir, $"{number:D6}.{Ext}");
 
     private unsafe class File : IDisposable
     {
@@ -67,14 +71,20 @@ public class PersistentDb : IDb
         private readonly MemoryMappedFile _mapped;
         private readonly MemoryMappedViewAccessor _accessor;
         private readonly byte* _pointer;
+        private readonly FileStream _file;
 
-        public File(int number)
+        public File(string dir, int number)
         {
             Number = number;
-            var name = FormatName(number);
-            _mapped = MemoryMappedFile.CreateOrOpen(name, ChunkSize, MemoryMappedFileAccess.ReadWrite);
+            var name = FormatName(dir, number);
+
+            _file = new FileStream(name, FileMode.CreateNew, FileAccess.ReadWrite);
+            _file.SetLength(ChunkSize);
+            _mapped = MemoryMappedFile.CreateFromFile(_file, null, ChunkSize, MemoryMappedFileAccess.ReadWrite, HandleInheritability.None, false);
             _accessor = _mapped.CreateViewAccessor();
             _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref _pointer);
+            
+            Chunk.Initialize();
         }
 
         public Chunk Chunk => new(_pointer);
@@ -82,7 +92,7 @@ public class PersistentDb : IDb
         public void Flush()
         {
             _accessor.Flush();
-            
+            _file.Flush(true);
         }
 
         public void Dispose()
@@ -103,6 +113,8 @@ public class PersistentDb : IDb
             _ptr = ptr;
         }
 
+        public unsafe void Initialize() => WriteUnaligned(_ptr, Preamble);
+
         public unsafe ReadOnlySpan<byte> Read(int position, int length) => new(Add<byte>(_ptr, position), length);
 
         public bool TryWrite(ReadOnlySpan<byte> data, out int position)
@@ -110,7 +122,7 @@ public class PersistentDb : IDb
             unsafe
             {
                 // always add preamble so that the file does not overwrite it
-                var current = ReadUnaligned<int>(_ptr) + Preamble;
+                var current = ReadUnaligned<int>(_ptr);
                 
                 var destination = new Span<byte>(Add<byte>(_ptr, current), ChunkSize - current);
 

@@ -237,6 +237,8 @@ public class PaprikaTree
             if ((first & LeafType) == LeafType)
             {
                 var leaf = node.Slice(PrefixLength);
+                
+                // ReSharper disable once StackAllocInsideLoop
                 Span<byte> destination = stackalloc byte[key.Length];
 
                 var builtKey = BuildKey(nibble, key, destination);
