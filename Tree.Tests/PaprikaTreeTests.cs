@@ -9,11 +9,11 @@ public class PaprikaTreeTests
     [Test]
     public void Test()
     {
-        using var db = new TestMemoryDb((int)(1.9 * 1024 * 1024 * 1024));
+        using var db = new TestMemoryDb(1024 * 1024 * 1024);
 
         var tree = new PaprikaTree(db);
 
-        const int count = 2_600_000;
+        const int count = 1_200_000;
 
         foreach (var (key, value) in Build(count))
         {
