@@ -15,18 +15,22 @@ The current implementation **does not include**:
 
 ## Benchmarks
 
+A few scenarios used for benchmarking
+
+### 15 millions of key value pairs
+
 15 millions of key value pairs, with keys being 32 bytes (Keccak) and values being 32 bytes.
 
 - Writing of 15 millions of items took 00:00:25.1832635
 - Reading of 15 millions of items took 00:00:23.9572717
 
-### Memory Profiling
+#### Memory Profiling
 
 Almost no managed memory used
 
 ![image](https://user-images.githubusercontent.com/519707/204166299-81c05582-7e0d-4401-b2cf-91a3c1b7153b.png)
 
-### Performance profiling
+#### Performance profiling
 
 Some potential for extracting scope when writing items down
 
