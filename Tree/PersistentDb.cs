@@ -10,6 +10,7 @@ public class PersistentDb : IDb
     
     private const int ChunkSize = 1024 * 1024 * 1024;
     private readonly List<File> _files = new();
+    private readonly int[] _used = new int[1000]; // dummy constant
 
     private Chunk _current;
     private int _currentNumber;
@@ -46,6 +47,21 @@ public class PersistentDb : IDb
         return Id.Encode(position, payload.Length, _currentNumber);
     }
 
+    public void Free(long id)
+    {
+        var (_, lenght, file) = Id.Decode(id);
+        _used[file] -= lenght;
+    }
+
+    public void PrintStats()
+    {
+        for (var i = 0; i <= _currentNumber; i++)
+        {
+            var percentage = (int)(((double)_used[i]) / ChunkSize * 100);
+            Console.WriteLine($"File {i:D5} is used by the current root at {percentage}%");
+        }
+    }
+
     private void Flush()
     {
         var last = _files.Last();
@@ -61,6 +77,8 @@ public class PersistentDb : IDb
         
         _current = file.Chunk;
         _currentNumber = file.Number;
+
+        _used[_currentNumber] = ChunkSize - Chunk.Preamble;
     }
 
     private static string FormatName(string dir, int number) => Path.Combine(dir, $"{number:D6}.{Ext}");
@@ -106,7 +124,7 @@ public class PersistentDb : IDb
     private readonly struct Chunk
     {
         private readonly unsafe void* _ptr;
-        private const int Preamble = 4;
+        public const int Preamble = 4;
 
         public unsafe Chunk(void* ptr)
         {

@@ -2,7 +2,7 @@
 
 namespace Tree.Tests.Mocks;
 
-public class TestMemoryDbTests
+public class MemoryDbTests
 {
     [Test]
     public void Simple()
@@ -15,7 +15,7 @@ public class TestMemoryDbTests
         var bytes2 = new byte[57];
         random.NextBytes(bytes2);
 
-        using var db = new TestMemoryDb(1024 * 1024);
+        using var db = new MemoryDb(1024 * 1024);
         
         var key1 = db.Write(bytes1);
         var key2 = db.Write(bytes2);

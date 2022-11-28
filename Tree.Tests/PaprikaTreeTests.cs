@@ -9,7 +9,7 @@ public class PaprikaTreeTests
     [Test]
     public void Test()
     {
-        using var db = new TestMemoryDb(1024 * 1024 * 1024);
+        using var db = new MemoryDb(1024 * 1024 * 1024);
 
         var tree = new PaprikaTree(db);
 

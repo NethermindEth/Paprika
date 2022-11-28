@@ -401,3 +401,7 @@ FodyWeavers.xsd
 
 # macOS
 .DS_Store
+
+# Paprika files
+
+db

@@ -6,7 +6,7 @@ namespace Tree.Tests;
 
 public static class Program
 {
-    private const int Count = 15_000_000;
+    private const int Count = 50_000_000;
     
     public static void Main(String[] args)
     {
@@ -43,6 +43,8 @@ public static class Program
             tree.TryGet(key, out var v);
         }
         Stop(read, "Reading");
+        
+        db.PrintStats();
     }
 
     private static void Stop(Stopwatch sw, string name)

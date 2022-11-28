@@ -2,7 +2,7 @@
 
 namespace Tree.Tests.Mocks;
 
-public unsafe class TestMemoryDb : IDb, IDisposable
+public unsafe class MemoryDb : IDb, IDisposable
 {
     private const int FileNumber = 13;
     
@@ -10,7 +10,7 @@ public unsafe class TestMemoryDb : IDb, IDisposable
     public int Size { get; }
     public int Position { get; private set; }
 
-    public TestMemoryDb(int size)
+    public MemoryDb(int size)
     {
         Size = size;
         _memory = (byte*)NativeMemory.Alloc((UIntPtr)size);
@@ -44,6 +44,11 @@ public unsafe class TestMemoryDb : IDb, IDisposable
         Position += length;
         
         return key;
+    }
+
+    public void Free(long id)
+    {
+        // TODO: consider adding something here? Maybe a jump to the next value so that it can be flushed later?
     }
 
     public void Dispose()

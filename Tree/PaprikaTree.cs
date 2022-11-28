@@ -21,7 +21,7 @@ public class PaprikaTree
 
     // branch
     private const byte BranchType = 0b1000_0000;
-    private const byte BranchChildCountMask = 0b0111_1111;
+    private const byte BranchChildCountMask = 0b0000_1111;
     private const int BranchMinChildCount = 2;
 
     // nibbles
@@ -45,7 +45,11 @@ public class PaprikaTree
         {
             return WriteLeaf(key, value);
         }
-
+        
+        // current node will be overwritten, reporting to db as freed to gather statistics
+        // later, this can be considered as an option to report a node that should be removed
+        _db.Free(current);
+        
         var node = _db.Read(current);
 
         ref readonly var first = ref node[0];
