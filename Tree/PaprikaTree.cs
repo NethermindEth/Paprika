@@ -37,16 +37,16 @@ public class PaprikaTree
         _db = db;
     }
 
-    public void Set(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value) => _root = Set(_root, 0, key, value);
+    public void Set(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value) => _root = Set(_db, _root, 0, key, value);
 
-    private long Set(long current, int nibble, ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)
+    private static long Set(IDb db, long current, int nibble, ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)
     {
         if (current == Null)
         {
-            return WriteLeaf(key, value);
+            return WriteLeaf(db, key, value);
         }
         
-        var node = _db.Read(current);
+        var node = db.Read(current);
 
         ref readonly var first = ref node[0];
 
@@ -63,10 +63,10 @@ public class PaprikaTree
             if (sameKey)
             {
                 // current node will be overwritten, reporting to db as freed to gather statistics
-                _db.Free(current);
+                db.Free(current);
                 
                 // update in place, making it walk up the tree
-                return WriteLeaf(builtKey, value);
+                return WriteLeaf(db, builtKey, value);
             }
 
             // nibbles are always written to the first byte, small half
@@ -83,17 +83,17 @@ public class PaprikaTree
 
                 // build the key for the nested nibble, this one exist and 1lvl deeper is needed
                 builtKey = BuildKey(nibble + 1, key, destination);
-                var @new = WriteLeaf(builtKey, value);
+                var @new = WriteLeaf(db, builtKey, value);
 
                 // build the key for the existing one,
                 builtKey = TrimKeyTo(nibble + 1, leaf.Slice(0, keyLength), destination);
-                var @old = WriteLeaf(builtKey, leaf.Slice(keyLength));
+                var @old = WriteLeaf(db, builtKey, leaf.Slice(keyLength));
 
                 // current node will be overwritten, reporting to db as freed to gather statistics
-                _db.Free(current);
+                db.Free(current);
                 
                 // 1. write branch
-                return WriteBranch(new NibbleEntry(oldNibble, @old), new NibbleEntry(newNibble, @new));
+                return WriteBranch(db, new NibbleEntry(oldNibble, @old), new NibbleEntry(newNibble, @new));
             }
         }
 
@@ -119,7 +119,7 @@ public class PaprikaTree
                 }
                 else
                 {
-                    var @new = Set(branchNode, nibble + 1, key, value);
+                    var @new = Set(db, branchNode, nibble + 1, key, value);
                     new NibbleEntry(newNibble, @new).Write(updateTo);
                     copied++;
                     found = true;
@@ -133,7 +133,7 @@ public class PaprikaTree
             {
                 Span<byte> destination = stackalloc byte[key.Length];
                 var builtKey = BuildKey(nibble + 1, key, destination);
-                var @new = WriteLeaf(builtKey, value);
+                var @new = WriteLeaf(db, builtKey, value);
                 
                 var updateTo = updated.Slice(PrefixLength + copied * NibbleEntry.Size);
                 new NibbleEntry(newNibble, @new).Write(updateTo);
@@ -143,9 +143,9 @@ public class PaprikaTree
             updated[0] = (byte)(BranchType | (copied - BranchMinChildCount));
             
             // current node will be overwritten, reporting to db as freed to gather statistics
-            _db.Free(current);
+            db.Free(current);
             
-            return _db.Write(updated.Slice(0, PrefixLength + copied * NibbleEntry.Size));
+            return db.Write(updated.Slice(0, PrefixLength + copied * NibbleEntry.Size));
         }
 
         throw new Exception("Type not handled!");
@@ -192,7 +192,7 @@ public class PaprikaTree
         return buildTo.Slice(0, original.Length);
     }
 
-    private long WriteLeaf(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)
+    private static long WriteLeaf(IDb db, ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)
     {
         var length = PrefixLength + key.Length + value.Length;
 
@@ -206,7 +206,7 @@ public class PaprikaTree
             destination[0] = LeafType;
             key.CopyTo(destination.Slice(PrefixLength));
             value.CopyTo(destination.Slice(key.Length + PrefixLength));
-            return _db.Write(destination.Slice(0, length));
+            return db.Write(destination.Slice(0, length));
         }
         finally
         {
@@ -217,7 +217,7 @@ public class PaprikaTree
         }
     }
 
-    private long WriteBranch(NibbleEntry nibble1, NibbleEntry nibble2)
+    private static long WriteBranch(IDb db, NibbleEntry nibble1, NibbleEntry nibble2)
     {
         Span<byte> branch = stackalloc byte[PrefixLength + 2 * NibbleEntry.Size];
 
@@ -226,28 +226,30 @@ public class PaprikaTree
         nibble1.Write(branch.Slice(PrefixLength));
         nibble2.Write(branch.Slice(PrefixLength + NibbleEntry.Size));
 
-        return _db.Write(branch);
+        return db.Write(branch);
     }
 
-    public bool TryGet(ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value)
+    public bool TryGet(ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value) => TryGet(_db, _root, key, out value);
+
+    private static bool TryGet(IDb db, long root, ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value)
     {
-        if (_root == Null)
+        if (root == Null)
         {
             value = default;
             return false;
         }
 
-        var current = _root;
+        var current = root;
 
         for (int nibble = 0; nibble < NibbleCount; nibble++)
         {
-            var node = _db.Read(current);
+            var node = db.Read(current);
             ref readonly var first = ref node[0];
 
             if ((first & LeafType) == LeafType)
             {
                 var leaf = node.Slice(PrefixLength);
-                
+
                 // ReSharper disable once StackAllocInsideLoop
                 Span<byte> destination = stackalloc byte[key.Length];
 
