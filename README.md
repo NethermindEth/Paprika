@@ -41,6 +41,51 @@ Some potential for extracting scope when writing items down
 50 millions of pairs 32b key + 32b value
 
 - disk size (no prunning, every single root of tree accesible): 40GB
-- Writing of 15 millions of items took 00:00:25.1832635
-- Reading of 15 millions of items took 00:00:23.9572717
+- Writing of 50000000 items took 00:06:18.9389653
+- Reading of 50000000 items took 00:08:58.9064186
+
+Distribution of space in files on disk shows some potential on copy on write, while undersaturated files would be copied forward.
+
+```
+File 00000 is used by the current root at 0%
+File 00001 is used by the current root at 0%
+File 00002 is used by the current root at 0%
+File 00003 is used by the current root at 0%
+File 00004 is used by the current root at 0%
+File 00005 is used by the current root at 0%
+File 00006 is used by the current root at 0%
+File 00007 is used by the current root at 0%
+File 00008 is used by the current root at 0%
+File 00009 is used by the current root at 0%
+File 00010 is used by the current root at 0%
+File 00011 is used by the current root at 0%
+File 00012 is used by the current root at 11%
+File 00013 is used by the current root at 13%
+File 00014 is used by the current root at 13%
+File 00015 is used by the current root at 13%
+File 00016 is used by the current root at 13%
+File 00017 is used by the current root at 13%
+File 00018 is used by the current root at 13%
+File 00019 is used by the current root at 13%
+File 00020 is used by the current root at 13%
+File 00021 is used by the current root at 13%
+File 00022 is used by the current root at 13%
+File 00023 is used by the current root at 13%
+File 00024 is used by the current root at 13%
+File 00025 is used by the current root at 13%
+File 00026 is used by the current root at 12%
+File 00027 is used by the current root at 10%
+File 00028 is used by the current root at 10%
+File 00029 is used by the current root at 10%
+File 00030 is used by the current root at 10%
+File 00031 is used by the current root at 10%
+File 00032 is used by the current root at 10%
+File 00033 is used by the current root at 10%
+File 00034 is used by the current root at 10%
+File 00035 is used by the current root at 10%
+File 00036 is used by the current root at 10%
+File 00037 is used by the current root at 10%
+File 00038 is used by the current root at 13%
+File 00039 is used by the current root at 55%
+```
 
