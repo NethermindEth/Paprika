@@ -46,10 +46,6 @@ public class PaprikaTree
             return WriteLeaf(key, value);
         }
         
-        // current node will be overwritten, reporting to db as freed to gather statistics
-        // later, this can be considered as an option to report a node that should be removed
-        _db.Free(current);
-        
         var node = _db.Read(current);
 
         ref readonly var first = ref node[0];
@@ -66,6 +62,9 @@ public class PaprikaTree
 
             if (sameKey)
             {
+                // current node will be overwritten, reporting to db as freed to gather statistics
+                _db.Free(current);
+                
                 // update in place, making it walk up the tree
                 return WriteLeaf(builtKey, value);
             }
@@ -90,6 +89,9 @@ public class PaprikaTree
                 builtKey = TrimKeyTo(nibble + 1, leaf.Slice(0, keyLength), destination);
                 var @old = WriteLeaf(builtKey, leaf.Slice(keyLength));
 
+                // current node will be overwritten, reporting to db as freed to gather statistics
+                _db.Free(current);
+                
                 // 1. write branch
                 return WriteBranch(new NibbleEntry(oldNibble, @old), new NibbleEntry(newNibble, @new));
             }
@@ -139,6 +141,10 @@ public class PaprikaTree
             }
 
             updated[0] = (byte)(BranchType | (copied - BranchMinChildCount));
+            
+            // current node will be overwritten, reporting to db as freed to gather statistics
+            _db.Free(current);
+            
             return _db.Write(updated.Slice(0, PrefixLength + copied * NibbleEntry.Size));
         }
 

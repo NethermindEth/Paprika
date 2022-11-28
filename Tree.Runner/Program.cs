@@ -5,7 +5,7 @@ namespace Tree.Tests;
 
 public static class Program
 {
-    private const int Count = 50_000_000;
+    private const int Count = 15_000_000;
     
     public static void Main(String[] args)
     {
