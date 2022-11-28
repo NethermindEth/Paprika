@@ -1,6 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 
-namespace Tree.Tests.Mocks;
+namespace Tree;
 
 public unsafe class MemoryDb : IDb, IDisposable
 {
@@ -36,8 +36,6 @@ public unsafe class MemoryDb : IDb, IDisposable
         }
         
         payload.CopyTo(new Span<byte>(_memory + Position, length));
-        
-        
         
         var key= Id.Encode(Position, length, FileNumber);
         

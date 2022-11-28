@@ -1,6 +1,6 @@
 ﻿using NUnit.Framework;
 
-namespace Tree.Tests.Mocks;
+namespace Tree.Tests;
 
 public class MemoryDbTests
 {
