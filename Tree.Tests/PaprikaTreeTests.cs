@@ -6,7 +6,7 @@ namespace Tree.Tests;
 public class PaprikaTreeTests
 {
     [Test]
-    public void Test()
+    public void NonUpdatableTest()
     {
         using var db = new MemoryDb(1024 * 1024 * 1024);
 
@@ -29,9 +29,44 @@ public class PaprikaTreeTests
 
         Console.WriteLine($"used {percentage}%");
     }
+    
+    [Test]
+    public void UpdatableTest()
+    {
+        using var db = new MemoryDb(1024 * 1024 * 1024);
 
-    private const int NibbleSize = 4;
+        var tree = new PaprikaTree(db);
 
+        const int count = 1_200_000;
+
+        int i = 0;
+        int batchSize = 10000;
+        
+        var batch = tree.Begin();
+        foreach (var (key, value) in Build(count))
+        {
+            batch.Set(key.AsSpan(), value.AsSpan());
+            i++;
+            if (i > batchSize)
+            {
+                batch.Commit();
+                batch = tree.Begin();
+                i = 0;
+            }
+        }
+        
+        batch.Commit();
+
+        foreach (var (key, value) in Build(count))
+        {
+            Assert.True(tree.TryGet(key.AsSpan(), out var retrieved), $"for key {key.Field0}");
+            Assert.True(retrieved.SequenceEqual(value.AsSpan()));
+        }
+
+        var percentage = (int)(((double)db.Position) / db.Size * 100);
+
+        Console.WriteLine($"used {percentage}%");
+    }
 
     private static IEnumerable<KeyValuePair<Keccak, Keccak>> Build(int number)
     {

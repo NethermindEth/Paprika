@@ -14,6 +14,9 @@ public class PersistentDb : IDb
 
     private Chunk _current;
     private int _currentNumber;
+
+    private readonly HashSet<int> _updatableFiles = new();
+    private readonly HashSet<long> _updatableIds = new();
     
     public PersistentDb(string dir)
     {
@@ -51,6 +54,44 @@ public class PersistentDb : IDb
     {
         var (_, lenght, file) = Id.Decode(id);
         _used[file] -= lenght;
+    }
+
+    public long WriteUpdatable(ReadOnlySpan<byte> payload)
+    {
+        var id = Write(payload);
+        var (_, _, file) = Id.Decode(id);
+        _updatableFiles.Add(file);
+        _updatableIds.Add(id);
+        return id;
+    }
+
+    public bool TryGetUpdatable(long id, out Span<byte> span)
+    {
+        if (_updatableIds.Contains(id))
+        {
+            var (position, lenght, file) = Id.Decode(id);
+
+            var chunk = file == _currentNumber ? _current : _files[file].Chunk;
+        
+            span= chunk.ReadUpdatable(position, lenght);
+            return true;
+        }
+
+        span = default;
+        return false;
+    }
+
+    public void Seal()
+    {
+        _updatableIds.Clear();
+        foreach (var updatableFile in _updatableFiles)
+        {
+            if (updatableFile < _currentNumber)
+            {
+                _files[updatableFile].Flush();
+            }
+        }
+        _updatableFiles.Clear();
     }
 
     public void PrintStats()
@@ -134,6 +175,8 @@ public class PersistentDb : IDb
         public unsafe void Initialize() => WriteUnaligned(_ptr, Preamble);
 
         public unsafe ReadOnlySpan<byte> Read(int position, int length) => new(Add<byte>(_ptr, position), length);
+        
+        public unsafe Span<byte> ReadUpdatable(int position, int length) => new(Add<byte>(_ptr, position), length);
 
         public bool TryWrite(ReadOnlySpan<byte> data, out int position)
         {

@@ -25,6 +25,7 @@ public class PaprikaTree
     private const int BranchMinChildCount = 2;
 
     // nibbles
+    private const int NibbleCardinality = 16;
     private const int NibbleBitSize = 4;
     private const int NibbleMask = (1 << NibbleBitSize) - 1;
 
@@ -37,15 +38,16 @@ public class PaprikaTree
         _db = db;
     }
 
-    public void Set(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value) => _root = Set(_db, _root, 0, key, value);
+    public void Set(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value) => _root = Set(_db, false, _root, 0, key, value);
 
-    private static long Set(IDb db, long current, int nibble, ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)
+    private static long Set(IDb db, bool isUpdatable, long current, int nibble, ReadOnlySpan<byte> key,
+        ReadOnlySpan<byte> value)
     {
         if (current == Null)
         {
             return WriteLeaf(db, key, value);
         }
-        
+
         var node = db.Read(current);
 
         ref readonly var first = ref node[0];
@@ -64,7 +66,7 @@ public class PaprikaTree
             {
                 // current node will be overwritten, reporting to db as freed to gather statistics
                 db.Free(current);
-                
+
                 // update in place, making it walk up the tree
                 return WriteLeaf(db, builtKey, value);
             }
@@ -91,7 +93,7 @@ public class PaprikaTree
 
                 // current node will be overwritten, reporting to db as freed to gather statistics
                 db.Free(current);
-                
+
                 // 1. write branch
                 return WriteBranch(db, new NibbleEntry(oldNibble, @old), new NibbleEntry(newNibble, @new));
             }
@@ -105,13 +107,13 @@ public class PaprikaTree
 
             Span<byte> updated = stackalloc byte[node.Length + NibbleEntry.Size];
             int copied = 0;
-            
+
             for (var i = 0; i < count; i++)
             {
                 var rawEntry = node.Slice(PrefixLength + i * NibbleEntry.Size);
                 var (branchNibble, branchNode) = NibbleEntry.Read(rawEntry);
                 var updateTo = updated.Slice(PrefixLength + copied * NibbleEntry.Size);
-                
+
                 if (branchNibble != newNibble)
                 {
                     rawEntry.CopyTo(updateTo);
@@ -119,10 +121,17 @@ public class PaprikaTree
                 }
                 else
                 {
-                    var @new = Set(db, branchNode, nibble + 1, key, value);
+                    var @new = Set(db, isUpdatable, branchNode, nibble + 1, key, value);
+
                     new NibbleEntry(newNibble, @new).Write(updateTo);
                     copied++;
                     found = true;
+
+                    if (@new == branchNode)
+                    {
+                        // not changed
+                        return current;
+                    }
                 }
             }
 
@@ -134,22 +143,42 @@ public class PaprikaTree
                 Span<byte> destination = stackalloc byte[key.Length];
                 var builtKey = BuildKey(nibble + 1, key, destination);
                 var @new = WriteLeaf(db, builtKey, value);
-                
+
                 var updateTo = updated.Slice(PrefixLength + copied * NibbleEntry.Size);
                 new NibbleEntry(newNibble, @new).Write(updateTo);
                 copied++;
             }
 
             updated[0] = (byte)(BranchType | (copied - BranchMinChildCount));
-            
+
+            var toWrite = updated.Slice(0, PrefixLength + copied * NibbleEntry.Size);
+
+            var shouldTryUpdate = ShouldTryUpdate(isUpdatable, nibble) && count == NibbleCardinality;
+
+            if (shouldTryUpdate)
+            {
+                if (db.TryGetUpdatable(current, out var updatable))
+                {
+                    // reuse updatable node
+                    toWrite.CopyTo(updatable);
+                    return current;
+                }
+
+                // current node will be overwritten, reporting to db as freed to gather statistics
+                db.Free(current);
+
+                return db.WriteUpdatable(toWrite);
+            }
+
             // current node will be overwritten, reporting to db as freed to gather statistics
             db.Free(current);
-            
-            return db.Write(updated.Slice(0, PrefixLength + copied * NibbleEntry.Size));
+            return db.Write(toWrite);
         }
 
         throw new Exception("Type not handled!");
     }
+
+    private static bool ShouldTryUpdate(bool isUpdatable, int nibble) => isUpdatable & nibble < 5;
 
     // module nibble get fast
     private static byte GetNibble(int nibble, int value) =>
@@ -303,6 +332,8 @@ public class PaprikaTree
         return false;
     }
 
+    public IBatch Begin() => new Batch(this);
+
     // enum NodeType : byte
     // {
     //     Branch,
@@ -331,6 +362,34 @@ public class PaprikaTree
             var node = value & NodeMask;
             var nibble = (byte)((value >> Shift) & NibbleMask);
             return (nibble, node);
+        }
+    }
+
+    class Batch : IBatch
+    {
+        private readonly PaprikaTree _parent;
+        private readonly IDb _db;
+        private long _root;
+
+        public Batch(PaprikaTree parent)
+        {
+            _parent = parent;
+            _db = parent._db;
+            _root = parent._root;
+        }
+
+        void IBatch.Set(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)
+        {
+            _root = PaprikaTree.Set(_db, true, _root, 0, key, value);
+        }
+
+        bool IBatch.TryGet(ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value) =>
+            PaprikaTree.TryGet(_db, _root, key, out value);
+
+        public void Commit()
+        {
+            _db.Seal();
+            _parent._root = _root;
         }
     }
 }

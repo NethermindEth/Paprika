@@ -12,4 +12,8 @@
       <ProjectReference Include="..\Tree.Tests\Tree.Tests.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+      <PackageReference Include="Spectre.Console" Version="0.45.1-preview.0.43" />
+    </ItemGroup>
+
 </Project>

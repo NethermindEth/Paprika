@@ -5,7 +5,8 @@ namespace Tree.Tests;
 
 public static class Program
 {
-    private const int Count = 15_000_000;
+    private const int Count = 50_000_000;
+    private const int BatchSize = 10000;
     
     public static void Main(String[] args)
     {
@@ -25,14 +26,25 @@ public static class Program
         var key = new byte[32];
         var value = new byte[32];
 
+        var batch = tree.Begin();
+
         var write = Stopwatch.StartNew();
         for (var i = 0; i < Count; i++)
         {
             BinaryPrimitives.WriteInt32LittleEndian(key, i);
             BinaryPrimitives.WriteInt32LittleEndian(value, i);
             
-            tree.Set(key, value);
+            batch.Set(key, value);
+            
+            if (i % BatchSize == 0)
+            {
+                batch.Commit();
+                batch = tree.Begin();
+            }
         }
+        
+        batch.Commit();
+        
         Stop(write, "Writing");
         
         var read = Stopwatch.StartNew();
@@ -48,6 +60,7 @@ public static class Program
 
     private static void Stop(Stopwatch sw, string name)
     {
-        Console.WriteLine($"{name} of {Count} items took {sw.Elapsed.ToString()}");
+        var throughput = (int)(Count / sw.Elapsed.TotalSeconds);
+        Console.WriteLine($"{name} of {Count:N} items with batch of {BatchSize} took {sw.Elapsed.ToString()} giving a throughput {throughput:N} items/s");
     }
 }
