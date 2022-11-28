@@ -17,12 +17,15 @@ The current implementation **does not include**:
 
 ## Benchmarks
 
-A few scenarios used for benchmarking. In each one key is 32 bytes long. The value is 32 bytes long as well.
+The following scenarios were used for benchmarking:
 
-### 15 millions of pairs
+1. [15 millions of pairs](#15-millions-of-pairs), written one by one, each commiting a new root
+1. [50 millions of pairs](#50-millions-of-pairs), written one by one, each commiting a new root
+1. [80 millions of pairs](#80-millions-of-pairs), written in batches of 10000, which is meant to similuate the block
 
-- Writing of 15 millions of items took 00:00:25.1832635
-- Reading of 15 millions of items took 00:00:23.9572717
+In each case the key is 32 bytes long. The value is 32 bytes long as well.
+
+### General considerations
 
 #### Memory Profiling
 
@@ -35,6 +38,11 @@ Almost no managed memory used
 Some potential for extracting scope when writing items down
 
 ![image](https://user-images.githubusercontent.com/519707/204166363-afe54fec-d772-49ff-9d63-0bf7571b4294.png)
+
+### 15 millions of pairs
+
+- Writing of 15 millions of items took 00:00:25.1832635
+- Reading of 15 millions of items took 00:00:23.9572717
 
 ### 50 millions of pairs
 
@@ -91,3 +99,45 @@ File 00038 is used by the current root at 13%
 File 00039 is used by the current root at 55%
 ```
 
+### 80 millions of pairs
+
+80 millions of pairs, written in batches of 10000, which is meant to similuate the block. Writing in bulks uses top upgradable nodes. Upgradable nodes are overwritten so that no new nodes are allocated for branches with child count 16 (top ones). This greatly reduces the amount of litter and is more aligned with a nature of the blockchain.
+
+- Writing of 80,000,000.00 items with batch of 10000 took 00:04:36.7785626 giving a throughput 289,039.00 items/s
+- Reading of 80,000,000.00 items with batch of 10000 took 00:05:35.1633116 giving a throughput 238,689.00 items/s
+
+The number of files is much lower! This is due to committing only at the batch end.
+
+
+```
+File 00000 is used by the current root at 0%
+File 00001 is used by the current root at 0%
+File 00002 is used by the current root at 0%
+File 00003 is used by the current root at 0%
+File 00004 is used by the current root at 1%
+File 00005 is used by the current root at 27%
+File 00006 is used by the current root at 27%
+File 00007 is used by the current root at 27%
+File 00008 is used by the current root at 27%
+File 00009 is used by the current root at 27%
+File 00010 is used by the current root at 27%
+File 00011 is used by the current root at 27%
+File 00012 is used by the current root at 16%
+File 00013 is used by the current root at 15%
+File 00014 is used by the current root at 15%
+File 00015 is used by the current root at 15%
+File 00016 is used by the current root at 15%
+File 00017 is used by the current root at 15%
+File 00018 is used by the current root at 15%
+File 00019 is used by the current root at 15%
+File 00020 is used by the current root at 15%
+File 00021 is used by the current root at 15%
+File 00022 is used by the current root at 15%
+File 00023 is used by the current root at 21%
+File 00024 is used by the current root at 23%
+File 00025 is used by the current root at 24%
+File 00026 is used by the current root at 24%
+File 00027 is used by the current root at 24%
+File 00028 is used by the current root at 24%
+File 00029 is used by the current root at 58%
+```
