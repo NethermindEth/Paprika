@@ -44,6 +44,8 @@ Some potential for extracting scope when writing items down
 - Writing of 50000000 items took 00:06:18.9389653
 - Reading of 50000000 items took 00:08:58.9064186
 
+Which gives ~83_000 read/writes per second
+
 Distribution of space in files on disk shows some potential on copy on write, while undersaturated files would be copied forward.
 
 ```
