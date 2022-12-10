@@ -1,4 +1,4 @@
-# Paprika
+# :hot_pepper: Paprika
 
 A low level Patricia tree, with no indirect db abstraction. The implementation should be suitable to replace a state tree of Ethereum blockchain.
 
