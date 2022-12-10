@@ -22,6 +22,7 @@ The following scenarios were used for benchmarking:
 1. [15 millions of pairs](#15-millions-of-pairs), written one by one, each commiting a new root
 1. [50 millions of pairs](#50-millions-of-pairs), written one by one, each commiting a new root
 1. [80 millions of pairs](#80-millions-of-pairs), written in batches of 10000, which is meant to similuate the block
+1. [80 millions of pairs but BETTER](#80-millions-of-pairs-updated), written in batches of 10000, which is meant to similuate the block
 
 In each case the key is 32 bytes long. The value is 32 bytes long as well.
 
@@ -140,4 +141,27 @@ File 00026 is used by the current root at 24%
 File 00027 is used by the current root at 24%
 File 00028 is used by the current root at 24%
 File 00029 is used by the current root at 58%
+```
+
+### 80 millions of pairs updated)
+
+The latest run with simplified and upgraded batch handling. Now every chunk of memory that is written to the database within a batch is updatable. This benefits scenario when a leaf node is promoted to a branch. Leaf has a lot of space and can provide for branches. The results (on battery, no charger in laptop) are astonishing! 
+
+- **70% of the disk size reduction**
+- **writing almost 400k pairs per second and reading almost 800k!**
+
+- Writing of 80,000,000.00 items with batch of 10000 took 00:03:24.9059538 giving a throughput 390,423.00 items/s
+- Reading of 80,000,000.00 items with batch of 10000 took 00:01:40.8293070 giving a throughput 793,420.00 items/s
+
+```
+File 00000 is used by the current root at 0%
+File 00001 is used by the current root at 0%
+File 00002 is used by the current root at 70%
+File 00003 is used by the current root at 76%
+File 00004 is used by the current root at 70%
+File 00005 is used by the current root at 61%
+File 00006 is used by the current root at 57%
+File 00007 is used by the current root at 71%
+File 00008 is used by the current root at 86%
+File 00009 is used by the current root at 99%
 ```
