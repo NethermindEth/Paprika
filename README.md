@@ -147,7 +147,7 @@ File 00029 is used by the current root at 58%
 
 The latest run with simplified and upgraded batch handling. Now every chunk of memory that is written to the database within a batch is updatable. This benefits scenario when a leaf node is promoted to a branch. Leaf has a lot of space and can provide for branches. The results (on battery, no charger in laptop) are astonishing! 
 
-- **70% of the disk size reduction**
+- **70% of the disk size reduction** to the previous benchmarked version of Paprika
 - **writing almost 400k pairs per second and reading almost 800k!**
 
 - Writing of 80,000,000.00 items with batch of 10000 took 00:03:24.9059538 giving a throughput 390,423.00 items/s
