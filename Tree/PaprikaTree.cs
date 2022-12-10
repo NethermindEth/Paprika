@@ -3,6 +3,18 @@ using System.Buffers.Binary;
 
 namespace Tree;
 
+/// <summary>
+/// Patricia tree.
+/// </summary>
+/// <remarks>
+/// Nibble path encoding
+///
+/// This is done in a way to optimize slicing.
+/// To get a path shorter by 1, that will be of
+/// - odd length, nothing is done, as previous nibble matches the path.
+/// - even length, slice by 1, the previous nibble was odd.
+/// This allows for efficient operations.
+/// </remarks>
 public class PaprikaTree
 {
     private const long Null = 0;
@@ -54,11 +66,8 @@ public class PaprikaTree
 
         if ((first & LeafType) == LeafType)
         {
-            // ReSharper disable once StackAllocInsideLoop
-            Span<byte> destination = stackalloc byte[key.Length];
-
             var leaf = node.Slice(PrefixLength);
-            var builtKey = BuildKey(nibble, key, destination);
+            var builtKey = BuildKey(nibble, key);
             var keyLength = builtKey.Length;
             var sameKey = leaf.StartsWith(builtKey);
 
@@ -71,9 +80,10 @@ public class PaprikaTree
                 return WriteLeaf(db, builtKey, value);
             }
 
-            // nibbles are always written to the first byte, small half
-            var newNibble = (byte)(builtKey[0] & NibbleMask);
-            var oldNibble = (byte)(leaf[0] & NibbleMask);
+            // calculate shift to nibble
+            var shift = NibbleBitSize * (nibble & 1);
+            var newNibble = (byte)((builtKey[0] >> shift) & NibbleMask);
+            var oldNibble = (byte)((leaf[0] >> shift) & NibbleMask);
 
             if (newNibble == oldNibble)
             {
@@ -84,11 +94,11 @@ public class PaprikaTree
                 // split to branch, on the next nibble
 
                 // build the key for the nested nibble, this one exist and 1lvl deeper is needed
-                builtKey = BuildKey(nibble + 1, key, destination);
+                builtKey = BuildKey(nibble + 1, key);
                 var @new = WriteLeaf(db, builtKey, value);
 
                 // build the key for the existing one,
-                builtKey = TrimKeyTo(nibble + 1, leaf.Slice(0, keyLength), destination);
+                builtKey = TrimKeyTo(nibble + 1, leaf.Slice(0, keyLength));
                 var @old = WriteLeaf(db, builtKey, leaf.Slice(keyLength));
 
                 // current node will be overwritten, reporting to db as freed to gather statistics
@@ -140,8 +150,7 @@ public class PaprikaTree
             // 2. add it to the branch
             if (!found)
             {
-                Span<byte> destination = stackalloc byte[key.Length];
-                var builtKey = BuildKey(nibble + 1, key, destination);
+                var builtKey = BuildKey(nibble + 1, key);
                 var @new = WriteLeaf(db, builtKey, value);
 
                 var updateTo = updated.Slice(PrefixLength + copied * NibbleEntry.Size);
@@ -184,20 +193,14 @@ public class PaprikaTree
     private static byte GetNibble(int nibble, int value) =>
         (byte)((value >> ((nibble & 1) * NibbleBitSize)) & NibbleMask);
 
-    private static ReadOnlySpan<byte> BuildKey(int nibble, ReadOnlySpan<byte> original, Span<byte> buildTo)
+    /// <summary>
+    /// Build the key.
+    /// For even nibbles, it will start with the given nibble.
+    /// For odd nibble, includes the previous one as well.
+    /// </summary>
+    private static ReadOnlySpan<byte> BuildKey(int nibble, ReadOnlySpan<byte> original)
     {
-        if (nibble % 2 == 0)
-        {
-            return original.Slice(nibble / 2);
-        }
-
-        // remember the high part of the odd nibble as a single byte
-        buildTo[0] = (byte)((original[nibble / 2] >> NibbleBitSize) & NibbleMask);
-        var copy = original.Slice(nibble / 2 + 1);
-
-        // copy from the next
-        copy.CopyTo(buildTo.Slice(1));
-        return buildTo.Slice(0, copy.Length + 1);
+        return original.Slice(nibble / 2);
     }
 
     /// <summary>
@@ -205,20 +208,18 @@ public class PaprikaTree
     /// </summary>
     /// <param name="nextNibble">The next nibble of the key, absolute, not relative.</param>
     /// <param name="original">The original key that was written to a leaf.</param>
-    /// <param name="buildTo">The span to build to.</param>
     /// <returns></returns>
-    private static ReadOnlySpan<byte> TrimKeyTo(int nextNibble, ReadOnlySpan<byte> original, Span<byte> buildTo)
+    private static ReadOnlySpan<byte> TrimKeyTo(int nextNibble, ReadOnlySpan<byte> original)
     {
+        // even nibble, remove 1
         if (nextNibble % 2 == 0)
         {
             // this was odd key, just slice, removing odd nibble in front
             return original.Slice(1);
         }
-
-        // the key was even, to make it odd, do as in BuildKey
-        original.CopyTo(buildTo);
-        buildTo[0] = (byte)((original[0] >> NibbleBitSize) & NibbleMask);
-        return buildTo.Slice(0, original.Length);
+        
+        // odd, leave as is
+        return original;
     }
 
     private static long WriteLeaf(IDb db, ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)
@@ -279,10 +280,7 @@ public class PaprikaTree
             {
                 var leaf = node.Slice(PrefixLength);
 
-                // ReSharper disable once StackAllocInsideLoop
-                Span<byte> destination = stackalloc byte[key.Length];
-
-                var builtKey = BuildKey(nibble, key, destination);
+                var builtKey = BuildKey(nibble, key);
                 var sameKey = leaf.StartsWith(builtKey);
 
                 if (sameKey)
