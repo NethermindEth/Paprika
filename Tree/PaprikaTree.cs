@@ -162,32 +162,21 @@ public class PaprikaTree
 
             var toWrite = updated.Slice(0, PrefixLength + copied * NibbleEntry.Size);
 
-            var shouldTryUpdate = ShouldTryUpdate(isUpdatable, nibble) && count == NibbleCardinality;
-
-            if (shouldTryUpdate)
+            if (db.TryGetUpdatable(current, out var updatable) && toWrite.TryCopyTo(updatable))
             {
-                if (db.TryGetUpdatable(current, out var updatable))
-                {
-                    // reuse updatable node
-                    toWrite.CopyTo(updatable);
-                    return current;
-                }
-
-                // current node will be overwritten, reporting to db as freed to gather statistics
-                db.Free(current);
-
-                return db.Write(toWrite);
+                // copy successful, return the current
+                toWrite.CopyTo(updatable);
+                return current;
             }
 
             // current node will be overwritten, reporting to db as freed to gather statistics
             db.Free(current);
+
             return db.Write(toWrite);
         }
 
         throw new Exception("Type not handled!");
     }
-
-    private static bool ShouldTryUpdate(bool isUpdatable, int nibble) => isUpdatable & nibble < 5;
 
     // module nibble get fast
     private static byte GetNibble(int nibble, int value) =>
@@ -374,6 +363,7 @@ public class PaprikaTree
             _parent = parent;
             _db = parent._db;
             _root = parent._root;
+            _db.StartUpgradableRegion();
         }
 
         void IBatch.Set(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)

@@ -58,7 +58,7 @@ public class PersistentDb : IDb
 
     public bool TryGetUpdatable(long id, out Span<byte> span)
     {
-        if (id > _upgradableFrom)
+        if (id >= _upgradableFrom)
         {
             var (position, lenght, file) = Id.Decode(id);
 
