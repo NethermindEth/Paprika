@@ -143,7 +143,7 @@ File 00028 is used by the current root at 24%
 File 00029 is used by the current root at 58%
 ```
 
-### 80 millions of pairs updated)
+### 80 millions of pairs updated
 
 The latest run with simplified and upgraded batch handling. Now every chunk of memory that is written to the database within a batch is updatable. This benefits scenario when a leaf node is promoted to a branch. Leaf has a lot of space and can provide for branches. The results (on battery, no charger in laptop) are astonishing! 
 
