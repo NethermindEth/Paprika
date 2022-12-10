@@ -176,7 +176,7 @@ public class PaprikaTree
                 // current node will be overwritten, reporting to db as freed to gather statistics
                 db.Free(current);
 
-                return db.WriteUpdatable(toWrite);
+                return db.Write(toWrite);
             }
 
             // current node will be overwritten, reporting to db as freed to gather statistics

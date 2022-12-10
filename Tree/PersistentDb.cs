@@ -16,7 +16,7 @@ public class PersistentDb : IDb
     private int _currentNumber;
 
     private readonly HashSet<int> _updatableFiles = new();
-    private readonly HashSet<long> _updatableIds = new();
+    private long _upgradableFrom = long.MaxValue;
     
     public PersistentDb(string dir)
     {
@@ -56,18 +56,9 @@ public class PersistentDb : IDb
         _used[file] -= lenght;
     }
 
-    public long WriteUpdatable(ReadOnlySpan<byte> payload)
-    {
-        var id = Write(payload);
-        var (_, _, file) = Id.Decode(id);
-        _updatableFiles.Add(file);
-        _updatableIds.Add(id);
-        return id;
-    }
-
     public bool TryGetUpdatable(long id, out Span<byte> span)
     {
-        if (_updatableIds.Contains(id))
+        if (id > _upgradableFrom)
         {
             var (position, lenght, file) = Id.Decode(id);
 
@@ -81,9 +72,14 @@ public class PersistentDb : IDb
         return false;
     }
 
+    public void StartUpgradableRegion()
+    {
+        _upgradableFrom = Id.Encode(_current.Position, 0, _currentNumber);
+    }
+
     public void Seal()
     {
-        _updatableIds.Clear();
+        _upgradableFrom = long.MaxValue;
         foreach (var updatableFile in _updatableFiles)
         {
             if (updatableFile < _currentNumber)
@@ -105,6 +101,11 @@ public class PersistentDb : IDb
 
     private void Flush()
     {
+        if (_upgradableFrom != long.MaxValue)
+        {
+            _updatableFiles.Add(_currentNumber);
+        }
+        
         var last = _files.Last();
         last.Flush();
 
@@ -178,6 +179,7 @@ public class PersistentDb : IDb
         
         public unsafe Span<byte> ReadUpdatable(int position, int length) => new(Add<byte>(_ptr, position), length);
 
+        public unsafe int Position => ReadUnaligned<int>(_ptr);
         public bool TryWrite(ReadOnlySpan<byte> data, out int position)
         {
             unsafe

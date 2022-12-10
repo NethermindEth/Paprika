@@ -13,17 +13,15 @@ public interface IDb
     void Free(long id);
 
     /// <summary>
-    /// Write value in an updatable fashion, that is later accessible with
-    /// </summary>
-    /// <param name="payload"></param>
-    /// <returns></returns>
-    long WriteUpdatable(ReadOnlySpan<byte> payload);
-
-    /// <summary>
     /// Tries to get the updatable under given address.
     /// </summary>
     /// <returns></returns>
     bool TryGetUpdatable(long id, out Span<byte> span);
+
+    /// <summary>
+    /// Starts the upgradable region.
+    /// </summary>
+    void StartUpgradableRegion();
 
     public void Seal();
 }

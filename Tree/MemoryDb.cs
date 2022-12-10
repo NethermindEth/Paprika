@@ -6,7 +6,7 @@ public unsafe class MemoryDb : IDb, IDisposable
 {
     private const int FileNumber = 13;
 
-    private HashSet<long> _updatableIds = new();
+    private long _upgradableFrom = long.MaxValue;
     private byte* _memory;
     public int Size { get; }
     public int Position { get; private set; }
@@ -50,16 +50,9 @@ public unsafe class MemoryDb : IDb, IDisposable
         // TODO: consider adding something here? Maybe a jump to the next value so that it can be flushed later?
     }
 
-    public long WriteUpdatable(ReadOnlySpan<byte> payload)
-    {
-        var id = Write(payload);
-        _updatableIds.Add(id);
-        return id;
-    }
-
     public bool TryGetUpdatable(long id, out Span<byte> span)
     {
-        if (_updatableIds.Contains(id))
+        if (id >= _upgradableFrom)
         {
             var (position, lenght, file) = Id.Decode(id);
 
@@ -74,9 +67,14 @@ public unsafe class MemoryDb : IDb, IDisposable
         return false;
     }
 
+    public void StartUpgradableRegion()
+    {
+        _upgradableFrom = Id.Encode(Position, 0, FileNumber);
+    }
+
     public void Seal()
     {
-        _updatableIds.Clear();
+        _upgradableFrom = long.MaxValue;
     }
 
     public void Dispose()
