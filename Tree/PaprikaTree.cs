@@ -1,7 +1,5 @@
 ﻿using System.Buffers;
 using System.Buffers.Binary;
-using System.Runtime.CompilerServices;
-using System.Runtime.Intrinsics.X86;
 
 namespace Tree;
 
@@ -72,9 +70,12 @@ public class PaprikaTree
             var leaf = node.Slice(PrefixLength);
             var builtKey = BuildKey(nibble, key);
             var keyLength = builtKey.Length;
-            var sameKey = leaf.StartsWith(builtKey);
 
-            if (sameKey)
+            // there's an existing leaf, find at which byte they differ
+            var diffAt = Nibbles.FindByteDifference(leaf, builtKey);
+
+            // no difference, this is a replacement
+            if (diffAt == leaf.Length)
             {
                 // current node will be overwritten, reporting to db as freed to gather statistics
                 db.Free(current);
@@ -83,33 +84,41 @@ public class PaprikaTree
                 return WriteLeaf(db, builtKey, value);
             }
 
-            // calculate shift to nibble
-            var shift = NibbleBitSize * (nibble & 1);
-            var newNibble = (byte)((builtKey[0] >> shift) & NibbleMask);
-            var oldNibble = (byte)((leaf[0] >> shift) & NibbleMask);
+            // there's a difference. It can result in two scenarios:
+            // 1. E -> B -> L1, L2
+            // 2. B -> L1, L2
+            // the 1st is when at least the first nibble is the same,
+            // the 2nd is then the first nibble is not the same
 
-            if (newNibble == oldNibble)
+            // check for B -> L1, L2 scenario
+            if (diffAt == 0)
             {
-                throw new Exception("Extension case. It is not handled now.");
+                // calculate shift to nibble
+                var shift = NibbleBitSize * (nibble & 1);
+                var firstNewNibble = (byte)((builtKey[0] >> shift) & NibbleMask);
+                var firstOldNibble = (byte)((leaf[0] >> shift) & NibbleMask);
+
+                if (firstNewNibble != firstOldNibble)
+                {
+                    // split to branch, on the next nibble
+
+                    // build the key for the nested nibble, this one exist and 1lvl deeper is needed
+                    builtKey = BuildKey(nibble + 1, key);
+                    var @new = WriteLeaf(db, builtKey, value);
+
+                    // build the key for the existing one,
+                    builtKey = TrimKeyTo(nibble + 1, leaf.Slice(0, keyLength));
+                    var @old = WriteLeaf(db, builtKey, leaf.Slice(keyLength));
+
+                    // current node will be overwritten, reporting to db as freed to gather statistics
+                    db.Free(current);
+
+                    // 1. write branch
+                    return WriteBranch(db, new NibbleEntry(firstOldNibble, @old), new NibbleEntry(firstNewNibble, @new));
+                }
             }
-            else
-            {
-                // split to branch, on the next nibble
 
-                // build the key for the nested nibble, this one exist and 1lvl deeper is needed
-                builtKey = BuildKey(nibble + 1, key);
-                var @new = WriteLeaf(db, builtKey, value);
-
-                // build the key for the existing one,
-                builtKey = TrimKeyTo(nibble + 1, leaf.Slice(0, keyLength));
-                var @old = WriteLeaf(db, builtKey, leaf.Slice(keyLength));
-
-                // current node will be overwritten, reporting to db as freed to gather statistics
-                db.Free(current);
-
-                // 1. write branch
-                return WriteBranch(db, new NibbleEntry(oldNibble, @old), new NibbleEntry(newNibble, @new));
-            }
+            throw new Exception("Extension case. It is not handled now.");
         }
 
         if ((first & BranchType) == BranchType)
@@ -167,8 +176,7 @@ public class PaprikaTree
 
             if (db.TryGetUpdatable(current, out var updatable) && toWrite.TryCopyTo(updatable))
             {
-                // copy successful, return the current
-                toWrite.CopyTo(updatable);
+                // the current was updatable and was written to, return.
                 return current;
             }
 

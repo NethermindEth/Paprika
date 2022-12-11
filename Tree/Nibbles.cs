@@ -5,6 +5,13 @@ namespace Tree;
 public class Nibbles
 {
     public const int SamePaths = -1;
+
+    public static int FindByteDifference(in ReadOnlySpan<byte> path1, in ReadOnlySpan<byte> path2)
+    {
+        ref var p1 = ref Unsafe.AsRef(in path1[0]);
+        ref var p2 = ref Unsafe.AsRef(in path2[0]);
+        return FindByteDifference(p1, p2, path1.Length);
+    }
     
     public static int FindByteDifference(in byte path1, in byte path2, int length)
     {
@@ -32,7 +39,7 @@ public class Nibbles
 
         if (position == length)
         {
-            return SamePaths;
+            return length;
         }
 
         // TODO: optimize with Lzcnt.X64, Lzcnt and loop unroll for all different cases
@@ -48,6 +55,6 @@ public class Nibbles
             p2 = ref Unsafe.Add(ref p2, 1);
         }
 
-        return SamePaths;
+        return length;
     }
 }

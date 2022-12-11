@@ -14,7 +14,7 @@ public class NibblesTests
 
         var diff = Nibbles.FindByteDifference(path, path, length);
 
-        Assert.AreEqual(Nibbles.SamePaths, diff);
+        Assert.AreEqual(length, diff);
     }
 
     [Test]
