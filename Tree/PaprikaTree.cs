@@ -1,5 +1,5 @@
 ﻿using System.Buffers;
-using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
 
 namespace Tree;
 
@@ -37,8 +37,7 @@ public class PaprikaTree
     // branch
     private const byte BranchType = 0b1000_0000;
     private const byte BranchChildCountMask = 0b0000_1111;
-    private const int BranchMinChildCount = 2;
-
+    
     // nibbles
     private const int NibbleBitSize = 4;
     private const int NibbleMask = (1 << NibbleBitSize) - 1;
@@ -52,9 +51,9 @@ public class PaprikaTree
         _db = db;
     }
 
-    public void Set(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value) => _root = Set(_db, false, _root, 0, key, value);
+    public void Set(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value) => _root = Set(_db, _root, 0, key, value);
 
-    private static long Set(IDb db, bool isUpdatable, long current, int nibble, ReadOnlySpan<byte> key,
+    private static long Set(IDb db, long current, int nibble, ReadOnlySpan<byte> key,
         ReadOnlySpan<byte> value)
     {
         if (current == Null)
@@ -71,12 +70,9 @@ public class PaprikaTree
             var leaf = node.Slice(PrefixLength);
             var builtKey = BuildKey(nibble, key);
             var keyLength = builtKey.Length;
+            var sameKey = leaf.StartsWith(builtKey);
 
-            // there's an existing leaf, find at which byte they differ
-            var diffAt = Nibbles.FindByteDifference(leaf, builtKey);
-
-            // no difference, this is a replacement
-            if (diffAt == leaf.Length)
+            if (sameKey)
             {
                 // current node will be overwritten, reporting to db as freed to gather statistics
                 db.Free(current);
@@ -85,125 +81,72 @@ public class PaprikaTree
                 return WriteLeaf(db, builtKey, value);
             }
 
-            // there's a difference. It can result in two scenarios:
-            // 1. E -> B -> L1, L2
-            // 2. B -> L1, L2
-            // the 1st is when at least the first nibble is the same,
-            // the 2nd is then the first nibble is not the same
+            // calculate shift to nibble
+            var shift = NibbleBitSize * (nibble & 1);
+            var newNibble = (byte)((builtKey[0] >> shift) & NibbleMask);
+            var oldNibble = (byte)((leaf[0] >> shift) & NibbleMask);
 
-            // check for the case of B -> L1, L2 scenario
-            if (diffAt == 0)
+            if (newNibble == oldNibble)
             {
-                // calculate shift to nibble
-                var shift = NibbleBitSize * (nibble & 1);
-                var nibbleA = (byte)((builtKey[0] >> shift) & NibbleMask);
-                var nibbleB = (byte)((leaf[0] >> shift) & NibbleMask);
-
-                if (nibbleA != nibbleB)
-                {
-                    // split to branch, on the next nibble
-                    var fromNibble = nibble + 1;
-
-                    // build the key for the nested nibble, this one exist and 1lvl deeper is needed
-                    builtKey = BuildKey(fromNibble, key);
-                    var @new = WriteLeaf(db, builtKey, value);
-
-                    // build the key for the existing one,
-                    builtKey = TrimKeyTo(fromNibble, leaf.Slice(0, keyLength));
-                    var @old = WriteLeaf(db, builtKey, leaf.Slice(keyLength));
-
-                    // current node will be overwritten, reporting to db as freed to gather statistics
-                    db.Free(current);
-
-                    // 1. write branch
-                    return WriteBranch(db, new NibbleEntry(nibbleB, @old), new NibbleEntry(nibbleA, @new));
-                }
+                throw new Exception("Extension case. It is not handled now.");
             }
-            //
-            // // this will be an extension that is followed by a branch 1. E -> B -> L1, L2
-            // // This requires at which nibble it's different and encode the lenght of the extension.
-            // var b1 = builtKey[diffAt];
-            // var b2 = leaf[diffAt];
-            //
-            // var diffAtFirstNibble = (b1 & NibbleMask) == (b2 & NibbleMask);
-            //
-            // // there are 4 cases, the current nibble is odd/even, the nibble is first or second
-            // if (nibble % 2 == 0)
-            // {
-            //     if (diffAtFirstNibble)
-            //     {
-            //         // the number of nibbles is even
-            //         var extensionLength = diffAt * 2;
-            //         var extensionKey = builtKey.Slice(0, diffAt);
-            //     }
-            //     else
-            //     {
-            //         var extensionLength = diffAt * 2 + 1;
-            //         var extensionKey = builtKey.Slice(0, diffAt + 1); // include the next byte as well
-            //     }
-            // }
-            // else
-            // {
-            //     
-            // }
-            
-            throw new Exception("Extension case. It is not handled now.");
+
+            // split to branch, on the next nibble
+            var fromNibble = nibble + 1;
+
+            // build the key for the nested nibble, this one exist and 1lvl deeper is needed
+            builtKey = BuildKey(fromNibble, key);
+            var @new = WriteLeaf(db, builtKey, value);
+
+            // build the key for the existing one,
+            builtKey = TrimKeyTo(fromNibble, leaf.Slice(0, keyLength));
+            var @old = WriteLeaf(db, builtKey, leaf.Slice(keyLength));
+
+            // current node will be overwritten, reporting to db as freed to gather statistics
+            db.Free(current);
+
+            Branch branch = default;
+            unsafe
+            {
+                branch.Branches[oldNibble] = @old;
+                branch.Branches[newNibble] = @new;
+            }
+
+            // 1. write branch
+            return branch.WriteTo(db);
         }
 
         if ((first & BranchType) == BranchType)
         {
-            var count = (first & BranchChildCountMask) + BranchMinChildCount;
             var newNibble = GetNibble(nibble, key[nibble / 2]);
-            var found = false;
+            var branch = Branch.Read(node);
 
-            Span<byte> updated = stackalloc byte[node.Length + NibbleEntry.Size];
-            int copied = 0;
-
-            for (var i = 0; i < count; i++)
+            unsafe
             {
-                var rawEntry = node.Slice(PrefixLength + i * NibbleEntry.Size);
-                var (branchNibble, branchNode) = NibbleEntry.Read(rawEntry);
-                var updateTo = updated.Slice(PrefixLength + copied * NibbleEntry.Size);
-
-                if (branchNibble != newNibble)
+                ref var branchNode = ref branch.Branches[newNibble];
+                if (branchNode != Null)
                 {
-                    rawEntry.CopyTo(updateTo);
-                    copied++;
+                    var @new = Set(db, branchNode, nibble + 1, key, value);
+                    if (@new == branchNode)
+                    {
+                        // nothing to update in the branch
+                        return current;
+                    }
+
+                    // override with the new value
+                    branchNode = @new;
                 }
                 else
                 {
-                    var @new = Set(db, isUpdatable, branchNode, nibble + 1, key, value);
-
-                    new NibbleEntry(newNibble, @new).Write(updateTo);
-                    copied++;
-                    found = true;
-
-                    if (@new == branchNode)
-                    {
-                        // not changed
-                        return current;
-                    }
+                    // not exist yet
+                    var builtKey = BuildKey(nibble + 1, key);
+                    branchNode = WriteLeaf(db, builtKey, value);
                 }
             }
 
-            // not found, must add
-            // 1. add new leaf
-            // 2. add it to the branch
-            if (!found)
-            {
-                var builtKey = BuildKey(nibble + 1, key);
-                var @new = WriteLeaf(db, builtKey, value);
+            Span<byte> written = branch.WriteTo(stackalloc byte[Branch.MaxDestinationSize]);
 
-                var updateTo = updated.Slice(PrefixLength + copied * NibbleEntry.Size);
-                new NibbleEntry(newNibble, @new).Write(updateTo);
-                copied++;
-            }
-
-            updated[0] = (byte)(BranchType | (copied - BranchMinChildCount));
-
-            var toWrite = updated.Slice(0, PrefixLength + copied * NibbleEntry.Size);
-
-            if (db.TryGetUpdatable(current, out var updatable) && toWrite.TryCopyTo(updatable))
+            if (db.TryGetUpdatable(current, out var updatable) && written.TryCopyTo(updatable))
             {
                 // the current was updatable and was written to, return.
                 return current;
@@ -212,12 +155,12 @@ public class PaprikaTree
             // current node will be overwritten, reporting to db as freed to gather statistics
             db.Free(current);
 
-            return db.Write(toWrite);
+            return db.Write(written);
         }
 
         throw new Exception("Type not handled!");
     }
-    
+
     // module nibble get fast
     private static byte GetNibble(int nibble, byte value) =>
         (byte)((value >> ((nibble & 1) * NibbleBitSize)) & NibbleMask);
@@ -276,18 +219,6 @@ public class PaprikaTree
         }
     }
 
-    private static long WriteBranch(IDb db, NibbleEntry nibble1, NibbleEntry nibble2)
-    {
-        Span<byte> branch = stackalloc byte[PrefixLength + 2 * NibbleEntry.Size];
-
-        branch[0] = BranchType | (2 - BranchMinChildCount);
-
-        nibble1.Write(branch.Slice(PrefixLength));
-        nibble2.Write(branch.Slice(PrefixLength + NibbleEntry.Size));
-
-        return db.Write(branch);
-    }
-
     public bool TryGet(ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value) => TryGet(_db, _root, key, out value);
 
     private static bool TryGet(IDb db, long root, ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value)
@@ -317,35 +248,24 @@ public class PaprikaTree
                     value = node.Slice(PrefixLength + builtKey.Length);
                     return true;
                 }
-                else
-                {
-                    value = default;
-                    return false;
-                }
+
+                value = default;
+                return false;
             }
 
             if ((first & BranchType) == BranchType)
             {
-                var count = (first & BranchChildCountMask) + BranchMinChildCount;
                 var newNibble = GetNibble(nibble, key[nibble / 2]);
-                var found = false;
 
-                for (var i = 0; i < count; i++)
+                var branch = Branch.Read(node);
+                unsafe
                 {
-                    var (branchNibble, branchNode) = NibbleEntry.Read(node.Slice(PrefixLength + i * NibbleEntry.Size));
-                    if (branchNibble == newNibble)
+                    var jump = branch.Branches[newNibble];
+                    if (jump != Null)
                     {
-                        // found descendant, set it and follow
-                        current = branchNode;
-                        found = true;
-                        break;
+                        current = jump;
+                        continue;
                     }
-                }
-
-                if (found)
-                {
-                    // continue the outer loop
-                    continue;
                 }
 
                 value = default;
@@ -368,27 +288,66 @@ public class PaprikaTree
     //     Leaf
     // }
 
-    struct NibbleEntry
+    struct Branch
     {
-        public const int Size = 8;
+        public const int MaxDestinationSize = BranchCount * EntrySize + PrefixLength;
+        private const int BranchCount = 16;
+        private const int EntrySize = 8;
         private const int Shift = 60;
         private const long NodeMask = 0x0FFF_FFFF_FFFF_FFFF;
+        private const int BranchMinChildCount = 2;
 
-        public NibbleEntry(byte nibble, long node)
+        public unsafe fixed long Branches[BranchCount];
+
+        public static unsafe Branch Read(in ReadOnlySpan<byte> source)
         {
-            Encoded = node | ((long)nibble) << Shift;
+            Branch result = default; // zero undefined
+
+            ref var b = ref Unsafe.AsRef(in source[0]);
+            var count = (b & BranchChildCountMask) + BranchMinChildCount;
+
+            // consume first
+            b = ref Unsafe.Add(ref b, PrefixLength);
+
+            for (var i = 0; i < count; i++)
+            {
+                var value = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, i * EntrySize));
+                var node = value & NodeMask;
+                var nibble = (byte)((value >> Shift) & NibbleMask);
+
+                result.Branches[nibble] = node;
+            }
+
+            return result;
         }
 
-        public long Encoded;
-
-        public void Write(Span<byte> destination) => BinaryPrimitives.WriteInt64LittleEndian(destination, Encoded);
-
-        public static (byte nibble, long node) Read(ReadOnlySpan<byte> source)
+        public long WriteTo(IDb db)
         {
-            var value = BinaryPrimitives.ReadInt64LittleEndian(source);
-            var node = value & NodeMask;
-            var nibble = (byte)((value >> Shift) & NibbleMask);
-            return (nibble, node);
+            Span<byte> destination = stackalloc byte[MaxDestinationSize];
+            return db.Write(WriteTo(destination));
+        }
+
+        public Span<byte> WriteTo(Span<byte> destination)
+        {
+            ref var b = ref Unsafe.AsRef(in destination[0]);
+
+            int count = 0;
+            for (long i = 0; i < BranchCount; i++)
+            {
+                unsafe
+                {
+                    if (Branches[i] != Null)
+                    {
+                        long value = Branches[i] | (i << Shift);
+                        Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, PrefixLength + count * EntrySize), value);
+                        count++;
+                    }
+                }
+            }
+
+            b = (byte)(BranchType | (byte)(count - BranchMinChildCount));
+
+            return destination.Slice(0, PrefixLength + EntrySize * count);
         }
     }
 
@@ -408,7 +367,7 @@ public class PaprikaTree
 
         void IBatch.Set(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)
         {
-            _root = PaprikaTree.Set(_db, true, _root, 0, key, value);
+            _root = PaprikaTree.Set(_db, _root, 0, key, value);
         }
 
         bool IBatch.TryGet(ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value) =>
