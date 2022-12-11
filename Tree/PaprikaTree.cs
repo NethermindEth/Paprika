@@ -14,6 +14,8 @@ namespace Tree;
 /// - odd length, nothing is done, as previous nibble matches the path.
 /// - even length, slice by 1, the previous nibble was odd.
 /// This allows for efficient operations.
+///
+/// For comments, B - branch, E - extension, L1, L2...L16 - leaves.
 /// </remarks>
 public class PaprikaTree
 {
@@ -38,7 +40,6 @@ public class PaprikaTree
     private const int BranchMinChildCount = 2;
 
     // nibbles
-    private const int NibbleCardinality = 16;
     private const int NibbleBitSize = 4;
     private const int NibbleMask = (1 << NibbleBitSize) - 1;
 
@@ -90,34 +91,62 @@ public class PaprikaTree
             // the 1st is when at least the first nibble is the same,
             // the 2nd is then the first nibble is not the same
 
-            // check for B -> L1, L2 scenario
+            // check for the case of B -> L1, L2 scenario
             if (diffAt == 0)
             {
                 // calculate shift to nibble
                 var shift = NibbleBitSize * (nibble & 1);
-                var firstNewNibble = (byte)((builtKey[0] >> shift) & NibbleMask);
-                var firstOldNibble = (byte)((leaf[0] >> shift) & NibbleMask);
+                var nibbleA = (byte)((builtKey[0] >> shift) & NibbleMask);
+                var nibbleB = (byte)((leaf[0] >> shift) & NibbleMask);
 
-                if (firstNewNibble != firstOldNibble)
+                if (nibbleA != nibbleB)
                 {
                     // split to branch, on the next nibble
+                    var fromNibble = nibble + 1;
 
                     // build the key for the nested nibble, this one exist and 1lvl deeper is needed
-                    builtKey = BuildKey(nibble + 1, key);
+                    builtKey = BuildKey(fromNibble, key);
                     var @new = WriteLeaf(db, builtKey, value);
 
                     // build the key for the existing one,
-                    builtKey = TrimKeyTo(nibble + 1, leaf.Slice(0, keyLength));
+                    builtKey = TrimKeyTo(fromNibble, leaf.Slice(0, keyLength));
                     var @old = WriteLeaf(db, builtKey, leaf.Slice(keyLength));
 
                     // current node will be overwritten, reporting to db as freed to gather statistics
                     db.Free(current);
 
                     // 1. write branch
-                    return WriteBranch(db, new NibbleEntry(firstOldNibble, @old), new NibbleEntry(firstNewNibble, @new));
+                    return WriteBranch(db, new NibbleEntry(nibbleB, @old), new NibbleEntry(nibbleA, @new));
                 }
             }
-
+            //
+            // // this will be an extension that is followed by a branch 1. E -> B -> L1, L2
+            // // This requires at which nibble it's different and encode the lenght of the extension.
+            // var b1 = builtKey[diffAt];
+            // var b2 = leaf[diffAt];
+            //
+            // var diffAtFirstNibble = (b1 & NibbleMask) == (b2 & NibbleMask);
+            //
+            // // there are 4 cases, the current nibble is odd/even, the nibble is first or second
+            // if (nibble % 2 == 0)
+            // {
+            //     if (diffAtFirstNibble)
+            //     {
+            //         // the number of nibbles is even
+            //         var extensionLength = diffAt * 2;
+            //         var extensionKey = builtKey.Slice(0, diffAt);
+            //     }
+            //     else
+            //     {
+            //         var extensionLength = diffAt * 2 + 1;
+            //         var extensionKey = builtKey.Slice(0, diffAt + 1); // include the next byte as well
+            //     }
+            // }
+            // else
+            // {
+            //     
+            // }
+            
             throw new Exception("Extension case. It is not handled now.");
         }
 
@@ -188,8 +217,7 @@ public class PaprikaTree
 
         throw new Exception("Type not handled!");
     }
-
-
+    
     // module nibble get fast
     private static byte GetNibble(int nibble, byte value) =>
         (byte)((value >> ((nibble & 1) * NibbleBitSize)) & NibbleMask);
@@ -197,7 +225,7 @@ public class PaprikaTree
     /// <summary>
     /// Build the key.
     /// For even nibbles, it will start with the given nibble.
-    /// For odd nibble, includes the previous one as well.
+    /// For odd nibble, includes the previous one as well to be byte aligned.
     /// </summary>
     private static ReadOnlySpan<byte> BuildKey(int nibble, ReadOnlySpan<byte> original)
     {
