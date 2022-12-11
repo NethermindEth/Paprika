@@ -1,5 +1,7 @@
 ﻿using System.Buffers;
 using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics.X86;
 
 namespace Tree;
 
@@ -28,8 +30,9 @@ public class PaprikaTree
     // leaf
     private const byte LeafType = 0b0100_0000;
 
-    // extension, identified by no flag set
+    // extension: [path....][long]
     private const byte ExtensionType = 0b0000_0000;
+    private const byte ExtensionNibbleLength = 0b0011_1111; // to 63 nibbles, if KeyLength > 32, needs to be rethough
 
     // branch
     private const byte BranchType = 0b1000_0000;
@@ -178,8 +181,9 @@ public class PaprikaTree
         throw new Exception("Type not handled!");
     }
 
+
     // module nibble get fast
-    private static byte GetNibble(int nibble, int value) =>
+    private static byte GetNibble(int nibble, byte value) =>
         (byte)((value >> ((nibble & 1) * NibbleBitSize)) & NibbleMask);
 
     /// <summary>
@@ -206,7 +210,7 @@ public class PaprikaTree
             // this was odd key, just slice, removing odd nibble in front
             return original.Slice(1);
         }
-        
+
         // odd, leave as is
         return original;
     }
