@@ -17,7 +17,7 @@ The current implementation **does not include**:
 
 ## Benchmarks
 
-The following scenarios were used for benchmarking:
+The following scenarios were used for benchmarking and are presented in the order of running them at various points of time. The latest should be used to get final insights and the rest should be treated as a history.
 
 1. [15 millions of pairs](#15-millions-of-pairs), written one by one, each commiting a new root
 1. [50 millions of pairs](#50-millions-of-pairs), written one by one, each commiting a new root
