@@ -1,4 +1,5 @@
 ﻿using System.Buffers;
+using System.Diagnostics.Contracts;
 using System.Runtime.CompilerServices;
 
 namespace Tree;
@@ -24,7 +25,6 @@ public class PaprikaTree
     private const int KeyLenght = KeccakLength;
     private const int NibblePerByte = 2;
     private const int NibbleCount = KeyLenght * NibblePerByte;
-    private const int PooledMinSize = 64;
     private const int PrefixLength = 1;
 
     // leaf
@@ -37,7 +37,7 @@ public class PaprikaTree
     // branch
     private const byte BranchType = 0b1000_0000;
     private const byte BranchChildCountMask = 0b0000_1111;
-    
+
     // nibbles
     private const int NibbleBitSize = 4;
     private const int NibbleMask = (1 << NibbleBitSize) - 1;
@@ -113,7 +113,7 @@ public class PaprikaTree
             }
 
             // 1. write branch
-            return branch.WriteTo(db);
+            return WriteToDb(branch, db);
         }
 
         if ((first & BranchType) == BranchType)
@@ -161,6 +161,12 @@ public class PaprikaTree
         throw new Exception("Type not handled!");
     }
 
+    private static long WriteToDb(in Branch branch, IDb db)
+    {
+        Span<byte> destination = stackalloc byte[Branch.MaxDestinationSize];
+        return db.Write(branch.WriteTo(destination));
+    }
+
     // module nibble get fast
     private static byte GetNibble(int nibble, byte value) =>
         (byte)((value >> ((nibble & 1) * NibbleBitSize)) & NibbleMask);
@@ -198,25 +204,12 @@ public class PaprikaTree
     {
         var length = PrefixLength + key.Length + value.Length;
 
-        byte[]? array = null;
-        Span<byte> destination = length <= PooledMinSize
-            ? stackalloc byte[length]
-            : array = ArrayPool<byte>.Shared.Rent(length);
+        Span<byte> destination = stackalloc byte[length];
 
-        try
-        {
-            destination[0] = LeafType;
-            key.CopyTo(destination.Slice(PrefixLength));
-            value.CopyTo(destination.Slice(key.Length + PrefixLength));
-            return db.Write(destination.Slice(0, length));
-        }
-        finally
-        {
-            if (array != null)
-            {
-                ArrayPool<byte>.Shared.Return(array);
-            }
-        }
+        destination[0] = LeafType;
+        key.CopyTo(destination.Slice(PrefixLength));
+        value.CopyTo(destination.Slice(key.Length + PrefixLength));
+        return db.Write(destination.Slice(0, length));
     }
 
     public bool TryGet(ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value) => TryGet(_db, _root, key, out value);
@@ -321,12 +314,7 @@ public class PaprikaTree
             return result;
         }
 
-        public long WriteTo(IDb db)
-        {
-            Span<byte> destination = stackalloc byte[MaxDestinationSize];
-            return db.Write(WriteTo(destination));
-        }
-
+        [Pure]
         public Span<byte> WriteTo(Span<byte> destination)
         {
             ref var b = ref Unsafe.AsRef(in destination[0]);
