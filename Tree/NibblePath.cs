@@ -51,6 +51,10 @@ public readonly ref struct NibblePath
         return destination.Slice(lenght + PreambleLength);
     }
 
+    public NibblePath Slice1() => new(_span, _nibbleFrom + 1, _length - 1);
+
+    public byte FirstNibble => (byte)((_span[_nibbleFrom / 2] >> ((_nibbleFrom & OddBit) * NibbleShift)) & NibbleMask);
+
     private static int GetSpanLength(byte length, int odd) => (length + 1 + odd) / 2;
 
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out NibblePath nibblePath)
@@ -60,10 +64,12 @@ public readonly ref struct NibblePath
         var odd = OddBit & b;
         var length = (byte)(b >> LengthShift);
 
-        nibblePath = new NibblePath(source.Slice(1), odd, length);
+        nibblePath = new NibblePath(source.Slice(PreambleLength), odd, length);
 
         return source.Slice(PreambleLength + GetSpanLength(length, odd));
     }
+
+    public int RawByteLength => PreambleLength + GetSpanLength(_length, _nibbleFrom & OddBit);
 
     public bool Equals(NibblePath other)
     {

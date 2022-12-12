@@ -58,7 +58,7 @@ public class PaprikaTree
     {
         if (current == Null)
         {
-            return WriteLeaf(db, key, value);
+            return WriteLeaf(db, NibblePath.FromKey(key, nibble), value);
         }
 
         var node = db.Read(current);
@@ -67,40 +67,28 @@ public class PaprikaTree
 
         if ((first & LeafType) == LeafType)
         {
-            var leaf = node.Slice(PrefixLength);
-            var builtKey = BuildKey(nibble, key);
-            var keyLength = builtKey.Length;
-            var sameKey = leaf.StartsWith(builtKey);
+            var addedPath = NibblePath.FromKey(key, nibble);
+            NibblePath.ReadFrom(node.Slice(PrefixLength), out var existingPath );
 
-            if (sameKey)
+            if (addedPath.Equals(existingPath))
             {
                 // current node will be overwritten, reporting to db as freed to gather statistics
                 db.Free(current);
 
                 // update in place, making it walk up the tree
-                return WriteLeaf(db, builtKey, value);
+                return WriteLeaf(db, existingPath, value);
             }
 
-            // calculate shift to nibble
-            var shift = NibbleBitSize * (nibble & 1);
-            var newNibble = (byte)((builtKey[0] >> shift) & NibbleMask);
-            var oldNibble = (byte)((leaf[0] >> shift) & NibbleMask);
-
-            if (newNibble == oldNibble)
+            if (addedPath.FirstNibble == existingPath.FirstNibble)
             {
                 throw new Exception("Extension case. It is not handled now.");
             }
 
-            // split to branch, on the next nibble
-            var fromNibble = nibble + 1;
-
             // build the key for the nested nibble, this one exist and 1lvl deeper is needed
-            builtKey = BuildKey(fromNibble, key);
-            var @new = WriteLeaf(db, builtKey, value);
+            var @new = WriteLeaf(db, addedPath.Slice1(), value);
 
             // build the key for the existing one,
-            builtKey = TrimKeyTo(fromNibble, leaf.Slice(0, keyLength));
-            var @old = WriteLeaf(db, builtKey, leaf.Slice(keyLength));
+            var @old = WriteLeaf(db, existingPath.Slice1(), node.Slice(PrefixLength + existingPath.RawByteLength));
 
             // current node will be overwritten, reporting to db as freed to gather statistics
             db.Free(current);
@@ -108,8 +96,8 @@ public class PaprikaTree
             Branch branch = default;
             unsafe
             {
-                branch.Branches[oldNibble] = @old;
-                branch.Branches[newNibble] = @new;
+                branch.Branches[existingPath.FirstNibble] = @old;
+                branch.Branches[addedPath.FirstNibble] = @new;
             }
 
             // 1. write branch
@@ -139,8 +127,7 @@ public class PaprikaTree
                 else
                 {
                     // not exist yet
-                    var builtKey = BuildKey(nibble + 1, key);
-                    branchNode = WriteLeaf(db, builtKey, value);
+                    branchNode = WriteLeaf(db, NibblePath.FromKey(key, nibble + 1), value);
                 }
             }
 
@@ -171,45 +158,16 @@ public class PaprikaTree
     private static byte GetNibble(int nibble, byte value) =>
         (byte)((value >> ((nibble & 1) * NibbleBitSize)) & NibbleMask);
 
-    /// <summary>
-    /// Build the key.
-    /// For even nibbles, it will start with the given nibble.
-    /// For odd nibble, includes the previous one as well to be byte aligned.
-    /// </summary>
-    private static ReadOnlySpan<byte> BuildKey(int nibble, ReadOnlySpan<byte> original)
+    private static long WriteLeaf(IDb db, NibblePath path, ReadOnlySpan<byte> value)
     {
-        return original.Slice(nibble / 2);
-    }
-
-    /// <summary>
-    /// Trims the existing written key by one nibble in front. This is done in an efficient manner.
-    /// </summary>
-    /// <param name="nextNibble">The next nibble of the key, absolute, not relative.</param>
-    /// <param name="original">The original key that was written to a leaf.</param>
-    /// <returns></returns>
-    private static ReadOnlySpan<byte> TrimKeyTo(int nextNibble, ReadOnlySpan<byte> original)
-    {
-        // even nibble, remove 1
-        if (nextNibble % 2 == 0)
-        {
-            // this was odd key, just slice, removing odd nibble in front
-            return original.Slice(1);
-        }
-
-        // odd, leave as is
-        return original;
-    }
-
-    private static long WriteLeaf(IDb db, ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)
-    {
-        var length = PrefixLength + key.Length + value.Length;
+        var length = PrefixLength + path.MaxLength + value.Length;
 
         Span<byte> destination = stackalloc byte[length];
 
         destination[0] = LeafType;
-        key.CopyTo(destination.Slice(PrefixLength));
-        value.CopyTo(destination.Slice(key.Length + PrefixLength));
-        return db.Write(destination.Slice(0, length));
+        var leftover = path.WriteTo(destination.Slice(1));
+        value.CopyTo(leftover);
+        return db.Write(destination.Slice(0, length - leftover.Length + value.Length));
     }
 
     public bool TryGet(ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value) => TryGet(_db, _root, key, out value);
@@ -233,12 +191,10 @@ public class PaprikaTree
             {
                 var leaf = node.Slice(PrefixLength);
 
-                var builtKey = BuildKey(nibble, key);
-                var sameKey = leaf.StartsWith(builtKey);
+                value = NibblePath.ReadFrom(leaf, out var path);
 
-                if (sameKey)
+                if (path.Equals(NibblePath.FromKey(key, nibble)))
                 {
-                    value = node.Slice(PrefixLength + builtKey.Length);
                     return true;
                 }
 
