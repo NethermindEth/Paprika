@@ -145,13 +145,14 @@ File 00029 is used by the current root at 58%
 
 ### 80 millions of pairs updated
 
-The latest run with simplified and upgraded batch handling. Now every chunk of memory that is written to the database within a batch is updatable. This benefits scenario when a leaf node is promoted to a branch. Leaf has a lot of space and can provide for branches. The results (on battery, no charger in laptop) are astonishing! 
+The latest run with simplified and upgraded batch handling. Now every chunk of memory that is written to the database within a batch is updatable. This benefits scenario when a leaf node is promoted to a branch. Leaf has a lot of space and can provide for branches. Additionally a new `NibblePath` used with `ref byte` field to make the paths analysis even faster from `Span<>`. The introduction of the `NibblePath` will help with extensions a lot.
 
 - **70% of the disk size reduction** to the previous benchmarked version of Paprika
-- **writing almost 400k pairs per second and reading almost 800k!**
+- **writing 1,500,000 pairs per second**
+- **reading 1,700,000 pairs per second**
 
-- Writing of 80,000,000.00 items with batch of 10000 took 00:03:24.9059538 giving a throughput 390,423.00 items/s
-- Reading of 80,000,000.00 items with batch of 10000 took 00:01:40.8293070 giving a throughput 793,420.00 items/s
+Writing of 80,000,000.00 items with batch of 10000 took 00:00:50.6045946 giving a throughput 1,580,884.00 items/s
+Reading of 80,000,000.00 items with batch of 10000 took 00:00:44.9487146 giving a throughput 1,779,806.00 items/s
 
 ```
 File 00000 is used by the current root at 0%
