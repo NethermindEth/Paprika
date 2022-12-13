@@ -259,9 +259,9 @@ public class PaprikaTree
         return value.Slice(0, ValueLenght);
     }
 
-    public bool TryGet(ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value) => TryGet(_db, _root, key, out value);
+    public bool TryGet(in ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value) => TryGet(_db, _root, key, out value);
 
-    private static bool TryGet(IDb db, long root, ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value)
+    private static bool TryGet(IDb db, long root, in ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value)
     {
         if (root == Null)
         {
@@ -436,12 +436,12 @@ public class PaprikaTree
             _db.StartUpgradableRegion();
         }
 
-        void IBatch.Set(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)
+        void IBatch.Set(in ReadOnlySpan<byte> key, in ReadOnlySpan<byte> value)
         {
             _root = PaprikaTree.Set(_db, _root, NibblePath.FromKey(key, 0), value);
         }
 
-        bool IBatch.TryGet(ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value) =>
+        bool IBatch.TryGet(in ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value) =>
             PaprikaTree.TryGet(_db, _root, key, out value);
 
         public void Commit()
