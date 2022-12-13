@@ -70,7 +70,9 @@ public class PaprikaTree
         {
             ReadLeaf(node.Slice(PrefixLength), out var existingPath);
 
-            if (addedPath.Equals(existingPath))
+            var diffAt = addedPath.FindFirstDifferentNibble(existingPath);
+
+            if (diffAt == addedPath.Length)
             {
                 // current node will be overwritten, reporting to db as freed to gather statistics
                 db.Free(current);
@@ -79,7 +81,7 @@ public class PaprikaTree
                 return WriteLeaf(db, existingPath, value);
             }
 
-            if (addedPath.FirstNibble == existingPath.FirstNibble)
+            if (diffAt > 0 )
             {
                 throw new Exception("Extension case. It is not handled now.");
             }
