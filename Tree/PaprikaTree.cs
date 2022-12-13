@@ -24,23 +24,17 @@ public class PaprikaTree
     private const int KeccakLength = 32;
     private const int KeyLenght = KeccakLength;
     private const int ValueLenght = KeccakLength;
-    private const int NibblePerByte = 2;
-    private const int NibbleCount = KeyLenght * NibblePerByte;
     private const int PrefixLength = 1;
 
-    // leaf
+    // leaf [...][path][value]
     private const byte LeafType = 0b0100_0000;
 
-    // extension: [path....][long]
+    // extension: [00][path][long]
     private const byte ExtensionType = 0b0000_0000;
 
-    // branch
+    // branch [...][branch0][branch3][branch7]
     private const byte BranchType = 0b1000_0000;
     private const byte BranchChildCountMask = 0b0000_1111;
-
-    // nibbles
-    private const int NibbleBitSize = 4;
-    private const int NibbleMask = (1 << NibbleBitSize) - 1;
 
     private readonly IDb _db;
 
@@ -193,10 +187,6 @@ public class PaprikaTree
         return db.Write(branch.WriteTo(destination));
     }
 
-    // module nibble get fast
-    private static byte GetNibble(int nibble, byte value) =>
-        (byte)((value >> ((nibble & 1) * NibbleBitSize)) & NibbleMask);
-
     private static long WriteLeaf(IDb db, NibblePath path, ReadOnlySpan<byte> value)
     {
         var length = PrefixLength + path.MaxLength + value.Length;
@@ -304,6 +294,7 @@ public class PaprikaTree
         private const int BranchCount = 16;
         private const int EntrySize = 8;
         private const int Shift = 60;
+        private const int Mask = 0xF;
         private const long NodeMask = 0x0FFF_FFFF_FFFF_FFFF;
         private const int BranchMinChildCount = 2;
 
@@ -323,7 +314,7 @@ public class PaprikaTree
             {
                 var value = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, i * EntrySize));
                 var node = value & NodeMask;
-                var nibble = (byte)((value >> Shift) & NibbleMask);
+                var nibble = (byte)((value >> Shift) & Mask);
 
                 result.Branches[nibble] = node;
             }
