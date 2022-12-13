@@ -25,7 +25,7 @@ public readonly ref struct NibblePath
     private readonly ref byte _span;
     private readonly byte _odd;
 
-    public static NibblePath FromKey(ReadOnlySpan<byte> key, int nibbleFrom)
+    public static NibblePath FromKey(ReadOnlySpan<byte> key, int nibbleFrom = 0)
     {
         var count = key.Length * NibblePerByte;
         return new NibblePath(key, nibbleFrom, count - nibbleFrom);
@@ -65,6 +65,12 @@ public readonly ref struct NibblePath
     public NibblePath SliceFrom(int start) => new(ref Unsafe.Add(ref _span, (_odd + start) / 2), (byte)((start & 1) ^ _odd), (byte)(Length - start));
     
     public NibblePath SliceTo(int length) => new(ref _span, _odd, (byte)length);
+
+    public byte GetAt(int nibble)
+    {
+        ref var b = ref Unsafe.Add(ref _span, (nibble + _odd) / 2);
+        return (byte)((b >> (((nibble + _odd) & OddBit) * NibbleShift)) & NibbleMask);
+    }
 
     public byte FirstNibble => (byte)((_span >> (_odd * NibbleShift)) & NibbleMask);
 

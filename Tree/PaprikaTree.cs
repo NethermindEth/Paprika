@@ -1,4 +1,5 @@
-﻿using System.Diagnostics.Contracts;
+﻿using System.Buffers.Binary;
+using System.Diagnostics.Contracts;
 using System.Runtime.CompilerServices;
 
 namespace Tree;
@@ -32,7 +33,6 @@ public class PaprikaTree
 
     // extension: [path....][long]
     private const byte ExtensionType = 0b0000_0000;
-    private const byte ExtensionNibbleLength = 0b0011_1111; // to 63 nibbles, if KeyLength > 32, needs to be rethough
 
     // branch
     private const byte BranchType = 0b1000_0000;
@@ -68,12 +68,14 @@ public class PaprikaTree
 
         if ((first & LeafType) == LeafType)
         {
-            ReadLeaf(node.Slice(PrefixLength), out var existingPath);
+            var leafValue = ReadLeaf(node.Slice(PrefixLength), out var existingPath);
 
             var diffAt = addedPath.FindFirstDifferentNibble(existingPath);
 
             if (diffAt == addedPath.Length)
             {
+                // TODO: use updatable
+                
                 // current node will be overwritten, reporting to db as freed to gather statistics
                 db.Free(current);
 
@@ -81,29 +83,64 @@ public class PaprikaTree
                 return WriteLeaf(db, existingPath, value);
             }
 
-            if (diffAt > 0 )
+            if (diffAt > 0)
             {
-                throw new Exception("Extension case. It is not handled now.");
+                // need to create E -> B -> L1, L2
+                // 1. extension path will be of length diffAt
+                // 2. branch at diffAt index (one forward)
+                // 3. leaves
+                // do the bottom up
+
+                // 3. leaves first
+                var existing = WriteLeaf(db, existingPath.SliceFrom(diffAt + 1), leafValue);
+                var added = WriteLeaf(db, addedPath.SliceFrom(diffAt + 1), value);
+
+                // 2. write branch
+                Branch branch = default;
+                unsafe
+                {
+                    branch.Branches[existingPath.GetAt(diffAt)] = existing;
+                    branch.Branches[addedPath.GetAt(diffAt)] = added;
+                }
+
+                var branchId = WriteToDb(branch, db);
+
+                // 3. extension
+                var extensionPath = addedPath.SliceTo(diffAt);
+                Span<byte> destination = stackalloc byte[Extension.MaxDestinationSize];
+                var extension = Extension.WriteTo(extensionPath, branchId, destination);
+
+                // try to write as updatable, the leave should have been
+                if (db.TryGetUpdatable(current, out var upgradable) && extension.TryCopyTo(upgradable))
+                {
+                    return current;
+                }
+
+                db.Free(current);
+                db.Write(extension);
             }
-
-            // build the key for the nested nibble, this one exist and 1lvl deeper is needed
-            var @new = WriteLeaf(db, addedPath.SliceFrom(1), value);
-
-            // build the key for the existing one,
-            var @old = WriteLeaf(db, existingPath.SliceFrom(1), node.Slice(PrefixLength + existingPath.RawByteLength));
-
-            // current node will be overwritten, reporting to db as freed to gather statistics
-            db.Free(current);
-
-            Branch branch = default;
-            unsafe
+            else
             {
-                branch.Branches[existingPath.FirstNibble] = @old;
-                branch.Branches[addedPath.FirstNibble] = @new;
-            }
+                // build the key for the nested nibble, this one exist and 1lvl deeper is needed
+                var @new = WriteLeaf(db, addedPath.SliceFrom(1), value);
 
-            // 1. write branch
-            return WriteToDb(branch, db);
+                // build the key for the existing one,
+                var @old = WriteLeaf(db, existingPath.SliceFrom(1),
+                    node.Slice(PrefixLength + existingPath.RawByteLength));
+
+                // current node will be overwritten, reporting to db as freed to gather statistics
+                db.Free(current);
+
+                Branch branch = default;
+                unsafe
+                {
+                    branch.Branches[existingPath.FirstNibble] = @old;
+                    branch.Branches[addedPath.FirstNibble] = @new;
+                }
+
+                // 1. write branch
+                return WriteToDb(branch, db);
+            }
         }
 
         if ((first & BranchType) == BranchType)
@@ -146,7 +183,7 @@ public class PaprikaTree
 
             return db.Write(written);
         }
-
+        
         throw new Exception("Type not handled!");
     }
 
@@ -190,7 +227,10 @@ public class PaprikaTree
 
         var current = root;
 
-        for (int nibble = 0; nibble < NibbleCount; nibble++)
+        var keyPath = NibblePath.FromKey(key);
+        NibblePath path = default;
+
+        while(keyPath.Length > 0)
         {
             var node = db.Read(current);
             ref readonly var first = ref node[0];
@@ -198,9 +238,9 @@ public class PaprikaTree
             if ((first & LeafType) == LeafType)
             {
                 var leaf = node.Slice(PrefixLength);
-                value = ReadLeaf(leaf, out var path);
+                value = ReadLeaf(leaf, out path);
 
-                if (path.Equals(NibblePath.FromKey(key, nibble)))
+                if (path.Equals(path))
                 {
                     return true;
                 }
@@ -211,14 +251,13 @@ public class PaprikaTree
 
             if ((first & BranchType) == BranchType)
             {
-                var newNibble = GetNibble(nibble, key[nibble / 2]);
-
                 var branch = Branch.Read(node);
                 unsafe
                 {
-                    var jump = branch.Branches[newNibble];
+                    var jump = branch.Branches[keyPath.FirstNibble];
                     if (jump != Null)
                     {
+                        keyPath = keyPath.SliceFrom(1);
                         current = jump;
                         continue;
                     }
@@ -228,7 +267,22 @@ public class PaprikaTree
                 return false;
             }
 
-            throw new Exception("Type not handled!");
+            if (first == ExtensionType)
+            {
+                Extension.Read(node, out path, out var jumpTo);
+                var diffAt = path.FindFirstDifferentNibble(keyPath);
+                
+                // jump only if it consumes the whole path
+                if (diffAt == path.Length)
+                {
+                    keyPath = keyPath.SliceFrom(diffAt);
+                    current = jumpTo;
+                    continue;
+                }
+                
+                value = default;
+                return false;
+            }
         }
 
         value = default;
@@ -299,6 +353,26 @@ public class PaprikaTree
             b = (byte)(BranchType | (byte)(count - BranchMinChildCount));
 
             return destination.Slice(0, PrefixLength + EntrySize * count);
+        }
+    }
+
+    class Extension
+    {
+        private const int BranchIdSize = 8;
+        public const int MaxDestinationSize = PrefixLength + 1 + KeyLenght + BranchIdSize;
+
+        public static Span<byte> WriteTo(NibblePath path, long branchId, Span<byte> destination)
+        {
+            destination[0] = ExtensionType;
+            var leftover = path.WriteTo(destination.Slice(1));
+            BinaryPrimitives.WriteInt64LittleEndian(leftover, branchId);
+            return destination.Slice(0, destination.Length - leftover.Length + BranchIdSize);
+        }
+
+        public static void Read(ReadOnlySpan<byte> source, out NibblePath path, out long jumpTo)
+        {
+            var leftover = NibblePath.ReadFrom(source.Slice(1), out path);
+            jumpTo = BinaryPrimitives.ReadInt64LittleEndian(leftover);
         }
     }
 

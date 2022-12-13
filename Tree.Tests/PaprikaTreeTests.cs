@@ -6,6 +6,35 @@ namespace Tree.Tests;
 public class PaprikaTreeTests
 {
     [Test]
+    public void Extension()
+    {
+        using var db = new MemoryDb(64 * 1024);
+
+        var tree = new PaprikaTree(db);
+
+        var key1 = new byte[32];
+        key1[0] = 0x01;
+        key1[31] = 0xA;
+        var key2 = new byte[32];
+        key2[0] = 0x21;
+        key1[31] = 0xB;
+        
+        var batch = tree.Begin();
+        batch.Set(key1, key1);
+        batch.Set(key2, key2);
+        batch.Commit();
+        
+        Assert(tree, key1);
+        Assert(tree, key2);
+        
+        void Assert(PaprikaTree paprikaTree, byte[] bytes)
+        {
+            NUnit.Framework.Assert.True(paprikaTree.TryGet(bytes.AsSpan(), out var retrieved));
+            NUnit.Framework.Assert.True(retrieved.SequenceEqual(bytes.AsSpan()));
+        }
+    }
+    
+    [Test]
     public void NonUpdatableTest()
     {
         using var db = new MemoryDb(1024 * 1024 * 1024);
