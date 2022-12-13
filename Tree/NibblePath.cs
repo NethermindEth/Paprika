@@ -45,6 +45,9 @@ public readonly ref struct NibblePath
         _length = length;
     }
 
+    /// <summary>
+    /// The estimate of the max length, used for stackalloc estimations.
+    /// </summary>
     public int MaxLength => _length / 2 + 2;
 
     public Span<byte> WriteTo(Span<byte> destination)
@@ -79,6 +82,113 @@ public readonly ref struct NibblePath
 
     public int RawByteLength => PreambleLength + GetSpanLength(_length, _odd & OddBit);
 
+    public int FindFirstDifferentNibble(NibblePath other)
+    {
+        var length = Math.Min(other._length, _length);
+
+        if (length == 0)
+        {
+            // special case, empty is different at zero
+            return 0;
+        }
+        
+        var position = 0;
+        
+        ref var a = ref _span;
+        ref var b = ref other._span;
+        
+        var isOdd = (other._odd & OddBit) == OddBit;
+        if (isOdd)
+        {
+            if ((a >> NibbleShift) != (b >> NibbleShift))
+            {
+                return 0;
+            }
+
+            // move by 1
+            a = ref Unsafe.Add(ref a, 1);
+            b = ref Unsafe.Add(ref b, 1);
+            position = 1;
+        }
+        
+        // oddity aligned, move in large jumps
+
+        // long
+        const int longJump = 8;
+        while (position + longJump * NibblePerByte < length)
+        {
+            var u1 = Unsafe.ReadUnaligned<ulong>(ref a);
+            var u2 = Unsafe.ReadUnaligned<ulong>(ref b);
+
+            if (u1 != u2)
+            {
+                break;
+            }
+
+            a = ref Unsafe.Add(ref a, longJump);
+            b = ref Unsafe.Add(ref b, longJump);
+
+            position += longJump * NibblePerByte;
+        }
+
+        // uint as there must be less than 16 nibbles here
+        const int intJump = 4;
+        if (position + intJump * NibblePerByte < length)
+        {
+            var u1 = Unsafe.ReadUnaligned<uint>(ref a);
+            var u2 = Unsafe.ReadUnaligned<uint>(ref b);
+
+            if (u1 == u2)
+            {
+                a = ref Unsafe.Add(ref a, intJump);
+                b = ref Unsafe.Add(ref b, intJump);
+
+                position += intJump * NibblePerByte;
+            }
+        }
+
+        // length must be less than 8 nibbles (4 bytes)
+        // scan through
+        const int byteJump = 1;
+        while (position + byteJump * NibblePerByte < length)
+        {
+            if (a != b)
+            {
+                break;
+            }
+
+            a = ref Unsafe.Add(ref a, byteJump);
+            b = ref Unsafe.Add(ref b, byteJump);
+
+            position += byteJump * NibblePerByte;
+        }
+
+        // it might be already processed, when length of 1
+        if (position == length)
+        {
+            return position;
+        }
+
+        // two or one nibbles left
+        if ((a & NibbleMask) != (b & NibbleMask))
+        {
+            return position;
+        }
+
+        position++;
+        if (position < length)
+        {
+            if (((a >> NibbleShift) & NibbleMask) != ((b >> NibbleShift) & NibbleMask))
+            {
+                return position;
+            }
+
+            position++;
+        }
+
+        return position;
+    }
+    
     public bool Equals(NibblePath other)
     {
         if (other._length != _length || (other._odd & OddBit) != (_odd & OddBit))
