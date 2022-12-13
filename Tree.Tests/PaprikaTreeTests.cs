@@ -14,23 +14,47 @@ public class PaprikaTreeTests
 
         var key1 = new byte[32];
         key1[0] = 0x01;
+        key1[1] = 0x02;
         key1[31] = 0xA;
+        
         var key2 = new byte[32];
-        key2[0] = 0x21;
-        key1[31] = 0xB;
+        key2[0] = 0x01;
+        key2[1] = 0x03;
+        key2[31] = 0xB;
+        
+        var key3 = new byte[32];
+        key3[0] = 0x01;
+        key3[1] = 0x04;
+        key3[31] = 0xC;
+        
+        var key4 = new byte[32];
+        key4[0] = 0x11; // split on the extension 2nd nibble
+        key4[1] = 0x05;
+        key4[31] = 0xD;
+        
+        var key5 = new byte[32];
+        key5[0] = 0x00; // split on the extension 1st nibble
+        key5[1] = 0x06;
+        key5[31] = 0xE;
         
         var batch = tree.Begin();
         batch.Set(key1, key1);
         batch.Set(key2, key2);
+        batch.Set(key3, key3);
+        batch.Set(key4, key4);
+        batch.Set(key5, key5);
         batch.Commit();
         
-        Assert(tree, key1);
-        Assert(tree, key2);
+        AssertTree(tree, key1);
+        AssertTree(tree, key2);
+        AssertTree(tree, key3);
+        AssertTree(tree, key4);
+        AssertTree(tree, key5);
         
-        void Assert(PaprikaTree paprikaTree, byte[] bytes)
+        void AssertTree(PaprikaTree paprikaTree, byte[] bytes)
         {
-            NUnit.Framework.Assert.True(paprikaTree.TryGet(bytes.AsSpan(), out var retrieved));
-            NUnit.Framework.Assert.True(retrieved.SequenceEqual(bytes.AsSpan()));
+            Assert.True(paprikaTree.TryGet(bytes.AsSpan(), out var retrieved));
+            Assert.True(retrieved.SequenceEqual(bytes.AsSpan()));
         }
     }
     

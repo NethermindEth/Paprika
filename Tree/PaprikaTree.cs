@@ -69,7 +69,7 @@ public class PaprikaTree
             if (diffAt == addedPath.Length)
             {
                 // TODO: use updatable
-                
+
                 // current node will be overwritten, reporting to db as freed to gather statistics
                 db.Free(current);
 
@@ -104,14 +104,7 @@ public class PaprikaTree
                 Span<byte> destination = stackalloc byte[Extension.MaxDestinationSize];
                 var extension = Extension.WriteTo(extensionPath, branchId, destination);
 
-                // try to write as updatable, the leave should have been
-                if (db.TryGetUpdatable(current, out var upgradable) && extension.TryCopyTo(upgradable))
-                {
-                    return current;
-                }
-
-                db.Free(current);
-                db.Write(extension);
+                return TryUpdateOrAdd(db, current, extension);
             }
             else
             {
@@ -166,19 +159,80 @@ public class PaprikaTree
 
             Span<byte> written = branch.WriteTo(stackalloc byte[Branch.MaxDestinationSize]);
 
-            if (db.TryGetUpdatable(current, out var updatable) && written.TryCopyTo(updatable))
+            return TryUpdateOrAdd(db, current, written);
+        }
+
+        if (first == ExtensionType)
+        {
+            Extension.Read(node, out var extensionPath, out var jumpTo);
+
+            var diffAt = extensionPath.FindFirstDifferentNibble(addedPath);
+
+            // matches the extension
+            if (diffAt == extensionPath.Length)
             {
-                // the current was updatable and was written to, return.
-                return current;
+                // matches extension
+                var added = Set(db, jumpTo, addedPath.SliceFrom(diffAt), value);
+                Span<byte> extension = stackalloc byte[Extension.MaxDestinationSize];
+                extension = Extension.WriteTo(extensionPath, added, extension);
+
+                return TryUpdateOrAdd(db, current, extension);
             }
 
-            // current node will be overwritten, reporting to db as freed to gather statistics
-            db.Free(current);
+            // build the key for the new value, one level deeper
+            var @new = WriteLeaf(db, addedPath.SliceFrom(diffAt + 1), value);
 
-            return db.Write(written);
+            Branch branch = default;
+            unsafe
+            {
+                branch.Branches[addedPath.GetAt(diffAt)] = @new;
+                branch.Branches[extensionPath.GetAt(diffAt)] = PushExtensionDown(db, extensionPath, jumpTo, diffAt + 1);
+            }
+
+            var branchPayload = branch.WriteTo(stackalloc byte[Branch.MaxDestinationSize]);
+
+            if (diffAt == 0)
+            {
+                // the branch is the first, no additional extension needed in front, just overwrite the current
+                return TryUpdateOrAdd(db, current, branchPayload);
+            }
+            else
+            {
+                // the branch is in the middle and it needs to have an extension first
+                var branchId = db.Write(branchPayload);
+
+                // extension of at least length 1
+                Span<byte> extension = stackalloc byte[Extension.MaxDestinationSize];
+                extension = Extension.WriteTo(extensionPath.SliceTo(diffAt), branchId, extension);
+
+                return TryUpdateOrAdd(db, current, extension);
+            }
         }
-        
+
         throw new Exception("Type not handled!");
+    }
+
+    private static long TryUpdateOrAdd(IDb db, long current, in Span<byte> written)
+    {
+        if (db.TryGetUpdatable(current, out var updatable) && written.TryCopyTo(updatable))
+        {
+            return current;
+        }
+
+        db.Free(current);
+        return db.Write(written);
+    }
+
+    private static long PushExtensionDown(IDb db, NibblePath extensionPath, long jumpTo, int pushDownBy)
+    {
+        if (extensionPath.Length == pushDownBy)
+        {
+            return jumpTo;
+        }
+
+        Span<byte> extension = stackalloc byte[Extension.MaxDestinationSize];
+        extension = Extension.WriteTo(extensionPath.SliceFrom(pushDownBy), jumpTo, extension);
+        return db.Write(extension);
     }
 
     private static long WriteToDb(in Branch branch, IDb db)
@@ -218,12 +272,13 @@ public class PaprikaTree
         var current = root;
 
         var keyPath = NibblePath.FromKey(key);
-        NibblePath path = default;
 
-        while(keyPath.Length > 0)
+        while (keyPath.Length > 0)
         {
             var node = db.Read(current);
             ref readonly var first = ref node[0];
+
+            NibblePath path;
 
             if ((first & LeafType) == LeafType)
             {
@@ -261,7 +316,7 @@ public class PaprikaTree
             {
                 Extension.Read(node, out path, out var jumpTo);
                 var diffAt = path.FindFirstDifferentNibble(keyPath);
-                
+
                 // jump only if it consumes the whole path
                 if (diffAt == path.Length)
                 {
@@ -269,7 +324,7 @@ public class PaprikaTree
                     current = jumpTo;
                     continue;
                 }
-                
+
                 value = default;
                 return false;
             }

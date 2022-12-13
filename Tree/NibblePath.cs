@@ -62,8 +62,9 @@ public readonly ref struct NibblePath
         return destination.Slice(lenght + PreambleLength);
     }
 
-    public NibblePath SliceFrom(int start) => new(ref Unsafe.Add(ref _span, (_odd + start) / 2), (byte)((start & 1) ^ _odd), (byte)(Length - start));
-    
+    public NibblePath SliceFrom(int start) => new(ref Unsafe.Add(ref _span, (_odd + start) / 2),
+        (byte)((start & 1) ^ _odd), (byte)(Length - start));
+
     public NibblePath SliceTo(int length) => new(ref _span, _odd, (byte)length);
 
     public byte GetAt(int nibble)
@@ -99,12 +100,12 @@ public readonly ref struct NibblePath
             // special case, empty is different at zero
             return 0;
         }
-        
+
         var position = 0;
-        
+
         ref var a = ref _span;
         ref var b = ref other._span;
-        
+
         var isOdd = (other._odd & OddBit) == OddBit;
         if (isOdd)
         {
@@ -118,7 +119,7 @@ public readonly ref struct NibblePath
             b = ref Unsafe.Add(ref b, 1);
             position = 1;
         }
-        
+
         // oddity aligned, move in large jumps
 
         // long
@@ -201,7 +202,7 @@ public readonly ref struct NibblePath
     {
         Span<char> path = stackalloc char[Length];
         ref var ch = ref path[0];
-        
+
         for (int i = _odd; i < Length + _odd; i++)
         {
             var b = Unsafe.Add(ref _span, i / 2);
