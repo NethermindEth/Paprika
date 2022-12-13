@@ -1,5 +1,4 @@
-﻿using System.Buffers;
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Tree;
@@ -10,7 +9,7 @@ namespace Tree;
 /// <remarks>
 /// The implementation diverges from the Ethereum encoding for extensions or leafs.
 /// The divergence is to never perform bit shift of the whole path and always align to byte boundary.
-/// If the path starts in on odd nibble, it will include
+/// If the path starts in on odd nibble, it will include one byte and use only its higher nibble.
 /// </remarks>
 public readonly ref struct NibblePath
 {

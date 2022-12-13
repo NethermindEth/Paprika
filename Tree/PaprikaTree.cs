@@ -51,14 +51,15 @@ public class PaprikaTree
         _db = db;
     }
 
-    public void Set(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value) => _root = Set(_db, _root, 0, key, value);
+    public void Set(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value) =>
+        _root = Set(_db, _root, NibblePath.FromKey(key, 0), value);
 
-    private static long Set(IDb db, long current, int nibble, ReadOnlySpan<byte> key,
-        ReadOnlySpan<byte> value)
+    private static long Set(IDb db, long current, in NibblePath addedPath,
+        in ReadOnlySpan<byte> value)
     {
         if (current == Null)
         {
-            return WriteLeaf(db, NibblePath.FromKey(key, nibble), value);
+            return WriteLeaf(db, addedPath, value);
         }
 
         var node = db.Read(current);
@@ -67,8 +68,6 @@ public class PaprikaTree
 
         if ((first & LeafType) == LeafType)
         {
-            var addedPath = NibblePath.FromKey(key, nibble);
-
             ReadLeaf(node.Slice(PrefixLength), out var existingPath);
 
             if (addedPath.Equals(existingPath))
@@ -107,7 +106,7 @@ public class PaprikaTree
 
         if ((first & BranchType) == BranchType)
         {
-            var newNibble = GetNibble(nibble, key[nibble / 2]);
+            var newNibble = addedPath.FirstNibble;
             var branch = Branch.Read(node);
 
             unsafe
@@ -115,7 +114,7 @@ public class PaprikaTree
                 ref var branchNode = ref branch.Branches[newNibble];
                 if (branchNode != Null)
                 {
-                    var @new = Set(db, branchNode, nibble + 1, key, value);
+                    var @new = Set(db, branchNode, addedPath.Slice1(), value);
                     if (@new == branchNode)
                     {
                         // nothing to update in the branch
@@ -128,7 +127,7 @@ public class PaprikaTree
                 else
                 {
                     // not exist yet
-                    branchNode = WriteLeaf(db, NibblePath.FromKey(key, nibble + 1), value);
+                    branchNode = WriteLeaf(db, addedPath.Slice1(), value);
                 }
             }
 
@@ -317,7 +316,7 @@ public class PaprikaTree
 
         void IBatch.Set(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)
         {
-            _root = PaprikaTree.Set(_db, _root, 0, key, value);
+            _root = PaprikaTree.Set(_db, _root, NibblePath.FromKey(key, 0), value);
         }
 
         bool IBatch.TryGet(ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value) =>
