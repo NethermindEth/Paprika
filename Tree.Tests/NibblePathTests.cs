@@ -39,4 +39,32 @@ public class NibblePathTests
         var expected = slice * 2 - oddity;
         Assert.AreEqual(expected, found);
     }
+
+    [Test]
+    public void SliceFrom([Values(0, 2, 4, 6, 8, 10, 12, 14)] int sliceFrom)
+    {
+        const int length = 8;
+        const ulong value = 0xFE_DC_BA_98_76_54_32_10;
+        Span<byte> span = stackalloc byte[length];
+        BinaryPrimitives.WriteUInt64LittleEndian(span, value);
+        
+        var original = NibblePath.FromKey(span, 0);
+        var sliced = original.SliceFrom(sliceFrom);
+        var expected = NibblePath.FromKey(span.Slice(sliceFrom/2), 0);
+        
+        Assert.IsTrue(expected.Equals(sliced));
+    }
+
+    [Test]
+    public void ToString([Values(0, 1, 3, 4, 5, 7)] int from)
+    {
+        const int length = 4;
+        const uint value = 0x76_54_32_10;
+        Span<byte> span = stackalloc byte[length];
+        BinaryPrimitives.WriteUInt32LittleEndian(span, value);
+
+        var str = new string(value.ToString("X").Reverse().ToArray());
+        
+        Assert.AreEqual(str.Substring(from), NibblePath.FromKey(span, from).ToString());
+    }
 }

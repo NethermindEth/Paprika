@@ -87,10 +87,10 @@ public class PaprikaTree
             }
 
             // build the key for the nested nibble, this one exist and 1lvl deeper is needed
-            var @new = WriteLeaf(db, addedPath.Slice1(), value);
+            var @new = WriteLeaf(db, addedPath.SliceFrom(1), value);
 
             // build the key for the existing one,
-            var @old = WriteLeaf(db, existingPath.Slice1(), node.Slice(PrefixLength + existingPath.RawByteLength));
+            var @old = WriteLeaf(db, existingPath.SliceFrom(1), node.Slice(PrefixLength + existingPath.RawByteLength));
 
             // current node will be overwritten, reporting to db as freed to gather statistics
             db.Free(current);
@@ -116,7 +116,7 @@ public class PaprikaTree
                 ref var branchNode = ref branch.Branches[newNibble];
                 if (branchNode != Null)
                 {
-                    var @new = Set(db, branchNode, addedPath.Slice1(), value);
+                    var @new = Set(db, branchNode, addedPath.SliceFrom(1), value);
                     if (@new == branchNode)
                     {
                         // nothing to update in the branch
@@ -129,7 +129,7 @@ public class PaprikaTree
                 else
                 {
                     // not exist yet
-                    branchNode = WriteLeaf(db, addedPath.Slice1(), value);
+                    branchNode = WriteLeaf(db, addedPath.SliceFrom(1), value);
                 }
             }
 

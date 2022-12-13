@@ -62,7 +62,9 @@ public readonly ref struct NibblePath
         return destination.Slice(lenght + PreambleLength);
     }
 
-    public NibblePath Slice1() => new(ref Unsafe.Add(ref _span, (_odd + 1) / 2), (byte)(1 - _odd), (byte)(Length - 1));
+    public NibblePath SliceFrom(int start) => new(ref Unsafe.Add(ref _span, (_odd + start) / 2), (byte)((start & 1) ^ _odd), (byte)(Length - start));
+    
+    public NibblePath SliceTo(int length) => new(ref _span, _odd, (byte)length);
 
     public byte FirstNibble => (byte)((_span >> (_odd * NibbleShift)) & NibbleMask);
 
@@ -188,7 +190,26 @@ public readonly ref struct NibblePath
 
         return position;
     }
-    
+
+    public override string ToString()
+    {
+        Span<char> path = stackalloc char[Length];
+        ref var ch = ref path[0];
+        
+        for (int i = _odd; i < Length + _odd; i++)
+        {
+            var b = Unsafe.Add(ref _span, i / 2);
+            var nibble = (b >> ((i & OddBit) * NibbleShift)) & NibbleMask;
+
+            ch = Hex[nibble];
+            ch = ref Unsafe.Add(ref ch, 1);
+        }
+
+        return new string(path);
+    }
+
+    private static char[] Hex = "0123456789ABCDEF".ToArray();
+
     public bool Equals(in NibblePath other)
     {
         if (other.Length != Length || (other._odd & OddBit) != (_odd & OddBit))
