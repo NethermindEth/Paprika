@@ -2,7 +2,7 @@
 
 A low level Patricia tree, with no indirect db abstraction. The implementation should be suitable to replace a state tree of Ethereum blockchain.
 
-This project removes the abstraction of the underlying storage and make Patricia tree work directly with data. This means, that all node types: branches, extensions (yet to be implemented) and leafs use internal addressing, requiring no additional database to get the data or write them.
+This project removes the abstraction of the underlying storage and make Patricia tree work directly with data. This means, that all node types: branches, extensions and leafs, use internal addressing, requiring no additional database to get the data or write them.
 
 Additionally, this means that Paprika uses **almost no managed memory**, delegating everything to the underlying store, based on memory mapped files. There are no managed nodes, no cache and no encoding/decoding. Just key-value pairs stored in a structure directly mapped to disk. 
 
@@ -10,10 +10,8 @@ The database assumes no deletes and keeping the last root in the memory. If dele
 
 The current implementation **does not include**:
 
-- extension nodes
-- prunning
-- Keccak compute and storying it
 - RLP encoding
+- Keccak compute and storying it
 
 ## Benchmarks
 
