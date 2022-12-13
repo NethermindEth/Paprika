@@ -1,5 +1,4 @@
-﻿using System.Buffers;
-using System.Diagnostics.Contracts;
+﻿using System.Diagnostics.Contracts;
 using System.Runtime.CompilerServices;
 
 namespace Tree;
@@ -23,6 +22,7 @@ public class PaprikaTree
     private const long Null = 0;
     private const int KeccakLength = 32;
     private const int KeyLenght = KeccakLength;
+    private const int ValueLenght = KeccakLength;
     private const int NibblePerByte = 2;
     private const int NibbleCount = KeyLenght * NibblePerByte;
     private const int PrefixLength = 1;
@@ -68,7 +68,8 @@ public class PaprikaTree
         if ((first & LeafType) == LeafType)
         {
             var addedPath = NibblePath.FromKey(key, nibble);
-            NibblePath.ReadFrom(node.Slice(PrefixLength), out var existingPath );
+
+            ReadLeaf(node.Slice(PrefixLength), out var existingPath);
 
             if (addedPath.Equals(existingPath))
             {
@@ -170,6 +171,12 @@ public class PaprikaTree
         return db.Write(destination.Slice(0, length - leftover.Length + value.Length));
     }
 
+    private static ReadOnlySpan<byte> ReadLeaf(ReadOnlySpan<byte> leaf, out NibblePath path)
+    {
+        var value = NibblePath.ReadFrom(leaf, out path);
+        return value.Slice(0, ValueLenght);
+    }
+
     public bool TryGet(ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value) => TryGet(_db, _root, key, out value);
 
     private static bool TryGet(IDb db, long root, ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value)
@@ -190,8 +197,7 @@ public class PaprikaTree
             if ((first & LeafType) == LeafType)
             {
                 var leaf = node.Slice(PrefixLength);
-
-                value = NibblePath.ReadFrom(leaf, out var path);
+                value = ReadLeaf(leaf, out var path);
 
                 if (path.Equals(NibblePath.FromKey(key, nibble)))
                 {
