@@ -138,6 +138,17 @@ public partial class PaprikaTree
         if ((first & BranchType) == BranchType)
         {
             var newNibble = addedPath.FirstNibble;
+            
+            if (Branch.TryFindInFull(node, newNibble, out var found))
+            {
+                var @new = Set(db, updateFrom, found, addedPath.SliceFrom(1), value);
+                Span<byte> copy = stackalloc byte[node.Length];
+                node.CopyTo(copy);
+                Branch.SetInFull(copy, newNibble, @new);
+
+                return TryUpdateOrAdd(db, updateFrom, current, copy);
+            }
+            
             var branch = Branch.Read(node);
 
             unsafe
@@ -380,13 +391,44 @@ public partial class PaprikaTree
 
             return result;
         }
-        
+
+        public static bool TryFindInFull(in ReadOnlySpan<byte> source, byte nibble, out long found)
+        {
+            ref var b = ref Unsafe.AsRef(in source[0]);
+            var count = (b & BranchChildCountMask) + BranchMinChildCount;
+
+            if (count == BranchCount)
+            {
+                // special case, full branch node, can directly jump as values are always sorted
+                var value = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, PrefixLength + nibble * EntrySize));
+                found = value & NodeMask;
+                return true;
+            }
+
+            found = default;
+            return false;
+        }
+
+        public static void SetInFull(Span<byte> copy, byte nibble, long @new)
+        {
+            ref var b = ref Unsafe.AsRef(in copy[0]);
+            var value = @new | ((long)nibble << Shift);
+            Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, PrefixLength + nibble * EntrySize), value);
+        }
+
         public static long Find(in ReadOnlySpan<byte> source, byte nibble)
         {
             ref var b = ref Unsafe.AsRef(in source[0]);
             var count = (b & BranchChildCountMask) + BranchMinChildCount;
 
-            // consume first
+            if (count == BranchCount)
+            {
+                // special case, full branch node, can directly jump as values are always sorted
+                var value = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, PrefixLength + nibble * EntrySize));
+                return value & NodeMask;
+            }
+            
+            // skip prefix
             b = ref Unsafe.Add(ref b, PrefixLength);
             
             for (var i = 0; i < count; i++)
