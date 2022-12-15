@@ -1,4 +1,4 @@
-﻿using System.Buffers.Binary;
+﻿using System.Runtime.InteropServices;
 using Spectre.Console;
 using Tree.Tests;
 
@@ -8,9 +8,10 @@ public static class Program
 {
     public static void Main(String[] args)
     {
-        const int DefaultCount = 80_000_000;
+        const int Count = 80_000_000;
         const int BatchSize = 10000;
-
+        const int seed = 17;
+        
         var dir = Directory.GetCurrentDirectory();
         var dataPath = Path.Combine(dir, "db");
 
@@ -25,24 +26,27 @@ public static class Program
 
         var tree = new PaprikaTree(db);
 
-        var key = new byte[32];
-        var value = new byte[32];
+        Span<byte> key = stackalloc byte[32];
+        ReadOnlySpan<byte> rkey = MemoryMarshal.CreateReadOnlySpan(ref key[0], 32);
+        Span<byte> value = stackalloc byte[32];
 
-        var count = AnsiConsole.Ask("[green]How many[/] key value pairs should be used for benchmark?",
-            DefaultCount);
-        var batchSize = AnsiConsole.Ask("What [green]batch size[/] should be used ?", BatchSize);
-
-        using (new Measure("Writing", count, batchSize))
+        AnsiConsole.WriteLine($"The test will write [green]{Count} items[/] in [green]batches of {BatchSize}[/].");
+        AnsiConsole.WriteLine($"The time includes the generation of random data which impacts the speed of the test.");
+        AnsiConsole.WriteLine("Running...");
+        
+        using (new Measure("Writing", Count, BatchSize))
         {
+            var random = new Random(seed);
+            
             var batch = tree.Begin();
-            for (var i = 0; i < count; i++)
+            for (var i = 0; i < Count; i++)
             {
-                BinaryPrimitives.WriteInt32LittleEndian(key, i);
-                BinaryPrimitives.WriteInt32LittleEndian(value, i);
+                random.NextBytes(key);
+                random.NextBytes(value);
 
                 batch.Set(key, value);
 
-                if (i % batchSize == 0)
+                if (i % BatchSize == 0)
                 {
                     batch.Commit();
                     batch = tree.Begin();
@@ -52,12 +56,16 @@ public static class Program
             batch.Commit();
         }
 
-        using (new Measure("Reading", count, batchSize))
+        using (new Measure("Reading", Count, BatchSize))
         {
-            for (var i = 0; i < DefaultCount; i++)
+            var random = new Random(seed);
+            
+            for (var i = 0; i < Count; i++)
             {
-                BinaryPrimitives.WriteInt32LittleEndian(key, i);
-                tree.TryGet(key, out var v);
+                random.NextBytes(key);
+                random.NextBytes(value);
+                
+                tree.TryGet(in rkey, out var v);
             }
         }
 
