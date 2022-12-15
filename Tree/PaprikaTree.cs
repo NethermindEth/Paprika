@@ -39,7 +39,11 @@ public partial class PaprikaTree
     private readonly IDb _db;
 
     private long _root = Null;
+    
+    // the id which the file was flushed to
     private long _lastFlushTo = 0;
+
+    private long _updatable = long.MaxValue;
 
     public PaprikaTree(IDb db)
     {
@@ -440,7 +444,7 @@ public partial class PaprikaTree
             _parent = parent;
             _db = parent._db;
             _root = parent._root;
-            _updateFrom = _db.NextId;
+            _updateFrom = Math.Min(_db.NextId, parent._updatable);
             _lastFlushTo = parent._lastFlushTo;
         }
 
@@ -452,16 +456,27 @@ public partial class PaprikaTree
         bool IBatch.TryGet(in ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value) =>
             PaprikaTree.TryGet(_db, _root, key, out value);
 
-        public void Commit(bool flushToDisk = false)
+        public void Commit(CommitOptions options)
         {
-            if (flushToDisk)
+            switch (options)
             {
-                _db.FlushFrom(_lastFlushTo);
-                _parent._lastFlushTo = _db.NextId;
+                case CommitOptions.RootOnly:
+                    // nothing to do
+                    break;
+                case CommitOptions.SealUpdatable:
+                    _parent._updatable = long.MaxValue;
+                    break;
 
-                // TODO: consider one optimization, where updatable is also held between commits so that the whole db works.
+                case CommitOptions.ForceFlush:
+                    _parent._updatable = long.MaxValue;
+                    _parent._lastFlushTo = _db.NextId - 1;
+                    _db.FlushFrom(_lastFlushTo);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(options), options, null);
             }
-
+            
+            // update the root in any case
             _parent._root = _root;
         }
     }

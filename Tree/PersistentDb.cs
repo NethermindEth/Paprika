@@ -76,8 +76,6 @@ public class PersistentDb : IDb
     private void BuildNewFile()
     {
         var last = _files.Last();
-        //last.Flush();
-
         BuildFile(last.Number);
     }
 

@@ -6,5 +6,26 @@ public interface IBatch
 
     bool TryGet(in ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value);
 
-    void Commit(bool flushToDisk = false);
+    /// <summary>
+    /// Commits the given batch.
+    /// </summary>
+    void Commit(CommitOptions options = CommitOptions.ForceFlush);
+}
+
+public enum CommitOptions
+{
+    /// <summary>
+    /// The commit updates root only, leaving all the nodes updatable and not committed to disk.
+    /// </summary>
+    RootOnly,
+
+    /// <summary>
+    /// Seals the updatable making them readonly but does no flush to disk. 
+    /// </summary>
+    SealUpdatable,
+
+    /// <summary>
+    /// Forces the flush to disk. It also runs <see cref="SealUpdatable"/>.
+    /// </summary>
+    ForceFlush,
 }

@@ -28,7 +28,6 @@ public static class Program
 
         Span<byte> key = stackalloc byte[32];
         ReadOnlySpan<byte> rkey = MemoryMarshal.CreateReadOnlySpan(ref key[0], 32);
-        Span<byte> value = stackalloc byte[32];
 
         AnsiConsole.WriteLine($"The test will write [green]{Count} items[/] in [green]batches of {BatchSize}[/].");
         AnsiConsole.WriteLine($"The time includes the generation of random data which impacts the speed of the test.");
@@ -42,18 +41,17 @@ public static class Program
             for (var i = 0; i < Count; i++)
             {
                 random.NextBytes(key);
-                random.NextBytes(value);
 
-                batch.Set(key, value);
+                batch.Set(key, key);
 
                 if (i % BatchSize == 0)
                 {
-                    batch.Commit();
+                    batch.Commit(CommitOptions.RootOnly);
                     batch = tree.Begin();
                 }
             }
 
-            batch.Commit();
+            batch.Commit(CommitOptions.ForceFlush);
         }
 
         using (new Measure("Reading", Count, BatchSize))
@@ -63,7 +61,6 @@ public static class Program
             for (var i = 0; i < Count; i++)
             {
                 random.NextBytes(key);
-                random.NextBytes(value);
                 
                 tree.TryGet(in rkey, out var v);
             }
