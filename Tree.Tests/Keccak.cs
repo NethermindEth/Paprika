@@ -1,6 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 
-namespace Tree;
+namespace Tree.Tests;
 
 public struct Keccak
 {
