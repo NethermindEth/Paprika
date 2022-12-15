@@ -2,7 +2,7 @@ namespace Tree;
 
 public interface IDb
 {
-    ReadOnlySpan<byte> Read(long id);
+    Span<byte> Read(long id);
     
     long Write(ReadOnlySpan<byte> payload);
 
@@ -13,15 +13,9 @@ public interface IDb
     void Free(long id);
 
     /// <summary>
-    /// Tries to get the updatable under given address.
+    /// Returns the id that all the ids written to the database will be bigger than.
     /// </summary>
-    /// <returns></returns>
-    bool TryGetUpdatable(long id, out Span<byte> span);
+    long NextId { get; }
 
-    /// <summary>
-    /// Starts the upgradable region.
-    /// </summary>
-    void StartUpgradableRegion();
-
-    public void Seal();
+    public void FlushFrom(long id);
 }

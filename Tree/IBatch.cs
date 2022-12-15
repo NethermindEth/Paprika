@@ -6,5 +6,5 @@ public interface IBatch
 
     bool TryGet(in ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value);
 
-    void Commit();
+    void Commit(bool flushToDisk = false);
 }

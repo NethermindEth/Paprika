@@ -39,6 +39,7 @@ public partial class PaprikaTree
     private readonly IDb _db;
 
     private long _root = Null;
+    private long _lastFlushTo = 0;
 
     public PaprikaTree(IDb db)
     {
@@ -46,9 +47,9 @@ public partial class PaprikaTree
     }
 
     public void Set(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value) =>
-        _root = Set(_db, _root, NibblePath.FromKey(key, 0), value);
+        _root = Set(_db, long.MaxValue, _root, NibblePath.FromKey(key, 0), value);
 
-    private static long Set(IDb db, long current, in NibblePath addedPath,
+    private static long Set(IDb db, long updateFrom, long current, in NibblePath addedPath,
         in ReadOnlySpan<byte> value)
     {
         if (current == Null)
@@ -104,7 +105,7 @@ public partial class PaprikaTree
                 Span<byte> destination = stackalloc byte[Extension.MaxDestinationSize];
                 var extension = Extension.WriteTo(extensionPath, branchId, destination);
 
-                return TryUpdateOrAdd(db, current, extension);
+                return TryUpdateOrAdd(db, updateFrom, current, extension);
             }
             else
             {
@@ -140,7 +141,7 @@ public partial class PaprikaTree
                 ref var branchNode = ref branch.Branches[newNibble];
                 if (branchNode != Null)
                 {
-                    var @new = Set(db, branchNode, addedPath.SliceFrom(1), value);
+                    var @new = Set(db, updateFrom, branchNode, addedPath.SliceFrom(1), value);
                     if (@new == branchNode)
                     {
                         // nothing to update in the branch
@@ -159,7 +160,7 @@ public partial class PaprikaTree
 
             Span<byte> written = branch.WriteTo(stackalloc byte[Branch.MaxDestinationSize]);
 
-            return TryUpdateOrAdd(db, current, written);
+            return TryUpdateOrAdd(db, updateFrom, current, written);
         }
 
         if (first == ExtensionType)
@@ -172,11 +173,11 @@ public partial class PaprikaTree
             if (diffAt == extensionPath.Length)
             {
                 // matches extension
-                var added = Set(db, jumpTo, addedPath.SliceFrom(diffAt), value);
+                var added = Set(db, updateFrom, jumpTo, addedPath.SliceFrom(diffAt), value);
                 Span<byte> extension = stackalloc byte[Extension.MaxDestinationSize];
                 extension = Extension.WriteTo(extensionPath, added, extension);
 
-                return TryUpdateOrAdd(db, current, extension);
+                return TryUpdateOrAdd(db, updateFrom, current, extension);
             }
 
             // build the key for the new value, one level deeper
@@ -194,7 +195,7 @@ public partial class PaprikaTree
             if (diffAt == 0)
             {
                 // the branch is the first, no additional extension needed in front, just overwrite the current
-                return TryUpdateOrAdd(db, current, branchPayload);
+                return TryUpdateOrAdd(db, updateFrom, current, branchPayload);
             }
             else
             {
@@ -205,18 +206,21 @@ public partial class PaprikaTree
                 Span<byte> extension = stackalloc byte[Extension.MaxDestinationSize];
                 extension = Extension.WriteTo(extensionPath.SliceTo(diffAt), branchId, extension);
 
-                return TryUpdateOrAdd(db, current, extension);
+                return TryUpdateOrAdd(db, updateFrom, current, extension);
             }
         }
 
         throw new Exception("Type not handled!");
     }
 
-    private static long TryUpdateOrAdd(IDb db, long current, in Span<byte> written)
+    private static long TryUpdateOrAdd(IDb db, long updateFrom, long current, in Span<byte> written)
     {
-        if (db.TryGetUpdatable(current, out var updatable) && written.TryCopyTo(updatable))
+        if (current >= updateFrom)
         {
-            return current;
+            if (written.TryCopyTo(db.Read(current)))
+            {
+                return current;
+            }
         }
 
         db.Free(current);
@@ -428,25 +432,36 @@ public partial class PaprikaTree
         private readonly IDb _db;
         private long _root;
 
+        private readonly long _updateFrom;
+        private readonly long _lastFlushTo;
+
         public Batch(PaprikaTree parent)
         {
             _parent = parent;
             _db = parent._db;
             _root = parent._root;
-            _db.StartUpgradableRegion();
+            _updateFrom = _db.NextId;
+            _lastFlushTo = parent._lastFlushTo;
         }
 
         void IBatch.Set(in ReadOnlySpan<byte> key, in ReadOnlySpan<byte> value)
         {
-            _root = PaprikaTree.Set(_db, _root, NibblePath.FromKey(key, 0), value);
+            _root = PaprikaTree.Set(_db, _updateFrom, _root, NibblePath.FromKey(key, 0), value);
         }
 
         bool IBatch.TryGet(in ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value) =>
             PaprikaTree.TryGet(_db, _root, key, out value);
 
-        public void Commit()
+        public void Commit(bool flushToDisk = false)
         {
-            _db.Seal();
+            if (flushToDisk)
+            {
+                _db.FlushFrom(_lastFlushTo);
+                _parent._lastFlushTo = _db.NextId;
+
+                // TODO: consider one optimization, where updatable is also held between commits so that the whole db works.
+            }
+
             _parent._root = _root;
         }
     }
