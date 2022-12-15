@@ -18,12 +18,12 @@ public unsafe class MemoryDb : IDb, IDisposable
 
     public Span<byte> Read(long id)
     {
-        var (position, lenght, file) = Id.Decode(id);
+        var decoded = Id.Decode(id);
 
-        if (file != FileNumber)
-            throw new ArgumentException($"Wrong file: {file}");
+        if (decoded.File != FileNumber)
+            throw new ArgumentException($"Wrong file: {decoded.File}");
 
-        return new Span<byte>(_memory + position, lenght);
+        return new Span<byte>(_memory + decoded.Position, decoded.Length);
     }
 
     public long Write(ReadOnlySpan<byte> payload)

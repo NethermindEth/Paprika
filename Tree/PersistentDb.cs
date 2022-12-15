@@ -23,11 +23,11 @@ public class PersistentDb : IDb
 
     public Span<byte> Read(long id)
     {
-        var (position, lenght, file) = Id.Decode(id);
+        var decoded = Id.Decode(id);
 
-        var chunk = file == _currentNumber ? _current : _files[file].Chunk;
+        var chunk = decoded.File == _currentNumber ? _current : _files[decoded.File].Chunk;
         
-        return chunk.Read(position, lenght);
+        return chunk.Read(decoded.Position, decoded.Length);
     }
 
     public long Write(ReadOnlySpan<byte> payload)
@@ -49,16 +49,16 @@ public class PersistentDb : IDb
 
     public void Free(long id)
     {
-        var (_, lenght, file) = Id.Decode(id);
-        _used[file] -= lenght;
+        var decoded = Id.Decode(id);
+        _used[decoded.File] -= decoded.Length;
     }
 
     public long NextId => Id.Encode(_current.Position, 0, _currentNumber);
     
     public void FlushFrom(long id)
     {
-        (_, _, int file)  = Id.Decode(id);
-        for (int i = file; i < _files.Count; i++)
+        var decoded  = Id.Decode(id);
+        for (int i = decoded.File; i < _files.Count; i++)
         {
             _files[i].Flush();
         }

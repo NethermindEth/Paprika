@@ -1,4 +1,6 @@
-﻿namespace Tree;
+﻿using System.Runtime.CompilerServices;
+
+namespace Tree;
 
 public static class Id
 {
@@ -20,11 +22,26 @@ public static class Id
     private const long FileMask = 0x0FFF_0000_0000_0000;
     private const int FileShift = 6 * Byte;
 
-    public static (int position, int length, int file) Decode(long id) =>
-        ((int)((id & PositionMask) >> PositionShift),
-            (int)((id & LengthMask) >> LengthShift),
-            (int)((id & FileMask) >> FileShift));
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    public static Decoded Decode(long id)
+    {
+        Decoded result;
+
+        result.Position = (int)((id & PositionMask) >> PositionShift);
+        result.Length = (ushort)((id & LengthMask) >> LengthShift);
+        result.File = (ushort)((id & FileMask) >> FileShift);
+
+        return result;
+    }
+        
 
     public static long Encode(int position, int length, int file) =>
         ((long)position << PositionShift) | ((long)length << LengthShift) | ((long)file << FileShift);
+    
+    public struct Decoded
+    {
+        public int Position;
+        public ushort Length;
+        public ushort File;
+    }
 }

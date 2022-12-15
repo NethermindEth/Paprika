@@ -304,16 +304,12 @@ public partial class PaprikaTree
 
             if ((first & BranchType) == BranchType)
             {
-                var branch = Branch.Read(node);
-                unsafe
+                var jump = Branch.Find(node, keyPath.FirstNibble);
+                if (jump != Null)
                 {
-                    var jump = branch.Branches[keyPath.FirstNibble];
-                    if (jump != Null)
-                    {
-                        keyPath = keyPath.SliceFrom(1);
-                        current = jump;
-                        continue;
-                    }
+                    keyPath = keyPath.SliceFrom(1);
+                    current = jump;
+                    continue;
                 }
 
                 value = default;
@@ -383,6 +379,27 @@ public partial class PaprikaTree
             }
 
             return result;
+        }
+        
+        public static long Find(in ReadOnlySpan<byte> source, byte nibble)
+        {
+            ref var b = ref Unsafe.AsRef(in source[0]);
+            var count = (b & BranchChildCountMask) + BranchMinChildCount;
+
+            // consume first
+            b = ref Unsafe.Add(ref b, PrefixLength);
+            
+            for (var i = 0; i < count; i++)
+            {
+                var value = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, i * EntrySize));
+                var actual = (byte)((value >> Shift) & Mask);
+                if (actual == nibble)
+                {
+                    return value & NodeMask;
+                } 
+            }
+
+            return Null;
         }
 
         [Pure]

@@ -12,8 +12,8 @@ public class IdTests
         var encoded = Id.Encode(position, length, file);
         var decoded = Id.Decode(encoded);
 
-        Assert.AreEqual(position, decoded.position);
-        Assert.AreEqual(file, decoded.file);
-        Assert.AreEqual(length, decoded.length);
+        Assert.AreEqual(position, decoded.Position);
+        Assert.AreEqual(file, decoded.File);
+        Assert.AreEqual(length, decoded.Length);
     }
 }
