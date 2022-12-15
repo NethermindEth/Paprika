@@ -18,7 +18,7 @@ namespace Tree;
 ///
 /// For comments, B - branch, E - extension, L1, L2...L16 - leaves.
 /// </remarks>
-public class PaprikaTree
+public partial class PaprikaTree
 {
     private const long Null = 0;
     private const int KeccakLength = 32;
