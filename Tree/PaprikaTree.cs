@@ -27,15 +27,15 @@ public partial class PaprikaTree
     private const int ValueLenght = KeccakLength;
     private const int PrefixLength = 1;
 
+    // types
+    private const byte TypeMask = 0b1100_0000;
+    
     // leaf [...][path][value]
     private const byte LeafType = 0b0100_0000;
-
-    // extension: [00][path][long]
+    // extension: [...][path][long]
     private const byte ExtensionType = 0b0000_0000;
-
     // branch [...][branch0][branch3][branch7]
     private const byte BranchType = 0b1000_0000;
-    private const byte BranchChildCountMask = 0b0000_1111;
 
     private readonly IDb _db;
 
@@ -66,7 +66,7 @@ public partial class PaprikaTree
 
         ref readonly var first = ref node[0];
 
-        if ((first & LeafType) == LeafType)
+        if ((first & TypeMask) == LeafType)
         {
             var leafValue = ReadLeaf(node.Slice(PrefixLength), out var existingPath);
 
@@ -131,7 +131,7 @@ public partial class PaprikaTree
             }
         }
 
-        if ((first & BranchType) == BranchType)
+        if ((first & TypeMask) == BranchType)
         {
             var newNibble = addedPath.FirstNibble;
 
@@ -174,7 +174,7 @@ public partial class PaprikaTree
             return TryUpdateOrAdd(db, updateFrom, current, written);
         }
 
-        if (first == ExtensionType)
+        if ((first & TypeMask) == ExtensionType)
         {
             Extension.Read(node, out var extensionPath, out var jumpTo);
 
@@ -308,7 +308,7 @@ public partial class PaprikaTree
 
             NibblePath path;
 
-            if ((first & LeafType) == LeafType)
+            if ((first & TypeMask) == LeafType)
             {
                 var leaf = node.Slice(PrefixLength);
                 value = ReadLeaf(leaf, out path);
@@ -322,7 +322,7 @@ public partial class PaprikaTree
                 return false;
             }
 
-            if ((first & BranchType) == BranchType)
+            if ((first & TypeMask) == BranchType)
             {
                 var jump = Branch.Find(node, keyPath.FirstNibble);
                 if (jump != Null)
@@ -336,7 +336,7 @@ public partial class PaprikaTree
                 return false;
             }
 
-            if (first == ExtensionType)
+            if ((first & TypeMask) == ExtensionType)
             {
                 Extension.Read(node, out path, out var jumpTo);
                 var diffAt = path.FindFirstDifferentNibble(keyPath);
@@ -376,6 +376,7 @@ public partial class PaprikaTree
         private const int Mask = 0xF;
         private const long NodeMask = 0x0FFF_FFFF_FFFF_FFFF;
         private const int BranchMinChildCount = 2;
+        private const byte BranchChildCountMask = 0b0000_1111;
 
         public unsafe fixed long Branches[BranchCount];
 
