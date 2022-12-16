@@ -1,4 +1,5 @@
 ﻿using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Diagnostics.Contracts;
 using System.Runtime.CompilerServices;
 
@@ -39,7 +40,7 @@ public partial class PaprikaTree
     private readonly IDb _db;
 
     private long _root = Null;
-    
+
     // the id which the file was flushed to
     private long _lastFlushTo = 0;
 
@@ -73,13 +74,7 @@ public partial class PaprikaTree
 
             if (diffAt == addedPath.Length)
             {
-                // TODO: use updatable
-
-                // current node will be overwritten, reporting to db as freed to gather statistics
-                db.Free(current);
-
-                // update in place, making it walk up the tree
-                return WriteLeaf(db, existingPath, value);
+                return WriteLeafUpdatable(db, existingPath, value, updateFrom, current);
             }
 
             if (diffAt > 0)
@@ -113,21 +108,22 @@ public partial class PaprikaTree
             }
             else
             {
+                // need to capture values of nibbles as they are overwritten by potential upgradable
+                var nibbleExisting = existingPath.FirstNibble;
+                var nibbleAdded = addedPath.FirstNibble;
+                
                 // build the key for the nested nibble, this one exist and 1lvl deeper is needed
                 var @new = WriteLeaf(db, addedPath.SliceFrom(1), value);
-
-                // build the key for the existing one,
-                var @old = WriteLeaf(db, existingPath.SliceFrom(1),
-                    node.Slice(PrefixLength + existingPath.RawByteLength));
-
-                // current node will be overwritten, reporting to db as freed to gather statistics
-                db.Free(current);
+                
+                // write existing one, try use updatable
+                var oldValue = node.Slice(PrefixLength + existingPath.RawByteLength);
+                var @old = WriteLeafUpdatable(db, existingPath.SliceFrom(1), oldValue, updateFrom, current);
 
                 Branch branch = default;
                 unsafe
                 {
-                    branch.Branches[existingPath.FirstNibble] = @old;
-                    branch.Branches[addedPath.FirstNibble] = @new;
+                    branch.Branches[nibbleExisting] = @old;
+                    branch.Branches[nibbleAdded] = @new;
                 }
 
                 // 1. write branch
@@ -138,7 +134,7 @@ public partial class PaprikaTree
         if ((first & BranchType) == BranchType)
         {
             var newNibble = addedPath.FirstNibble;
-            
+
             if (Branch.TryFindInFull(node, newNibble, out var found))
             {
                 var @new = Set(db, updateFrom, found, addedPath.SliceFrom(1), value);
@@ -148,7 +144,7 @@ public partial class PaprikaTree
 
                 return TryUpdateOrAdd(db, updateFrom, current, copy);
             }
-            
+
             var branch = Branch.Read(node);
 
             unsafe
@@ -270,6 +266,19 @@ public partial class PaprikaTree
         var leftover = path.WriteTo(destination.Slice(1));
         value.CopyTo(leftover);
         return db.Write(destination.Slice(0, length - leftover.Length + value.Length));
+    }
+    
+    private static long WriteLeafUpdatable(IDb db, NibblePath path, ReadOnlySpan<byte> value, long updateFrom, long current)
+    {
+        var length = PrefixLength + path.MaxLength + value.Length;
+
+        Span<byte> destination = stackalloc byte[length];
+
+        destination[0] = LeafType;
+        var leftover = path.WriteTo(destination.Slice(1));
+        value.CopyTo(leftover);
+        var leaf = destination.Slice(0, length - leftover.Length + value.Length);
+        return TryUpdateOrAdd(db, updateFrom, current, leaf);
     }
 
     private static ReadOnlySpan<byte> ReadLeaf(ReadOnlySpan<byte> leaf, out NibblePath path)
@@ -427,10 +436,10 @@ public partial class PaprikaTree
                 var value = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, PrefixLength + nibble * EntrySize));
                 return value & NodeMask;
             }
-            
+
             // skip prefix
             b = ref Unsafe.Add(ref b, PrefixLength);
-            
+
             for (var i = 0; i < count; i++)
             {
                 var value = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, i * EntrySize));
@@ -438,7 +447,7 @@ public partial class PaprikaTree
                 if (actual == nibble)
                 {
                     return value & NodeMask;
-                } 
+                }
             }
 
             return Null;
@@ -534,7 +543,7 @@ public partial class PaprikaTree
                 default:
                     throw new ArgumentOutOfRangeException(nameof(options), options, null);
             }
-            
+
             // update the root in any case
             _parent._root = _root;
         }
