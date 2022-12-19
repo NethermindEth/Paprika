@@ -19,7 +19,7 @@ namespace Tree;
 ///
 /// For comments, B - branch, E - extension, L1, L2...L16 - leaves.
 /// </remarks>
-public partial class PaprikaTree
+public class PaprikaTree
 {
     private const long Null = 0;
     private const int KeccakLength = 32;
@@ -29,11 +29,13 @@ public partial class PaprikaTree
 
     // types
     private const byte TypeMask = 0b1100_0000;
-    
+
     // leaf [...][path][value]
     private const byte LeafType = 0b0100_0000;
+
     // extension: [...][path][long]
     private const byte ExtensionType = 0b0000_0000;
+
     // branch [...][branch0][branch3][branch7]
     private const byte BranchType = 0b1000_0000;
 
@@ -44,17 +46,18 @@ public partial class PaprikaTree
     // the id which the file was flushed to
     private long _lastFlushTo = 0;
 
-    private long _updatable = long.MaxValue;
+    private readonly Store _store;
 
     public PaprikaTree(IDb db)
     {
         _db = db;
+        _store = new Store(db);
     }
 
     public void Set(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value) =>
-        _root = Set(_db, long.MaxValue, _root, NibblePath.FromKey(key, 0), value);
+        _root = Set(_store, _root, NibblePath.FromKey(key, 0), value);
 
-    private static long Set(IDb db, long updateFrom, long current, in NibblePath addedPath,
+    private static long Set(IStore db, long current, in NibblePath addedPath,
         in ReadOnlySpan<byte> value)
     {
         if (current == Null)
@@ -74,7 +77,7 @@ public partial class PaprikaTree
 
             if (diffAt == addedPath.Length)
             {
-                return WriteLeafUpdatable(db, existingPath, value, updateFrom, current);
+                return WriteLeafUpdatable(db, existingPath, value, current);
             }
 
             if (diffAt > 0)
@@ -104,20 +107,20 @@ public partial class PaprikaTree
                 Span<byte> destination = stackalloc byte[Extension.MaxDestinationSize];
                 var extension = Extension.WriteTo(extensionPath, branchId, destination);
 
-                return TryUpdateOrAdd(db, updateFrom, current, extension);
+                return db.TryUpdateOrAdd(current, extension);
             }
             else
             {
                 // need to capture values of nibbles as they are overwritten by potential upgradable
                 var nibbleExisting = existingPath.FirstNibble;
                 var nibbleAdded = addedPath.FirstNibble;
-                
+
                 // build the key for the nested nibble, this one exist and 1lvl deeper is needed
                 var @new = WriteLeaf(db, addedPath.SliceFrom(1), value);
-                
+
                 // write existing one, try use updatable
                 var oldValue = node.Slice(PrefixLength + existingPath.RawByteLength);
-                var @old = WriteLeafUpdatable(db, existingPath.SliceFrom(1), oldValue, updateFrom, current);
+                var @old = WriteLeafUpdatable(db, existingPath.SliceFrom(1), oldValue, current);
 
                 Branch branch = default;
                 unsafe
@@ -137,12 +140,12 @@ public partial class PaprikaTree
 
             if (Branch.TryFindInFull(node, newNibble, out var found))
             {
-                var @new = Set(db, updateFrom, found, addedPath.SliceFrom(1), value);
+                var @new = Set(db, found, addedPath.SliceFrom(1), value);
                 Span<byte> copy = stackalloc byte[node.Length];
                 node.CopyTo(copy);
                 Branch.SetInFull(copy, newNibble, @new);
 
-                return TryUpdateOrAdd(db, updateFrom, current, copy);
+                return db.TryUpdateOrAdd(current, copy);
             }
 
             var branch = Branch.Read(node);
@@ -152,7 +155,7 @@ public partial class PaprikaTree
                 ref var branchNode = ref branch.Branches[newNibble];
                 if (branchNode != Null)
                 {
-                    var @new = Set(db, updateFrom, branchNode, addedPath.SliceFrom(1), value);
+                    var @new = Set(db, branchNode, addedPath.SliceFrom(1), value);
                     if (@new == branchNode)
                     {
                         // nothing to update in the branch
@@ -171,7 +174,7 @@ public partial class PaprikaTree
 
             Span<byte> written = branch.WriteTo(stackalloc byte[Branch.MaxDestinationSize]);
 
-            return TryUpdateOrAdd(db, updateFrom, current, written);
+            return db.TryUpdateOrAdd(current, written);
         }
 
         if ((first & TypeMask) == ExtensionType)
@@ -184,11 +187,11 @@ public partial class PaprikaTree
             if (diffAt == extensionPath.Length)
             {
                 // matches extension
-                var added = Set(db, updateFrom, jumpTo, addedPath.SliceFrom(diffAt), value);
+                var added = Set(db, jumpTo, addedPath.SliceFrom(diffAt), value);
                 Span<byte> extension = stackalloc byte[Extension.MaxDestinationSize];
                 extension = Extension.WriteTo(extensionPath, added, extension);
 
-                return TryUpdateOrAdd(db, updateFrom, current, extension);
+                return db.TryUpdateOrAdd(current, extension);
             }
 
             // build the key for the new value, one level deeper
@@ -206,7 +209,7 @@ public partial class PaprikaTree
             if (diffAt == 0)
             {
                 // the branch is the first, no additional extension needed in front, just overwrite the current
-                return TryUpdateOrAdd(db, updateFrom, current, branchPayload);
+                return db.TryUpdateOrAdd(current, branchPayload);
             }
             else
             {
@@ -217,28 +220,14 @@ public partial class PaprikaTree
                 Span<byte> extension = stackalloc byte[Extension.MaxDestinationSize];
                 extension = Extension.WriteTo(extensionPath.SliceTo(diffAt), branchId, extension);
 
-                return TryUpdateOrAdd(db, updateFrom, current, extension);
+                return db.TryUpdateOrAdd(current, extension);
             }
         }
 
         throw new Exception("Type not handled!");
     }
 
-    private static long TryUpdateOrAdd(IDb db, long updateFrom, long current, in Span<byte> written)
-    {
-        if (current >= updateFrom)
-        {
-            if (written.TryCopyTo(db.Read(current)))
-            {
-                return current;
-            }
-        }
-
-        db.Free(current);
-        return db.Write(written);
-    }
-
-    private static long PushExtensionDown(IDb db, NibblePath extensionPath, long jumpTo, int pushDownBy)
+    private static long PushExtensionDown(IStore db, NibblePath extensionPath, long jumpTo, int pushDownBy)
     {
         if (extensionPath.Length == pushDownBy)
         {
@@ -250,13 +239,13 @@ public partial class PaprikaTree
         return db.Write(extension);
     }
 
-    private static long WriteToDb(in Branch branch, IDb db)
+    private static long WriteToDb(in Branch branch, IStore db)
     {
         Span<byte> destination = stackalloc byte[Branch.MaxDestinationSize];
         return db.Write(branch.WriteTo(destination));
     }
 
-    private static long WriteLeaf(IDb db, NibblePath path, ReadOnlySpan<byte> value)
+    private static long WriteLeaf(IStore db, NibblePath path, ReadOnlySpan<byte> value)
     {
         var length = PrefixLength + path.MaxLength + value.Length;
 
@@ -267,8 +256,8 @@ public partial class PaprikaTree
         value.CopyTo(leftover);
         return db.Write(destination.Slice(0, length - leftover.Length + value.Length));
     }
-    
-    private static long WriteLeafUpdatable(IDb db, NibblePath path, ReadOnlySpan<byte> value, long updateFrom, long current)
+
+    private static long WriteLeafUpdatable(IStore db, NibblePath path, ReadOnlySpan<byte> value, long current)
     {
         var length = PrefixLength + path.MaxLength + value.Length;
 
@@ -278,7 +267,7 @@ public partial class PaprikaTree
         var leftover = path.WriteTo(destination.Slice(1));
         value.CopyTo(leftover);
         var leaf = destination.Slice(0, length - leftover.Length + value.Length);
-        return TryUpdateOrAdd(db, updateFrom, current, leaf);
+        return db.TryUpdateOrAdd(current, leaf);
     }
 
     private static ReadOnlySpan<byte> ReadLeaf(ReadOnlySpan<byte> leaf, out NibblePath path)
@@ -505,21 +494,24 @@ public partial class PaprikaTree
         private readonly IDb _db;
         private long _root;
 
-        private readonly long _updateFrom;
         private readonly long _lastFlushTo;
+        private readonly Store _store;
 
         public Batch(PaprikaTree parent)
         {
             _parent = parent;
             _db = parent._db;
             _root = parent._root;
-            _updateFrom = Math.Min(_db.NextId, parent._updatable);
+            
+            _store = parent._store;
+            _store.EnsureUpdatable();
+            
             _lastFlushTo = parent._lastFlushTo;
         }
 
         void IBatch.Set(in ReadOnlySpan<byte> key, in ReadOnlySpan<byte> value)
         {
-            _root = PaprikaTree.Set(_db, _updateFrom, _root, NibblePath.FromKey(key, 0), value);
+            _root = PaprikaTree.Set(_store, _root, NibblePath.FromKey(key, 0), value);
         }
 
         bool IBatch.TryGet(in ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value) =>
@@ -527,26 +519,111 @@ public partial class PaprikaTree
 
         public void Commit(CommitOptions options)
         {
+            _parent._root = _root;
+
             switch (options)
             {
                 case CommitOptions.RootOnly:
                     // nothing to do
                     break;
                 case CommitOptions.SealUpdatable:
-                    _parent._updatable = long.MaxValue;
+                    _store.Seal();
                     break;
-
                 case CommitOptions.ForceFlush:
-                    _parent._updatable = long.MaxValue;
+                    _store.Seal();
                     _parent._lastFlushTo = _db.NextId - 1;
                     _db.FlushFrom(_lastFlushTo);
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(options), options, null);
             }
-
-            // update the root in any case
-            _parent._root = _root;
         }
+    }
+
+    interface IStore
+    {
+        public long TryUpdateOrAdd(long current, in Span<byte> written);
+
+        ReadOnlySpan<byte> Read(long id);
+
+        long Write(ReadOnlySpan<byte> payload);
+    }
+
+    class Store : IStore
+    {
+        private const int MaxCachedLength = 256;
+
+        private readonly IDb _db;
+        private long _updateFrom;
+        private readonly long[] _slots;
+
+        public Store(IDb db)
+        {
+            _db = db;
+            _slots = new long[MaxCachedLength];
+        }
+
+        public void EnsureUpdatable()
+        {
+            if (_updateFrom == long.MaxValue)
+            {
+                _updateFrom = Math.Min(_db.NextId, _updateFrom);
+            }
+        }
+
+        public void Seal()
+        {
+            _updateFrom = long.MaxValue;
+            Array.Clear(_slots);
+        }
+
+        public long TryUpdateOrAdd(long current, in Span<byte> written)
+        {
+            var currentNode = _db.Read(current);
+
+            if (current >= _updateFrom)
+            {
+                if (written.TryCopyTo(currentNode))
+                {
+                    return current;
+                }
+            }
+
+            var length = currentNode.Length;
+
+            // the current was not sufficient, cache it for future
+            if (Id.Size <= length && length < MaxCachedLength)
+            {
+                // create a chain, write previous in node, put the current there
+                BinaryPrimitives.WriteInt64LittleEndian(currentNode, _slots[length]);
+                _slots[length] = current;
+            }
+            else
+            {
+                // not cacheable, free it
+                _db.Free(current);
+            }
+
+            // current is no longer used, try to get a node from cache
+            var writtenLength = written.Length;
+            var slot = _slots[writtenLength];
+            if (slot != Null)
+            {
+                var reusable = _db.Read(slot);
+                var next = BinaryPrimitives.ReadInt64LittleEndian(reusable);
+                _slots[writtenLength] = next;
+
+                written.CopyTo(reusable);
+                return slot;
+            }
+            
+            // all caching failed, just write
+
+            return _db.Write(written);
+        }
+
+        public ReadOnlySpan<byte> Read(long id) => _db.Read(id);
+
+        public long Write(ReadOnlySpan<byte> payload) => _db.Write(payload);
     }
 }

@@ -4,6 +4,8 @@ namespace Tree;
 
 public static class Id
 {
+    public const int Size = sizeof(long);
+    
     public const int MaxPosition = int.MaxValue;
     public const int MaxLength = short.MaxValue;
     public const int MaxFile  = 0x0FFF;
