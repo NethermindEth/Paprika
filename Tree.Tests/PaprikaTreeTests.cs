@@ -4,7 +4,7 @@ using NUnit.Framework;
 
 namespace Tree.Tests;
 
-public class PaprikaTreeTests
+public partial class PaprikaTreeTests
 {
     [Test]
     public void Extension()

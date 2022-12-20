@@ -19,16 +19,29 @@ namespace Tree;
 ///
 /// For comments, B - branch, E - extension, L1, L2...L16 - leaves.
 /// </remarks>
-public class PaprikaTree
+public partial class PaprikaTree
 {
     private const long Null = 0;
+    
+    // [type][rlp or keccak]
+    private const int TypePrefixLength = 1;
     private const int KeccakLength = 32;
-    private const int KeyLenght = KeccakLength;
-    private const int ValueLenght = KeccakLength;
-    private const int PrefixLength = 1;
+    private const int KeccakOrRlpWithLength = KeccakLength;
+    
+    /// <summary>
+    /// The total lenght of the the prefix before actual payload of the given node,
+    /// includes: type, keccak-or-rlp.
+    /// </summary>
+    private const int PrefixTotalLength = TypePrefixLength + KeccakOrRlpWithLength;
+    private const int RlpLenghtOfLength = 1;
+    
+    private const int KeyLenght = 32;
+    private const int ValueLenght = 32;
 
-    // types
+    // masks
     private const byte TypeMask = 0b1100_0000;
+    public const byte HasKeccak = 0b0010_0000;
+    public const byte HasRlp = 0b0001_0000;
 
     // leaf [...][path][value]
     private const byte LeafType = 0b0100_0000;
@@ -71,7 +84,7 @@ public class PaprikaTree
 
         if ((first & TypeMask) == LeafType)
         {
-            var leafValue = ReadLeaf(node.Slice(PrefixLength), out var existingPath);
+            var leafValue = ReadLeaf(node.Slice(PrefixTotalLength), out var existingPath);
 
             var diffAt = addedPath.FindFirstDifferentNibble(existingPath);
 
@@ -119,7 +132,7 @@ public class PaprikaTree
                 var @new = WriteLeaf(db, addedPath.SliceFrom(1), value);
 
                 // write existing one, try use updatable
-                var oldValue = node.Slice(PrefixLength + existingPath.RawByteLength);
+                var oldValue = node.Slice(PrefixTotalLength + existingPath.RawByteLength);
                 var @old = WriteLeafUpdatable(db, existingPath.SliceFrom(1), oldValue, current);
 
                 Branch branch = default;
@@ -240,7 +253,7 @@ public class PaprikaTree
 
     private static long WriteLeaf(IStore db, NibblePath path, ReadOnlySpan<byte> value)
     {
-        var length = PrefixLength + path.MaxLength + value.Length;
+        var length = PrefixTotalLength + path.MaxLength + value.Length;
 
         Span<byte> destination = stackalloc byte[length];
 
@@ -252,7 +265,7 @@ public class PaprikaTree
 
     private static long WriteLeafUpdatable(IStore db, NibblePath path, ReadOnlySpan<byte> value, long current)
     {
-        var length = PrefixLength + path.MaxLength + value.Length;
+        var length = PrefixTotalLength + path.MaxLength + value.Length;
 
         Span<byte> destination = stackalloc byte[length];
 
@@ -292,7 +305,7 @@ public class PaprikaTree
 
             if ((first & TypeMask) == LeafType)
             {
-                var leaf = node.Slice(PrefixLength);
+                var leaf = node.Slice(PrefixTotalLength);
                 value = ReadLeaf(leaf, out path);
 
                 if (path.Equals(path))
@@ -351,7 +364,7 @@ public class PaprikaTree
 
     struct Branch
     {
-        public const int MaxDestinationSize = BranchCount * EntrySize + PrefixLength;
+        public const int MaxDestinationSize = BranchCount * EntrySize + PrefixTotalLength;
         private const int BranchCount = 16;
         private const int EntrySize = 8;
         private const int Shift = 60;
@@ -370,7 +383,7 @@ public class PaprikaTree
             var count = (b & BranchChildCountMask) + BranchMinChildCount;
 
             // consume first
-            b = ref Unsafe.Add(ref b, PrefixLength);
+            b = ref Unsafe.Add(ref b, PrefixTotalLength);
 
             for (var i = 0; i < count; i++)
             {
@@ -392,7 +405,7 @@ public class PaprikaTree
             if (count == BranchCount)
             {
                 // special case, full branch node, can directly jump as values are always sorted
-                var value = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, PrefixLength + nibble * EntrySize));
+                var value = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, PrefixTotalLength + nibble * EntrySize));
                 found = value & NodeMask;
                 return true;
             }
@@ -405,7 +418,7 @@ public class PaprikaTree
         {
             ref var b = ref Unsafe.AsRef(in copy[0]);
             var value = @new | ((long)nibble << Shift);
-            Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, PrefixLength + nibble * EntrySize), value);
+            Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, PrefixTotalLength + nibble * EntrySize), value);
         }
 
         public static long Find(in ReadOnlySpan<byte> source, byte nibble)
@@ -416,12 +429,12 @@ public class PaprikaTree
             if (count == BranchCount)
             {
                 // special case, full branch node, can directly jump as values are always sorted
-                var value = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, PrefixLength + nibble * EntrySize));
+                var value = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, PrefixTotalLength + nibble * EntrySize));
                 return value & NodeMask;
             }
 
             // skip prefix
-            b = ref Unsafe.Add(ref b, PrefixLength);
+            b = ref Unsafe.Add(ref b, PrefixTotalLength);
 
             for (var i = 0; i < count; i++)
             {
@@ -449,7 +462,7 @@ public class PaprikaTree
                     if (Branches[i] != Null)
                     {
                         long value = Branches[i] | (i << Shift);
-                        Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, PrefixLength + count * EntrySize), value);
+                        Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, PrefixTotalLength + count * EntrySize), value);
                         count++;
                     }
                 }
@@ -457,14 +470,14 @@ public class PaprikaTree
 
             b = (byte)(BranchType | (byte)(count - BranchMinChildCount));
 
-            return destination.Slice(0, PrefixLength + EntrySize * count);
+            return destination.Slice(0, PrefixTotalLength + EntrySize * count);
         }
     }
 
     class Extension
     {
         private const int BranchIdSize = 8;
-        public const int MaxDestinationSize = PrefixLength + 1 + KeyLenght + BranchIdSize;
+        public const int MaxDestinationSize = PrefixTotalLength + 1 + KeyLenght + BranchIdSize;
 
         public static Span<byte> WriteTo(NibblePath path, long branchId, Span<byte> destination)
         {
