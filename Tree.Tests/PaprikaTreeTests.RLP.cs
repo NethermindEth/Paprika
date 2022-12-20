@@ -31,10 +31,14 @@ public class PaprikaTreeTestsRlp
     [Test]
     public void Extension_Short_To_RLP()
     {
-        // var key = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34 });
-        // var expected = new byte[] { 201, 131, 32, 18, 52, 132, 3, 5, 7, 11 };
-        // var childEncoded = new byte[] { 1 };
-        // AssertExtension(expected, key, value);
+        // leaf
+        Span<byte> leaf = stackalloc byte[32];
+        PaprikaTree.EncodeLeaf(NibblePath.FromKey(stackalloc byte[] { 0x12 }), stackalloc byte[] { 0x56 }, leaf);
+        var leafRlp = leaf.Slice(1, leaf[0]);
+        
+        // extension 
+        var path = NibblePath.FromKey(stackalloc byte[] { 0x34 });
+        AssertExtension(new byte[0], path, leafRlp);
     }
 
     private static void AssertLeaf(byte[] expected, in NibblePath path, in ReadOnlySpan<byte> value)
