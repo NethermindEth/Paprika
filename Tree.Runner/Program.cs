@@ -8,7 +8,8 @@ public static class Program
 {
     public static void Main(String[] args)
     {
-        const int Count = 80_000_000;
+        const int Count = 160_000_000;
+        const int LogEvery = 1000_000;
         const int BatchSize = 10000;
         const int seed = 17;
         
@@ -49,6 +50,11 @@ public static class Program
                     batch.Commit(CommitOptions.RootOnly);
                     batch = tree.Begin();
                 }
+
+                if (i % LogEvery == 0)
+                {
+                    Console.WriteLine("Wrote {0:N0} items", i);
+                }
             }
 
             batch.Commit(CommitOptions.ForceFlush);
@@ -63,6 +69,11 @@ public static class Program
                 random.NextBytes(key);
                 
                 tree.TryGet(in rkey, out var v);
+                
+                if (i % LogEvery == 0)
+                {
+                    Console.WriteLine("Read {0:N0} items", i);
+                }
             }
         }
 
