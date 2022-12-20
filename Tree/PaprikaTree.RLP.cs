@@ -131,8 +131,7 @@ public partial class PaprikaTree
             return HasRlp;
         }
 
-        var keccak = ValueKeccak.Compute(data);
-        keccak.BytesAsSpan.CopyTo(destination);
+        KeccakHash.ComputeHash(data, destination);
         return HasKeccak;
     }
 }

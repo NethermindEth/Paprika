@@ -5,10 +5,10 @@ using NUnit.Framework;
 
 namespace Tree.Tests;
 
-public partial class PaprikaTreeTests
+public class PaprikaTreeTestsRlp
 {
     [Test]
-    public void RLP_Leaf_Short()
+    public void Leaf_Short_To_RLP()
     {
         var key = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34 });
         Span<byte> value = stackalloc byte[] { 3, 5, 7, 11 };
@@ -18,7 +18,7 @@ public partial class PaprikaTreeTests
     }
     
     [Test]
-    public void RLP_Leaf_Long()
+    public void Leaf_Long_To_Keccak()
     {
         var key = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34 });
         var value = new byte [32];
@@ -27,11 +27,32 @@ public partial class PaprikaTreeTests
         
         AssertLeaf(keccak, key, value);
     }
+    
+    [Test]
+    public void Extension_Short_To_RLP()
+    {
+        // var key = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34 });
+        // var expected = new byte[] { 201, 131, 32, 18, 52, 132, 3, 5, 7, 11 };
+        // var childEncoded = new byte[] { 1 };
+        // AssertExtension(expected, key, value);
+    }
 
     private static void AssertLeaf(byte[] expected, in NibblePath path, in ReadOnlySpan<byte> value)
     {
         Span<byte> destination = stackalloc byte[32];
         var encoded = PaprikaTree.EncodeLeaf(path, value, destination);
+        AssertEncoded(expected, encoded, destination);
+    }
+    
+    private static void AssertExtension(byte[] expected, in NibblePath path, in ReadOnlySpan<byte> childRlpOrKeccak)
+    {
+        Span<byte> destination = stackalloc byte[32];
+        var encoded = PaprikaTree.EncodeExtension(path, childRlpOrKeccak, destination);
+        AssertEncoded(expected, encoded, destination);
+    }
+
+    private static void AssertEncoded(byte[] expected, byte encoded, Span<byte> destination)
+    {
         if (encoded == PaprikaTree.HasKeccak)
         {
             // keccak
@@ -45,6 +66,7 @@ public partial class PaprikaTreeTests
             CollectionAssert.AreEqual(expected, rlp.ToArray());
         }
     }
+
 
     private static byte[] ParseHex(string hex)
     {

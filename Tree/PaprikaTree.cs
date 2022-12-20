@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Contracts;
 using System.Runtime.CompilerServices;
+using Tree.Crypto;
 
 namespace Tree;
 
@@ -25,7 +26,7 @@ public partial class PaprikaTree
     
     // [type][rlp or keccak]
     private const int TypePrefixLength = 1;
-    private const int KeccakLength = 32;
+    private const int KeccakLength = KeccakHash.HASH_SIZE;
     private const int KeccakOrRlpWithLength = KeccakLength;
     
     /// <summary>
