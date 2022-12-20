@@ -1,17 +1,31 @@
 # :hot_pepper: Paprika
 
-A low level Patricia tree, with no indirect db abstraction. The implementation should be suitable to replace a state tree of Ethereum blockchain.
+Paprika is an imeplementation of the Patricia tree used in Ethereum. It has the following key properties:
 
-This project removes the abstraction of the underlying storage and make Patricia tree work directly with data. This means, that all node types: branches, extensions and leafs, use internal addressing, requiring no additional database to get the data or write them.
+1. no external KV storage
+1. no managed memory overhead - Paprika uses almost no managed memory as only `Span<byte>`, stackallocated variables and uses no managed representation of the tree
+1. different commit options - depending on the commit level, it can update values in place (for initial blocks for example)
 
-Additionally, this means that Paprika uses **almost no managed memory**, delegating everything to the underlying store, based on memory mapped files. There are no managed nodes, no cache and no encoding/decoding. Just key-value pairs stored in a structure directly mapped to disk. 
+**No external KV storage** means that Paprika is selfsufficient in regards to writing and reading data from disk and requires no third party dbs like Rocks or others.
+
+**No managed memory overhead** means that Paprika uses almost no managed memory. Only `Span<byte>`, stackallocated variables are used. There's no representation of the tree stored in the managed memory. Also, it uses `[module: SkipLocalsInit]` to not clean any memory before accessing it.
+
+**Different commit options** mean that depending on the level of the commit of the batch, Paprika can:
+
+1. write almost in place, just updating the root. It does by reusing nodes that were decomissioned by splits etc.
+1. commit a whole batch, making it readonly (useful to commit a block so that it's readable later)
+1. flush everything to disk (forces to flush, making the previous fully persistent)
 
 The database assumes no deletes and keeping the last root in the memory. If deletes or pruning is required, it can be added later on. For example, by copying only values that are alive. The roots can be captured and stored elsewhere. They map to a single long and one can easily amend paprika to get old data by its root.
 
-The current implementation **does not include**:
+## Design
 
-- RLP encoding
-- Keccak compute and storying it
+Some design principles:
+
+1. Paprika uses `memory mapped files` to store and read data. 
+1. For writing data, it writes them to the first empty space of the given size (unaligned) and maps it to a single `long`.
+1. `long` identifier is used for internal addressing in the tree.
+1. `Keccak` or `RLP` of the node is stored in a front of the node which makes it colocated with the node and easy to access.
 
 ## Benchmarks
 
