@@ -90,9 +90,14 @@ public partial class PaprikaTree
     public static byte EncodeExtension(NibblePath path, ReadOnlySpan<byte> childKeccakOrRlp, Span<byte> destination)
     {
         Span<byte> hexPath = stackalloc byte [path.HexEncodedLength];
-        path.HexEncode(hexPath, true);
+        path.HexEncode(hexPath, false);
         
-        var contentLength = Rlp.Rlp.LengthOf(hexPath) + Rlp.Rlp.LengthOf(childKeccakOrRlp);
+        const int keccakRlpLength = 33;
+
+        var contentLength = Rlp.Rlp.LengthOf(hexPath) + (childKeccakOrRlp.Length == KeccakLength
+            ? keccakRlpLength
+            : childKeccakOrRlp.Length);
+        
         var totalLength = Rlp.Rlp.LengthOfSequence(contentLength);
 
         Span<byte> data = stackalloc byte[totalLength];

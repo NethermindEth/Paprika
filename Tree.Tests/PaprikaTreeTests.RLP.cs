@@ -13,10 +13,10 @@ public class PaprikaTreeTestsRlp
         var key = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34 });
         Span<byte> value = stackalloc byte[] { 3, 5, 7, 11 };
         var expected = new byte[] { 201, 131, 32, 18, 52, 132, 3, 5, 7, 11 };
-        
+
         AssertLeaf(expected, key, value);
     }
-    
+
     [Test]
     public void Leaf_Long_To_Keccak()
     {
@@ -24,21 +24,22 @@ public class PaprikaTreeTestsRlp
         var value = new byte [32];
 
         var keccak = ParseHex("0xc9a263dc573d67a8d0627756d012385a27db78bb4a072ab0f755a84d3b4babda");
-        
+
         AssertLeaf(keccak, key, value);
     }
-    
+
     [Test]
     public void Extension_Short_To_RLP()
     {
         // leaf
         Span<byte> leaf = stackalloc byte[32];
-        PaprikaTree.EncodeLeaf(NibblePath.FromKey(stackalloc byte[] { 0x12 }), stackalloc byte[] { 0x56 }, leaf);
+        PaprikaTree.EncodeLeaf(NibblePath.FromKey(stackalloc byte[] { 0x03 }).SliceFrom(1), stackalloc byte[] { 0x05 },
+            leaf);
         var leafRlp = leaf.Slice(1, leaf[0]);
-        
+
         // extension 
-        var path = NibblePath.FromKey(stackalloc byte[] { 0x34 });
-        AssertExtension(new byte[0], path, leafRlp);
+        var path = NibblePath.FromKey(stackalloc byte[] { 0x07 }).SliceFrom(1);
+        AssertExtension(new byte[] { 196, 23, 194, 51, 5 }, path, leafRlp);
     }
 
     private static void AssertLeaf(byte[] expected, in NibblePath path, in ReadOnlySpan<byte> value)
@@ -47,7 +48,7 @@ public class PaprikaTreeTestsRlp
         var encoded = PaprikaTree.EncodeLeaf(path, value, destination);
         AssertEncoded(expected, encoded, destination);
     }
-    
+
     private static void AssertExtension(byte[] expected, in NibblePath path, in ReadOnlySpan<byte> childRlpOrKeccak)
     {
         Span<byte> destination = stackalloc byte[32];
@@ -76,8 +77,8 @@ public class PaprikaTreeTestsRlp
     {
         hex = hex.Replace("0x", "");
         var result = new byte[hex.Length / 2];
-        
-        for (int i = 0; i < hex.Length; i+=2)
+
+        for (int i = 0; i < hex.Length; i += 2)
         {
             result[i / 2] = byte.Parse(hex.Substring(i, 2), NumberStyles.HexNumber);
         }
