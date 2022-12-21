@@ -12,6 +12,9 @@ public partial class PaprikaTree
 
     internal const byte HasKeccak = 0b0010_0000;
     internal const byte HasRlp = 0b0001_0000;
+    internal const byte ClearKeccakRlp = 0b1100_1111;
+    
+    public Keccak RootKeccak => new(GetNodeKeccakOrRlp(_db, _root).ToArray());
     
     private static Span<byte> GetNodeKeccakOrRlp(IDb db, long id)
     {

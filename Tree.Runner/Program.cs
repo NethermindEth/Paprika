@@ -30,7 +30,7 @@ public static class Program
         Span<byte> key = stackalloc byte[32];
         ReadOnlySpan<byte> rkey = MemoryMarshal.CreateReadOnlySpan(ref key[0], 32);
 
-        AnsiConsole.WriteLine($"The test will write [green]{Count} items[/] in [green]batches of {BatchSize}[/].");
+        AnsiConsole.WriteLine($"The test will write {Count} in batches of {BatchSize}.");
         AnsiConsole.WriteLine($"The time includes the generation of random data which impacts the speed of the test.");
         AnsiConsole.WriteLine("Running...");
         
@@ -47,13 +47,13 @@ public static class Program
 
                 if (i % BatchSize == 0)
                 {
-                    batch.Commit(CommitOptions.RootOnly);
+                    batch.Commit(CommitOptions.RootOnlyWithHash);
                     batch = tree.Begin();
                 }
 
                 if (i % LogEvery == 0)
                 {
-                    Console.WriteLine("Wrote {0:N0} items", i);
+                    Console.WriteLine("Wrote {0:N0} items with the current root hash set to {1}", i, tree.RootKeccak.ToString());
                 }
             }
 

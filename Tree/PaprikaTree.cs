@@ -156,6 +156,7 @@ public partial class PaprikaTree
                 var @new = Set(db, found, addedPath.SliceFrom(1), value);
                 Span<byte> copy = stackalloc byte[node.Length];
                 node.CopyTo(copy);
+                copy[0] = (byte)(copy[0] & ClearKeccakRlp); // override the mask, as it contains RLP/Keccak flag
                 Branch.SetInFull(copy, newNibble, @new);
 
                 return db.TryUpdateOrAdd(current, copy);

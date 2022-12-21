@@ -146,6 +146,8 @@ namespace Tree.Crypto
         }
 
         public KeccakStructRef ToStructRef() => new(Bytes);
+
+        public override string ToString() => Bytes.AsSpan().ToHexString();
     }
 
     public ref struct KeccakStructRef
