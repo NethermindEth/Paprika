@@ -10,8 +10,8 @@ public partial class PaprikaTree
     private const int MaxBranchRlpLength = MaxLengthOfLengths + Branch.BranchCount * KeccakRlpLength + 1; // 1 for null value
     private const int MaxLengthOfLengths = 4;
 
-    public const byte HasKeccak = 0b0010_0000;
-    public const byte HasRlp = 0b0001_0000;
+    internal const byte HasKeccak = 0b0010_0000;
+    internal const byte HasRlp = 0b0001_0000;
     
     private static Span<byte> GetNodeKeccakOrRlp(IDb db, long id)
     {
@@ -68,7 +68,7 @@ public partial class PaprikaTree
         return keccakOrRpl.Slice(RlpLenghtOfLength, keccakOrRpl[0]);
     }
 
-    private static byte EncodeBranch(in Branch branch, IDb db, in Span<byte> destination)
+    internal static byte EncodeBranch(in Branch branch, IDb db, in Span<byte> destination)
     {
         var pool = ArrayPool<byte>.Shared;
         var bytes = pool.Rent(MaxBranchRlpLength);
@@ -82,17 +82,28 @@ public partial class PaprikaTree
             {
                 unsafe
                 {
-                    var childKeccakOrRlp = GetNodeKeccakOrRlp(db, branch.Branches[i]);
-                    if (childKeccakOrRlp.Length < KeccakLength)
+                    var child = branch.Branches[i];
+                    if (child == Null)
                     {
-                        rlp.Write(childKeccakOrRlp);
+                        rlp.EncodeEmptyArray();
                     }
                     else
                     {
-                        rlp.EncodeKeccak(childKeccakOrRlp);
+                        var childKeccakOrRlp = GetNodeKeccakOrRlp(db, child);
+                        if (childKeccakOrRlp.Length < KeccakLength)
+                        {
+                            rlp.Write(childKeccakOrRlp);
+                        }
+                        else
+                        {
+                            rlp.EncodeKeccak(childKeccakOrRlp);
+                        }    
                     }
                 }
             }
+            
+            // write empty value 
+            rlp.EncodeEmptyArray();
 
             // write length
             var pos = rlp.Position;
@@ -112,7 +123,7 @@ public partial class PaprikaTree
         }
     }
 
-    public static byte EncodeLeaf(NibblePath path, ReadOnlySpan<byte> value, Span<byte> destination)
+    internal static byte EncodeLeaf(NibblePath path, ReadOnlySpan<byte> value, Span<byte> destination)
     {
         Span<byte> hexPath = stackalloc byte [path.HexEncodedLength];
         path.HexEncode(hexPath, true);
@@ -131,7 +142,7 @@ public partial class PaprikaTree
         return WrapRlp(rlp.Data, destination);
     }
     
-    public static byte EncodeExtension(NibblePath path, ReadOnlySpan<byte> childKeccakOrRlp, Span<byte> destination)
+    internal static byte EncodeExtension(NibblePath path, ReadOnlySpan<byte> childKeccakOrRlp, Span<byte> destination)
     {
         Span<byte> hexPath = stackalloc byte [path.HexEncodedLength];
         path.HexEncode(hexPath, false);

@@ -101,6 +101,8 @@ public ref struct RlpStream
         Encode(value ? (byte)1 : (byte)0);
     }
 
+    public void EncodeEmptyArray() => WriteByte(EmptyArrayByte);
+
     public void Encode(ReadOnlySpan<byte> input)
     {
         if (input.Length == 0)

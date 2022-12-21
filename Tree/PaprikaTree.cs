@@ -44,7 +44,7 @@ public partial class PaprikaTree
 
 
     // leaf [...][path][value]
-    private const byte LeafType = 0b0100_0000;
+    internal const byte LeafType = 0b0100_0000;
 
     // extension: [...][path][long]
     private const byte ExtensionType = 0b0000_0000;
@@ -362,7 +362,7 @@ public partial class PaprikaTree
     //     Leaf
     // }
 
-    struct Branch
+    public struct Branch
     {
         public const int MaxDestinationSize = BranchCount * EntrySize + PrefixTotalLength;
         public const int BranchCount = 16;

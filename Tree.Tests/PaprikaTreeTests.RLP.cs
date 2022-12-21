@@ -41,7 +41,7 @@ public class PaprikaTreeTestsRlp
         var path = NibblePath.FromKey(stackalloc byte[] { 0x07 }).SliceFrom(1);
         AssertExtension(new byte[] { 196, 23, 194, 51, 5 }, path, leafRlp);
     }
-    
+
     [Test]
     public void Extension_Long_To_Keccak()
     {
@@ -53,10 +53,35 @@ public class PaprikaTreeTestsRlp
 
         // extension 
         var path = NibblePath.FromKey(stackalloc byte[] { 0x07 }).SliceFrom(1);
-        
+
         var expected = ParseHex("0x87096a8380f2003182a4fa0409326e6678e0c5cf55418fc0aa516ae06b66be46");
 
         AssertExtension(expected, path, keccak);
+    }
+
+    [Test]
+    public void Branch_Long_To_Keccak()
+    {
+        // leaf
+        var key = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34 });
+        var value = new byte [32];
+        Span<byte> leafPrefix = stackalloc byte[33];
+        PaprikaTree.EncodeLeaf(key, value, leafPrefix.Slice(1));
+        leafPrefix[0] = PaprikaTree.HasKeccak | PaprikaTree.LeafType;
+
+        var db = new MemoryDb(1024);
+        var leaf = db.Write(leafPrefix);
+
+        // branch
+        PaprikaTree.Branch branch = default;
+        unsafe
+        {
+            branch.Branches[11] = leaf;
+        }
+
+        var expected = ParseHex("0xfe8ac9a9c96e07c71fdb2c4cda32cb86e4e880616cf4dad1454247c28dd3a739");
+
+        AssertBranch(expected, branch, db);
     }
 
     private static void AssertLeaf(byte[] expected, in NibblePath path, in ReadOnlySpan<byte> value)
@@ -70,6 +95,13 @@ public class PaprikaTreeTestsRlp
     {
         Span<byte> destination = stackalloc byte[32];
         var encoded = PaprikaTree.EncodeExtension(path, childRlpOrKeccak, destination);
+        AssertEncoded(expected, encoded, destination);
+    }
+
+    private static void AssertBranch(byte[] expected, in PaprikaTree.Branch branch, IDb db)
+    {
+        Span<byte> destination = stackalloc byte[32];
+        var encoded = PaprikaTree.EncodeBranch(branch, db, destination);
         AssertEncoded(expected, encoded, destination);
     }
 

@@ -1,9 +1,10 @@
 ﻿using System.Buffers.Binary;
 using NUnit.Framework;
+// ReSharper disable HeapView.BoxingAllocation
 
 namespace Tree.Tests;
 
-public partial class NibblePathTests
+public class NibblePathTests
 {
     [Test]
     public void Equal_From([Range(0, 15)] int from)
