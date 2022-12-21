@@ -41,8 +41,7 @@ public partial class PaprikaTree
 
     // masks
     private const byte TypeMask = 0b1100_0000;
-    public const byte HasKeccak = 0b0010_0000;
-    public const byte HasRlp = 0b0001_0000;
+
 
     // leaf [...][path][value]
     private const byte LeafType = 0b0100_0000;
@@ -366,7 +365,7 @@ public partial class PaprikaTree
     struct Branch
     {
         public const int MaxDestinationSize = BranchCount * EntrySize + PrefixTotalLength;
-        private const int BranchCount = 16;
+        public const int BranchCount = 16;
         private const int EntrySize = 8;
         private const int Shift = 60;
         private const int Mask = 0xF;

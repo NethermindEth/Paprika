@@ -1,10 +1,18 @@
-﻿using Tree.Crypto;
+﻿using System.Buffers;
+using Tree.Crypto;
 using Tree.Rlp;
 
 namespace Tree;
 
 public partial class PaprikaTree
 {
+    private const int KeccakRlpLength = 33;
+    private const int MaxBranchRlpLength = MaxLengthOfLengths + Branch.BranchCount * KeccakRlpLength + 1; // 1 for null value
+    private const int MaxLengthOfLengths = 4;
+
+    public const byte HasKeccak = 0b0010_0000;
+    public const byte HasRlp = 0b0001_0000;
+    
     private static Span<byte> GetNodeKeccakOrRlp(IDb db, long id)
     {
         var node = db.Read(id);
@@ -33,19 +41,11 @@ public partial class PaprikaTree
             hasRlpOrKeccak = EncodeLeaf(path, value, keccakOrRpl);
         }
 
-        // if ((first & TypeMask) == BranchType)
-        // {
-        //     var jump = Branch.Find(node, keyPath.FirstNibble);
-        //     if (jump != Null)
-        //     {
-        //         keyPath = keyPath.SliceFrom(1);
-        //         current = jump;
-        //         continue;
-        //     }
-        //
-        //     value = default;
-        //     return false;
-        // }
+        if ((first & TypeMask) == BranchType)
+        {
+            var branch = Branch.Read(node);
+            hasRlpOrKeccak = EncodeBranch(branch, db, keccakOrRpl);
+        }
 
         if ((first & TypeMask) == ExtensionType)
         {
@@ -67,7 +67,51 @@ public partial class PaprikaTree
         first |= HasRlp;
         return keccakOrRpl.Slice(RlpLenghtOfLength, keccakOrRpl[0]);
     }
-    
+
+    private static byte EncodeBranch(in Branch branch, IDb db, in Span<byte> destination)
+    {
+        var pool = ArrayPool<byte>.Shared;
+        var bytes = pool.Rent(MaxBranchRlpLength);
+
+        try
+        {
+            RlpStream rlp = new (bytes);
+            rlp.Position = MaxLengthOfLengths;
+            
+            for (var i = 0; i < Branch.BranchCount; i++)
+            {
+                unsafe
+                {
+                    var childKeccakOrRlp = GetNodeKeccakOrRlp(db, branch.Branches[i]);
+                    if (childKeccakOrRlp.Length < KeccakLength)
+                    {
+                        rlp.Write(childKeccakOrRlp);
+                    }
+                    else
+                    {
+                        rlp.EncodeKeccak(childKeccakOrRlp);
+                    }
+                }
+            }
+
+            // write length
+            var pos = rlp.Position;
+            var length = pos - MaxLengthOfLengths;
+            var sequenceLength = Rlp.Rlp.LengthOfLength(length);
+            var actualStart = MaxLengthOfLengths - sequenceLength;
+            
+            rlp.Position = actualStart;
+            rlp.StartSequence(length);
+            rlp.Position = pos;
+
+            return WrapRlp(bytes.AsSpan(actualStart, length + sequenceLength), destination);
+        }
+        finally
+        {
+            pool.Return(bytes);
+        }
+    }
+
     public static byte EncodeLeaf(NibblePath path, ReadOnlySpan<byte> value, Span<byte> destination)
     {
         Span<byte> hexPath = stackalloc byte [path.HexEncodedLength];
@@ -84,18 +128,16 @@ public partial class PaprikaTree
         rlp.Encode(hexPath);
         rlp.Encode(value);
 
-        return WrapRlp(rlp, destination);
+        return WrapRlp(rlp.Data, destination);
     }
     
     public static byte EncodeExtension(NibblePath path, ReadOnlySpan<byte> childKeccakOrRlp, Span<byte> destination)
     {
         Span<byte> hexPath = stackalloc byte [path.HexEncodedLength];
         path.HexEncode(hexPath, false);
-        
-        const int keccakRlpLength = 33;
 
         var contentLength = Rlp.Rlp.LengthOf(hexPath) + (childKeccakOrRlp.Length == KeccakLength
-            ? keccakRlpLength
+            ? KeccakRlpLength
             : childKeccakOrRlp.Length);
         
         var totalLength = Rlp.Rlp.LengthOfSequence(contentLength);
@@ -109,12 +151,6 @@ public partial class PaprikaTree
         
         if (childKeccakOrRlp.Length < KeccakLength)
         {
-            // I think it can only happen if we have a short extension to a branch with a short extension as the only child?
-            // so |
-            // so |
-            // so E - - - - - - - - - - - - - - -
-            // so |
-            // so |
             rlp.Write(childKeccakOrRlp);
         }
         else
@@ -122,13 +158,11 @@ public partial class PaprikaTree
             rlp.EncodeKeccak(childKeccakOrRlp);
         }
 
-        return WrapRlp(rlp, destination);
+        return WrapRlp(rlp.Data, destination);
     }
 
-    private static byte WrapRlp(in RlpStream rlp, Span<byte> destination)
+    private static byte WrapRlp(in Span<byte> data, Span<byte> destination)
     {
-        var data = rlp.Data;
-
         if (data.Length < 32)
         {
             destination[0] = (byte)data.Length;
