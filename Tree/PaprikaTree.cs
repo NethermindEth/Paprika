@@ -155,15 +155,8 @@ public class PaprikaTree
                 ref var branchNode = ref branch.Branches[newNibble];
                 if (branchNode != Null)
                 {
-                    var @new = Set(db, branchNode, addedPath.SliceFrom(1), value);
-                    if (@new == branchNode)
-                    {
-                        // nothing to update in the branch
-                        return current;
-                    }
-
                     // override with the new value
-                    branchNode = @new;
+                    branchNode = Set(db, branchNode, addedPath.SliceFrom(1), value);
                 }
                 else
                 {
