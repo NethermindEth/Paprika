@@ -41,6 +41,23 @@ public class PaprikaTreeTestsRlp
         var path = NibblePath.FromKey(stackalloc byte[] { 0x07 }).SliceFrom(1);
         AssertExtension(new byte[] { 196, 23, 194, 51, 5 }, path, leafRlp);
     }
+    
+    [Test]
+    public void Extension_Long_To_Keccak()
+    {
+        // leaf
+        var key = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34 });
+        var value = new byte [32];
+        Span<byte> keccak = stackalloc byte[32];
+        PaprikaTree.EncodeLeaf(key, value, keccak);
+
+        // extension 
+        var path = NibblePath.FromKey(stackalloc byte[] { 0x07 }).SliceFrom(1);
+        
+        var expected = ParseHex("0x87096a8380f2003182a4fa0409326e6678e0c5cf55418fc0aa516ae06b66be46");
+
+        AssertExtension(expected, path, keccak);
+    }
 
     private static void AssertLeaf(byte[] expected, in NibblePath path, in ReadOnlySpan<byte> value)
     {
