@@ -258,7 +258,7 @@ public partial class PaprikaTree
         Span<byte> destination = stackalloc byte[length];
 
         destination[0] = LeafType;
-        var leftover = path.WriteTo(destination.Slice(1));
+        var leftover = path.WriteTo(destination.Slice(PrefixTotalLength));
         value.CopyTo(leftover);
         return db.Write(destination.Slice(0, length - leftover.Length + value.Length));
     }
@@ -270,7 +270,7 @@ public partial class PaprikaTree
         Span<byte> destination = stackalloc byte[length];
 
         destination[0] = LeafType;
-        var leftover = path.WriteTo(destination.Slice(1));
+        var leftover = path.WriteTo(destination.Slice(PrefixTotalLength));
         value.CopyTo(leftover);
         var leaf = destination.Slice(0, length - leftover.Length + value.Length);
         return db.TryUpdateOrAdd(current, leaf);
@@ -482,14 +482,14 @@ public partial class PaprikaTree
         public static Span<byte> WriteTo(NibblePath path, long branchId, Span<byte> destination)
         {
             destination[0] = ExtensionType;
-            var leftover = path.WriteTo(destination.Slice(1));
+            var leftover = path.WriteTo(destination.Slice(PrefixTotalLength));
             BinaryPrimitives.WriteInt64LittleEndian(leftover, branchId);
             return destination.Slice(0, destination.Length - leftover.Length + BranchIdSize);
         }
 
         public static void Read(ReadOnlySpan<byte> source, out NibblePath path, out long jumpTo)
         {
-            var leftover = NibblePath.ReadFrom(source.Slice(1), out path);
+            var leftover = NibblePath.ReadFrom(source.Slice(PrefixTotalLength), out path);
             jumpTo = BinaryPrimitives.ReadInt64LittleEndian(leftover);
         }
     }
@@ -532,10 +532,15 @@ public partial class PaprikaTree
                 case CommitOptions.RootOnly:
                     // nothing to do
                     break;
+                case CommitOptions.RootOnlyWithHash:
+                    GetNodeKeccakOrRlp(_db, _root);
+                    break;
                 case CommitOptions.SealUpdatable:
+                    GetNodeKeccakOrRlp(_db, _root);
                     _store.Seal();
                     break;
                 case CommitOptions.ForceFlush:
+                    GetNodeKeccakOrRlp(_db, _root);
                     _store.Seal();
                     _parent._lastFlushTo = _db.NextId - 1;
                     _db.FlushFrom(_lastFlushTo);

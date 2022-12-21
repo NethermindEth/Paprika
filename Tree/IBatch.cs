@@ -20,6 +20,11 @@ public enum CommitOptions
     RootOnly,
 
     /// <summary>
+    /// The commit updates root as <see cref="RootOnly"/> but also calculates its hash.
+    /// </summary>
+    RootOnlyWithHash,
+
+    /// <summary>
     /// Seals the updatable making them readonly but does no flush to disk. 
     /// </summary>
     SealUpdatable,
