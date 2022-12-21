@@ -16,7 +16,7 @@ public partial class PaprikaTree
     
     public Keccak RootKeccak => new(GetNodeKeccakOrRlp(_db, _root).ToArray());
     
-    private static Span<byte> GetNodeKeccakOrRlp(IDb db, long id)
+    private static Span<byte> GetNodeKeccakOrRlp(IDb db, long id, bool parallel = false)
     {
         var node = db.Read(id);
         ref var first = ref node[0];
@@ -47,7 +47,7 @@ public partial class PaprikaTree
         if ((first & TypeMask) == BranchType)
         {
             var branch = Branch.Read(node);
-            hasRlpOrKeccak = EncodeBranch(branch, db, keccakOrRpl);
+            hasRlpOrKeccak = EncodeBranch(branch, db, keccakOrRpl, parallel);
         }
 
         if ((first & TypeMask) == ExtensionType)
@@ -71,13 +71,32 @@ public partial class PaprikaTree
         return keccakOrRpl.Slice(RlpLenghtOfLength, keccakOrRpl[0]);
     }
 
-    internal static byte EncodeBranch(in Branch branch, IDb db, in Span<byte> destination)
+    internal static byte EncodeBranch(in Branch branch, IDb db, in Span<byte> destination, bool parallel = false)
     {
         var pool = ArrayPool<byte>.Shared;
         var bytes = pool.Rent(MaxBranchRlpLength);
 
         try
         {
+            if (parallel)
+            {
+                // parallel, precalculate children
+                var children = new List<long>(Branch.BranchCount);
+                for (var i = 0; i < Branch.BranchCount; i++)
+                {
+                    unsafe
+                    {
+                        var child = branch.Branches[i];
+                        if (child != Null)
+                        {
+                            children.Add(child);
+                        }
+                    }
+                }
+
+                Parallel.ForEach(children, id => GetNodeKeccakOrRlp(db, id));
+            }
+            
             RlpStream rlp = new (bytes);
             rlp.Position = MaxLengthOfLengths;
             

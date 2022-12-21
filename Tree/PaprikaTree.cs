@@ -534,14 +534,14 @@ public partial class PaprikaTree
                     // nothing to do
                     break;
                 case CommitOptions.RootOnlyWithHash:
-                    GetNodeKeccakOrRlp(_db, _root);
+                    GetNodeKeccakOrRlp(_db, _root, true);
                     break;
                 case CommitOptions.SealUpdatable:
-                    GetNodeKeccakOrRlp(_db, _root);
+                    GetNodeKeccakOrRlp(_db, _root, true);
                     _store.Seal();
                     break;
                 case CommitOptions.ForceFlush:
-                    GetNodeKeccakOrRlp(_db, _root);
+                    GetNodeKeccakOrRlp(_db, _root, true);
                     _store.Seal();
                     _parent._lastFlushTo = _db.NextId - 1;
                     _db.FlushFrom(_lastFlushTo);
