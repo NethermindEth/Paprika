@@ -35,7 +35,8 @@ public static class Id
 
         return result;
     }
-        
+
+    public static bool IsSameFile(long id1, long id2) => ((id1 ^ id2) & FileMask) == 0;
 
     public static long Encode(int position, int length, int file) =>
         ((long)position << PositionShift) | ((long)length << LengthShift) | ((long)file << FileShift);

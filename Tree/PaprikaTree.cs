@@ -502,10 +502,10 @@ public class PaprikaTree
             _parent = parent;
             _db = parent._db;
             _root = parent._root;
-            
+
             _store = parent._store;
             _store.EnsureUpdatable();
-            
+
             _lastFlushTo = parent._lastFlushTo;
         }
 
@@ -606,19 +606,26 @@ public class PaprikaTree
 
             // current is no longer used, try to get a node from cache
             var writtenLength = written.Length;
-            var slot = _slots[writtenLength];
-            if (slot != Null)
+            ref var slot = ref _slots[writtenLength];
+
+            var nextId = _db.NextId;
+
+            while (slot != Null)
             {
-                var reusable = _db.Read(slot);
+                var currentSlot = slot;
+                var reusable = _db.Read(currentSlot);
                 var next = BinaryPrimitives.ReadInt64LittleEndian(reusable);
-                _slots[writtenLength] = next;
+                slot = next;
 
-                written.CopyTo(reusable);
-                return slot;
+                // Only reuse slot if in the same file. Reusing a slot from an old file may result in a random access.
+                if (Id.IsSameFile(nextId, currentSlot))
+                {
+                    written.CopyTo(reusable);
+                    return currentSlot;
+                }
             }
-            
-            // all caching failed, just write
 
+            // all caching failed, just write
             return _db.Write(written);
         }
 
