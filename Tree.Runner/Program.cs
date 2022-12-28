@@ -53,7 +53,7 @@ public static class Program
 
                 if (i % LogEvery == 0)
                 {
-                    Console.WriteLine("Wrote {0:N0} items with the current root hash set to {1}", i, tree.RootKeccak.ToString());
+                    //Console.WriteLine("Wrote {0:N0} items with the current root hash set to {1}", i, tree.RootKeccak.ToString());
                 }
             }
 

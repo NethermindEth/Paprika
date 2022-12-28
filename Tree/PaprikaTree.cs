@@ -1,6 +1,7 @@
 ﻿using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Diagnostics.Contracts;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using Tree.Crypto;
 
@@ -23,19 +24,19 @@ namespace Tree;
 public partial class PaprikaTree
 {
     private const long Null = 0;
-    
+
     // [type][rlp or keccak]
     private const int TypePrefixLength = 1;
     private const int KeccakLength = KeccakHash.HASH_SIZE;
-    private const int KeccakOrRlpWithLength = KeccakLength;
-    
+
     /// <summary>
     /// The total lenght of the the prefix before actual payload of the given node,
     /// includes: type, keccak-or-rlp.
     /// </summary>
-    private const int PrefixTotalLength = TypePrefixLength + KeccakOrRlpWithLength;
+    private const int PrefixTotalLength = TypePrefixLength;
+
     private const int RlpLenghtOfLength = 1;
-    
+
     private const int KeyLenght = 32;
     private const int ValueLenght = 32;
 
@@ -51,6 +52,7 @@ public partial class PaprikaTree
 
     // branch [...][branch0][branch3][branch7]
     private const byte BranchType = 0b1000_0000;
+    private const byte NibbleBitMaskSize = 2;
 
     private readonly IDb _db;
 
@@ -106,15 +108,10 @@ public partial class PaprikaTree
                 var added = WriteLeaf(db, addedPath.SliceFrom(diffAt + 1), value);
 
                 // 2. write branch
-                Branch branch = default;
-                unsafe
-                {
-                    branch.Branches[existingPath.GetAt(diffAt)] = existing;
-                    branch.Branches[addedPath.GetAt(diffAt)] = added;
-                }
-
-                var branchId = WriteToDb(branch, db);
-
+                Span<byte> branch = stackalloc byte[Branch.GetNeededSize(2)];
+                WriteBranch(branch, existingPath.GetAt(diffAt), existing, addedPath.GetAt(diffAt), @added);
+                var branchId =  db.Write(branch);
+                
                 // 3. extension
                 var extensionPath = addedPath.SliceTo(diffAt);
                 Span<byte> destination = stackalloc byte[Extension.MaxDestinationSize];
@@ -135,15 +132,10 @@ public partial class PaprikaTree
                 var oldValue = node.Slice(PrefixTotalLength + existingPath.RawByteLength);
                 var @old = WriteLeafUpdatable(db, existingPath.SliceFrom(1), oldValue, current);
 
-                Branch branch = default;
-                unsafe
-                {
-                    branch.Branches[nibbleExisting] = @old;
-                    branch.Branches[nibbleAdded] = @new;
-                }
-
-                // 1. write branch
-                return WriteToDb(branch, db);
+                // write branch
+                Span<byte> branch = stackalloc byte[Branch.GetNeededSize(2)];
+                WriteBranch(branch, nibbleExisting, old, nibbleAdded, @new);
+                return db.Write(branch);
             }
         }
 
@@ -151,37 +143,27 @@ public partial class PaprikaTree
         {
             var newNibble = addedPath.FirstNibble;
 
-            if (Branch.TryFindInFull(node, newNibble, out var found))
+            if (Branch.TryFindExisting(node, newNibble, out var found))
             {
+                // found so it can be easily overwritten
                 var @new = Set(db, found, addedPath.SliceFrom(1), value);
                 Span<byte> copy = stackalloc byte[node.Length];
                 node.CopyTo(copy);
-                copy[0] = (byte)(copy[0] & ClearKeccakRlp); // override the mask, as it contains RLP/Keccak flag
-                Branch.SetInFull(copy, newNibble, @new);
 
+                Branch.SetWithExistingNibble(copy, newNibble, @new);
                 return db.TryUpdateOrAdd(current, copy);
             }
 
-            var branch = Branch.Read(node);
-
-            unsafe
+            // not exist yet
             {
-                ref var branchNode = ref branch.Branches[newNibble];
-                if (branchNode != Null)
-                {
-                    // override with the new value
-                    branchNode = Set(db, branchNode, addedPath.SliceFrom(1), value);
-                }
-                else
-                {
-                    // not exist yet
-                    branchNode = WriteLeaf(db, addedPath.SliceFrom(1), value);
-                }
+                var @new = WriteLeaf(db, addedPath.SliceFrom(1), value);
+                // allocate one more
+                Span<byte> copy = stackalloc byte[node.Length + Branch.EntrySize];
+                node.CopyTo(copy);
+
+                Branch.SetNonExistingYet(copy, newNibble, @new);
+                return db.TryUpdateOrAdd(current, copy);
             }
-
-            Span<byte> written = branch.WriteTo(stackalloc byte[Branch.MaxDestinationSize]);
-
-            return db.TryUpdateOrAdd(current, written);
         }
 
         if ((first & TypeMask) == ExtensionType)
@@ -204,24 +186,20 @@ public partial class PaprikaTree
             // build the key for the new value, one level deeper
             var @new = WriteLeaf(db, addedPath.SliceFrom(diffAt + 1), value);
 
-            Branch branch = default;
-            unsafe
-            {
-                branch.Branches[addedPath.GetAt(diffAt)] = @new;
-                branch.Branches[extensionPath.GetAt(diffAt)] = PushExtensionDown(db, extensionPath, jumpTo, diffAt + 1);
-            }
+            Span<byte> branch = stackalloc byte[Branch.GetNeededSize(2)];
+            WriteBranch(branch, addedPath.GetAt(diffAt), @new, extensionPath.GetAt(diffAt),
+                PushExtensionDown(db, extensionPath, jumpTo, diffAt + 1));
 
-            var branchPayload = branch.WriteTo(stackalloc byte[Branch.MaxDestinationSize]);
 
             if (diffAt == 0)
             {
                 // the branch is the first, no additional extension needed in front, just overwrite the current
-                return db.TryUpdateOrAdd(current, branchPayload);
+                return db.TryUpdateOrAdd(current, branch);
             }
             else
             {
                 // the branch is in the middle and it needs to have an extension first
-                var branchId = db.Write(branchPayload);
+                var branchId = db.Write(branch);
 
                 // extension of at least length 1
                 Span<byte> extension = stackalloc byte[Extension.MaxDestinationSize];
@@ -234,6 +212,15 @@ public partial class PaprikaTree
         throw new Exception("Type not handled!");
     }
 
+    private static void WriteBranch(in Span<byte> destination, byte nibble1, long key1, byte nibble2, long key2)
+    {
+        destination.Clear();
+        destination[0] = BranchType;
+
+        Branch.SetNonExistingYet(destination, nibble1, key1);
+        Branch.SetNonExistingYet(destination, nibble2, key2);
+    }
+
     private static long PushExtensionDown(IStore db, NibblePath extensionPath, long jumpTo, int pushDownBy)
     {
         if (extensionPath.Length == pushDownBy)
@@ -244,12 +231,6 @@ public partial class PaprikaTree
         Span<byte> extension = stackalloc byte[Extension.MaxDestinationSize];
         extension = Extension.WriteTo(extensionPath.SliceFrom(pushDownBy), jumpTo, extension);
         return db.Write(extension);
-    }
-
-    private static long WriteToDb(in Branch branch, IStore db)
-    {
-        Span<byte> destination = stackalloc byte[Branch.MaxDestinationSize];
-        return db.Write(branch.WriteTo(destination));
     }
 
     private static long WriteLeaf(IStore db, NibblePath path, ReadOnlySpan<byte> value)
@@ -320,8 +301,7 @@ public partial class PaprikaTree
 
             if ((first & TypeMask) == BranchType)
             {
-                var jump = Branch.Find(node, keyPath.FirstNibble);
-                if (jump != Null)
+                if (Branch.TryFindExisting(node, keyPath.FirstNibble, out var jump))
                 {
                     keyPath = keyPath.SliceFrom(1);
                     current = jump;
@@ -356,58 +336,45 @@ public partial class PaprikaTree
 
     public IBatch Begin() => new Batch(this);
 
-    // enum NodeType : byte
-    // {
-    //     Branch,
-    //     Extension,
-    //     Leaf
-    // }
-
+    /// <summary>
+    /// Layout:
+    /// [1byte - type][2bytes - bitmask]
+    /// </summary>
     public struct Branch
     {
-        public const int MaxDestinationSize = BranchCount * EntrySize + PrefixTotalLength;
         public const int BranchCount = 16;
-        private const int EntrySize = 8;
-        private const int Shift = 60;
-        private const int Mask = 0xF;
-        private const long NodeMask = 0x0FFF_FFFF_FFFF_FFFF;
+        public const int EntrySize = 8;
+
         private const int BranchMinChildCount = 2;
         private const byte BranchChildCountMask = 0b0000_1111;
 
-        public unsafe fixed long Branches[BranchCount];
+        private const int BitMaskLength = 2;
+        private const int BranchPrefixLength = PrefixTotalLength + BitMaskLength;
 
-        public static unsafe Branch Read(in ReadOnlySpan<byte> source)
-        {
-            Branch result = default; // zero undefined
+        public static int GetNeededSize(int nibbleCount) => BranchPrefixLength + EntrySize * nibbleCount;
 
-            ref var b = ref Unsafe.AsRef(in source[0]);
-            var count = (b & BranchChildCountMask) + BranchMinChildCount;
-
-            // consume first
-            b = ref Unsafe.Add(ref b, PrefixTotalLength);
-
-            for (var i = 0; i < count; i++)
-            {
-                var value = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, i * EntrySize));
-                var node = value & NodeMask;
-                var nibble = (byte)((value >> Shift) & Mask);
-
-                result.Branches[nibble] = node;
-            }
-
-            return result;
-        }
-
-        public static bool TryFindInFull(in ReadOnlySpan<byte> source, byte nibble, out long found)
+        public static bool TryFindExisting(in ReadOnlySpan<byte> source, byte nibble, out long found)
         {
             ref var b = ref Unsafe.AsRef(in source[0]);
-            var count = (b & BranchChildCountMask) + BranchMinChildCount;
+            var count = GetCount(b);
 
             if (count == BranchCount)
             {
                 // special case, full branch node, can directly jump as values are always sorted
-                var value = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, PrefixTotalLength + nibble * EntrySize));
-                found = value & NodeMask;
+                found = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, BranchPrefixLength + nibble * EntrySize));
+                return true;
+            }
+
+            var bitmap = ReadBitMap(ref b);
+
+            var bit = 1 << nibble;
+            if ((bitmap & bit) == bit)
+            {
+                // found in bitmap, count set till this moment
+                var countNotNull = CountNotNullNibblesBefore(nibble, bitmap);
+
+                found = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b,
+                    BranchPrefixLength + countNotNull * EntrySize));
                 return true;
             }
 
@@ -415,63 +382,56 @@ public partial class PaprikaTree
             return false;
         }
 
-        public static void SetInFull(Span<byte> copy, byte nibble, long @new)
+        private static ushort ReadBitMap(ref byte start) => Unsafe.ReadUnaligned<ushort>(ref Unsafe.Add(ref start, 1));
+
+        private static void SetBitMap(ref byte start, ushort value) =>
+            Unsafe.WriteUnaligned(ref Unsafe.Add(ref start, 1), value);
+
+        private static int CountNotNullNibblesBefore(byte nibble, ushort bitmap)
+        {
+            // get next bit then subtract 1 to get a mask for this and lower nibbles
+            var mask = (1 << (nibble + 1)) - 1;
+            var masked = bitmap & mask;
+            return BitOperations.PopCount((uint)masked) - 1;
+        }
+
+        private static int GetCount(byte b) => (b & BranchChildCountMask) + BranchMinChildCount;
+
+        public static void SetWithExistingNibble(Span<byte> copy, byte nibble, long @new)
         {
             ref var b = ref Unsafe.AsRef(in copy[0]);
-            var value = @new | ((long)nibble << Shift);
-            Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, PrefixTotalLength + nibble * EntrySize), value);
-        }
-
-        public static long Find(in ReadOnlySpan<byte> source, byte nibble)
-        {
-            ref var b = ref Unsafe.AsRef(in source[0]);
-            var count = (b & BranchChildCountMask) + BranchMinChildCount;
-
+            var count = GetCount(b);
             if (count == BranchCount)
             {
-                // special case, full branch node, can directly jump as values are always sorted
-                var value = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, PrefixTotalLength + nibble * EntrySize));
-                return value & NodeMask;
+                Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, BranchPrefixLength + nibble * EntrySize), @new);
             }
-
-            // skip prefix
-            b = ref Unsafe.Add(ref b, PrefixTotalLength);
-
-            for (var i = 0; i < count; i++)
+            else
             {
-                var value = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, i * EntrySize));
-                var actual = (byte)((value >> Shift) & Mask);
-                if (actual == nibble)
-                {
-                    return value & NodeMask;
-                }
+                var bitmap = Unsafe.ReadUnaligned<ushort>(ref Unsafe.Add(ref b, 1));
+                var countNotNull = CountNotNullNibblesBefore(nibble, bitmap);
+                Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, BranchPrefixLength + countNotNull * EntrySize), @new);
             }
-
-            return Null;
         }
 
-        [Pure]
-        public Span<byte> WriteTo(Span<byte> destination)
+        public static void SetNonExistingYet(Span<byte> copy, byte newNibble, long @new)
         {
-            ref var b = ref Unsafe.AsRef(in destination[0]);
+            // not exists, must be 15 or less nibbles
+            ref var b = ref Unsafe.AsRef(in copy[0]);
 
-            int count = 0;
-            for (long i = 0; i < BranchCount; i++)
-            {
-                unsafe
-                {
-                    if (Branches[i] != Null)
-                    {
-                        long value = Branches[i] | (i << Shift);
-                        Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, PrefixTotalLength + count * EntrySize), value);
-                        count++;
-                    }
-                }
-            }
+            var bitmap = ReadBitMap(ref b);
 
-            b = (byte)(BranchType | (byte)(count - BranchMinChildCount));
+            // existing that must be left in place
+            var leaveInPlace = CountNotNullNibblesBefore(newNibble, bitmap);
 
-            return destination.Slice(0, PrefixTotalLength + EntrySize * count);
+            // move by 1 leaving one place
+            copy.Slice(leaveInPlace * EntrySize).CopyTo(copy.Slice((leaveInPlace + 1) * EntrySize));
+
+            // write entry
+            Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, BranchPrefixLength + newNibble * EntrySize), @new);
+
+            // set metadata
+            SetBitMap(ref b, (ushort)(bitmap | (1 << newNibble)));
+            b += 1;
         }
     }
 
@@ -549,6 +509,10 @@ public partial class PaprikaTree
                 default:
                     throw new ArgumentOutOfRangeException(nameof(options), options, null);
             }
+        }
+
+        private static void GetNodeKeccakOrRlp(IDb db, long root, bool p2)
+        {
         }
     }
 
