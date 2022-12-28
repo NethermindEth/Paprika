@@ -35,24 +35,14 @@ public partial class PaprikaTree
     /// </summary>
     private const int PrefixTotalLength = TypePrefixLength;
 
-    private const int RlpLenghtOfLength = 1;
-
     private const int KeyLenght = 32;
     private const int ValueLenght = 32;
 
-    // masks
+    // types
     private const byte TypeMask = 0b1100_0000;
-
-
-    // leaf [...][path][value]
-    internal const byte LeafType = 0b0100_0000;
-
-    // extension: [...][path][long]
+    private const byte LeafType = 0b0100_0000;
     private const byte ExtensionType = 0b0000_0000;
-
-    // branch [...][branch0][branch3][branch7]
     private const byte BranchType = 0b1000_0000;
-    private const byte NibbleBitMaskSize = 2;
 
     private readonly IDb _db;
 
@@ -405,6 +395,7 @@ public partial class PaprikaTree
             var count = GetCount(b);
             if (count == BranchCount)
             {
+                // fast path, no counting of nibbles needed
                 Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, BranchPrefixLength + nibble * EntrySize), @new);
             }
             else
@@ -444,15 +435,15 @@ public partial class PaprikaTree
 
     class Extension
     {
-        private const int BranchIdSize = 8;
-        public const int MaxDestinationSize = PrefixTotalLength + 1 + KeyLenght + BranchIdSize;
+        private const int ChildIdSize = 8;
+        public const int MaxDestinationSize = PrefixTotalLength + 1 + KeyLenght + ChildIdSize;
 
-        public static Span<byte> WriteTo(NibblePath path, long branchId, Span<byte> destination)
+        public static Span<byte> WriteTo(NibblePath path, long childId, Span<byte> destination)
         {
             destination[0] = ExtensionType;
             var leftover = path.WriteTo(destination.Slice(PrefixTotalLength));
-            BinaryPrimitives.WriteInt64LittleEndian(leftover, branchId);
-            return destination.Slice(0, destination.Length - leftover.Length + BranchIdSize);
+            BinaryPrimitives.WriteInt64LittleEndian(leftover, childId);
+            return destination.Slice(0, destination.Length - leftover.Length + ChildIdSize);
         }
 
         public static void Read(ReadOnlySpan<byte> source, out NibblePath path, out long jumpTo)
