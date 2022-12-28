@@ -332,7 +332,7 @@ public partial class PaprikaTree
     /// Layout:
     /// [1byte - type][2bytes - bitmask]
     /// </summary>
-    public struct Branch
+    private static class Branch
     {
         public const int BranchCount = 16;
         public const int EntrySize = 8;
@@ -433,17 +433,20 @@ public partial class PaprikaTree
         }
     }
 
-    class Extension
+    private static class Extension
     {
-        private const int ChildIdSize = 8;
-        public const int MaxDestinationSize = PrefixTotalLength + 1 + KeyLenght + ChildIdSize;
+        private const int ChildIdSize = Id.Size;
+        private const byte HasKeccakSet = 0b0010_0000;
+        private const byte HasRlpSet = 0b0001_0000;
+        
+        public const int MaxDestinationSize = PrefixTotalLength + 1 + KeyLenght + ChildIdSize + KeccakLength;
 
         public static Span<byte> WriteTo(NibblePath path, long childId, Span<byte> destination)
         {
             destination[0] = ExtensionType;
             var leftover = path.WriteTo(destination.Slice(PrefixTotalLength));
             BinaryPrimitives.WriteInt64LittleEndian(leftover, childId);
-            return destination.Slice(0, destination.Length - leftover.Length + ChildIdSize);
+            return destination.Slice(0, destination.Length - leftover.Length + ChildIdSize + KeccakLength);
         }
 
         public static void Read(ReadOnlySpan<byte> source, out NibblePath path, out long jumpTo)
