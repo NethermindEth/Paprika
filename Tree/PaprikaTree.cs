@@ -110,8 +110,8 @@ public partial class PaprikaTree
                 // 2. write branch
                 Span<byte> branch = stackalloc byte[Branch.GetNeededSize(2)];
                 WriteBranch(branch, existingPath.GetAt(diffAt), existing, addedPath.GetAt(diffAt), @added);
-                var branchId =  db.Write(branch);
-                
+                var branchId = db.Write(branch);
+
                 // 3. extension
                 var extensionPath = addedPath.SliceTo(diffAt);
                 Span<byte> destination = stackalloc byte[Extension.MaxDestinationSize];
@@ -214,7 +214,9 @@ public partial class PaprikaTree
 
     private static void WriteBranch(in Span<byte> destination, byte nibble1, long key1, byte nibble2, long key2)
     {
-        destination.Clear();
+        // clear first 8 bytes, to overlap with prefix
+        Unsafe.As<byte, long>(ref destination[0]) = 0;
+
         destination[0] = BranchType;
 
         Branch.SetNonExistingYet(destination, nibble1, key1);
@@ -345,7 +347,6 @@ public partial class PaprikaTree
         public const int BranchCount = 16;
         public const int EntrySize = 8;
 
-        private const int BranchMinChildCount = 2;
         private const byte BranchChildCountMask = 0b0000_1111;
 
         private const int BitMaskLength = 2;
@@ -382,20 +383,21 @@ public partial class PaprikaTree
             return false;
         }
 
-        private static ushort ReadBitMap(ref byte start) => Unsafe.ReadUnaligned<ushort>(ref Unsafe.Add(ref start, 1));
+        private static ushort ReadBitMap(ref byte start) =>
+            Unsafe.ReadUnaligned<ushort>(ref Unsafe.Add(ref start, TypePrefixLength));
 
         private static void SetBitMap(ref byte start, ushort value) =>
-            Unsafe.WriteUnaligned(ref Unsafe.Add(ref start, 1), value);
+            Unsafe.WriteUnaligned(ref Unsafe.Add(ref start, TypePrefixLength), value);
 
         private static int CountNotNullNibblesBefore(byte nibble, ushort bitmap)
         {
             // get next bit then subtract 1 to get a mask for this and lower nibbles
-            var mask = (1 << (nibble + 1)) - 1;
+            var mask = (1 << nibble) - 1;
             var masked = bitmap & mask;
-            return BitOperations.PopCount((uint)masked) - 1;
+            return BitOperations.PopCount((uint)masked);
         }
 
-        private static int GetCount(byte b) => (b & BranchChildCountMask) + BranchMinChildCount;
+        private static int GetCount(byte b) => b & BranchChildCountMask;
 
         public static void SetWithExistingNibble(Span<byte> copy, byte nibble, long @new)
         {
@@ -418,16 +420,21 @@ public partial class PaprikaTree
             // not exists, must be 15 or less nibbles
             ref var b = ref Unsafe.AsRef(in copy[0]);
 
+            var count = GetCount(b);
             var bitmap = ReadBitMap(ref b);
 
-            // existing that must be left in place
-            var leaveInPlace = CountNotNullNibblesBefore(newNibble, bitmap);
+            var nibblesBefore = CountNotNullNibblesBefore(newNibble, bitmap);
 
-            // move by 1 leaving one place
-            copy.Slice(leaveInPlace * EntrySize).CopyTo(copy.Slice((leaveInPlace + 1) * EntrySize));
+            if (count - nibblesBefore > 0)
+            {
+                // move by 1 leaving one place to insert new
+                var start = nibblesBefore * EntrySize + BranchPrefixLength;
+                copy.Slice(start, copy.Length - start - EntrySize)
+                    .CopyTo(copy.Slice(start + EntrySize));
+            }
 
             // write entry
-            Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, BranchPrefixLength + newNibble * EntrySize), @new);
+            Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, BranchPrefixLength + nibblesBefore * EntrySize), @new);
 
             // set metadata
             SetBitMap(ref b, (ushort)(bitmap | (1 << newNibble)));
