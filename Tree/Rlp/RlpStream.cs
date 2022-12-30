@@ -67,38 +67,11 @@ public ref struct RlpStream
 
     public int Length => Data.Length;
 
-    void WriteZero(int length)
-    {
-        Position += 256;
-    }
-
-    public void Encode(byte value)
-    {
-        if (value == 0)
-        {
-            WriteByte(128);
-        }
-        else if (value < 128)
-        {
-            WriteByte(value);
-        }
-        else
-        {
-            WriteByte(129);
-            WriteByte(value);
-        }
-    }
-    
     public void EncodeKeccak(ReadOnlySpan<byte> keccak)
     {
         // TODO: optimize
         WriteByte(160);
         Write(keccak);
-    }
-
-    public void Encode(bool value)
-    {
-        Encode(value ? (byte)1 : (byte)0);
     }
 
     public void EncodeEmptyArray() => WriteByte(EmptyArrayByte);
@@ -130,9 +103,4 @@ public ref struct RlpStream
     }
     
     private const byte EmptyArrayByte = 128;
-
-    public override string ToString()
-    {
-        return $"[{nameof(RlpStream)}|{Position}/{Length}]";
-    }
 }

@@ -87,7 +87,7 @@ public partial class PaprikaTree
                     {
                         // missing, need to calculate, pass the actual value so that it's updated
                         keccakOrRlp = CalculateKeccakOrRlp(db, child, value);
-                        Branch.SetKeccakOrRlp(branch, i, keccakOrRlp);
+                        //Branch.SetKeccakOrRlp(branch, i, keccakOrRlp);
                     }
 
                     if (keccakOrRlp == KeccakOrRlp.Rlp)

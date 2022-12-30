@@ -412,17 +412,9 @@ public partial class PaprikaTree
         {
             ref var b = ref Unsafe.AsRef(in copy[0]);
             var count = GetCount(b);
-            if (count == BranchCount)
-            {
-                // fast path, no counting of nibbles needed
-                Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, BranchPrefixLength + nibble * EntrySize), @new);
-            }
-            else
-            {
-                var bitmap = Unsafe.ReadUnaligned<ushort>(ref Unsafe.Add(ref b, 1));
-                var countNotNull = CountNotNullNibblesBefore(nibble, bitmap);
-                Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, BranchPrefixLength + countNotNull * EntrySize), @new);
-            }
+            var skip = count == BranchCount ? nibble : CountNotNullNibblesBefore(nibble, ReadBitMap(ref b));
+
+            Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, BranchPrefixLength + skip * EntrySize), @new);
         }
 
         public static void SetNonExistingYet(Span<byte> copy, byte newNibble, long @new)
@@ -508,9 +500,11 @@ public partial class PaprikaTree
             var count = GetCount(b);
             var skip = count == BranchCount ? nibble : CountNotNullNibblesBefore(nibble, ReadBitMap(ref b));
 
+            long flag = (long)keccakOrRlp << KeccakOrRlpShift;
+
             ref var addr = ref Unsafe.Add(ref b, BranchPrefixLength + skip * EntrySize);
             var value = Unsafe.ReadUnaligned<long>(ref addr) & IdMask;
-            Unsafe.WriteUnaligned(ref addr, value | ((long)keccakOrRlp << KeccakOrRlpShift));
+            Unsafe.WriteUnaligned(ref addr, value | flag);
         }
     }
 

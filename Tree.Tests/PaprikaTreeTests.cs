@@ -59,6 +59,44 @@ public class PaprikaTreeTests
         }
     }
 
+    [TestCase(0, 1, 2)]
+    [TestCase(2, 1, 0)]
+    [TestCase(0, 2, 1)]
+    [TestCase(2, 0, 1)]
+    public void Branching(int k0, int k1, int k2)
+    {
+        using var db = new MemoryDb(64 * 1024);
+
+        var tree = new PaprikaTree(db);
+
+        var keys = new byte[3][];
+        
+        keys[0] = new byte[32];
+        keys[0][0] = 0xA1;
+        
+        keys[1] = new byte[32];
+        keys[1][0] = 0xA2;
+        
+        keys[2] = new byte[32];
+        keys[2][0] = 0xA3;
+        
+        var batch = tree.Begin();
+        batch.Set(keys[k0], keys[k0]);
+        batch.Set(keys[k1], keys[k1]);
+        batch.Set(keys[k2], keys[k2]);
+        batch.Commit();
+        
+        AssertTree(tree, keys[0]);
+        AssertTree(tree, keys[1]);
+        AssertTree(tree, keys[2]);
+        
+        void AssertTree(PaprikaTree paprikaTree, byte[] bytes)
+        {
+            Assert.True(paprikaTree.TryGet(bytes.AsSpan(), out var retrieved));
+            Assert.True(retrieved.SequenceEqual(bytes.AsSpan()));
+        }
+    }
+
     [Test]
     public void NonUpdatableTest()
     {
