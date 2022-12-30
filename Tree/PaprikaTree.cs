@@ -148,7 +148,7 @@ public partial class PaprikaTree
             {
                 var @new = WriteLeaf(db, addedPath.SliceFrom(1), value);
                 // allocate one more
-                Span<byte> copy = stackalloc byte[node.Length + Branch.EntrySize];
+                Span<byte> copy = stackalloc byte[Branch.GetNextNeededSize(node)];
                 node.CopyTo(copy);
 
                 Branch.SetNonExistingYet(copy, newNibble, @new);
@@ -335,14 +335,23 @@ public partial class PaprikaTree
     private static class Branch
     {
         public const int BranchCount = 16;
-        public const int EntrySize = 8;
+
+        private const int EntrySize = Id.Size;
+
+        // Total size needed for writing one nibble.
+        private const int TotalNibbleSize = EntrySize + KeccakLength;
 
         private const byte BranchChildCountMask = 0b0000_1111;
 
         private const int BitMaskLength = 2;
         private const int BranchPrefixLength = PrefixTotalLength + BitMaskLength;
 
-        public static int GetNeededSize(int nibbleCount) => BranchPrefixLength + EntrySize * nibbleCount;
+        public static int GetNeededSize(int nibbleCount) => BranchPrefixLength + TotalNibbleSize * nibbleCount;
+
+        /// <summary>
+        /// Gets the memory needed for the branch with one more nibble.
+        /// </summary>
+        public static int GetNextNeededSize(in ReadOnlySpan<byte> node) => node.Length + TotalNibbleSize;
 
         public static bool TryFindExisting(in ReadOnlySpan<byte> source, byte nibble, out long found)
         {
@@ -414,14 +423,26 @@ public partial class PaprikaTree
             var count = GetCount(b);
             var bitmap = ReadBitMap(ref b);
 
+            // move keccak region by one to allow write of the nibble
+            var oldKeccakRegion = copy.Slice(count * EntrySize + BranchPrefixLength, count * KeccakLength);
+            var newKeccakRegion = copy.Slice(count * EntrySize + BranchPrefixLength + EntrySize, count * KeccakLength);
+            oldKeccakRegion.CopyTo(newKeccakRegion);
+            
             var nibblesBefore = CountNotNullNibblesBefore(newNibble, bitmap);
 
-            if (count - nibblesBefore > 0)
+            // if not writing as the last, the segment after needs to be moved
+            if (nibblesBefore < count)
             {
-                // move by 1 leaving one place to insert new
-                var start = nibblesBefore * EntrySize + BranchPrefixLength;
-                copy.Slice(start, copy.Length - start - EntrySize)
-                    .CopyTo(copy.Slice(start + EntrySize));
+                var newCount = count + 1;
+                var keccakRegion = copy.Slice(newCount * EntrySize + BranchPrefixLength);
+                var keccakFrom = nibblesBefore * KeccakLength;
+                keccakRegion.Slice(keccakFrom, keccakRegion.Length - keccakFrom - KeccakLength)
+                    .CopyTo(keccakRegion.Slice(keccakFrom + KeccakLength));
+
+                var childRegion = copy.Slice(BranchPrefixLength, newCount * EntrySize);
+                var childFrom = nibblesBefore * EntrySize;
+                childRegion.Slice(childFrom, childRegion.Length - childFrom - EntrySize)
+                    .CopyTo(childRegion.Slice(childFrom + EntrySize));
             }
 
             // write entry
@@ -436,17 +457,15 @@ public partial class PaprikaTree
     private static class Extension
     {
         private const int ChildIdSize = Id.Size;
-        private const byte HasKeccakSet = 0b0010_0000;
-        private const byte HasRlpSet = 0b0001_0000;
-        
-        public const int MaxDestinationSize = PrefixTotalLength + 1 + KeyLenght + ChildIdSize + KeccakLength;
+
+        public const int MaxDestinationSize = PrefixTotalLength + 1 + KeyLenght + ChildIdSize;
 
         public static Span<byte> WriteTo(NibblePath path, long childId, Span<byte> destination)
         {
             destination[0] = ExtensionType;
             var leftover = path.WriteTo(destination.Slice(PrefixTotalLength));
             BinaryPrimitives.WriteInt64LittleEndian(leftover, childId);
-            return destination.Slice(0, destination.Length - leftover.Length + ChildIdSize + KeccakLength);
+            return destination.Slice(0, destination.Length - leftover.Length + ChildIdSize);
         }
 
         public static void Read(ReadOnlySpan<byte> source, out NibblePath path, out long jumpTo)
@@ -528,7 +547,7 @@ public partial class PaprikaTree
 
     class Store : IStore
     {
-        private const int MaxCachedLength = 256;
+        private const int MaxCachedLength = 768;
 
         private readonly IDb _db;
         private long _updateFrom;
