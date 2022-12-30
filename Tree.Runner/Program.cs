@@ -1,5 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 using Spectre.Console;
+using Tree.Crypto;
 using Tree.Tests;
 
 namespace Tree.Runner;
@@ -53,7 +54,7 @@ public static class Program
 
                 if (i % LogEvery == 0 && i > 0)
                 {
-                    Console.WriteLine("Wrote {0:N0} items with the current root hash set to {1}", i, tree.RootKeccak.ToString());
+                    Console.WriteLine("Wrote {0:N0} items with the current root hash set to {1}", i, tree.RootKeccak.ToHexString());
                 }
             }
 

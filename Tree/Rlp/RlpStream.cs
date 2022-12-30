@@ -55,7 +55,7 @@ public ref struct RlpStream
         Data[Position++] = byteToWrite;
     }
 
-    public void Write(ReadOnlySpan<byte> bytesToWrite)
+    public void Write(in ReadOnlySpan<byte> bytesToWrite)
     {
         bytesToWrite.CopyTo(Data.Slice(Position, bytesToWrite.Length));
         Position += bytesToWrite.Length;
@@ -67,7 +67,7 @@ public ref struct RlpStream
 
     public int Length => Data.Length;
 
-    public void EncodeKeccak(ReadOnlySpan<byte> keccak)
+    public void EncodeKeccak(in ReadOnlySpan<byte> keccak)
     {
         // TODO: optimize
         WriteByte(160);

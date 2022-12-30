@@ -19,7 +19,7 @@ public partial class PaprikaTree
         Rlp = 2
     }
     
-    private static KeccakOrRlp CalculateKeccakOrRlp(IDb db, long id, Span<byte> destination)
+    private static KeccakOrRlp CalculateKeccakOrRlp(IDb db, long id, in Span<byte> destination)
     {
         var node = db.Read(id);
         ref var first = ref node[0];
@@ -42,9 +42,9 @@ public partial class PaprikaTree
             // if something changed underneath, this hash will change as well
             // so there's not that much value in storing it.
             Extension.Read(node, out var path, out var jumpTo);
-            Span<byte> child = stackalloc byte[32];
-            var rlpOrKeccak = CalculateKeccakOrRlp(db, jumpTo, child);
-            return EncodeExtension(path, TrimToType(child, rlpOrKeccak), destination);
+            Span<byte> childRlpOrKeccak = stackalloc byte[32];
+            var rlpOrKeccak = CalculateKeccakOrRlp(db, jumpTo, childRlpOrKeccak);
+            return EncodeExtension(path, TrimToType(childRlpOrKeccak, rlpOrKeccak), destination);
         }
 
         throw new ArgumentException("The unknown type!");
@@ -81,13 +81,13 @@ public partial class PaprikaTree
                 }
                 else
                 {
-                    KeccakOrRlp keccakOrRlp = Branch.GetKeccakOrRlp(branch, i, out Span<byte> value);
+                    var keccakOrRlp = Branch.GetKeccakOrRlp(branch, i, out var value);
 
                     if (keccakOrRlp == KeccakOrRlp.None)
                     {
                         // missing, need to calculate, pass the actual value so that it's updated
                         keccakOrRlp = CalculateKeccakOrRlp(db, child, value);
-                        //Branch.SetKeccakOrRlp(branch, i, keccakOrRlp);
+                        Branch.SetKeccakOrRlp(branch, i, keccakOrRlp);
                     }
 
                     if (keccakOrRlp == KeccakOrRlp.Rlp)

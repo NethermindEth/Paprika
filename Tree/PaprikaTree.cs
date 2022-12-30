@@ -1,4 +1,5 @@
 ﻿using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -50,7 +51,7 @@ public partial class PaprikaTree
     private KeccakOrRlp _type = KeccakOrRlp.None;
     private readonly byte[] _keccakOrRlp = new byte[KeccakLength];
 
-    public ReadOnlySpan<byte> RootKeccak => TrimToType(_keccakOrRlp, _type);
+    public Span<byte> RootKeccak => TrimToType(_keccakOrRlp, _type);
 
     // the id which the file was flushed to
     private long _lastFlushTo;
@@ -345,7 +346,7 @@ public partial class PaprikaTree
         // Total size needed for writing one nibble.
         private const int TotalNibbleSize = EntrySize + KeccakLength;
 
-        private const byte BranchChildCountMask = 0b0000_1111;
+        private const byte BranchChildCountMask = 0b0001_1111;
 
         private const int BitMaskLength = 2;
         private const int BranchPrefixLength = PrefixTotalLength + BitMaskLength;
@@ -479,9 +480,8 @@ public partial class PaprikaTree
             {
                 // found in bitmap, count set till this moment
                 var countNotNull = CountNotNullNibblesBefore(nibble, bitmap);
-
-                span = MemoryMarshal.CreateSpan(ref Unsafe.Add(ref b, shift + countNotNull * KeccakLength),
-                    KeccakLength);
+                ref var from = ref Unsafe.Add(ref b, shift + countNotNull * KeccakLength);
+                span = MemoryMarshal.CreateSpan(ref from, KeccakLength);
 
                 var found = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b,
                     BranchPrefixLength + countNotNull * EntrySize));
@@ -505,6 +505,24 @@ public partial class PaprikaTree
             ref var addr = ref Unsafe.Add(ref b, BranchPrefixLength + skip * EntrySize);
             var value = Unsafe.ReadUnaligned<long>(ref addr) & IdMask;
             Unsafe.WriteUnaligned(ref addr, value | flag);
+        }
+
+        public static void AssertMemoryDb(in ReadOnlySpan<byte> payload)
+        {
+            if ((payload[0] & BranchType) == BranchType)
+            {
+                ref var b = ref Unsafe.AsRef(in payload[0]);
+                var count = GetCount(b);
+
+                ref var children = ref Unsafe.Add(ref b, BranchPrefixLength);
+                
+                for (int i = 0; i < count; i++)
+                {
+                    var child = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref children, i * EntrySize));
+                    
+                    Debug.Assert(Id.Decode(child).File == MemoryDb.FileNumber, $"{i}th child breaks the rule!");
+                }    
+            }
         }
     }
 
@@ -630,6 +648,8 @@ public partial class PaprikaTree
 
         public long TryUpdateOrAdd(long current, in Span<byte> written)
         {
+            Branch.AssertMemoryDb(written);
+            
             var currentNode = _db.Read(current);
 
             if (current >= _updateFrom)
@@ -682,6 +702,10 @@ public partial class PaprikaTree
 
         public ReadOnlySpan<byte> Read(long id) => _db.Read(id);
 
-        public long Write(ReadOnlySpan<byte> payload) => _db.Write(payload);
+        public long Write(ReadOnlySpan<byte> payload)
+        {
+            Branch.AssertMemoryDb(payload);
+            return _db.Write(payload);
+        }
     }
 }

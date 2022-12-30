@@ -59,36 +59,33 @@ public class PaprikaTreeTests
         }
     }
 
-    [TestCase(0, 1, 2)]
-    [TestCase(2, 1, 0)]
-    [TestCase(0, 2, 1)]
-    [TestCase(2, 0, 1)]
-    public void Branching(int k0, int k1, int k2)
+    [Test]
+    public void Branching_Full()
     {
         using var db = new MemoryDb(64 * 1024);
 
         var tree = new PaprikaTree(db);
 
-        var keys = new byte[3][];
-        
-        keys[0] = new byte[32];
-        keys[0][0] = 0xA1;
-        
-        keys[1] = new byte[32];
-        keys[1][0] = 0xA2;
-        
-        keys[2] = new byte[32];
-        keys[2][0] = 0xA3;
-        
+        var keys = Enumerable.Range(0, 16).Select(i =>
+            {
+                var key = new byte[32];
+                key[0] = (byte)(i << 4);
+                return key;
+            }
+        ).ToArray();
+
         var batch = tree.Begin();
-        batch.Set(keys[k0], keys[k0]);
-        batch.Set(keys[k1], keys[k1]);
-        batch.Set(keys[k2], keys[k2]);
+        foreach (var key in keys)
+        {
+            batch.Set(key, key);
+        }
+
         batch.Commit();
         
-        AssertTree(tree, keys[0]);
-        AssertTree(tree, keys[1]);
-        AssertTree(tree, keys[2]);
+        foreach (var key in keys)
+        {
+            AssertTree(tree, key);
+        }
         
         void AssertTree(PaprikaTree paprikaTree, byte[] bytes)
         {
@@ -129,7 +126,7 @@ public class PaprikaTreeTests
 
         var tree = new PaprikaTree(db);
 
-        const int count = 1_200_000;
+        const int count = 50;
 
         int i = 0;
         int batchSize = 10000;

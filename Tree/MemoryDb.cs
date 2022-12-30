@@ -4,7 +4,7 @@ namespace Tree;
 
 public unsafe class MemoryDb : IDb, IDisposable
 {
-    private const int FileNumber = 13;
+    public const int FileNumber = 13;
 
     private byte* _memory;
     public int Size { get; }
