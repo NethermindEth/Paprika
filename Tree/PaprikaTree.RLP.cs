@@ -1,5 +1,4 @@
 ﻿using System.Buffers;
-using System.Reflection.Metadata.Ecma335;
 using Tree.Crypto;
 using Tree.Rlp;
 
@@ -8,18 +7,20 @@ namespace Tree;
 public partial class PaprikaTree
 {
     private const int RlpLengthOfLength = 1;
-    private const int KeccakRlpLength = 33;
     
-    public enum KeccakOrRlp
+    private const int KeccakRlpLength = 33;
+    private const int MaxBranchRlpLength = MaxLengthOfLengths + Branch.BranchCount * KeccakRlpLength + 1; // 1 for null value
+    private const int MaxLengthOfLengths = 4;
+    
+    public enum KeccakOrRlp : byte
     {
+        None = 0,
         Keccak = 1,
         Rlp = 2
     }
     
     private static KeccakOrRlp CalculateKeccakOrRlp(IDb db, long id, Span<byte> destination)
     {
-        throw new NotImplementedException();
-        
         var node = db.Read(id);
         ref var first = ref node[0];
         
@@ -30,11 +31,10 @@ public partial class PaprikaTree
             return EncodeLeaf(path, value, destination);
         }
         
-        // if ((first & TypeMask) == BranchType)
-        // {
-        //     var branch = Branch.Read(node);
-        //     hasRlpOrKeccak = EncodeBranch(branch, db, keccakOrRpl, parallel);
-        // }
+        if ((first & TypeMask) == BranchType)
+        {
+            return EncodeBranch(node, db, destination);
+        }
         
         if ((first & TypeMask) == ExtensionType)
         {
@@ -46,8 +46,8 @@ public partial class PaprikaTree
             var rlpOrKeccak = CalculateKeccakOrRlp(db, jumpTo, child);
             return EncodeExtension(path, TrimToType(child, rlpOrKeccak), destination);
         }
-        
-        
+
+        throw new ArgumentException("The unknown type!");
     }
 
     /// <summary>
@@ -61,79 +61,66 @@ public partial class PaprikaTree
         return type == KeccakOrRlp.Keccak ? rlpOrKeccak : rlpOrKeccak.Slice(1, rlpOrKeccak[0]);
     }
 
-    // internal static byte EncodeBranch(in Branch branch, IDb db, in Span<byte> destination, bool parallel = false)
-    // {
-    //     var pool = ArrayPool<byte>.Shared;
-    //     var bytes = pool.Rent(MaxBranchRlpLength);
-    //
-    //     try
-    //     {
-    //         if (parallel)
-    //         {
-    //             // parallel, precalculate children
-    //             var children = new List<long>(Branch.BranchCount);
-    //             for (var i = 0; i < Branch.BranchCount; i++)
-    //             {
-    //                 unsafe
-    //                 {
-    //                     var child = branch.Branches[i];
-    //                     if (child != Null)
-    //                     {
-    //                         children.Add(child);
-    //                     }
-    //                 }
-    //             }
-    //
-    //             Parallel.ForEach(children, id => CalculateKeccakOrRlp(db, id));
-    //         }
-    //         
-    //         RlpStream rlp = new (bytes);
-    //         rlp.Position = MaxLengthOfLengths;
-    //         
-    //         for (var i = 0; i < Branch.BranchCount; i++)
-    //         {
-    //             unsafe
-    //             {
-    //                 var child = branch.Branches[i];
-    //                 if (child == Null)
-    //                 {
-    //                     rlp.EncodeEmptyArray();
-    //                 }
-    //                 else
-    //                 {
-    //                     var childKeccakOrRlp = CalculateKeccakOrRlp(db, child);
-    //                     if (childKeccakOrRlp.Length < KeccakLength)
-    //                     {
-    //                         rlp.Write(childKeccakOrRlp);
-    //                     }
-    //                     else
-    //                     {
-    //                         rlp.EncodeKeccak(childKeccakOrRlp);
-    //                     }    
-    //                 }
-    //             }
-    //         }
-    //         
-    //         // write empty value 
-    //         rlp.EncodeEmptyArray();
-    //
-    //         // write length
-    //         var pos = rlp.Position;
-    //         var length = pos - MaxLengthOfLengths;
-    //         var sequenceLength = Rlp.Rlp.LengthOfLength(length);
-    //         var actualStart = MaxLengthOfLengths - sequenceLength;
-    //         
-    //         rlp.Position = actualStart;
-    //         rlp.StartSequence(length);
-    //         rlp.Position = pos;
-    //
-    //         return WrapRlp(bytes.AsSpan(actualStart, length + sequenceLength), destination);
-    //     }
-    //     finally
-    //     {
-    //         pool.Return(bytes);
-    //     }
-    // }
+    internal static KeccakOrRlp EncodeBranch(ReadOnlySpan<byte> branch, IDb db, in Span<byte> destination, bool parallel = false)
+    {
+        var pool = ArrayPool<byte>.Shared;
+        var bytes = pool.Rent(MaxBranchRlpLength);
+    
+        try
+        {
+            RlpStream rlp = new (bytes);
+            rlp.Position = MaxLengthOfLengths;
+            
+            for (byte i = 0; i < Branch.BranchCount; i++)
+            {
+                Branch.TryFindExisting(branch, i, out var child);
+                
+                if (child == Null)
+                {
+                    rlp.EncodeEmptyArray();
+                }
+                else
+                {
+                    KeccakOrRlp keccakOrRlp = Branch.GetKeccakOrRlp(branch, i, out Span<byte> value);
+
+                    if (keccakOrRlp == KeccakOrRlp.None)
+                    {
+                        // missing, need to calculate, pass the actual value so that it's updated
+                        keccakOrRlp = CalculateKeccakOrRlp(db, child, value);
+                        Branch.SetKeccakOrRlp(branch, i, keccakOrRlp);
+                    }
+
+                    if (keccakOrRlp == KeccakOrRlp.Rlp)
+                    {
+                        rlp.Write(TrimToType(value, KeccakOrRlp.Rlp));
+                    }
+                    else
+                    {
+                        rlp.EncodeKeccak(value);
+                    }    
+                }
+            }
+            
+            // write empty value 
+            rlp.EncodeEmptyArray();
+    
+            // write length
+            var pos = rlp.Position;
+            var length = pos - MaxLengthOfLengths;
+            var sequenceLength = Rlp.Rlp.LengthOfLength(length);
+            var actualStart = MaxLengthOfLengths - sequenceLength;
+            
+            rlp.Position = actualStart;
+            rlp.StartSequence(length);
+            rlp.Position = pos;
+    
+            return WrapRlp(bytes.AsSpan(actualStart, length + sequenceLength), destination);
+        }
+        finally
+        {
+            pool.Return(bytes);
+        }
+    }
 
     internal static KeccakOrRlp EncodeLeaf(NibblePath path, ReadOnlySpan<byte> value, Span<byte> destination)
     {

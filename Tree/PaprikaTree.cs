@@ -1,8 +1,7 @@
 ﻿using System.Buffers.Binary;
-using System.Diagnostics;
-using System.Diagnostics.Contracts;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Tree.Crypto;
 
 namespace Tree;
@@ -40,9 +39,9 @@ public partial class PaprikaTree
 
     // types
     private const byte TypeMask = 0b1100_0000;
-    private const byte LeafType = 0b0100_0000;
-    private const byte ExtensionType = 0b0000_0000;
-    private const byte BranchType = 0b1000_0000;
+    public const byte LeafType = 0b0100_0000;
+    public const byte ExtensionType = 0b0000_0000;
+    public const byte BranchType = 0b1000_0000;
 
     private readonly IDb _db;
 
@@ -225,7 +224,7 @@ public partial class PaprikaTree
         return db.Write(extension);
     }
 
-    private static long WriteLeaf(IStore db, NibblePath path, ReadOnlySpan<byte> value)
+    internal static long WriteLeaf(IStore db, NibblePath path, ReadOnlySpan<byte> value)
     {
         var length = PrefixTotalLength + path.MaxLength + value.Length;
 
@@ -332,7 +331,7 @@ public partial class PaprikaTree
     /// Layout:
     /// [1byte - type][2bytes - bitmask]
     /// </summary>
-    private static class Branch
+    internal static class Branch
     {
         public const int BranchCount = 16;
 
@@ -345,6 +344,9 @@ public partial class PaprikaTree
 
         private const int BitMaskLength = 2;
         private const int BranchPrefixLength = PrefixTotalLength + BitMaskLength;
+
+        private const int KeccakOrRlpShift = 62;
+        private const byte KeccakOrRlpMask = 0x3;
 
         public static int GetNeededSize(int nibbleCount) => BranchPrefixLength + TotalNibbleSize * nibbleCount;
 
@@ -396,6 +398,7 @@ public partial class PaprikaTree
             return BitOperations.PopCount((uint)masked);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static int GetCount(byte b) => b & BranchChildCountMask;
 
         public static void SetWithExistingNibble(Span<byte> copy, byte nibble, long @new)
@@ -423,6 +426,8 @@ public partial class PaprikaTree
             var count = GetCount(b);
             var bitmap = ReadBitMap(ref b);
 
+            // TODO: optimize spans moves here
+            
             // move keccak region by one to allow write of the nibble
             var oldKeccakRegion = copy.Slice(count * EntrySize + BranchPrefixLength, count * KeccakLength);
             var newKeccakRegion = copy.Slice(count * EntrySize + BranchPrefixLength + EntrySize, count * KeccakLength);
@@ -451,6 +456,53 @@ public partial class PaprikaTree
             // set metadata
             SetBitMap(ref b, (ushort)(bitmap | (1 << newNibble)));
             b += 1;
+        }
+
+        public static KeccakOrRlp GetKeccakOrRlp(ReadOnlySpan<byte> branch, byte nibble, out Span<byte> span)
+        {
+            ref var b = ref Unsafe.AsRef(in branch[0]);
+            var count = GetCount(b);
+
+            var shift = BranchPrefixLength + count * EntrySize;
+            
+            if (count == BranchCount)
+            {
+                span = MemoryMarshal.CreateSpan(ref Unsafe.Add(ref b, shift + nibble * KeccakLength), KeccakLength);
+                
+                var found = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, BranchPrefixLength + nibble * EntrySize));
+                return (KeccakOrRlp)((found >> KeccakOrRlpShift) & KeccakOrRlpMask);
+            }
+
+            var bitmap = ReadBitMap(ref b);
+
+            var bit = 1 << nibble;
+            if ((bitmap & bit) == bit)
+            {
+                // found in bitmap, count set till this moment
+                var countNotNull = CountNotNullNibblesBefore(nibble, bitmap);
+
+                span = MemoryMarshal.CreateSpan(ref Unsafe.Add(ref b, shift + countNotNull * KeccakLength),
+                    KeccakLength);
+                
+                var found = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, BranchPrefixLength + countNotNull * EntrySize));
+                return (KeccakOrRlp)((found >> KeccakOrRlpShift) & KeccakOrRlpMask);
+            }
+
+            // should never happen
+            span = default;
+            return KeccakOrRlp.None;
+        }
+
+        public static void SetKeccakOrRlp(ReadOnlySpan<byte> branch, byte nibble, KeccakOrRlp keccakOrRlp)
+        {
+            ref var b = ref Unsafe.AsRef(in branch[0]);
+
+            var count = GetCount(b);
+            var skip = count == BranchCount ? nibble : CountNotNullNibblesBefore(nibble, ReadBitMap(ref b));
+
+            ref var addr = ref Unsafe.Add(ref b, BranchPrefixLength + skip * EntrySize);
+            var value = Unsafe.ReadUnaligned<long>(ref addr);
+            Unsafe.WriteUnaligned(ref addr, value | (((long)keccakOrRlp) << KeccakOrRlpShift));
         }
     }
 
@@ -536,7 +588,7 @@ public partial class PaprikaTree
         }
     }
 
-    interface IStore
+    internal interface IStore
     {
         public long TryUpdateOrAdd(long current, in Span<byte> written);
 
