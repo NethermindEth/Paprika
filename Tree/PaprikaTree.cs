@@ -47,8 +47,13 @@ public partial class PaprikaTree
 
     private long _root = Null;
 
+    private KeccakOrRlp _type = KeccakOrRlp.None;
+    private readonly byte[] _keccakOrRlp = new byte[KeccakLength];
+
+    public ReadOnlySpan<byte> RootKeccak => TrimToType(_keccakOrRlp, _type);
+
     // the id which the file was flushed to
-    private long _lastFlushTo = 0;
+    private long _lastFlushTo;
 
     private readonly Store _store;
 
@@ -345,7 +350,8 @@ public partial class PaprikaTree
         private const int BitMaskLength = 2;
         private const int BranchPrefixLength = PrefixTotalLength + BitMaskLength;
 
-        private const int KeccakOrRlpShift = 62;
+        private const long IdMask = 0x0FFF_FFFF_FFFF_FFFF;
+        private const int KeccakOrRlpShift = 61;
         private const byte KeccakOrRlpMask = 0x3;
 
         public static int GetNeededSize(int nibbleCount) => BranchPrefixLength + TotalNibbleSize * nibbleCount;
@@ -363,7 +369,8 @@ public partial class PaprikaTree
             if (count == BranchCount)
             {
                 // special case, full branch node, can directly jump as values are always sorted
-                found = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, BranchPrefixLength + nibble * EntrySize));
+                found = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, BranchPrefixLength + nibble * EntrySize)) &
+                        IdMask;
                 return true;
             }
 
@@ -376,7 +383,7 @@ public partial class PaprikaTree
                 var countNotNull = CountNotNullNibblesBefore(nibble, bitmap);
 
                 found = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b,
-                    BranchPrefixLength + countNotNull * EntrySize));
+                    BranchPrefixLength + countNotNull * EntrySize)) & IdMask;
                 return true;
             }
 
@@ -427,12 +434,12 @@ public partial class PaprikaTree
             var bitmap = ReadBitMap(ref b);
 
             // TODO: optimize spans moves here
-            
+
             // move keccak region by one to allow write of the nibble
             var oldKeccakRegion = copy.Slice(count * EntrySize + BranchPrefixLength, count * KeccakLength);
             var newKeccakRegion = copy.Slice(count * EntrySize + BranchPrefixLength + EntrySize, count * KeccakLength);
             oldKeccakRegion.CopyTo(newKeccakRegion);
-            
+
             var nibblesBefore = CountNotNullNibblesBefore(newNibble, bitmap);
 
             // if not writing as the last, the segment after needs to be moved
@@ -464,11 +471,11 @@ public partial class PaprikaTree
             var count = GetCount(b);
 
             var shift = BranchPrefixLength + count * EntrySize;
-            
+
             if (count == BranchCount)
             {
                 span = MemoryMarshal.CreateSpan(ref Unsafe.Add(ref b, shift + nibble * KeccakLength), KeccakLength);
-                
+
                 var found = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, BranchPrefixLength + nibble * EntrySize));
                 return (KeccakOrRlp)((found >> KeccakOrRlpShift) & KeccakOrRlpMask);
             }
@@ -483,8 +490,9 @@ public partial class PaprikaTree
 
                 span = MemoryMarshal.CreateSpan(ref Unsafe.Add(ref b, shift + countNotNull * KeccakLength),
                     KeccakLength);
-                
-                var found = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, BranchPrefixLength + countNotNull * EntrySize));
+
+                var found = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b,
+                    BranchPrefixLength + countNotNull * EntrySize));
                 return (KeccakOrRlp)((found >> KeccakOrRlpShift) & KeccakOrRlpMask);
             }
 
@@ -501,8 +509,8 @@ public partial class PaprikaTree
             var skip = count == BranchCount ? nibble : CountNotNullNibblesBefore(nibble, ReadBitMap(ref b));
 
             ref var addr = ref Unsafe.Add(ref b, BranchPrefixLength + skip * EntrySize);
-            var value = Unsafe.ReadUnaligned<long>(ref addr);
-            Unsafe.WriteUnaligned(ref addr, value | (((long)keccakOrRlp) << KeccakOrRlpShift));
+            var value = Unsafe.ReadUnaligned<long>(ref addr) & IdMask;
+            Unsafe.WriteUnaligned(ref addr, value | ((long)keccakOrRlp << KeccakOrRlpShift));
         }
     }
 
@@ -566,14 +574,14 @@ public partial class PaprikaTree
                     // nothing to do
                     break;
                 case CommitOptions.RootOnlyWithHash:
-                    GetNodeKeccakOrRlp(_db, _root, true);
+                    BuildRootKeccakOrRlp();
                     break;
                 case CommitOptions.SealUpdatable:
-                    GetNodeKeccakOrRlp(_db, _root, true);
+                    BuildRootKeccakOrRlp();
                     _store.Seal();
                     break;
                 case CommitOptions.ForceFlush:
-                    GetNodeKeccakOrRlp(_db, _root, true);
+                    BuildRootKeccakOrRlp();
                     _store.Seal();
                     _parent._lastFlushTo = _db.NextId - 1;
                     _db.FlushFrom(_lastFlushTo);
@@ -583,8 +591,9 @@ public partial class PaprikaTree
             }
         }
 
-        private static void GetNodeKeccakOrRlp(IDb db, long root, bool p2)
+        private void BuildRootKeccakOrRlp()
         {
+            _parent._type = CalculateKeccakOrRlp(_db, _root, _parent._keccakOrRlp);
         }
     }
 
