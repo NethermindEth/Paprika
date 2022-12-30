@@ -51,7 +51,7 @@ public static class Program
                     batch = tree.Begin();
                 }
 
-                if (i % LogEvery == 0)
+                if (i % LogEvery == 0 && i > 0)
                 {
                     Console.WriteLine("Wrote {0:N0} items with the current root hash set to {1}", i, tree.RootKeccak.ToString());
                 }
