@@ -1,5 +1,4 @@
 ﻿using System.Buffers.Binary;
-using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -343,9 +342,6 @@ public partial class PaprikaTree
 
         private const int EntrySize = Id.Size;
 
-        // Total size needed for writing one nibble.
-        private const int TotalNibbleSize = EntrySize + KeccakLength;
-
         private const byte BranchChildCountMask = 0b0001_1111;
 
         private const int BitMaskLength = 2;
@@ -355,12 +351,12 @@ public partial class PaprikaTree
         private const int KeccakOrRlpShift = 61;
         private const byte KeccakOrRlpMask = 0x3;
 
-        public static int GetNeededSize(int nibbleCount) => BranchPrefixLength + TotalNibbleSize * nibbleCount;
+        public static int GetNeededSize(int nibbleCount) => BranchPrefixLength + EntrySize * nibbleCount;
 
         /// <summary>
         /// Gets the memory needed for the branch with one more nibble.
         /// </summary>
-        public static int GetNextNeededSize(in ReadOnlySpan<byte> node) => node.Length + TotalNibbleSize;
+        public static int GetNextNeededSize(in ReadOnlySpan<byte> node) => node.Length + EntrySize;
 
         public static bool TryFindExisting(in ReadOnlySpan<byte> source, byte nibble, out long found)
         {
@@ -426,23 +422,12 @@ public partial class PaprikaTree
             var count = GetCount(b);
             var bitmap = ReadBitMap(ref b);
 
-            // TODO: optimize spans moves here
-
-            // move keccak region by one to allow write of the nibble
-            var oldKeccakRegion = copy.Slice(count * EntrySize + BranchPrefixLength, count * KeccakLength);
-            var newKeccakRegion = copy.Slice(count * EntrySize + BranchPrefixLength + EntrySize, count * KeccakLength);
-            oldKeccakRegion.CopyTo(newKeccakRegion);
-
             var nibblesBefore = CountNotNullNibblesBefore(newNibble, bitmap);
 
             // if not writing as the last, the segment after needs to be moved
             if (nibblesBefore < count)
             {
                 var newCount = count + 1;
-                var keccakRegion = copy.Slice(newCount * EntrySize + BranchPrefixLength);
-                var keccakFrom = nibblesBefore * KeccakLength;
-                keccakRegion.Slice(keccakFrom, keccakRegion.Length - keccakFrom - KeccakLength)
-                    .CopyTo(keccakRegion.Slice(keccakFrom + KeccakLength));
 
                 var childRegion = copy.Slice(BranchPrefixLength, newCount * EntrySize);
                 var childFrom = nibblesBefore * EntrySize;
@@ -505,24 +490,6 @@ public partial class PaprikaTree
             ref var addr = ref Unsafe.Add(ref b, BranchPrefixLength + skip * EntrySize);
             var value = Unsafe.ReadUnaligned<long>(ref addr) & IdMask;
             Unsafe.WriteUnaligned(ref addr, value | flag);
-        }
-
-        public static void AssertMemoryDb(in ReadOnlySpan<byte> payload)
-        {
-            if ((payload[0] & BranchType) == BranchType)
-            {
-                ref var b = ref Unsafe.AsRef(in payload[0]);
-                var count = GetCount(b);
-
-                ref var children = ref Unsafe.Add(ref b, BranchPrefixLength);
-                
-                for (int i = 0; i < count; i++)
-                {
-                    var child = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref children, i * EntrySize));
-                    
-                    Debug.Assert(Id.Decode(child).File == MemoryDb.FileNumber, $"{i}th child breaks the rule!");
-                }    
-            }
         }
     }
 
@@ -605,7 +572,8 @@ public partial class PaprikaTree
 
         private void BuildRootKeccakOrRlp()
         {
-            _parent._type = CalculateKeccakOrRlp(_db, _root, _parent._keccakOrRlp);
+            // TODO: enable
+            // _parent._type = CalculateKeccakOrRlp(_db, _root, _parent._keccakOrRlp);
         }
     }
 
@@ -648,8 +616,6 @@ public partial class PaprikaTree
 
         public long TryUpdateOrAdd(long current, in Span<byte> written)
         {
-            Branch.AssertMemoryDb(written);
-            
             var currentNode = _db.Read(current);
 
             if (current >= _updateFrom)
@@ -704,7 +670,6 @@ public partial class PaprikaTree
 
         public long Write(ReadOnlySpan<byte> payload)
         {
-            Branch.AssertMemoryDb(payload);
             return _db.Write(payload);
         }
     }
