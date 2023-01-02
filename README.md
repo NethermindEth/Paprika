@@ -81,4 +81,5 @@ Clearly, memmapping is beyond memory size and requires some reads that impacts t
 
 - **writing 230,000 pairs per second**
 - **reading 300,000 pairs per second**
-- 14GB of data
+- **14GB** on disk
+- no Keccaks yet
