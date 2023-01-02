@@ -184,7 +184,6 @@ public partial class PaprikaTree
             WriteBranch(branch, addedPath.GetAt(diffAt), @new, extensionPath.GetAt(diffAt),
                 PushExtensionDown(db, extensionPath, jumpTo, diffAt + 1));
 
-
             if (diffAt == 0)
             {
                 // the branch is the first, no additional extension needed in front, just overwrite the current
@@ -340,14 +339,18 @@ public partial class PaprikaTree
     {
         public const int BranchCount = 16;
 
-        private const int EntrySize = Id.Size;
+        // optimization constants. Each address is written on 7 bytes only to save 1/8th of the db size
+        // this requires some byte juggling which is based on the constants added below
+        private const int EntrySize = Id.NonZeroBytesSize;
+        private const int LongByteAlignment = Id.Size - Id.NonZeroBytesSize;
+        private const long IdMask = Id.NonZeroBytesMask;
+        private const int ByteShift = 8;
 
         private const byte BranchChildCountMask = 0b0001_1111;
 
         private const int BitMaskLength = 2;
         private const int BranchPrefixLength = PrefixTotalLength + BitMaskLength;
 
-        private const long IdMask = 0x0FFF_FFFF_FFFF_FFFF;
         private const int KeccakOrRlpShift = 61;
         private const byte KeccakOrRlpMask = 0x3;
 
@@ -366,8 +369,7 @@ public partial class PaprikaTree
             if (count == BranchCount)
             {
                 // special case, full branch node, can directly jump as values are always sorted
-                found = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b, BranchPrefixLength + nibble * EntrySize)) &
-                        IdMask;
+                found = ReadAt(ref b, nibble);
                 return true;
             }
 
@@ -379,8 +381,7 @@ public partial class PaprikaTree
                 // found in bitmap, count set till this moment
                 var countNotNull = CountNotNullNibblesBefore(nibble, bitmap);
 
-                found = Unsafe.ReadUnaligned<long>(ref Unsafe.Add(ref b,
-                    BranchPrefixLength + countNotNull * EntrySize)) & IdMask;
+                found = ReadAt(ref b, countNotNull);
                 return true;
             }
 
@@ -411,7 +412,7 @@ public partial class PaprikaTree
             var count = GetCount(b);
             var skip = count == BranchCount ? nibble : CountNotNullNibblesBefore(nibble, ReadBitMap(ref b));
 
-            Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, BranchPrefixLength + skip * EntrySize), @new);
+            WriteAt(ref b, @new, skip);
         }
 
         public static void SetNonExistingYet(Span<byte> copy, byte newNibble, long @new)
@@ -436,11 +437,40 @@ public partial class PaprikaTree
             }
 
             // write entry
-            Unsafe.WriteUnaligned(ref Unsafe.Add(ref b, BranchPrefixLength + nibblesBefore * EntrySize), @new);
+            WriteAt(ref b, @new, nibblesBefore);
 
             // set metadata
             SetBitMap(ref b, (ushort)(bitmap | (1 << newNibble)));
             b += 1;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void WriteAt(ref byte b, long @new, int skip)
+        {
+            ref var addr = ref Unsafe.Add(ref b, BranchPrefixLength + skip * EntrySize - LongByteAlignment);
+
+            if (BitConverter.IsLittleEndian)
+            {
+                // the youngest byte should stay as the previous
+                Unsafe.WriteUnaligned(ref addr, addr | (@new << ByteShift));
+            }
+            else
+            {
+                throw new NotImplementedException("BIG ENDIAN NOT IMPLEMENTED YET");
+            }
+        }
+        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static long ReadAt(ref byte b, int skip)
+        {
+            ref var addr = ref Unsafe.Add(ref b, BranchPrefixLength + skip * EntrySize - LongByteAlignment);
+            if (BitConverter.IsLittleEndian)
+            {
+                var value = Unsafe.ReadUnaligned<long>(ref addr);
+                return (value >> ByteShift) & IdMask;
+            }
+
+            throw new NotImplementedException("BIG ENDIAN NOT IMPLEMENTED YET");
         }
 
         public static KeccakOrRlp GetKeccakOrRlp(ReadOnlySpan<byte> branch, byte nibble, out Span<byte> span)
