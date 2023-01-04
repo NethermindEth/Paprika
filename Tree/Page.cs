@@ -216,6 +216,7 @@ public readonly unsafe struct Page
         private const int LengthOfLenght = 1;
         private const int Null = 0;
         private const ushort NullAddr = 0;
+        private const int KeySlice = 1;
 
         public static Page Set(in Page page, in NibblePath key, in ReadOnlySpan<byte> value, IPageManager manager)
         {
@@ -255,8 +256,7 @@ public readonly unsafe struct Page
             var nibble = key.FirstNibble;
             var addr = header->Nibble[nibble];
 
-            // consume first nibble, it's in the lookup
-            key = key.SliceFrom(1);
+            key = key.SliceFrom(KeySlice);
 
             var neededMemory = (ushort)(key.RawByteLength + AddressSize + LengthOfLenght + value.Length);
 
@@ -291,7 +291,7 @@ public readonly unsafe struct Page
             if (addr != NullAddr)
             {
                 // consume first nibble, it's in the lookup
-                key = key.SliceFrom(1);
+                var slice = key.SliceFrom(KeySlice);
 
                 var pagePayload = new Span<byte>(page._ptr, PageSize);
                 while (addr != NullAddr)
@@ -299,7 +299,7 @@ public readonly unsafe struct Page
                     var search = pagePayload.Slice(addr);
                     var leftover = NibblePath.ReadFrom(search, out var actual);
                     addr = ReadUnaligned<ushort>(ref AsRef(in leftover[0]));
-                    if (actual.Equals(key))
+                    if (actual.Equals(slice))
                     {
                         var valueLength = leftover[AddressSize];
                         value = leftover.Slice(AddressSize + LengthOfLenght, valueLength);
