@@ -1,4 +1,5 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Tree;
@@ -13,6 +14,7 @@ namespace Tree;
 /// </remarks>
 public readonly ref struct NibblePath
 {
+    private const int NibbleBitSize = 4;
     private const int NibblePerByte = 2;
     public const int NibbleShift = 8 / NibblePerByte;
     public const int NibbleMask = 15;
@@ -299,7 +301,7 @@ public readonly ref struct NibblePath
         return new string(path);
     }
 
-    private static char[] Hex = "0123456789ABCDEF".ToArray();
+    private static readonly char[] Hex = "0123456789ABCDEF".ToArray();
 
     public bool Equals(in NibblePath other)
     {
