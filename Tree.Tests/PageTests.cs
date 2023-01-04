@@ -1,4 +1,5 @@
-﻿using NUnit.Framework;
+﻿using System.Buffers.Binary;
+using NUnit.Framework;
 
 namespace Tree.Tests;
 
@@ -41,6 +42,25 @@ public class PageTests
         for (int i = 0; i < 12_000_000; i++)
         {
             random.NextBytes(key);
+            var path = NibblePath.FromKey(key);
+            root = root.Set(path, key, 0, manager);
+        }
+        
+        Console.WriteLine($"Used memory {manager.TotalUsedPages:P}");
+    }
+    
+    [Test]
+    public void Same_path()
+    {
+        using var manager = new MemoryPageManager(128 * 1024 * 1024UL);
+
+        var root = manager.GetClean(out _);
+
+        var key = new byte[32];
+
+        for (int i = 0; i < 1000000; i++)
+        {
+            BinaryPrimitives.WriteInt32BigEndian(key.AsSpan(28, 4), i);
             var path = NibblePath.FromKey(key);
             root = root.Set(path, key, 0, manager);
         }

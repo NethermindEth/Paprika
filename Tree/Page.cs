@@ -1,4 +1,5 @@
 ﻿using System.Buffers.Binary;
+using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using static System.Runtime.CompilerServices.Unsafe;
@@ -39,7 +40,7 @@ public readonly unsafe struct Page
         }
 
         PageType type = page.Type;
-        
+
         if (type == PageType.None)
         {
             // type not set yet, define it on the basis of the fan out level
@@ -58,7 +59,7 @@ public readonly unsafe struct Page
 
         return page;
     }
-    
+
     private PageType Type
     {
         get => Head & PageType.Mask;
@@ -126,9 +127,9 @@ public readonly unsafe struct Page
             var addr = Read<int>(GetAddrPtr(page, path, depth));
             if (!BitConverter.IsLittleEndian)
             {
-                addr = BinaryPrimitives.ReverseEndianness(addr);    
+                addr = BinaryPrimitives.ReverseEndianness(addr);
             }
-            
+
             return addr >> 8;
         }
 
@@ -138,9 +139,9 @@ public readonly unsafe struct Page
             var addr = (actual << 8) | (int)PageType.JumpPage;
             if (!BitConverter.IsLittleEndian)
             {
-                addr = BinaryPrimitives.ReverseEndianness(addr);    
+                addr = BinaryPrimitives.ReverseEndianness(addr);
             }
-            
+
             Write(addrPtr, addr);
         }
 
@@ -209,11 +210,14 @@ public readonly unsafe struct Page
                 }
 
                 Set(in overflow, key, value, manager);
+                return page;
             }
-
-            var clean = manager.GetClean(out header.OverflowTo);
-            Set(in clean, key, value, manager);
-            return page;
+            else
+            {
+                var clean = manager.GetClean(out header.OverflowTo);
+                Set(in clean, key, value, manager);
+                return page;    
+            }
         }
 
         private static bool TryWrite(Page page, NibblePath key, ReadOnlySpan<byte> value)
@@ -281,7 +285,7 @@ public unsafe class MemoryPageManager : IPageManager, IDisposable
 {
     private readonly void* _writable;
     private readonly int _bitmapSize;
-    
+
     private readonly HashSet<int> _abandoned = new();
     private readonly Stack<int> _reusable = new();
 
@@ -312,7 +316,7 @@ public unsafe class MemoryPageManager : IPageManager, IDisposable
     {
         if (address > _maxPage)
             throw new ArgumentException($"Requested address {address} while the max page is {_maxPage}");
-        
+
         return new Page(Add<byte>(_ptr, address * Page.PageSize));
     }
 
@@ -330,11 +334,116 @@ public unsafe class MemoryPageManager : IPageManager, IDisposable
                 throw new OutOfMemoryException("Not enough memory with page manager");
 
             addr = _nextPage;
-            
+
             // set bit
             ref var @byte = ref AsRef<byte>(Add<byte>(_writable, addr / 8));
             @byte = (byte)(@byte | (1 << (addr & 7)));
-            
+
+            _nextPage += 1;
+        }
+
+        var page = GetAt(addr);
+        page.Clear();
+        return page;
+    }
+
+    public void Abandon(in Page page) => _abandoned.Add(GetAddress(page));
+
+    public void Commit()
+    {
+        // simulate the commit with the clear
+        new Span<byte>(_writable, _bitmapSize).Clear();
+
+        foreach (var page in _abandoned)
+        {
+            _reusable.Push(page);
+        }
+
+        _abandoned.Clear();
+    }
+
+    public void Dispose() => NativeMemory.AlignedFree(_ptr);
+}
+
+public unsafe class DummyMemoryMappedFilePageManager : IPageManager
+{
+    private readonly long _size;
+    private readonly int _maxPage;
+    private readonly int _bitmapSize;
+    private readonly void* _writable;
+    private readonly FileStream _file;
+    private readonly MemoryMappedFile _mapped;
+    private readonly MemoryMappedViewAccessor _accessor;
+
+    private readonly HashSet<int> _abandoned = new();
+    private readonly Stack<int> _reusable = new();
+
+    private int _nextPage;
+    private readonly void* _ptr;
+
+    public DummyMemoryMappedFilePageManager(long size, string dir)
+    {
+        _size = size;
+        _maxPage = (int)(size / Page.PageSize);
+
+        _bitmapSize = _maxPage / 8 + 1;
+        _writable = NativeMemory.Alloc((UIntPtr)_bitmapSize);
+
+        var name = Path.Combine(dir, "memory-mapped.db");
+
+        if (File.Exists(name))
+            File.Delete(name);
+
+        _file = new FileStream(name, FileMode.CreateNew, FileAccess.ReadWrite);
+        _file.SetLength(size);
+        _mapped = MemoryMappedFile.CreateFromFile(_file, null, size, MemoryMappedFileAccess.ReadWrite,
+            HandleInheritability.None, false);
+        _accessor = _mapped.CreateViewAccessor();
+
+        byte* ptr = null;
+        _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
+        _ptr = ptr;
+    }
+
+    public double TotalUsedPages => (double)(_nextPage - _abandoned.Count) / _maxPage;
+
+    public bool IsWritable(in Page page)
+    {
+        var address = GetAddress(page);
+        var @byte = AsRef<byte>(Add<byte>(_writable, address / 8));
+        return (@byte & (1 << (address & 7))) != 0;
+    }
+
+    public Page GetAt(int address)
+    {
+        if (address >= _maxPage)
+            throw new ArgumentException($"Requested address {address} while the max page is {_maxPage}");
+        
+        if (address < 0)
+            throw new ArgumentException($"Requested address {address} that is smaller than 0!");
+
+        return new Page((byte*) _ptr + address * ((long)Page.PageSize));
+    }
+
+    public int GetAddress(in Page page)
+    {
+        return (int)(ByteOffset(ref AsRef<byte>(_ptr), ref AsRef<byte>(page.Raw.ToPointer()))
+            .ToInt64() / Page.PageSize);
+    }
+
+    public Page GetClean(out int addr)
+    {
+        if (!_reusable.TryPop(out addr))
+        {
+            if (_nextPage >= _maxPage)
+                throw new OutOfMemoryException("Not enough memory with page manager");
+
+            addr = _nextPage;
+
+            // set writable bit
+            ref var @byte = ref AsRef<byte>(Add<byte>(_writable, addr / 8));
+            @byte = (byte)(@byte | (1 << (addr & 7)));
+
             _nextPage += 1;
         }
 
