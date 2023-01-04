@@ -59,6 +59,24 @@ public readonly unsafe struct Page
 
         return page;
     }
+    
+    public bool TryGet(NibblePath key, out ReadOnlySpan<byte> value, int depth, IPageManager manager)
+    {
+        PageType type = Type;
+
+        if (type == PageType.JumpPage)
+        {
+            return JumpPage.TryGet(this, key, out value, depth, manager);
+        }
+
+        if (type == PageType.ValuePage)
+        {
+            return ValuePage.TryGet(this, key, out value, manager);
+        }
+
+        value = default;
+        return false;
+    }
 
     private PageType Type
     {
@@ -100,12 +118,18 @@ public readonly unsafe struct Page
         /// <summary>
         /// Tries to find the <paramref name="path"/> in the given page.
         /// </summary>
-        public static bool TryFind(in Page page, ref NibblePath path, int depth, out int pageAddress)
+        public static bool TryGet(in Page page, in NibblePath path, out ReadOnlySpan<byte> value, int depth, IPageManager manager)
         {
-            pageAddress = ReadAddr(page, path, depth);
-            path = SlicePath(path, depth);
-
-            return pageAddress != Null;
+            var addr = ReadAddr(page, path, depth);
+            
+            if (addr == Null)
+            {
+                value = default;
+                return false;
+            }
+            
+            var child = manager.GetAt(addr);
+            return child.TryGet(SlicePath(path, depth), out value, depth + 1, manager);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -188,6 +212,7 @@ public readonly unsafe struct Page
         private const int AvailableMemoryInPage = PageSize - Header.Size;
         private const int LengthOfLenght = 1;
         private const int Null = 0;
+        private const ushort NullAddr = 0;
 
         public static Page Set(in Page page, in NibblePath key, in ReadOnlySpan<byte> value, IPageManager manager)
         {
@@ -249,6 +274,49 @@ public readonly unsafe struct Page
                 return true;
             }
 
+            return false;
+        }
+
+        public static bool TryGet(in Page page, NibblePath key, out ReadOnlySpan<byte> value, IPageManager manager)
+        {
+            ref var header = ref AsRef<Header>(page._ptr);
+            
+            var nibble = key.FirstNibble;
+            ref var addr = ref header.Nibble[nibble];
+
+            if (addr == NullAddr)
+            {
+                value = default;
+                return false;
+            }
+
+            // consume first nibble, it's in the lookup
+            key = key.SliceFrom(1);
+
+            var pagePayload = new Span<byte>(page._ptr, Page.PageSize);
+            while (addr != NullAddr)
+            {
+                var search = pagePayload.Slice(addr);
+                var leftover = NibblePath.ReadFrom(search, out var actual);
+                addr = ReadUnaligned<ushort>(ref AsRef(in leftover[0]));
+                if (actual.Equals(key))
+                {
+                    var valueLength = leftover[AddressSize];
+                    value = leftover.Slice(AddressSize + LengthOfLenght, valueLength);
+                    return true;
+                }
+
+                
+            }
+            
+            // no more jumps on the page, try overflow
+            if (header.OverflowTo != Null)
+            {
+                var overflow = manager.GetAt(header.OverflowTo);
+                return TryGet(overflow, key, out value, manager);
+            }
+
+            value = default;
             return false;
         }
     }

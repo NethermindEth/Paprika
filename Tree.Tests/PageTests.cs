@@ -31,19 +31,31 @@ public class PageTests
     [Test]
     public void Random_big()
     {
-        using var manager = new MemoryPageManager(2 * 1024 * 1024 * 1024UL);
+        using var manager = new MemoryPageManager(1024 * 1024 * 1024UL);
 
+        const int count = 1000;
+        
         var root = manager.GetClean(out _);
 
         var random = new Random(13);
 
         var key = new byte[32];
 
-        for (int i = 0; i < 12_000_000; i++)
+        for (int i = 0; i < count; i++)
         {
             random.NextBytes(key);
             var path = NibblePath.FromKey(key);
             root = root.Set(path, key, 0, manager);
+        }
+        
+        // reset random
+        random = new Random(13);
+        for (int i = 0; i < count; i++)
+        {
+            random.NextBytes(key);
+            var path = NibblePath.FromKey(key);
+            Assert.True(root.TryGet(path, out var value, 0, manager));
+            Assert.True(value.SequenceEqual(key.AsSpan()));
         }
         
         Console.WriteLine($"Used memory {manager.TotalUsedPages:P}");
