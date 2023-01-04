@@ -34,10 +34,7 @@ public readonly unsafe struct Page
 
         if (!manager.IsWritable(page))
         {
-            // if page is not writable, copy it first
-            page = manager.GetClean(out _);
-            CopyTo(page);
-            manager.Abandon(this);
+            page = manager.GetWritableCopy(in this, out _);
         }
 
         PageType type = page.Type;
@@ -60,7 +57,7 @@ public readonly unsafe struct Page
 
         return page;
     }
-    
+
     public bool TryGet(NibblePath key, out ReadOnlySpan<byte> value, int depth, IPageManager manager)
     {
         PageType type = Type;
@@ -119,16 +116,17 @@ public readonly unsafe struct Page
         /// <summary>
         /// Tries to find the <paramref name="path"/> in the given page.
         /// </summary>
-        public static bool TryGet(in Page page, in NibblePath path, out ReadOnlySpan<byte> value, int depth, IPageManager manager)
+        public static bool TryGet(in Page page, in NibblePath path, out ReadOnlySpan<byte> value, int depth,
+            IPageManager manager)
         {
             var addr = ReadAddr(page, path, depth);
-            
+
             if (addr == Null)
             {
                 value = default;
                 return false;
             }
-            
+
             var child = manager.GetAt(addr);
             return child.TryGet(SlicePath(path, depth), out value, depth + 1, manager);
         }
@@ -182,7 +180,8 @@ public readonly unsafe struct Page
             if (addr == Null)
             {
                 // does not exist, get and set
-                manager.GetClean(out addr);
+                var allocated = manager.GetNewDirtyPage(out addr);
+                allocated.Clear();
             }
 
             var child = manager.GetAt(addr);
@@ -202,9 +201,9 @@ public readonly unsafe struct Page
         private struct Header
         {
             public const int Size = NibbleStart + NibbleCount * AddressSize;
-            
+
             private const int NibbleStart = 8;
-            
+
             /// <summary>
             /// <see cref="ValuePage.GetKeyIndex"/> to understand the mappning.
             /// </summary>
@@ -214,7 +213,7 @@ public readonly unsafe struct Page
             [FieldOffset(4)] public int OverflowTo;
             [FieldOffset(NibbleStart)] public fixed ushort Nibble[NibbleCount];
         }
-        
+
         private const int AddressSize = 2;
         private const int AvailableMemoryInPage = PageSize - Header.Size;
         private const int LengthOfLenght = 1;
@@ -236,10 +235,7 @@ public readonly unsafe struct Page
                 var overflow = manager.GetAt(header.OverflowTo);
                 if (!manager.IsWritable(overflow))
                 {
-                    var copy = manager.GetClean(out header.OverflowTo);
-                    overflow.CopyTo(copy);
-                    manager.Abandon(overflow);
-                    overflow = copy;
+                    overflow = manager.GetWritableCopy(overflow, out header.OverflowTo);
                 }
 
                 Set(in overflow, key, value, manager);
@@ -247,16 +243,18 @@ public readonly unsafe struct Page
             }
             else
             {
-                var clean = manager.GetClean(out header.OverflowTo);
-                Set(in clean, key, value, manager);
-                return page;    
+                var allocated = manager.GetNewDirtyPage(out header.OverflowTo);
+                allocated.Clear();
+                
+                Set(in allocated, key, value, manager);
+                return page;
             }
         }
 
         private static bool TryWrite(Page page, NibblePath key, ReadOnlySpan<byte> value)
         {
             var header = (Header*)page._ptr;
-            
+
             var index = GetKeyIndex(key);
             var addr = header->Nibble[index];
 
@@ -288,7 +286,7 @@ public readonly unsafe struct Page
         public static bool TryGet(in Page page, NibblePath key, out ReadOnlySpan<byte> value, IPageManager manager)
         {
             var header = (Header*)page._ptr;
-            
+
             var index = GetKeyIndex(key);
             var addr = header->Nibble[index];
 
@@ -346,10 +344,18 @@ public interface IPageManager
     int GetAddress(in Page page);
 
     /// <summary>
-    /// Gets an unused page
+    /// Gets an unused page that is not clean.
     /// </summary>
     /// <returns></returns>
-    Page GetClean(out int addr);
+    Page GetNewDirtyPage(out int addr);
+
+    Page GetWritableCopy(in Page page, out int addr)
+    {
+        var allocated = GetNewDirtyPage(out addr);
+        page.CopyTo(allocated);
+        Abandon(page);
+        return allocated;
+    }
 
     /// <summary>
     /// Abandons the page, marking it as reusable once the transaction commits.
@@ -403,7 +409,7 @@ public unsafe class MemoryPageManager : IPageManager, IDisposable
             .ToInt64() / Page.PageSize);
     }
 
-    public Page GetClean(out int addr)
+    public Page GetNewDirtyPage(out int addr)
     {
         if (!_reusable.TryPop(out addr))
         {
@@ -495,11 +501,11 @@ public unsafe class DummyMemoryMappedFilePageManager : IPageManager
     {
         if (address >= _maxPage)
             throw new ArgumentException($"Requested address {address} while the max page is {_maxPage}");
-        
+
         if (address < 0)
             throw new ArgumentException($"Requested address {address} that is smaller than 0!");
 
-        return new Page((byte*) _ptr + address * ((long)Page.PageSize));
+        return new Page((byte*)_ptr + address * ((long)Page.PageSize));
     }
 
     public int GetAddress(in Page page)
@@ -508,7 +514,7 @@ public unsafe class DummyMemoryMappedFilePageManager : IPageManager
             .ToInt64() / Page.PageSize);
     }
 
-    public Page GetClean(out int addr)
+    public Page GetNewDirtyPage(out int addr)
     {
         if (!_reusable.TryPop(out addr))
         {

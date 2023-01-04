@@ -24,7 +24,8 @@ public static class Program
         Directory.CreateDirectory(dataPath);
 
         var manager = new DummyMemoryMappedFilePageManager(DbFileSize, dataPath);
-        var root = manager.GetClean(out _);
+        var root = manager.GetNewDirtyPage(out _);
+        root.Clear();
 
         // var db = new PersistentDb(dataPath);
         // var tree = new PaprikaTree(db);

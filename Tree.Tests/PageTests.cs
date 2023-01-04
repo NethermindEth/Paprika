@@ -10,7 +10,7 @@ public class PageTests
     {
         using var manager = new MemoryPageManager(1024 * 1024);
 
-        var root = manager.GetClean(out _);
+        var root = manager.GetNewDirtyPage(out _);
 
         var key = new byte[32];
 
@@ -35,7 +35,7 @@ public class PageTests
 
         const int count = 1000_000;
         
-        var root = manager.GetClean(out _);
+        var root = manager.GetNewDirtyPage(out _);
 
         var random = new Random(13);
 
@@ -71,7 +71,7 @@ public class PageTests
     {
         using var manager = new MemoryPageManager(128 * 1024 * 1024UL);
 
-        var root = manager.GetClean(out _);
+        var root = manager.GetNewDirtyPage(out _);
 
         var key = new byte[32];
 
