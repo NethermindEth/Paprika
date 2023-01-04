@@ -46,6 +46,8 @@ public class PageTests
             random.NextBytes(key);
             var path = NibblePath.FromKey(key);
             root = root.Set(path, key, 0, manager);
+            
+            AssertValue(root, path, manager, i, key);
         }
         
         // reset random
@@ -54,13 +56,16 @@ public class PageTests
         {
             random.NextBytes(key);
             var path = NibblePath.FromKey(key);
-            Assert.True(root.TryGet(path, out var value, 0, manager));
-            Assert.True(value.SequenceEqual(key.AsSpan()));
+            AssertValue(root, path, manager, i, key);
         }
         
-        Console.WriteLine($"Used memory {manager.TotalUsedPages:P}");
+        static void AssertValue(Page root, NibblePath path, IPageManager manager, int i, byte[] key)
+        {
+            Assert.True(root.TryGet(path, out var value, 0, manager), $"Failed getting {path.ToString()} at {i}");
+            Assert.True(value.SequenceEqual(key.AsSpan()));
+        }
     }
-    
+
     [Test]
     public void Same_path()
     {

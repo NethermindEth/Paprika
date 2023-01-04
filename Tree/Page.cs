@@ -1,4 +1,5 @@
 ﻿using System.Buffers.Binary;
+using System.Diagnostics;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -132,6 +133,7 @@ public readonly unsafe struct Page
             return child.TryGet(SlicePath(path, depth), out value, depth + 1, manager);
         }
 
+        [DebuggerStepThrough]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static NibblePath SlicePath(NibblePath path, int depth) => path.SliceFrom(2 + OneOnOdd(depth));
 
@@ -196,18 +198,19 @@ public readonly unsafe struct Page
 
     static class ValuePage
     {
-        [StructLayout(LayoutKind.Explicit, Size = Size)]
+        [StructLayout(LayoutKind.Explicit, Size = Size, Pack = 1)]
         private struct Header
         {
-            public const int NibbleStart = 8;
             public const int Size = NibbleStart + NibbleCount * AddressSize;
+            
+            private const int NibbleStart = 8;
+            private const int NibbleCount = 16;
 
             [FieldOffset(2)] public ushort MemoryUsed;
             [FieldOffset(4)] public int OverflowTo;
             [FieldOffset(NibbleStart)] public fixed ushort Nibble[NibbleCount];
         }
-
-        private const int NibbleCount = 16;
+        
         private const int AddressSize = 2;
         private const int AvailableMemoryInPage = PageSize - Header.Size;
         private const int LengthOfLenght = 1;
@@ -293,7 +296,7 @@ public readonly unsafe struct Page
             // consume first nibble, it's in the lookup
             key = key.SliceFrom(1);
 
-            var pagePayload = new Span<byte>(page._ptr, Page.PageSize);
+            var pagePayload = new Span<byte>(page._ptr, PageSize);
             while (addr != NullAddr)
             {
                 var search = pagePayload.Slice(addr);
@@ -305,8 +308,6 @@ public readonly unsafe struct Page
                     value = leftover.Slice(AddressSize + LengthOfLenght, valueLength);
                     return true;
                 }
-
-                
             }
             
             // no more jumps on the page, try overflow
