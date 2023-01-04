@@ -250,29 +250,30 @@ public readonly unsafe struct Page
 
         private static bool TryWrite(Page page, NibblePath key, ReadOnlySpan<byte> value)
         {
-            ref var header = ref AsRef<Header>(page._ptr);
+            var header = (Header*)page._ptr;
+            
             var nibble = key.FirstNibble;
-            ref var addr = ref header.Nibble[nibble];
+            var addr = header->Nibble[nibble];
 
             // consume first nibble, it's in the lookup
             key = key.SliceFrom(1);
 
             var neededMemory = (ushort)(key.RawByteLength + AddressSize + LengthOfLenght + value.Length);
 
-            var available = AvailableMemoryInPage - header.MemoryUsed;
+            var available = AvailableMemoryInPage - header->MemoryUsed;
             if (available >= neededMemory)
             {
-                var destination = new Span<byte>(Add<byte>(page._ptr, Header.Size + header.MemoryUsed), neededMemory);
+                var destination = new Span<byte>(Add<byte>(page._ptr, Header.Size + header->MemoryUsed), neededMemory);
 
                 var leftover = key.WriteTo(destination);
                 WriteUnaligned(ref leftover[0], addr);
                 leftover[AddressSize] = (byte)value.Length;
                 value.CopyTo(leftover.Slice(AddressSize + 1));
 
-                addr = (ushort)(Header.Size + header.MemoryUsed);
+                header->Nibble[nibble] = (ushort)(Header.Size + header->MemoryUsed);
 
                 // enough memory to write
-                header.MemoryUsed += neededMemory;
+                header->MemoryUsed += neededMemory;
 
                 return true;
             }
@@ -282,38 +283,35 @@ public readonly unsafe struct Page
 
         public static bool TryGet(in Page page, NibblePath key, out ReadOnlySpan<byte> value, IPageManager manager)
         {
-            ref var header = ref AsRef<Header>(page._ptr);
+            var header = (Header*)page._ptr;
             
             var nibble = key.FirstNibble;
-            ref var addr = ref header.Nibble[nibble];
+            var addr = header->Nibble[nibble];
 
-            if (addr == NullAddr)
+            if (addr != NullAddr)
             {
-                value = default;
-                return false;
-            }
+                // consume first nibble, it's in the lookup
+                key = key.SliceFrom(1);
 
-            // consume first nibble, it's in the lookup
-            key = key.SliceFrom(1);
-
-            var pagePayload = new Span<byte>(page._ptr, PageSize);
-            while (addr != NullAddr)
-            {
-                var search = pagePayload.Slice(addr);
-                var leftover = NibblePath.ReadFrom(search, out var actual);
-                addr = ReadUnaligned<ushort>(ref AsRef(in leftover[0]));
-                if (actual.Equals(key))
+                var pagePayload = new Span<byte>(page._ptr, PageSize);
+                while (addr != NullAddr)
                 {
-                    var valueLength = leftover[AddressSize];
-                    value = leftover.Slice(AddressSize + LengthOfLenght, valueLength);
-                    return true;
+                    var search = pagePayload.Slice(addr);
+                    var leftover = NibblePath.ReadFrom(search, out var actual);
+                    addr = ReadUnaligned<ushort>(ref AsRef(in leftover[0]));
+                    if (actual.Equals(key))
+                    {
+                        var valueLength = leftover[AddressSize];
+                        value = leftover.Slice(AddressSize + LengthOfLenght, valueLength);
+                        return true;
+                    }
                 }
             }
-            
-            // no more jumps on the page, try overflow
-            if (header.OverflowTo != Null)
+
+            // always check overflow if exists, this page might have been saturated before the current nibble was set 
+            if (header->OverflowTo != Null)
             {
-                var overflow = manager.GetAt(header.OverflowTo);
+                var overflow = manager.GetAt(header->OverflowTo);
                 return TryGet(overflow, key, out value, manager);
             }
 

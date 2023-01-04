@@ -33,7 +33,7 @@ public class PageTests
     {
         using var manager = new MemoryPageManager(1024 * 1024 * 1024UL);
 
-        const int count = 1000;
+        const int count = 1000_000;
         
         var root = manager.GetClean(out _);
 

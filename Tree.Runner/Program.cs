@@ -4,10 +4,13 @@ namespace Tree.Runner;
 
 public static class Program
 {
+    private const int Count = 160_000_000;
+    private const int LogEvery = 10_000_000;
+    private const long Gb = 1024 * 1024 * 1024L;
+    private const long DbFileSize = 20 * Gb;
+
     public static void Main(String[] args)
     {
-        const int Count = 160_000_000;
-        const int LogEvery = 10_000_000;
         const int seed = 17;
 
         var dir = Directory.GetCurrentDirectory();
@@ -20,9 +23,7 @@ public static class Program
 
         Directory.CreateDirectory(dataPath);
 
-        var GB = 1024 * 1024 * 1024L;
-        var size = 20 * GB;
-        var manager = new DummyMemoryMappedFilePageManager(size, dataPath);
+        var manager = new DummyMemoryMappedFilePageManager(DbFileSize, dataPath);
         var root = manager.GetClean(out _);
 
         // var db = new PersistentDb(dataPath);
@@ -50,7 +51,7 @@ public static class Program
                     var used = manager.TotalUsedPages;
                     Console.WriteLine(
                         "Wrote {0:N0} items, DB usage is at {1:P} which gives {2:F2}GB out of allocated {3}GB", i, used,
-                        used * size / GB, size / GB);
+                        used * DbFileSize / Gb, DbFileSize / Gb);
                 }
             }
         }
@@ -63,7 +64,15 @@ public static class Program
             {
                 random.NextBytes(key);
 
-                root.TryGet(NibblePath.FromKey(key), out var v, 0, manager);
+                if (!root.TryGet(NibblePath.FromKey(key), out var v, 0, manager))
+                {
+                    throw new Exception($"Missing value at {i}!");
+                }
+
+                if (!v.SequenceEqual(key))
+                {
+                    throw new Exception($"Wrong value at {i}!");
+                }
 
                 if (i % LogEvery == 0)
                 {
