@@ -226,6 +226,9 @@ public readonly unsafe struct Page
             var nibble = key.FirstNibble;
             ref var addr = ref header.Nibble[nibble];
 
+            // consume first nibble, it's in the lookup
+            key = key.SliceFrom(1);
+
             var neededMemory = (ushort)(key.RawByteLength + AddressSize + LengthOfLenght + value.Length);
 
             var available = AvailableMemoryInPage - header.MemoryUsed;
