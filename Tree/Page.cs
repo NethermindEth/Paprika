@@ -204,7 +204,11 @@ public readonly unsafe struct Page
             public const int Size = NibbleStart + NibbleCount * AddressSize;
             
             private const int NibbleStart = 8;
-            private const int NibbleCount = 16;
+            
+            /// <summary>
+            /// <see cref="ValuePage.GetKeyIndex"/> to understand the mappning.
+            /// </summary>
+            private const int NibbleCount = 16 * 4;
 
             [FieldOffset(2)] public ushort MemoryUsed;
             [FieldOffset(4)] public int OverflowTo;
@@ -253,8 +257,8 @@ public readonly unsafe struct Page
         {
             var header = (Header*)page._ptr;
             
-            var nibble = key.FirstNibble;
-            var addr = header->Nibble[nibble];
+            var index = GetKeyIndex(key);
+            var addr = header->Nibble[index];
 
             key = key.SliceFrom(KeySlice);
 
@@ -270,7 +274,7 @@ public readonly unsafe struct Page
                 leftover[AddressSize] = (byte)value.Length;
                 value.CopyTo(leftover.Slice(AddressSize + 1));
 
-                header->Nibble[nibble] = (ushort)(Header.Size + header->MemoryUsed);
+                header->Nibble[index] = (ushort)(Header.Size + header->MemoryUsed);
 
                 // enough memory to write
                 header->MemoryUsed += neededMemory;
@@ -285,8 +289,8 @@ public readonly unsafe struct Page
         {
             var header = (Header*)page._ptr;
             
-            var nibble = key.FirstNibble;
-            var addr = header->Nibble[nibble];
+            var index = GetKeyIndex(key);
+            var addr = header->Nibble[index];
 
             if (addr != NullAddr)
             {
@@ -318,6 +322,9 @@ public readonly unsafe struct Page
             value = default;
             return false;
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int GetKeyIndex(in NibblePath key) => (key.GetAt(0) << 2) | (key.GetAt(1) >> 2);
     }
 }
 
