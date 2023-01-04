@@ -23,7 +23,9 @@ public static class Program
 
         Directory.CreateDirectory(dataPath);
 
-        var manager = new DummyMemoryMappedFilePageManager(30 * 1024 * 1024 * 1024L, dataPath);
+        var GB = 1024 * 1024 * 1024L;
+        var size = 20 * GB;
+        var manager = new DummyMemoryMappedFilePageManager(size, dataPath);
         var root = manager.GetClean(out _);
         
         // var db = new PersistentDb(dataPath);
@@ -48,7 +50,8 @@ public static class Program
                 
                 if (i % LogEvery == 0 && i > 0)
                 {
-                    Console.WriteLine("Wrote {0:N0} items. Db usage is at {1:P}", i, manager.TotalUsedPages);
+                    var used = manager.TotalUsedPages;
+                    Console.WriteLine("Wrote {0:N0} items, DB usage is at {1:P} which gives {2:F2}GB out of allocated {3}GB", i, used , used * size/GB, size/GB);
                 }
             }
         }
