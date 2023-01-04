@@ -17,4 +17,8 @@
       <PackageReference Include="Spectre.Console" Version="0.45.1-preview.0.43" />
     </ItemGroup>
 
+    <ItemGroup>
+      <Folder Include="db" />
+    </ItemGroup>
+
 </Project>
