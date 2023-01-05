@@ -302,28 +302,38 @@ public readonly unsafe struct Page
 
         public static bool TryGet(in Page page, NibblePath key, out ReadOnlySpan<byte> value, ITransaction manager)
         {
-            var header = (Header*)page._ptr;
-
+            var slice = key.SliceFrom(KeySlice);
             var index = GetKeyIndex(key);
+
+            // encode key only once and then compare encoded
+            Span<byte> rawKey = stackalloc byte[slice.HexEncodedLength];
+            slice.WriteTo(rawKey);
+
+            return TryGetImpl(page, index, in rawKey, out value, manager);
+        }
+
+        private static bool TryGetImpl(in Page page, int index, in Span<byte> rawKey, out ReadOnlySpan<byte> value,
+            ITransaction manager)
+        {
+            var header = (Header*)page._ptr;
             var addr = header->Nibble[index];
 
             if (addr != NullAddr)
             {
-                // consume first nibble, it's in the lookup
-                var slice = key.SliceFrom(KeySlice);
-
                 var pagePayload = new Span<byte>(page._ptr, PageSize);
                 while (addr != NullAddr)
                 {
                     var search = pagePayload.Slice(addr);
-                    var leftover = NibblePath.ReadFrom(search, out var actual);
-                    addr = ReadUnaligned<ushort>(ref AsRef(in leftover[0]));
-                    if (actual.Equals(slice))
+                    var leftover = search.Slice(rawKey.Length);
+
+                    if (search.StartsWith(rawKey))
                     {
                         var valueLength = leftover[AddressSize];
                         value = leftover.Slice(AddressSize + LengthOfLenght, valueLength);
                         return true;
                     }
+
+                    addr = ReadUnaligned<ushort>(ref AsRef(in leftover[0]));
                 }
             }
 
@@ -331,7 +341,7 @@ public readonly unsafe struct Page
             if (header->OverflowTo != Null)
             {
                 var overflow = manager.GetAt(header->OverflowTo);
-                return TryGet(overflow, key, out value, manager);
+                return TryGetImpl(overflow, index, rawKey, out value, manager);
             }
 
             value = default;
