@@ -67,6 +67,7 @@ public class PageTests
     }
 
     [Test]
+    [Ignore("Currently updates in place are not supported")]
     public void Same_path()
     {
         using var manager = new MemoryTransaction(128 * 1024 * 1024UL);

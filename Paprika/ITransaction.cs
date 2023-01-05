@@ -3,11 +3,6 @@
 public interface ITransaction
 {
     /// <summary>
-    /// Gets information whether the page is writable in a given transaction.
-    /// </summary>
-    bool IsWritable(in Page page);
-
-    /// <summary>
     /// Gets the page at given address.
     /// </summary>
     Page GetAt(int address);

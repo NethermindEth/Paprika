@@ -23,8 +23,8 @@ public static class Program
 
         var manager = new DummyMemoryMappedFileTransaction(DbFileSize, dataPath);
         var root = manager.GetNewDirtyPage(out _);
-        root.Clear();
-
+        root.ClearToWritable();
+        
         byte[] key = new byte[32];
 
         using (new Measure("Writing", Count))

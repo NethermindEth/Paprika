@@ -26,31 +26,41 @@ public readonly unsafe struct Page
 
     public void Clear() => new Span<byte>(_ptr, PageSize).Clear();
 
+    public void ClearToWritable()
+    {
+        Clear();
+        Flags = PageFlags.Writable;
+    }
+
     public void CopyTo(in Page page) => new Span<byte>(_ptr, PageSize).CopyTo(new Span<byte>(page._ptr, PageSize));
 
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> value, int depth, ITransaction manager)
     {
         var page = this;
 
-        if (!manager.IsWritable(page))
+        if (!page.IsWritable)
         {
             page = manager.GetWritableCopy(in this, out _);
+            page.Flags |= PageFlags.Writable;
         }
 
-        PageType type = page.Type;
+        PageFlags type = page.Flags & PageFlags.TypeMask;
 
-        if (type == PageType.None)
+        if (type == PageFlags.None)
         {
             // type not set yet, define it on the basis of the fan out level
-            page.Type = type = depth > MaxFanOutLevel ? PageType.ValuePage : PageType.JumpPage;
+            page.Flags = type = depth > MaxFanOutLevel ? PageFlags.ValuePage : PageFlags.JumpPage;
+
+            // this is a newly allocated empty page, mark as writable
+            page.Flags |= PageFlags.Writable;
         }
 
-        if (type == PageType.JumpPage)
+        if (type == PageFlags.JumpPage)
         {
             return JumpPage.Set(page, key, value, depth, manager);
         }
 
-        if (type == PageType.ValuePage)
+        if (type == PageFlags.ValuePage)
         {
             return ValuePage.Set(page, key, value, manager);
         }
@@ -60,14 +70,14 @@ public readonly unsafe struct Page
 
     public bool TryGet(NibblePath key, out ReadOnlySpan<byte> value, int depth, ITransaction manager)
     {
-        PageType type = Type;
+        PageFlags type = Flags & PageFlags.TypeMask;
 
-        if (type == PageType.JumpPage)
+        if (type == PageFlags.JumpPage)
         {
             return JumpPage.TryGet(this, key, out value, depth, manager);
         }
 
-        if (type == PageType.ValuePage)
+        if (type == PageFlags.ValuePage)
         {
             return ValuePage.TryGet(this, key, out value, manager);
         }
@@ -76,20 +86,20 @@ public readonly unsafe struct Page
         return false;
     }
 
-    private PageType Type
+    private PageFlags Flags
     {
-        get => Head & PageType.Mask;
-        set { Head = value; }
+        get => AsRef<PageFlags>(_ptr);
+        set => AsRef<PageFlags>(_ptr) = value;
     }
 
-    private ref PageType Head => ref AsRef<PageType>(_ptr);
+    private bool IsWritable => (Flags & PageFlags.Writable) == PageFlags.Writable;
 
     /// <summary>
     /// Represents the page type.
     /// Values of this do not overlap with AddressMask, allowing
     /// </summary>
     [Flags]
-    enum PageType : byte
+    enum PageFlags : byte
     {
         None = 0,
 
@@ -105,7 +115,12 @@ public readonly unsafe struct Page
         /// </summary>
         ValuePage = 0b1000_0000,
 
-        Mask = JumpPage | ValuePage,
+        /// <summary>
+        /// Marks the page as writable within the given transaction.
+        /// </summary>
+        Writable = 0b0010_0000,
+
+        TypeMask = JumpPage | ValuePage,
     }
 
     static class JumpPage
@@ -160,7 +175,8 @@ public readonly unsafe struct Page
         private static void WriteAddr(in Page page, NibblePath path, int depth, int actual)
         {
             var addrPtr = GetAddrPtr(page, path, depth);
-            var addr = (actual << 8) | (int)PageType.JumpPage;
+            // the page is written to so it must be writable
+            var addr = (actual << 8) | (int)(PageFlags.JumpPage | PageFlags.Writable);
             if (!BitConverter.IsLittleEndian)
             {
                 addr = BinaryPrimitives.ReverseEndianness(addr);
@@ -181,7 +197,7 @@ public readonly unsafe struct Page
             {
                 // does not exist, get and set
                 var allocated = manager.GetNewDirtyPage(out addr);
-                allocated.Clear();
+                allocated.ClearToWritable();
             }
 
             var child = manager.GetAt(addr);
@@ -233,9 +249,10 @@ public readonly unsafe struct Page
             if (header.OverflowTo != Null)
             {
                 var overflow = manager.GetAt(header.OverflowTo);
-                if (!manager.IsWritable(overflow))
+                if (!overflow.IsWritable)
                 {
                     overflow = manager.GetWritableCopy(overflow, out header.OverflowTo);
+                    overflow.Flags |= PageFlags.Writable;
                 }
 
                 Set(in overflow, key, value, manager);
@@ -244,8 +261,8 @@ public readonly unsafe struct Page
             else
             {
                 var allocated = manager.GetNewDirtyPage(out header.OverflowTo);
-                allocated.Clear();
-                
+                allocated.ClearToWritable();
+
                 Set(in allocated, key, value, manager);
                 return page;
             }
@@ -328,9 +345,6 @@ public readonly unsafe struct Page
 
 public unsafe class MemoryTransaction : ITransaction, IDisposable
 {
-    private readonly void* _writable;
-    private readonly int _bitmapSize;
-
     private readonly HashSet<int> _abandoned = new();
     private readonly Stack<int> _reusable = new();
 
@@ -343,19 +357,9 @@ public unsafe class MemoryTransaction : ITransaction, IDisposable
     {
         _ptr = NativeMemory.AlignedAlloc((UIntPtr)size, (UIntPtr)Page.PageSize);
         _maxPage = (int)(size / Page.PageSize);
-
-        _bitmapSize = _maxPage / 8 + 1;
-        _writable = NativeMemory.Alloc((UIntPtr)_bitmapSize);
     }
 
     public double TotalUsedPages => (double)(_nextPage - _abandoned.Count) / _maxPage;
-
-    public bool IsWritable(in Page page)
-    {
-        var address = GetAddress(page);
-        var @byte = AsRef<byte>(Add<byte>(_writable, address / 8));
-        return (@byte & (1 << (address & 7))) != 0;
-    }
 
     public Page GetAt(int address)
     {
@@ -380,10 +384,6 @@ public unsafe class MemoryTransaction : ITransaction, IDisposable
 
             addr = _nextPage;
 
-            // set bit
-            ref var @byte = ref AsRef<byte>(Add<byte>(_writable, addr / 8));
-            @byte = (byte)(@byte | (1 << (addr & 7)));
-
             _nextPage += 1;
         }
 
@@ -396,9 +396,6 @@ public unsafe class MemoryTransaction : ITransaction, IDisposable
 
     public void Commit()
     {
-        // simulate the commit with the clear
-        new Span<byte>(_writable, _bitmapSize).Clear();
-
         foreach (var page in _abandoned)
         {
             _reusable.Push(page);
@@ -412,10 +409,7 @@ public unsafe class MemoryTransaction : ITransaction, IDisposable
 
 public unsafe class DummyMemoryMappedFileTransaction : ITransaction
 {
-    private readonly long _size;
     private readonly int _maxPage;
-    private readonly int _bitmapSize;
-    private readonly void* _writable;
     private readonly FileStream _file;
     private readonly MemoryMappedFile _mapped;
     private readonly MemoryMappedViewAccessor _accessor;
@@ -428,11 +422,7 @@ public unsafe class DummyMemoryMappedFileTransaction : ITransaction
 
     public DummyMemoryMappedFileTransaction(long size, string dir)
     {
-        _size = size;
         _maxPage = (int)(size / Page.PageSize);
-
-        _bitmapSize = _maxPage / 8 + 1;
-        _writable = NativeMemory.Alloc((UIntPtr)_bitmapSize);
 
         var name = Path.Combine(dir, "memory-mapped.db");
 
@@ -451,13 +441,6 @@ public unsafe class DummyMemoryMappedFileTransaction : ITransaction
     }
 
     public double TotalUsedPages => (double)(_nextPage - _abandoned.Count) / _maxPage;
-
-    public bool IsWritable(in Page page)
-    {
-        var address = GetAddress(page);
-        var @byte = AsRef<byte>(Add<byte>(_writable, address / 8));
-        return (@byte & (1 << (address & 7))) != 0;
-    }
 
     public Page GetAt(int address)
     {
@@ -485,10 +468,6 @@ public unsafe class DummyMemoryMappedFileTransaction : ITransaction
 
             addr = _nextPage;
 
-            // set writable bit
-            ref var @byte = ref AsRef<byte>(Add<byte>(_writable, addr / 8));
-            @byte = (byte)(@byte | (1 << (addr & 7)));
-
             _nextPage += 1;
         }
 
@@ -501,9 +480,6 @@ public unsafe class DummyMemoryMappedFileTransaction : ITransaction
 
     public void Commit()
     {
-        // simulate the commit with the clear
-        new Span<byte>(_writable, _bitmapSize).Clear();
-
         foreach (var page in _abandoned)
         {
             _reusable.Push(page);
