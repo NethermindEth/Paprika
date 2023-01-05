@@ -19,20 +19,6 @@ public interface ITransaction
     Page GetNewDirtyPage(out int addr);
 
     /// <summary>
-    /// Gets the writable copy (copy-on-write) of the given page.
-    /// </summary>
-    /// <param name="page"></param>
-    /// <param name="addr"></param>
-    /// <returns>The new page with the copied content.</returns>
-    Page GetWritableCopy(in Page page, out int addr)
-    {
-        var allocated = GetNewDirtyPage(out addr);
-        page.CopyTo(allocated);
-        Abandon(page);
-        return allocated;
-    }
-
-    /// <summary>
     /// Abandons the page, marking it as unused once the transaction commits.
     /// </summary>
     void Abandon(in Page page);

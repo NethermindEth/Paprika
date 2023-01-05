@@ -34,14 +34,13 @@ public readonly unsafe struct Page
 
     public void CopyTo(in Page page) => new Span<byte>(_ptr, PageSize).CopyTo(new Span<byte>(page._ptr, PageSize));
 
-    public Page Set(in NibblePath key, in ReadOnlySpan<byte> value, int depth, ITransaction manager)
+    public Page Set(in NibblePath key, in ReadOnlySpan<byte> value, int depth, ITransaction tx)
     {
         var page = this;
 
         if (!page.IsWritable)
         {
-            page = manager.GetWritableCopy(in this, out _);
-            page.Flags |= PageFlags.Writable;
+            page = GetWritableCopy(tx, in this, out _);
         }
 
         PageFlags type = page.Flags & PageFlags.TypeMask;
@@ -57,15 +56,24 @@ public readonly unsafe struct Page
 
         if (type == PageFlags.JumpPage)
         {
-            return JumpPage.Set(page, key, value, depth, manager);
+            return JumpPage.Set(page, key, value, depth, tx);
         }
 
         if (type == PageFlags.ValuePage)
         {
-            return ValuePage.Set(page, key, value, manager);
+            return ValuePage.Set(page, key, value, tx);
         }
 
         return page;
+    }
+
+    private static Page GetWritableCopy(ITransaction tx, in Page page, out int addr)
+    {
+        var allocated = tx.GetNewDirtyPage(out addr);
+        page.CopyTo(allocated);
+        tx.Abandon(page);
+        allocated.Flags |= PageFlags.Writable;
+        return allocated;
     }
 
     public bool TryGet(NibblePath key, out ReadOnlySpan<byte> value, int depth, ITransaction manager)
@@ -237,7 +245,7 @@ public readonly unsafe struct Page
         private const ushort NullAddr = 0;
         private const int KeySlice = 1;
 
-        public static Page Set(in Page page, in NibblePath key, in ReadOnlySpan<byte> value, ITransaction manager)
+        public static Page Set(in Page page, in NibblePath key, in ReadOnlySpan<byte> value, ITransaction tx)
         {
             if (TryWrite(page, key, value))
             {
@@ -248,22 +256,21 @@ public readonly unsafe struct Page
             ref var header = ref AsRef<Header>(page._ptr);
             if (header.OverflowTo != Null)
             {
-                var overflow = manager.GetAt(header.OverflowTo);
+                var overflow = tx.GetAt(header.OverflowTo);
                 if (!overflow.IsWritable)
                 {
-                    overflow = manager.GetWritableCopy(overflow, out header.OverflowTo);
-                    overflow.Flags |= PageFlags.Writable;
+                    overflow = GetWritableCopy(tx, overflow, out header.OverflowTo);
                 }
 
-                Set(in overflow, key, value, manager);
+                Set(in overflow, key, value, tx);
                 return page;
             }
             else
             {
-                var allocated = manager.GetNewDirtyPage(out header.OverflowTo);
+                var allocated = tx.GetNewDirtyPage(out header.OverflowTo);
                 allocated.ClearToWritable();
 
-                Set(in allocated, key, value, manager);
+                Set(in allocated, key, value, tx);
                 return page;
             }
         }
