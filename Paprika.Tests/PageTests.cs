@@ -48,7 +48,7 @@ public class PageTests
             AssertValue(tx, key, i);
         }
         
-        tx.Commit(CommitOptions.FlushDataThenRoot);
+        tx.Commit();
 
         // reset random
         random = new Random(13);

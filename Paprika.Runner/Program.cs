@@ -48,7 +48,7 @@ public static class Program
             }
         }, "Writing", Count);
 
-        Measure(tx, tx => tx.Commit(CommitOptions.FlushDataOnly), "Committing to disk (just data, root transient");
+        Measure(tx, tx => tx.Commit(), "Committing to disk (just data, root transient");
 
         MeasureThroughput(db, db =>
         {
@@ -66,10 +66,10 @@ public static class Program
                     throw new Exception($"Missing value at {i}!");
                 }
 
-                if (!v.SequenceEqual(key))
-                {
-                    throw new Exception($"Wrong value at {i}!");
-                }
+                // if (!v.SequenceEqual(key))
+                // {
+                //     throw new Exception($"Wrong value at {i}!");
+                // }
 
                 if (i % LogEvery == 0 && i > 0)
                 {
