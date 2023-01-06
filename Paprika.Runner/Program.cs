@@ -48,7 +48,7 @@ public static class Program
             }
         }, "Writing", Count);
 
-        Measure(tx, tx => tx.Commit(), "Committing to disk (just data, root transient");
+        Measure(tx, tx => tx.Commit(), "Committing to disk (including the root)");
 
         MeasureThroughput(db, db =>
         {

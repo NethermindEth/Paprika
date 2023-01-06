@@ -13,9 +13,16 @@ public abstract unsafe class PagedDb : IDb, IDisposable
     /// At least two are required to make sure that the writing transaction does not overwrite the current root.
     /// </summary>
     /// <remarks>
+    /// REORGS
     /// It can be set arbitrary big and used for handling reorganizations.
     /// If history depth is set to the max reorg depth,
-    /// moving to previous block is just a single write transaction moving the root back. 
+    /// moving to previous block is just a single write transaction moving the root back.
+    ///
+    /// ABANDONED PAGES
+    /// To keep N roots active, the pages that were abandoned in previous transactions should be reused only on
+    /// rolling over, meaning, that they should be taken from the item that the root will point to. In this case,
+    /// if undo happens, they are still active. So use abandoned pages and add them to abandoned pages of the given
+    /// transaction, use at will and commit them so that they can be reused in <see cref="HistoryDepth"/> commits. 
     /// </remarks>
     private const int HistoryDepth = 2;
 
