@@ -39,6 +39,11 @@ public readonly unsafe struct Page
         Flags = PageFlags.Writable;
     }
 
+    public void MarkWritable()
+    {
+        Flags = PageFlags.Writable;
+    }
+
     public void CopyTo(in Page page) => new Span<byte>(_ptr, PageSize).CopyTo(new Span<byte>(page._ptr, PageSize));
 
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> value, int depth, IInternalTransaction tx)
