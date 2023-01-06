@@ -22,6 +22,8 @@ public readonly unsafe struct Page
         _ptr = ptr;
     }
 
+    public TPage* As<TPage>() where TPage : unmanaged => (TPage*)_ptr;
+
     public UIntPtr Raw => new(_ptr);
 
     public void Clear() => new Span<byte>(_ptr, PageSize).Clear();
@@ -34,7 +36,7 @@ public readonly unsafe struct Page
 
     public void CopyTo(in Page page) => new Span<byte>(_ptr, PageSize).CopyTo(new Span<byte>(page._ptr, PageSize));
 
-    public Page Set(in NibblePath key, in ReadOnlySpan<byte> value, int depth, ITransaction tx)
+    public Page Set(in NibblePath key, in ReadOnlySpan<byte> value, int depth, IInternalTransaction tx)
     {
         var page = this;
 
@@ -67,7 +69,12 @@ public readonly unsafe struct Page
         return page;
     }
 
-    private static Page GetWritableCopy(ITransaction tx, in Page page, out int addr)
+    public void CleanWritable()
+    {
+        throw new NotImplementedException();
+    }
+
+    private static Page GetWritableCopy(IInternalTransaction tx, in Page page, out int addr)
     {
         var allocated = tx.GetNewDirtyPage(out addr);
         page.CopyTo(allocated);
@@ -76,7 +83,7 @@ public readonly unsafe struct Page
         return allocated;
     }
 
-    public bool TryGet(NibblePath key, out ReadOnlySpan<byte> value, int depth, ITransaction manager)
+    public bool TryGet(NibblePath key, out ReadOnlySpan<byte> value, int depth, IInternalTransaction manager)
     {
         PageFlags type = Flags & PageFlags.TypeMask;
 
@@ -140,7 +147,7 @@ public readonly unsafe struct Page
         /// Tries to find the <paramref name="path"/> in the given page.
         /// </summary>
         public static bool TryGet(in Page page, in NibblePath path, out ReadOnlySpan<byte> value, int depth,
-            ITransaction manager)
+            IInternalTransaction manager)
         {
             var addr = ReadAddr(page, path, depth);
 
@@ -197,7 +204,7 @@ public readonly unsafe struct Page
         private static int OneOnOdd(int depth) => depth & 1;
 
         public static Page Set(in Page page, in NibblePath key, in ReadOnlySpan<byte> value, int depth,
-            ITransaction manager)
+            IInternalTransaction manager)
         {
             var addr = ReadAddr(page, key, depth);
 
@@ -245,7 +252,7 @@ public readonly unsafe struct Page
         private const ushort NullAddr = 0;
         private const int KeySlice = 1;
 
-        public static Page Set(in Page page, in NibblePath key, in ReadOnlySpan<byte> value, ITransaction tx)
+        public static Page Set(in Page page, in NibblePath key, in ReadOnlySpan<byte> value, IInternalTransaction tx)
         {
             if (TryWrite(page, key, value))
             {
@@ -307,7 +314,7 @@ public readonly unsafe struct Page
             return false;
         }
 
-        public static bool TryGet(in Page page, NibblePath key, out ReadOnlySpan<byte> value, ITransaction manager)
+        public static bool TryGet(in Page page, NibblePath key, out ReadOnlySpan<byte> value, IInternalTransaction manager)
         {
             var slice = key.SliceFrom(KeySlice);
             var index = GetKeyIndex(key);
@@ -320,7 +327,7 @@ public readonly unsafe struct Page
         }
 
         private static bool TryGetImpl(in Page page, int index, in Span<byte> rawKey, out ReadOnlySpan<byte> value,
-            ITransaction manager)
+            IInternalTransaction manager)
         {
             var header = (Header*)page._ptr;
             var addr = header->Nibble[index];
@@ -360,71 +367,8 @@ public readonly unsafe struct Page
     }
 }
 
-public unsafe class MemoryTransaction : ITransaction, IDisposable
-{
-    private readonly HashSet<int> _abandoned = new();
-    private readonly Stack<int> _reusable = new();
 
-    private readonly void* _ptr;
-    private readonly int _maxPage;
-
-    private int _nextPage;
-
-    public MemoryTransaction(ulong size)
-    {
-        _ptr = NativeMemory.AlignedAlloc((UIntPtr)size, (UIntPtr)Page.PageSize);
-        _maxPage = (int)(size / Page.PageSize);
-    }
-
-    public double TotalUsedPages => (double)(_nextPage - _abandoned.Count) / _maxPage;
-
-    public Page GetAt(int address)
-    {
-        if (address > _maxPage)
-            throw new ArgumentException($"Requested address {address} while the max page is {_maxPage}");
-
-        return new Page(Add<byte>(_ptr, address * Page.PageSize));
-    }
-
-    public int GetAddress(in Page page)
-    {
-        return (int)(ByteOffset(ref AsRef<byte>(_ptr), ref AsRef<byte>(page.Raw.ToPointer()))
-            .ToInt64() / Page.PageSize);
-    }
-
-    public Page GetNewDirtyPage(out int addr)
-    {
-        if (!_reusable.TryPop(out addr))
-        {
-            if (_nextPage >= _maxPage)
-                throw new OutOfMemoryException("Not enough memory with page manager");
-
-            addr = _nextPage;
-
-            _nextPage += 1;
-        }
-
-        var page = GetAt(addr);
-        page.Clear();
-        return page;
-    }
-
-    public void Abandon(in Page page) => _abandoned.Add(GetAddress(page));
-
-    public void Commit()
-    {
-        foreach (var page in _abandoned)
-        {
-            _reusable.Push(page);
-        }
-
-        _abandoned.Clear();
-    }
-
-    public void Dispose() => NativeMemory.AlignedFree(_ptr);
-}
-
-public unsafe class DummyMemoryMappedFileTransaction : ITransaction
+public unsafe class DummyMemoryMappedFileInternalTransaction : IInternalTransaction
 {
     private readonly int _maxPage;
     private readonly FileStream _file;
@@ -437,7 +381,7 @@ public unsafe class DummyMemoryMappedFileTransaction : ITransaction
     private int _nextPage;
     private readonly void* _ptr;
 
-    public DummyMemoryMappedFileTransaction(long size, string dir)
+    public DummyMemoryMappedFileInternalTransaction(long size, string dir)
     {
         _maxPage = (int)(size / Page.PageSize);
 

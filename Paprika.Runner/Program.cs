@@ -21,7 +21,7 @@ public static class Program
 
         Directory.CreateDirectory(dataPath);
 
-        var manager = new DummyMemoryMappedFileTransaction(DbFileSize, dataPath);
+        var manager = new DummyMemoryMappedFileInternalTransaction(DbFileSize, dataPath);
         var root = manager.GetNewDirtyPage(out _);
         root.ClearToWritable();
         

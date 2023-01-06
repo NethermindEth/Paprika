@@ -1,6 +1,6 @@
 ﻿namespace Paprika;
 
-public interface ITransaction
+public interface IInternalTransaction
 {
     /// <summary>
     /// Gets the page at given address.
