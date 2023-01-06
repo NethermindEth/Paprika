@@ -17,7 +17,7 @@ public readonly unsafe struct Page
 
     private readonly void* _ptr;
 
-    public Page(void* ptr)
+    public Page(byte* ptr)
     {
         _ptr = ptr;
     }
@@ -28,7 +28,7 @@ public readonly unsafe struct Page
 
     public void Clear() => new Span<byte>(_ptr, PageSize).Clear();
 
-    public void ClearToWritable()
+    private void ClearToWritable()
     {
         Clear();
         Flags = PageFlags.Writable;
@@ -69,9 +69,9 @@ public readonly unsafe struct Page
         return page;
     }
 
-    public void CleanWritable()
+    public void ClearWritable()
     {
-        throw new NotImplementedException();
+        // TODO: clear writable flags first
     }
 
     private static Page GetWritableCopy(IInternalTransaction tx, in Page page, out int addr)
@@ -204,21 +204,21 @@ public readonly unsafe struct Page
         private static int OneOnOdd(int depth) => depth & 1;
 
         public static Page Set(in Page page, in NibblePath key, in ReadOnlySpan<byte> value, int depth,
-            IInternalTransaction manager)
+            IInternalTransaction tx)
         {
             var addr = ReadAddr(page, key, depth);
 
             if (addr == Null)
             {
                 // does not exist, get and set
-                var allocated = manager.GetNewDirtyPage(out addr);
+                var allocated = tx.GetNewDirtyPage(out addr);
                 allocated.ClearToWritable();
             }
 
-            var child = manager.GetAt(addr);
+            var child = tx.GetAt(addr);
 
             // remember, the child might have changed to another ref
-            var actual = manager.GetAddress(child.Set(SlicePath(key, depth), value, depth + 1, manager));
+            var actual = tx.GetAddress(child.Set(SlicePath(key, depth), value, depth + 1, tx));
 
             WriteAddr(page, key, depth, actual);
 

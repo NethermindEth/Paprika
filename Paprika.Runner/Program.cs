@@ -1,9 +1,11 @@
-﻿namespace Paprika.Runner;
+﻿using Paprika.Db;
+
+namespace Paprika.Runner;
 
 public static class Program
 {
     private const int Count = 160_000_000;
-    private const int LogEvery = 10_000_000;
+    private const int LogEvery = 1_000_000;
     private const long Gb = 1024 * 1024 * 1024L;
     private const long DbFileSize = 20 * Gb;
 
@@ -21,10 +23,9 @@ public static class Program
 
         Directory.CreateDirectory(dataPath);
 
-        var manager = new DummyMemoryMappedFileInternalTransaction(DbFileSize, dataPath);
-        var root = manager.GetNewDirtyPage(out _);
-        root.ClearToWritable();
-        
+        var db = new MemoryMappedPagedDb(DbFileSize, dataPath, true);
+        var tx = db.Begin();
+
         byte[] key = new byte[32];
 
         using (new Measure("Writing", Count))
@@ -35,11 +36,11 @@ public static class Program
             {
                 random.NextBytes(key);
 
-                root.Set(NibblePath.FromKey(key), key, 0, manager);
+                tx.Set(key, key);
 
                 if (i % LogEvery == 0 && i > 0)
                 {
-                    var used = manager.TotalUsedPages;
+                    var used = tx.TotalUsedPages;
                     Console.WriteLine(
                         "Wrote {0:N0} items, DB usage is at {1:P} which gives {2:F2}GB out of allocated {3}GB", i, used,
                         used * DbFileSize / Gb, DbFileSize / Gb);
@@ -47,15 +48,22 @@ public static class Program
             }
         }
 
+        using (new Measure("Committing to disk just data", Count))
+        {
+            tx.Commit(CommitOptions.FlushDataOnly);
+        }
+
         using (new Measure("Reading", Count))
         {
             var random = new Random(seed);
+
+            tx = db.Begin();
 
             for (var i = 0; i < Count; i++)
             {
                 random.NextBytes(key);
 
-                if (!root.TryGet(NibblePath.FromKey(key), out var v, 0, manager))
+                if (!tx.TryGet(key, out var v))
                 {
                     throw new Exception($"Missing value at {i}!");
                 }

@@ -14,6 +14,8 @@ public interface ITransaction
     void Set(in ReadOnlySpan<byte> key, in ReadOnlySpan<byte> value);
 
     void Commit(CommitOptions options);
+
+    double TotalUsedPages { get; }
 }
 
 public enum CommitOptions
