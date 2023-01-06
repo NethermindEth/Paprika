@@ -1,12 +1,17 @@
 ﻿using System.Buffers.Binary;
 using System.Diagnostics;
-using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using static System.Runtime.CompilerServices.Unsafe;
 
 namespace Paprika;
 
+/// <summary>
+/// Struct representing data oriented page types.
+/// Two separate types are used: Value and Jump page.
+/// Jump pages consist only of jumps according to a part of <see cref="NibblePath"/>.
+/// Value pages have buckets + skip list for storing values.
+/// </summary>
 public readonly unsafe struct Page
 {
     public const int PageCount = 0x0100_0000; // 64GB addressable
@@ -314,7 +319,8 @@ public readonly unsafe struct Page
             return false;
         }
 
-        public static bool TryGet(in Page page, NibblePath key, out ReadOnlySpan<byte> value, IInternalTransaction manager)
+        public static bool TryGet(in Page page, NibblePath key, out ReadOnlySpan<byte> value,
+            IInternalTransaction manager)
         {
             var slice = key.SliceFrom(KeySlice);
             var index = GetKeyIndex(key);
@@ -365,89 +371,4 @@ public readonly unsafe struct Page
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static int GetKeyIndex(in NibblePath key) => (key.GetAt(0) << 2) | (key.GetAt(1) >> 2);
     }
-}
-
-
-public unsafe class DummyMemoryMappedFileInternalTransaction : IInternalTransaction
-{
-    private readonly int _maxPage;
-    private readonly FileStream _file;
-    private readonly MemoryMappedFile _mapped;
-    private readonly MemoryMappedViewAccessor _accessor;
-
-    private readonly HashSet<int> _abandoned = new();
-    private readonly Stack<int> _reusable = new();
-
-    private int _nextPage;
-    private readonly void* _ptr;
-
-    public DummyMemoryMappedFileInternalTransaction(long size, string dir)
-    {
-        _maxPage = (int)(size / Page.PageSize);
-
-        var name = Path.Combine(dir, "memory-mapped.db");
-
-        if (File.Exists(name))
-            File.Delete(name);
-
-        _file = new FileStream(name, FileMode.CreateNew, FileAccess.ReadWrite);
-        _file.SetLength(size);
-        _mapped = MemoryMappedFile.CreateFromFile(_file, null, size, MemoryMappedFileAccess.ReadWrite,
-            HandleInheritability.None, false);
-        _accessor = _mapped.CreateViewAccessor();
-
-        byte* ptr = null;
-        _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
-        _ptr = ptr;
-    }
-
-    public double TotalUsedPages => (double)(_nextPage - _abandoned.Count) / _maxPage;
-
-    public Page GetAt(int address)
-    {
-        if (address >= _maxPage)
-            throw new ArgumentException($"Requested address {address} while the max page is {_maxPage}");
-
-        if (address < 0)
-            throw new ArgumentException($"Requested address {address} that is smaller than 0!");
-
-        return new Page((byte*)_ptr + address * ((long)Page.PageSize));
-    }
-
-    public int GetAddress(in Page page)
-    {
-        return (int)(ByteOffset(ref AsRef<byte>(_ptr), ref AsRef<byte>(page.Raw.ToPointer()))
-            .ToInt64() / Page.PageSize);
-    }
-
-    public Page GetNewDirtyPage(out int addr)
-    {
-        if (!_reusable.TryPop(out addr))
-        {
-            if (_nextPage >= _maxPage)
-                throw new OutOfMemoryException("Not enough memory with page manager");
-
-            addr = _nextPage;
-
-            _nextPage += 1;
-        }
-
-        var page = GetAt(addr);
-        page.Clear();
-        return page;
-    }
-
-    public void Abandon(in Page page) => _abandoned.Add(GetAddress(page));
-
-    public void Commit()
-    {
-        foreach (var page in _abandoned)
-        {
-            _reusable.Push(page);
-        }
-
-        _abandoned.Clear();
-    }
-
-    public void Dispose() => NativeMemory.AlignedFree(_ptr);
 }
