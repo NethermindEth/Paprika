@@ -1,38 +1,36 @@
 # :hot_pepper: Paprika
 
-Paprika is an imeplementation of the Patricia tree used in Ethereum. It has the following key properties:
+Paprika provides a custom implementation of the Patricia tree used in Ethereum. It's inspired mostly by [LMDB](https://github.com/LMDB/lmdb). It aims at delivering the following:
 
 1. no external KV storage
 1. no managed memory overhead - Paprika uses almost no managed memory as only `Span<byte>`, stackallocated variables and uses no managed representation of the tree
-1. different commit options - depending on the commit level, it can update values in place (for initial blocks for example)
+1. atomic commit
+1. the history of N-th last versions of the db
 
 **No external KV storage** means that Paprika is selfsufficient in regards to writing and reading data from disk and requires no third party dbs like Rocks or others.
 
 **No managed memory overhead** means that Paprika uses almost no managed memory. Only `Span<byte>`, stackallocated variables are used. There's no representation of the tree stored in the managed memory. Also, it uses `[module: SkipLocalsInit]` to not clean any memory before accessing it.
 
-**Different commit options** mean that depending on the level of the commit of the batch, Paprika can:
+**Atomic commit** means atomic in the meaning of ACID. If there's a failure during the commit the db shall not be corrupted and shall represent the previous state.
 
-1. write almost in place, just updating the root. It does by reusing nodes that were decomissioned by splits etc.
-1. commit a whole batch, making it readonly (useful to commit a block so that it's readable later)
-1. flush everything to disk (forces to flush, making the previous fully persistent)
-
-The database assumes no deletes and keeping the last root in the memory. If deletes or pruning is required, it can be added later on. For example, by copying only values that are alive. The roots can be captured and stored elsewhere. They map to a single long and one can easily amend paprika to get old data by its root.
+**History** is preserved using additional metadata pages, that keep the root and the pages that were marked as abandoned .
 
 ## Design
 
-Some design principles:
+Some design principles of Paprika:
 
-1. Paprika uses `memory mapped files` to store and read data. 
-1. For writing data, it writes them to the first empty space of the given size (unaligned) and maps it to a single `long`.
-1. `long` identifier is used for internal addressing in the tree.
-1. `Keccak` or `RLP` of the node is stored outside of tree as it can be always recalculated if needed and having it memmapped makes the files tooo big.
+1. `memory mapped files` used to store and read data
+1. 4kb `page` based addressing and memory management
+1. `copy on write`, so no dirty write on previous data
+1. a single tx writer
+1. use `NibblePath` without decoding it to bytes, which allows easy slicing and fast comparisons. It's also compact
+1. use alloc free RLP/Keccak computations
 
 ## Benchmarks
 
-The following scenarios were used for benchmarking and are presented in the order of running them at various points of time. The latest should be used to get final insights and the rest should be treated as a history.
+After the redesign to be page oriented, the benchmarks use bigger numbers
 
-1. [80 millions of pairs](#80-millions-of-pairs), written in batches of 10000, which is meant to similuate the block
-1. [160 millions of pairs](#160-millions-of-pairs), written in batches of 10000, which is meant to similuate the block
+1. [160 millions of pairs](#160-millions-of-pairs), written in a single transaction, which shall simulate the initial population/sync
 
 In each case the key is 32 bytes long. The value is 32 bytes long as well.
 
@@ -44,42 +42,29 @@ Almost no managed memory used
 
 ![image](https://user-images.githubusercontent.com/519707/204166299-81c05582-7e0d-4401-b2cf-91a3c1b7153b.png)
 
-#### Performance profiling
-
-Some potential for extracting scope when writing items down
-
-![image](https://user-images.githubusercontent.com/519707/204166363-afe54fec-d772-49ff-9d63-0bf7571b4294.png)
-
-
-### 80 millions of pairs
-
-The latest run with simplified and upgraded batch handling. Now every chunk of memory that is written to the database within a batch is updatable. This benefits scenario when a leaf node is promoted to a branch. Leaf has a lot of space and can provide for branches. Additionally a new `NibblePath` used with `ref byte` field to make the paths analysis even faster from `Span<>`. The introduction of the `NibblePath` will help with extensions a lot.
-
-- **70% of the disk size reduction** to the previous benchmarked version of Paprika
-- **writing 1,500,000 pairs per second**
-- **reading 1,700,000 pairs per second**
-
-Writing of 80,000,000.00 items with batch of 10000 took 00:00:50.6045946 giving a throughput 1,580,884.00 items/s
-Reading of 80,000,000.00 items with batch of 10000 took 00:00:44.9487146 giving a throughput 1,779,806.00 items/s
-
-```
-File 00000 is used by the current root at 0%
-File 00001 is used by the current root at 0%
-File 00002 is used by the current root at 70%
-File 00003 is used by the current root at 76%
-File 00004 is used by the current root at 70%
-File 00005 is used by the current root at 61%
-File 00006 is used by the current root at 57%
-File 00007 is used by the current root at 71%
-File 00008 is used by the current root at 86%
-File 00009 is used by the current root at 99%
-```
-
 ### 160 millions of pairs
 
-Clearly, memmapping is beyond memory size and requires some reads that impacts the speed
+Writing 160 million 32bytes -> 32bytes mappings
 
-- **writing 230,000 pairs per second**
-- **reading 300,000 pairs per second**
-- **14GB** on disk
-- no Keccaks yet
+```
+Wrote 10,000,000 items, DB usage is at 5.01% which gives 1.00GB out of allocated 20GB
+Wrote 20,000,000 items, DB usage is at 9.85% which gives 1.97GB out of allocated 20GB
+Wrote 30,000,000 items, DB usage is at 11.41% which gives 2.28GB out of allocated 20GB
+Wrote 40,000,000 items, DB usage is at 15.05% which gives 3.01GB out of allocated 20GB
+Wrote 50,000,000 items, DB usage is at 18.85% which gives 3.77GB out of allocated 20GB
+Wrote 60,000,000 items, DB usage is at 21.10% which gives 4.22GB out of allocated 20GB
+Wrote 70,000,000 items, DB usage is at 24.86% which gives 4.97GB out of allocated 20GB
+Wrote 80,000,000 items, DB usage is at 28.02% which gives 5.60GB out of allocated 20GB
+Wrote 90,000,000 items, DB usage is at 30.84% which gives 6.17GB out of allocated 20GB
+Wrote 100,000,000 items, DB usage is at 34.42% which gives 6.88GB out of allocated 20GB
+Wrote 110,000,000 items, DB usage is at 37.41% which gives 7.48GB out of allocated 20GB
+Wrote 120,000,000 items, DB usage is at 40.52% which gives 8.10GB out of allocated 20GB
+Wrote 130,000,000 items, DB usage is at 43.89% which gives 8.78GB out of allocated 20GB
+Wrote 140,000,000 items, DB usage is at 46.91% which gives 9.38GB out of allocated 20GB
+Wrote 150,000,000 items, DB usage is at 50.14% which gives 10.03GB out of allocated 20GB
+Writing of 160,000,000.00 items took 00:08:19.8204173 giving a throughput 320,114.00 items/s
+
+Committing to disk took 00:00:10.4085680
+
+Reading of 160,000,000.00 items took 00:08:24.8362414 giving a throughput 316,934.00 items/s
+```
