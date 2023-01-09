@@ -5,9 +5,6 @@ namespace Paprika.Db;
 
 public abstract unsafe class PagedDb : IDb, IDisposable
 {
-    // fixed pages    
-    private const int PageRoot = 0;
-
     /// <summary>
     /// The number of roots kept in the history.
     /// At least two are required to make sure that the writing transaction does not overwrite the current root.
@@ -28,19 +25,15 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
     private readonly int _maxPage;
     private readonly MetadataPage*[] _metadata;
-    private RootPage* _root;
 
-    [StructLayout(LayoutKind.Explicit, Size = Page.PageSize, Pack = 1)]
-    private struct RootPage
-    {
-        [FieldOffset(0)] public long Number;
-    }
+    private long _currentRoot;
 
     [StructLayout(LayoutKind.Explicit, Size = Page.PageSize, Pack = 1)]
     private struct MetadataPage
     {
         [FieldOffset(0)] public int NextFreePage;
         [FieldOffset(4)] public int Root;
+        [FieldOffset(8)] public long TxId;
 
         /// <summary>
         /// Pops the next free page.
@@ -70,26 +63,35 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
     protected void RootInit()
     {
-        _root = GetAt(PageRoot).As<RootPage>();
         for (var i = 0; i < HistoryDepth; i++)
         {
-            _metadata[i] = GetAt(1 + i).As<MetadataPage>();
+            _metadata[i] = GetAt(i).As<MetadataPage>();
         }
 
-        // the 0th page will have the properly number set to first free page
-        _metadata[0]->NextFreePage = HistoryDepth + 1;
+        if (_metadata[0]->NextFreePage < HistoryDepth)
+        {
+            // the 0th page will have the properly number set to first free page
+            _metadata[0]->NextFreePage = HistoryDepth;
+        }
+
+        _currentRoot = 0;
+        for (var i = 0; i < HistoryDepth; i++)
+        {
+            if (_metadata[i]->TxId > _currentRoot)
+            {
+                _currentRoot = _metadata[i]->TxId;
+            }
+        }
     }
 
     protected abstract void* Ptr { get; }
 
     public double TotalUsedPages => (double)CurrentMeta->NextFreePage / _maxPage;
 
-    private long Root => _root->Number;
+    private MetadataPage* CurrentMeta => _metadata[_currentRoot % HistoryDepth];
+    private MetadataPage* NextMeta => _metadata[(_currentRoot + 1) % HistoryDepth];
 
-    private MetadataPage* CurrentMeta => _metadata[Root % HistoryDepth];
-    private MetadataPage* NextMeta => _metadata[(Root + 1) % HistoryDepth];
-
-    private void MoveRootNext() => _root->Number++;
+    private void MoveRootNext() => _currentRoot++;
 
     private Page GetAt(int address)
     {
@@ -125,6 +127,9 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             // copy to next meta
             *_db.NextMeta = *_db.CurrentMeta;
             _meta = _db.NextMeta;
+
+            // set next id
+            _meta->TxId++;
 
             // peek the next free and treat it as root
             var newRoot = _meta->PopNextFreePage();
