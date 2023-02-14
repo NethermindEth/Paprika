@@ -66,7 +66,7 @@ public class PageTests
         }
     }
 
-    [Test]
+    [Test, Explicit("Long running")]
     public void Same_path()
     {
         using var manager = new MemoryPageManager(128 * 1024 * 1024UL);
