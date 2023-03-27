@@ -26,7 +26,7 @@ jobs:
       id: cache-dotnet
       uses: actions/cache@v3
       with:
-          path: ${{ DOTNET_INSTALL_DIR}}
+          path: ${{ env.DOTNET_INSTALL_DIR }}
           key: ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}
           restore-keys: ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}
     - name: Set up .NET
