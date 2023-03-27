@@ -403,5 +403,5 @@ FodyWeavers.xsd
 .DS_Store
 
 # Paprika files
-
-db
+src/Paprika.Runner/db
+src/Tree.Runner/db
