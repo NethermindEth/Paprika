@@ -15,7 +15,18 @@ jobs:
     permissions:
       contents: read
     steps:
-    - uses: ./.github/actions/setup-dotnet
+    - name: Cache dotnet
+      id: cache-dotnet
+      uses: actions/cache@v3
+      with:
+          path: ${{ DOTNET_INSTALL_DIR}}
+          key: ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}
+          restore-keys: ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}
+    - name: Set up .NET
+      if: ${{ steps.cache-dotnet.outputs.cache-hit != 'true' }}
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
     - uses: actions/checkout@v3
       with:
         submodules: true
