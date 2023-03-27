@@ -1,0 +1,38 @@
+name: 'Paprika Tests'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+env:
+  BUILD_CONFIG: release
+  DOTNET_VERSION: 7
+  DOTNET_INSTALL_DIR: '~/.dotnet'
+
+jobs:
+  tests:
+    name: 'Run Paprika tests'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: ./.github/actions/setup-dotnet
+    - uses: actions/checkout@v3
+      with:
+        submodules: true
+    - name: Cache nuget
+      uses: actions/cache@v3
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+
+    - name: Test
+      run: dotnet test dotnet test src/Paprika.Tests -c ${{ env.BUILD_CONFIG }}
