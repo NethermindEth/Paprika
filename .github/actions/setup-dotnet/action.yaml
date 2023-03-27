@@ -1,0 +1,24 @@
+name: "Setup dotnet"
+description: "Sets the dotnet"
+
+inputs:
+  version:  # dotnet version to install
+    description: 'dotnet version to install'
+    required: true
+    default: '7'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Cache dotnet
+      id: cache-dotnet
+      uses: actions/cache@v3
+      with:
+          path: '~/.dotnet'
+          key: ${{ runner.os }}-dotnet-${{ inputs.version }}
+          restore-keys: ${{ runner.os }}-dotnet-${{ inputs.version }}
+    - name: Set up .NET
+      if: ${{ steps.cache-dotnet.outputs.cache-hit != 'true' }}
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: ${{ inputs.version }}
