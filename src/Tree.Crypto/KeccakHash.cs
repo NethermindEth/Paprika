@@ -436,7 +436,7 @@ namespace Tree.Crypto
             {
                 ThrowBadKeccak();
             }
-            
+
             Span<byte> temp = stackalloc byte[TEMP_BUFF_SIZE];
             input[..remainingInputLength].CopyTo(temp);
             temp[remainingInputLength] = 1;

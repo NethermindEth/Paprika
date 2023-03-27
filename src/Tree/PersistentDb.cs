@@ -7,7 +7,7 @@ public class PersistentDb : IDb
 {
     private readonly string _dir;
     public const string Ext = "db";
-    
+
     private const int ChunkSize = 1024 * 1024 * 1024;
     private readonly List<File> _files = new();
     private readonly int[] _used = new int[1000]; // dummy constant
@@ -26,7 +26,7 @@ public class PersistentDb : IDb
         var decoded = Id.Decode(id);
 
         var chunk = decoded.File == _currentNumber ? _current : _files[decoded.File].Chunk;
-        
+
         return chunk.Read(decoded.Position, decoded.Length);
     }
 
@@ -43,7 +43,7 @@ public class PersistentDb : IDb
         {
             BuildNewFile();
         }
-        
+
         return Id.Encode(position, payload.Length, _currentNumber);
     }
 
@@ -54,10 +54,10 @@ public class PersistentDb : IDb
     }
 
     public long NextId => Id.Encode(_current.Position, 0, _currentNumber);
-    
+
     public void FlushFrom(long id)
     {
-        var decoded  = Id.Decode(id);
+        var decoded = Id.Decode(id);
         for (int i = decoded.File; i < _files.Count; i++)
         {
             _files[i].Flush();
@@ -83,7 +83,7 @@ public class PersistentDb : IDb
     {
         var file = new File(_dir, number + 1);
         _files.Add(file);
-        
+
         _current = file.Chunk;
         _currentNumber = file.Number;
 
@@ -110,12 +110,12 @@ public class PersistentDb : IDb
             _mapped = MemoryMappedFile.CreateFromFile(_file, null, ChunkSize, MemoryMappedFileAccess.ReadWrite, HandleInheritability.None, false);
             _accessor = _mapped.CreateViewAccessor();
             _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref _pointer);
-            
+
             Chunk.Initialize();
         }
 
         public Chunk Chunk => new(_pointer);
-        
+
         public void Flush()
         {
             _accessor.Flush();
@@ -143,7 +143,7 @@ public class PersistentDb : IDb
         public unsafe void Initialize() => WriteUnaligned(_ptr, Preamble);
 
         public unsafe Span<byte> Read(int position, int length) => new(Add<byte>(_ptr, position), length);
-        
+
         public unsafe int Position => ReadUnaligned<int>(_ptr);
         public bool TryWrite(ReadOnlySpan<byte> data, out int position)
         {
@@ -151,7 +151,7 @@ public class PersistentDb : IDb
             {
                 // always add preamble so that the file does not overwrite it
                 var current = ReadUnaligned<int>(_ptr);
-                
+
                 var destination = new Span<byte>(Add<byte>(_ptr, current), ChunkSize - current);
 
                 var written = data.TryCopyTo(destination);

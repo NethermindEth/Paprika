@@ -459,7 +459,7 @@ public partial class PaprikaTree
                 throw new NotImplementedException("BIG ENDIAN NOT IMPLEMENTED YET");
             }
         }
-        
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static long ReadAt(ref byte b, int skip)
         {

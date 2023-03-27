@@ -259,7 +259,7 @@ public readonly ref struct NibblePath
                                             ((Unsafe.Add(ref b, 1) >> NibbleShift) & NibbleMask));
                 b = ref Unsafe.Add(ref b, 1);
             }
-            
+
             return;
         }
 
@@ -267,7 +267,7 @@ public readonly ref struct NibblePath
         if ((Length & OddBit) == OddBit)
         {
             destination[0] += (byte)(OddFlag + ((b >> NibbleShift) & NibbleMask));
-            
+
             // the length is even, no need to amend destination[0]
             for (var i = 0; i < Length / 2; i++)
             {
@@ -275,7 +275,7 @@ public readonly ref struct NibblePath
                                             ((Unsafe.Add(ref b, 1) >> NibbleShift) & NibbleMask));
                 b = ref Unsafe.Add(ref b, 1);
             }
-            
+
             return;
         }
 

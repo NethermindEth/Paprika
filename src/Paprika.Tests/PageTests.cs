@@ -47,7 +47,7 @@ public class PageTests
 
             AssertValue(tx, key, i);
         }
-        
+
         tx.Commit();
 
         // reset random

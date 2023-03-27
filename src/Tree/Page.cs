@@ -245,7 +245,7 @@ public readonly unsafe struct Page
             {
                 var allocated = manager.GetNewDirtyPage(out header.OverflowTo);
                 allocated.Clear();
-                
+
                 Set(in allocated, key, value, manager);
                 return page;
             }

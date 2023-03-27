@@ -25,7 +25,7 @@ public enum CommitOptions
     /// waiting for the next commit to be truly stored.
     /// </summary>
     FlushDataOnly,
-    
+
     /// <summary>
     /// Flush twice, first data, then root to ensure that db is fully flushed.
     /// </summary>

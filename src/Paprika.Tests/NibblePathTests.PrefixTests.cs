@@ -12,7 +12,7 @@ public class NibblePathHexPrefixTests
     public NibblePathHexPrefixTests(bool odd)
     {
         _odd = odd;
-        _shift = odd ?  0 : NibblePath.NibbleShift;
+        _shift = odd ? 0 : NibblePath.NibbleShift;
     }
 
     [TestCase(false, (byte)3, (byte)19)]
@@ -80,7 +80,7 @@ public class NibblePathHexPrefixTests
         Assert.AreEqual(byte1, destination[0]);
         Assert.AreEqual(byte2, destination[1]);
     }
-    
+
     // [TestCase(false, (byte)3, (byte)7, (byte)0, (byte)55)]
     // [TestCase(true, (byte)3, (byte)7, (byte)32, (byte)55)]
     // public void Decode_gives_correct_output_when_even(bool expectedFlag, byte nibble1, byte nibble2, byte byte1,

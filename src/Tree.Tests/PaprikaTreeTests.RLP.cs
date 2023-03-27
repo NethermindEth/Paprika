@@ -19,7 +19,7 @@ public class PaprikaTreeTestsRlp
     public void Leaf_Long_To_Keccak()
     {
         var key = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34 });
-        var value = new byte [32];
+        var value = new byte[32];
 
         var keccak = ParseHex("0xc9a263dc573d67a8d0627756d012385a27db78bb4a072ab0f755a84d3b4babda");
 
@@ -45,7 +45,7 @@ public class PaprikaTreeTestsRlp
     {
         // leaf
         var key = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34 });
-        var value = new byte [32];
+        var value = new byte[32];
         Span<byte> keccak = stackalloc byte[32];
         PaprikaTree.EncodeLeaf(key, value, keccak);
 
@@ -62,20 +62,20 @@ public class PaprikaTreeTestsRlp
     {
         var db = new MemoryDb(1024);
         var store = new Store(db);
-        
+
         // leaf
         var key = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34 });
-        var value = new byte [32];
+        var value = new byte[32];
 
         var leaf = PaprikaTree.WriteLeaf(store, key.SliceFrom(0), value);
 
         Span<byte> branch = stackalloc byte[PaprikaTree.Branch.GetNeededSize(1)];
         branch.Clear();
         branch[0] = PaprikaTree.BranchType;
-        PaprikaTree.Branch.SetNonExistingYet(branch, 11,leaf);
+        PaprikaTree.Branch.SetNonExistingYet(branch, 11, leaf);
 
         var branchId = store.Write(branch);
-        
+
         var expected = ParseHex("0xfe8ac9a9c96e07c71fdb2c4cda32cb86e4e880616cf4dad1454247c28dd3a739");
 
         AssertBranch(expected, branchId, db);
@@ -140,7 +140,7 @@ public class PaprikaTreeTestsRlp
         {
             _db = db;
         }
-        
+
         public long TryUpdateOrAdd(long current, in Span<byte> written)
         {
             throw new NotImplementedException();

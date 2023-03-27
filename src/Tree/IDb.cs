@@ -3,7 +3,7 @@ namespace Tree;
 public interface IDb
 {
     Span<byte> Read(long id);
-    
+
     long Write(ReadOnlySpan<byte> payload);
 
     /// <summary>

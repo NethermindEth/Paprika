@@ -24,17 +24,17 @@ public class PageTests
             var path = NibblePath.FromKey(key);
             root = root.Set(path, key, 0, manager);
         }
-        
+
         Console.WriteLine($"Used memory {manager.TotalUsedPages:P}");
     }
-    
+
     [Test]
     public void Random_big()
     {
         using var manager = new MemoryPageManager(1024 * 1024 * 1024UL);
 
         const int count = 1000_000;
-        
+
         var root = manager.GetNewDirtyPage(out _);
 
         var random = new Random(13);
@@ -46,10 +46,10 @@ public class PageTests
             random.NextBytes(key);
             var path = NibblePath.FromKey(key);
             root = root.Set(path, key, 0, manager);
-            
+
             AssertValue(root, path, manager, i, key);
         }
-        
+
         // reset random
         random = new Random(13);
         for (int i = 0; i < count; i++)
@@ -58,7 +58,7 @@ public class PageTests
             var path = NibblePath.FromKey(key);
             AssertValue(root, path, manager, i, key);
         }
-        
+
         static void AssertValue(Page root, NibblePath path, IPageManager manager, int i, byte[] key)
         {
             Assert.True(root.TryGet(path, out var value, 0, manager), $"Failed getting {path.ToString()} at {i}");
@@ -81,7 +81,7 @@ public class PageTests
             var path = NibblePath.FromKey(key);
             root = root.Set(path, key, 0, manager);
         }
-        
+
         Console.WriteLine($"Used memory {manager.TotalUsedPages:P}");
     }
 

@@ -101,6 +101,6 @@ public ref struct RlpStream
             Write(input);
         }
     }
-    
+
     private const byte EmptyArrayByte = 128;
 }

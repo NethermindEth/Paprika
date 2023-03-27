@@ -35,7 +35,7 @@ public static class Rlp
     public static int LengthOfLength(int value)
     {
         // BitOperations.LeadingZeroCount((value)
-        
+
         if (value < 1 << 8)
         {
             return 1;

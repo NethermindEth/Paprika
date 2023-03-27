@@ -49,8 +49,8 @@ public unsafe class MemoryDb : IDb, IDisposable
         // TODO: consider adding something here? Maybe a jump to the next value so that it can be flushed later?
     }
 
-    public long NextId =>Id.Encode(Position, 0, FileNumber);
-    
+    public long NextId => Id.Encode(Position, 0, FileNumber);
+
     public void FlushFrom(long id)
     {
     }

@@ -81,12 +81,12 @@ public class PaprikaTreeTests
         }
 
         batch.Commit();
-        
+
         foreach (var key in keys)
         {
             AssertTree(tree, key);
         }
-        
+
         void AssertTree(PaprikaTree paprikaTree, byte[] bytes)
         {
             Assert.True(paprikaTree.TryGet(bytes.AsSpan(), out var retrieved));
