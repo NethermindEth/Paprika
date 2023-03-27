@@ -46,4 +46,4 @@ jobs:
           ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
 
     - name: Test
-      run: dotnet test dotnet test src/Paprika.Tests -c ${{ env.BUILD_CONFIG }}
+      run: dotnet test src/Paprika.Tests -c ${{ env.BUILD_CONFIG }}
