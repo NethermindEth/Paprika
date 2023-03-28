@@ -1,4 +1,6 @@
-﻿namespace Paprika;
+﻿using Paprika.Pages;
+
+namespace Paprika;
 
 public interface IInternalTransaction
 {
@@ -17,9 +19,4 @@ public interface IInternalTransaction
     /// </summary>
     /// <returns></returns>
     Page GetNewDirtyPage(out int addr);
-
-    /// <summary>
-    /// Abandons the page, marking it as unused once the transaction commits.
-    /// </summary>
-    void Abandon(in Page page);
 }

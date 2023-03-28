@@ -11,7 +11,7 @@ public unsafe class MemoryMappedPagedDb : PagedDb
     private readonly MemoryMappedViewAccessor _accessor;
     private readonly byte* _ptr;
 
-    public MemoryMappedPagedDb(ulong size, string path, bool deleteOnStart = false) : base(size)
+    public MemoryMappedPagedDb(ulong size, byte historyDepth, string path, bool deleteOnStart = false) : base(size, historyDepth)
     {
         _path = path;
 
