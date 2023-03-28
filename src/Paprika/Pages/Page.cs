@@ -55,7 +55,5 @@ public readonly unsafe struct Page
 
     public Span<byte> Span => new(_ptr, PageSize);
 
-    public void CopyTo(in Page page) => new Span<byte>(_ptr, PageSize).CopyTo(new Span<byte>(page._ptr, PageSize));
-
     public ref PageHeader Header => ref Unsafe.AsRef<PageHeader>(_ptr);
 }
