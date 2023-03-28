@@ -3,6 +3,15 @@ using System.Runtime.InteropServices;
 
 namespace Paprika.Pages;
 
+/// <summary>
+/// Represents a data page storing account data.
+/// </summary>
+/// <remarks>
+/// The page is capable of storing some data inside of it and provides fan out for lower layers.
+/// This means that for small amount of data no creation of further layers is required.
+///
+/// TODO: the split algo should be implemented properly. 
+/// </remarks>
 public readonly unsafe struct DataPage : IPage
 {
     private const int AddressSize = 4;
@@ -48,9 +57,15 @@ public readonly unsafe struct DataPage : IPage
         [FieldOffset(FramesDataOffset)]
         public fixed byte FramesData[FrameCount * AccountFrame.Size];
         
+        /// <summary>
+        /// Map of <see cref="FramesData"/> as a type.
+        /// </summary>
         [FieldOffset(FramesDataOffset)]
         public AccountFrame Frame;
 
+        /// <summary>
+        /// Access all the frames.
+        /// </summary>
         public Span<AccountFrame> Frames => MemoryMarshal.CreateSpan(ref Frame, FrameCount);
     }
     
