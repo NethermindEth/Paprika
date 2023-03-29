@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Nethermind.Int256;
 using Paprika.Pages;
 
 namespace Paprika.Db;
@@ -133,6 +134,10 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             _txId = _root.Header.TransactionId++;
         }
 
+        public void Set(in Keccak key, UInt256 balance, UInt256 nonce)
+        {
+            _root.
+        }
         // public bool TryGet(in ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value)
         // {
         //     var path = NibblePath.FromKey(key);

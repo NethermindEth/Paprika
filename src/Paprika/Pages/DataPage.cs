@@ -14,8 +14,6 @@ namespace Paprika.Pages;
 /// </remarks>
 public readonly unsafe struct DataPage : IPage
 {
-    private const int AddressSize = 4;
-    
     private readonly Page _page;
 
     public DataPage(byte* ptr) : this(new Page(ptr))
@@ -25,9 +23,9 @@ public readonly unsafe struct DataPage : IPage
     public DataPage(Page root) => _page = root;
 
     public ref DataPageHeader Header => ref Unsafe.As<PageHeader, DataPageHeader>(ref _page.Header);
-    
+
     /// <summary>
-    /// The payload of the data page that stores 16 nibble-addressable buckets.
+    /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
     /// These buckets is used to store up to <see cref="FrameCount"/> entries before flushing them down as other pages
     /// like page split. 
     /// </summary>
@@ -35,10 +33,10 @@ public readonly unsafe struct DataPage : IPage
     public struct Payload16
     {
         public const int Size = Page.PageSize - DataPageHeader.Size;
-        
+
         public const int BucketCount = 16;
-        
-        private const int FramesDataOffset = sizeof(int) + sizeof(int) + BucketCount * AddressSize;
+
+        private const int FramesDataOffset = sizeof(int) + sizeof(int) + BucketCount * DbAddress.Size;
         private const int FrameCount = (Size - FramesDataOffset) / AccountFrame.Size;
 
         /// <summary>
@@ -56,7 +54,7 @@ public readonly unsafe struct DataPage : IPage
         /// </summary>
         [FieldOffset(FramesDataOffset)]
         public fixed byte FramesData[FrameCount * AccountFrame.Size];
-        
+
         /// <summary>
         /// Map of <see cref="FramesData"/> as a type.
         /// </summary>
@@ -68,7 +66,7 @@ public readonly unsafe struct DataPage : IPage
         /// </summary>
         public Span<AccountFrame> Frames => MemoryMarshal.CreateSpan(ref Frame, FrameCount);
     }
-    
+
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     public struct DataPageHeader
     {
