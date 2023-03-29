@@ -1,5 +1,9 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Nethermind.Int256;
+using Paprika.Pages;
 
 namespace Paprika.Db;
 
@@ -12,185 +16,197 @@ public abstract unsafe class PagedDb : IDb, IDisposable
     /// <remarks>
     /// REORGS
     /// It can be set arbitrary big and used for handling reorganizations.
-    /// If history depth is set to the max reorg depth,
-    /// moving to previous block is just a single write transaction moving the root back.
-    ///
-    /// ABANDONED PAGES
-    /// To keep N roots active, the pages that were abandoned in previous transactions should be reused only on
-    /// rolling over, meaning, that they should be taken from the item that the root will point to. In this case,
-    /// if undo happens, they are still active. So use abandoned pages and add them to abandoned pages of the given
-    /// transaction, use at will and commit them so that they can be reused in <see cref="HistoryDepth"/> commits. 
+    /// If history depth is set to the max reorg depth, moving to previous block is just a single write transaction moving the root back.
     /// </remarks>
-    private const int HistoryDepth = 2;
+    private const int MinHistoryDepth = 2;
 
+    private readonly byte _historyDepth;
     private readonly int _maxPage;
-    private readonly MetadataPage*[] _metadata;
+    private long _lastRoot;
+    private readonly RootPage[] _roots;
 
-    private long _currentRoot;
+    // a simple pool of root pages
+    private readonly ConcurrentStack<RootPage> _pool = new();
 
-    [StructLayout(LayoutKind.Explicit, Size = Page.PageSize, Pack = 1)]
-    private struct MetadataPage
+    /// <summary>
+    /// Initializes the paged db.
+    /// </summary>
+    /// <param name="size">The size of the database, should be a multiple of <see cref="Page.PageSize"/>.</param>
+    /// <param name="historyDepth">The depth history represent how many blocks should be able to be restored from the past. Effectively,
+    /// a reorg depth. At least 2 are required</param>
+    protected PagedDb(ulong size, byte historyDepth)
     {
-        [FieldOffset(0)] public int NextFreePage;
-        [FieldOffset(4)] public int Root;
-        [FieldOffset(8)] public long TxId;
+        if (historyDepth < MinHistoryDepth)
+            throw new ArgumentException($"{nameof(historyDepth)} should be bigger than {MinHistoryDepth}");
 
-        /// <summary>
-        /// Pops the next free page.
-        /// </summary>
-        public int PopNextFreePage()
-        {
-            // TODO: reuse empty pages
-            return NextFreePage++;
-        }
-
-        public void Abandon(int address)
-        {
-            // TODO: mark page as abandoned
-        }
-
-        public void PrepareCommit()
-        {
-            // TODO: clear pages bits, calculate keccaks etc.
-        }
-    }
-
-    protected PagedDb(ulong size)
-    {
+        _historyDepth = historyDepth;
         _maxPage = (int)(size / Page.PageSize);
-        _metadata = new MetadataPage*[HistoryDepth];
+        _roots = new RootPage[MinHistoryDepth];
     }
 
     protected void RootInit()
     {
-        for (var i = 0; i < HistoryDepth; i++)
+        // create all root pages for the history depth
+        for (uint i = 0; i < _historyDepth; i++)
         {
-            _metadata[i] = GetAt(i).As<MetadataPage>();
+            _roots[i] = new RootPage(GetAt(DbAddress.Page(i)));
         }
 
-        if (_metadata[0]->NextFreePage < HistoryDepth)
+        if (_roots[0].Data.NextFreePage < _historyDepth)
         {
             // the 0th page will have the properly number set to first free page
-            _metadata[0]->NextFreePage = HistoryDepth;
+            _roots[0].Data.NextFreePage = DbAddress.Page(_historyDepth);
         }
 
-        _currentRoot = 0;
-        for (var i = 0; i < HistoryDepth; i++)
+        _lastRoot = 0;
+        for (var i = 0; i < MinHistoryDepth; i++)
         {
-            if (_metadata[i]->TxId > _currentRoot)
+            if (_roots[i].Header.TransactionId > _lastRoot)
             {
-                _currentRoot = _metadata[i]->TxId;
+                _lastRoot = i;
             }
         }
     }
 
     protected abstract void* Ptr { get; }
 
-    public double TotalUsedPages => (double)CurrentMeta->NextFreePage / _maxPage;
+    public double TotalUsedPages => ((double)(int)Root.Data.NextFreePage) / _maxPage;
 
-    private MetadataPage* CurrentMeta => _metadata[_currentRoot % HistoryDepth];
-    private MetadataPage* NextMeta => _metadata[(_currentRoot + 1) % HistoryDepth];
+    private RootPage Root => _roots[_lastRoot % _historyDepth];
 
-    private void MoveRootNext() => _currentRoot++;
-
-    private Page GetAt(int address)
+    private Page GetAt(DbAddress address)
     {
-        if (address > _maxPage)
-            throw new ArgumentException($"Requested address {address} while the max page is {_maxPage}");
+        Debug.Assert(address.IsValidAddressPage, "The address page is invalid and breaches max page count");
 
         // Long here is required! Otherwise int overflow will turn it to negative value!
-        long offset = ((long)address) * Page.PageSize;
+        // ReSharper disable once SuggestVarOrType_BuiltInTypes
+        long offset = ((long)(int)address) * Page.PageSize;
         return new Page((byte*)Ptr + offset);
     }
 
-    private int GetAddress(in Page page)
+    private DbAddress GetAddress(in Page page)
     {
-        return (int)(Unsafe.ByteOffset(ref Unsafe.AsRef<byte>(Ptr), ref Unsafe.AsRef<byte>(page.Raw.ToPointer()))
-            .ToInt64() / Page.PageSize);
+        return DbAddress.Page((uint)(Unsafe
+            .ByteOffset(ref Unsafe.AsRef<byte>(Ptr), ref Unsafe.AsRef<byte>(page.Raw.ToPointer()))
+            .ToInt64() / Page.PageSize));
     }
 
     public abstract void Dispose();
     protected abstract void Flush();
 
-    public ITransaction Begin() => new Transaction(this);
+    private RootPage RentRootPage()
+    {
+        if (_pool.TryPop(out RootPage page))
+        {
+            return page;
+        }
+
+        var memory = (byte*)NativeMemory.AlignedAlloc((UIntPtr)Page.PageSize, (UIntPtr)UIntPtr.Size);
+        return new RootPage(memory);
+    }
+
+    private void ReleaseRootPage(RootPage page) => _pool.Push(page);
+
+    // for now, omit block consideration
+    public ITransaction Begin() => new Transaction(this, RentRootPage());
+
+    private void SetNewRoot(RootPage root)
+    {
+        _lastRoot += 1;
+        root.CopyTo(_roots[_lastRoot % _historyDepth]);
+    }
 
     class Transaction : ITransaction, IInternalTransaction
     {
+        private const byte RootLevel = 0;
         private readonly PagedDb _db;
-        private readonly MetadataPage* _meta;
-        private Page _root;
+        private readonly RootPage _root;
+        private readonly long _txId;
 
-        public Transaction(PagedDb db)
+        public Transaction(PagedDb db, RootPage tempRootPage)
         {
             _db = db;
+            _root = tempRootPage;
 
-            // copy to next meta
-            *_db.NextMeta = *_db.CurrentMeta;
-            _meta = _db.NextMeta;
+            _db.Root.CopyTo(_root);
 
-            // set next id
-            _meta->TxId++;
+            _root.Header.TransactionId++;
 
-            // peek the next free and treat it as root
-            var newRoot = _meta->PopNextFreePage();
-            _root = _db.GetAt(newRoot);
-            _meta->Root = newRoot;
-            _root.Clear();
+            _txId = _root.Header.TransactionId;
+        }
 
-            // copy current
-            if (_db.CurrentMeta->Root != 0)
+        public bool TryGetNonce(in Keccak key, out UInt256 nonce)
+        {
+            var root = _root.Data.DataPage;
+            if (root.IsNull)
             {
-                _db.GetAt(_db.CurrentMeta->Root).CopyTo(_root);
+                nonce = default;
+                return false;
+            }
 
-                // abandon current
-                _db.NextMeta->Abandon(_db.CurrentMeta->Root);
+            // treat as data page
+            var data = new DataPage(_db.GetAt(root));
+
+            return data.TryGetNonce(key, out nonce, RootLevel);
+        }
+
+        public void Set(in Keccak key, in UInt256 balance, in UInt256 nonce)
+        {
+            ref var root = ref _root.Data.DataPage;
+            var page = root.IsNull ? GetNewDirtyPage(out root) : GetWritable(ref root);
+
+            // treat as data page
+            var data = new DataPage(page);
+
+            var ctx = new SetContext(in key, balance, nonce);
+            data.Set(ctx, this, RootLevel);
+        }
+
+        public void Commit(CommitOptions options)
+        {
+            // flush data first
+            _db.Flush();
+            _db.SetNewRoot(_root);
+
+            if (options == CommitOptions.FlushDataAndRoot)
+            {
+                _db.Flush();
             }
         }
 
-        public bool TryGet(in ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value)
+        public double TotalUsedPages => ((double)(uint)_root.Data.NextFreePage) / _db._maxPage;
+
+        Page IInternalTransaction.GetAt(DbAddress address) => _db.GetAt(address);
+
+        DbAddress IInternalTransaction.GetAddress(in Page page) => _db.GetAddress(page);
+
+        public Page GetNewDirtyPage(out DbAddress addr)
         {
-            var path = NibblePath.FromKey(key);
-            return _root.TryGet(path, out value, 0, this);
+            addr = _root.Data.GetNextFreePage();
+            Debug.Assert(addr.IsValidAddressPage, "The page address retrieved is invalid");
+            var page = _db.GetAt(addr);
+            AssignTxId(page);
+            return page;
         }
 
-        public void Set(in ReadOnlySpan<byte> key, in ReadOnlySpan<byte> value)
+        private void AssignTxId(Page page) => page.Header.TransactionId = _txId;
+
+        private Page GetWritable(ref DbAddress addr)
         {
-            var path = NibblePath.FromKey(key);
-            _root = _root.Set(path, value, 0, this);
+            var page = _db.GetAt(addr);
+            if (page.Header.TransactionId == _txId)
+                return page;
+
+            var @new = GetNewDirtyPage(out addr);
+            page.CopyTo(@new);
+            AssignTxId(@new);
+
+            // TODO: the previous page is dangling and the only information it has is the tx_id, mem management is needed.
+            // Or a process that would scan pages for being old enough to be reused
+
+            return @new;
         }
 
-        public void Commit()
-        {
-            // flush data first
-            _meta->Root = _db.GetAddress(_root);
-            _meta->PrepareCommit();
-            _root.ClearWritable();
-            _db.Flush();
-
-            // set and flush next root
-            _db.MoveRootNext();
-            _db.Flush();
-        }
-
-        public double TotalUsedPages => (double)_meta->NextFreePage / _db._maxPage;
-
-        Page IInternalTransaction.GetAt(int address) => _db.GetAt(address);
-
-        int IInternalTransaction.GetAddress(in Page page) => _db.GetAddress(page);
-
-        Page IInternalTransaction.GetNewDirtyPage(out int addr)
-        {
-            addr = _meta->PopNextFreePage();
-
-            if (addr >= _db._maxPage)
-                throw new Exception("The db file is too small for this page");
-
-            return _db.GetAt(addr);
-        }
-
-        void IInternalTransaction.Abandon(in Page page)
-        {
-            _meta->Abandon(_db.GetAddress(page));
-        }
+        public void Dispose() => _db.ReleaseRootPage(_root);
     }
 }

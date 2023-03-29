@@ -32,6 +32,12 @@ public readonly ref struct NibblePath
         return new NibblePath(key, nibbleFrom, count - nibbleFrom);
     }
 
+    public static NibblePath FromKey(Keccak key, int nibbleFrom = 0)
+    {
+        var count = Keccak.Size * NibblePerByte;
+        return new NibblePath(key.BytesAsSpan, nibbleFrom, count - nibbleFrom);
+    }
+
     private NibblePath(ReadOnlySpan<byte> key, int nibbleFrom, int length)
     {
         _span = ref Unsafe.Add(ref MemoryMarshal.GetReference(key), nibbleFrom / 2);
@@ -63,9 +69,15 @@ public readonly ref struct NibblePath
         return destination.Slice(lenght + PreambleLength);
     }
 
+    /// <summary>
+    /// Slices the beginning of the nibble path as <see cref="Span{T}.Slice(int)"/> does.
+    /// </summary>
     public NibblePath SliceFrom(int start) => new(ref Unsafe.Add(ref _span, (_odd + start) / 2),
         (byte)((start & 1) ^ _odd), (byte)(Length - start));
 
+    /// <summary>
+    /// Trims the end of the nibble path so that it gets to the specified length.
+    /// </summary>
     public NibblePath SliceTo(int length) => new(ref _span, _odd, (byte)length);
 
     public byte GetAt(int nibble)
