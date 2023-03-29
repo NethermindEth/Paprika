@@ -3,7 +3,10 @@
 namespace Paprika.Pages;
 
 /// <summary>
-/// Represents a page address in the db.
+/// Represents an address in the database. It can be one of the following:
+///
+/// 1. an address page
+/// 2. a data-frame page in the same page as the value resides in
 /// </summary>
 public readonly struct DbAddress : IEquatable<DbAddress>
 {
