@@ -1,4 +1,5 @@
 ﻿using System.Runtime.CompilerServices;
+using Nethermind.Int256;
 
 namespace Paprika;
 
@@ -9,9 +10,9 @@ public interface IDb
 
 public interface ITransaction
 {
-    bool TryGet(in ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value);
+    bool TryGetNonce(in Keccak key, out UInt256 nonce);
 
-    void Set(in ReadOnlySpan<byte> key, in ReadOnlySpan<byte> value);
+    void Set(in Keccak key, in UInt256 balance, in UInt256 nonce);
 
     void Commit(CommitOptions options);
 

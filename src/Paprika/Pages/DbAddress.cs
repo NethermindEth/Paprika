@@ -56,4 +56,5 @@ public readonly struct DbAddress
     public bool IsValidAddressPage => _value < Pages.Page.PageCount;
 
     public static implicit operator uint(DbAddress address) => address._value;
+    public static implicit operator int(DbAddress address) => (int)address._value;
 }

@@ -11,4 +11,7 @@ public unsafe struct Keccak
     public fixed byte Bytes[Size];
 
     public Span<byte> BytesAsSpan => MemoryMarshal.AsBytes(MemoryMarshal.CreateSpan(ref this, 1));
+
+    // TODO: poor implementation, make it better
+    public bool Equals(in Keccak other) => BytesAsSpan.SequenceEqual(other.BytesAsSpan);
 }

@@ -70,11 +70,9 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
     protected abstract void* Ptr { get; }
 
-    public double TotalUsedPages => (double)Root.NextFreePage / _maxPage;
+    public double TotalUsedPages => ((double)(int)Root.Data.NextFreePage) / _maxPage;
 
     private RootPage Root => _roots[_lastRoot % _historyDepth];
-
-    private void MoveRootNext() => _lastRoot++;
 
     private Page GetAt(DbAddress address)
     {
@@ -82,7 +80,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         // Long here is required! Otherwise int overflow will turn it to negative value!
         // ReSharper disable once SuggestVarOrType_BuiltInTypes
-        long offset = ((long)address) * Page.PageSize;
+        long offset = ((long)(int)address) * Page.PageSize;
         return new Page((byte*)Ptr + offset);
     }
 
@@ -136,6 +134,21 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             _txId = _root.Header.TransactionId++;
         }
 
+        public bool TryGetNonce(in Keccak key, out UInt256 nonce)
+        {
+            var root = _root.Data.DataPage;
+            if (root.IsNull)
+            {
+                nonce = default;
+                return false;
+            }
+            
+            // treat as data page
+            var data = new DataPage(_db.GetAt(root));
+            
+            return data.TryGetNonce(key, out nonce, RootLevel);
+        }
+
         public void Set(in Keccak key, in UInt256 balance, in UInt256 nonce)
         {
             ref var root = ref _root.Data.DataPage;
@@ -160,7 +173,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             }
         }
 
-        public double TotalUsedPages => (double)_root.Data.NextFreePage / _db._maxPage;
+        public double TotalUsedPages => ((double)(uint)_root.Data.NextFreePage) / _db._maxPage;
 
         Page IInternalTransaction.GetAt(DbAddress address) => _db.GetAt(address);
 

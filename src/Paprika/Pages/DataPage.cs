@@ -1,6 +1,6 @@
 ﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Paprika.Db;
+using Nethermind.Int256;
 
 namespace Paprika.Pages;
 
@@ -36,12 +36,12 @@ public readonly unsafe struct DataPage : IPage
         public const int BucketCount = 16;
 
         private const int FramesDataOffset = sizeof(int) + sizeof(int) + BucketCount * DbAddress.Size;
-        private const int FrameCount = (Size - FramesDataOffset) / AccountFrame.Size;
+        public const int FrameCount = (Size - FramesDataOffset) / AccountFrame.Size;
 
         /// <summary>
         /// The bit map of frames used at this page.
         /// </summary>
-        [FieldOffset(0)] public int FrameUsed;
+        [FieldOffset(0)] public uint FrameUsed;
 
         /// <summary>
         /// The nibble addressable buckets.
@@ -74,12 +74,28 @@ public readonly unsafe struct DataPage : IPage
 
     public void Set(in SetContext ctx, IInternalTransaction tx, byte level)
     {
-        // TODO: assume one per nibble for now, throw in other cases
-        var nibble = ctx.Key.FirstNibble;
+        // TODO: updates, check for the key existence, comparisons and more, for now just reserve a slot and set it
+        
+        if (BitExtensions.TryReserveBit(ref Data.FrameUsed, Payload16.FrameCount, out var reserved))
+        {
+            var path = NibblePath.FromKey(ctx.Key.BytesAsSpan, level);
+            ref var bucket = ref Unsafe.Add(ref Data.Buckets, path.FirstNibble);
+            
+            ref var frame = ref Data.Frames[reserved];
 
-        ref var bucket = ref Unsafe.Add(ref Data.Buckets, nibble);
-        
-        
+            frame.Key = ctx.Key;
+            frame.Balance = ctx.Balance;
+            frame.Nonce = ctx.Nonce;
+
+            // set the next to create the linked list
+            frame.Next = bucket;
+            
+            // overwrite the bucket with the recent one
+            bucket = DbAddress.JumpToFrame(reserved);
+            return;
+        }
+
+        throw new NotImplementedException("Should overflow to the next page or result in a page split");
     }
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
@@ -100,5 +116,30 @@ public readonly unsafe struct DataPage : IPage
     public enum DataPageFlags : int
     {
         // type of the page, and others
+    }
+
+    public bool TryGetNonce(in Keccak key, out UInt256 nonce, byte level)
+    {
+        var path = NibblePath.FromKey(key.BytesAsSpan, level);
+        
+        // TODO: updates, check for the key existence, comparisons and more, and nested levels
+
+        var frames = Data.Frames;
+        var bucket = Unsafe.Add(ref Data.Buckets, path.FirstNibble);
+        while (bucket.IsNull == false)
+        {
+            ref var frame = ref frames[bucket];
+
+            if (frame.Key.Equals(key))
+            {
+                nonce = frame.Nonce;
+                return true;
+            }
+
+            bucket = frame.Next;
+        }
+
+        nonce = default;
+        return false;
     }
 }
