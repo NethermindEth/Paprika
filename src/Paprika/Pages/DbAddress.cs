@@ -5,7 +5,7 @@ namespace Paprika.Pages;
 /// <summary>
 /// Represents a page address in the db.
 /// </summary>
-public readonly struct DbAddress
+public readonly struct DbAddress : IEquatable<DbAddress>
 {
     public const int Size = sizeof(uint);
 
@@ -55,6 +55,27 @@ public readonly struct DbAddress
 
     public bool IsValidAddressPage => _value < Pages.Page.PageCount;
 
+    public bool TryGetSamePage(out byte frame)
+    {
+        if (IsSamePage)
+        {
+            frame = (byte)(_value & ~SamePage);
+            return true;
+        }
+
+        frame = default;
+        return false;
+    }
+
     public static implicit operator uint(DbAddress address) => address._value;
     public static implicit operator int(DbAddress address) => (int)address._value;
+
+    public override string ToString() => IsNull ? "null" :
+        IsSamePage ? $"Jump within page to index: {_value & ~SamePage}" : $"Page @{_value}";
+
+    public bool Equals(DbAddress other) => _value == other._value;
+
+    public override bool Equals(object? obj) => obj is DbAddress other && Equals(other);
+
+    public override int GetHashCode() => (int)_value;
 }

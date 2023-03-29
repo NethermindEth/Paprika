@@ -20,7 +20,7 @@ public readonly unsafe struct DataPage : IPage
     public DataPage(Page root) => _page = root;
 
     public ref DataPageHeader Header => ref Unsafe.As<PageHeader, DataPageHeader>(ref _page.Header);
-    
+
     public ref Payload16 Data => ref Unsafe.AsRef<Payload16>(_page.Payload);
 
     /// <summary>
@@ -53,7 +53,7 @@ public readonly unsafe struct DataPage : IPage
         /// </summary>
         [FieldOffset(sizeof(int))]
         public DbAddress Buckets;
-        
+
         /// <summary>
         /// Data for storing frames.
         /// </summary>
@@ -75,12 +75,12 @@ public readonly unsafe struct DataPage : IPage
     public void Set(in SetContext ctx, IInternalTransaction tx, byte level)
     {
         // TODO: updates, check for the key existence, comparisons and more, for now just reserve a slot and set it
-        
+
         if (BitExtensions.TryReserveBit(ref Data.FrameUsed, Payload16.FrameCount, out var reserved))
         {
             var path = NibblePath.FromKey(ctx.Key.BytesAsSpan, level);
             ref var bucket = ref Unsafe.Add(ref Data.Buckets, path.FirstNibble);
-            
+
             ref var frame = ref Data.Frames[reserved];
 
             frame.Key = ctx.Key;
@@ -89,7 +89,7 @@ public readonly unsafe struct DataPage : IPage
 
             // set the next to create the linked list
             frame.Next = bucket;
-            
+
             // overwrite the bucket with the recent one
             bucket = DbAddress.JumpToFrame(reserved);
             return;
@@ -121,14 +121,14 @@ public readonly unsafe struct DataPage : IPage
     public bool TryGetNonce(in Keccak key, out UInt256 nonce, byte level)
     {
         var path = NibblePath.FromKey(key.BytesAsSpan, level);
-        
+
         // TODO: updates, check for the key existence, comparisons and more, and nested levels
 
         var frames = Data.Frames;
         var bucket = Unsafe.Add(ref Data.Buckets, path.FirstNibble);
-        while (bucket.IsNull == false)
+        while (bucket.TryGetSamePage(out var frameIndex))
         {
-            ref var frame = ref frames[bucket];
+            ref var frame = ref frames[frameIndex];
 
             if (frame.Key.Equals(key))
             {

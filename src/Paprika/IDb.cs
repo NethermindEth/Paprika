@@ -8,7 +8,7 @@ public interface IDb
     ITransaction Begin();
 }
 
-public interface ITransaction
+public interface ITransaction : IDisposable
 {
     bool TryGetNonce(in Keccak key, out UInt256 nonce);
 

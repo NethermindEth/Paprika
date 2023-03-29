@@ -114,7 +114,6 @@ public abstract unsafe class PagedDb : IDb, IDisposable
     {
         _lastRoot += 1;
         root.CopyTo(_roots[_lastRoot % _historyDepth]);
-        ReleaseRootPage(root);
     }
 
     class Transaction : ITransaction, IInternalTransaction
@@ -131,7 +130,9 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
             _db.Root.CopyTo(_root);
 
-            _txId = _root.Header.TransactionId++;
+            _root.Header.TransactionId++;
+
+            _txId = _root.Header.TransactionId;
         }
 
         public bool TryGetNonce(in Keccak key, out UInt256 nonce)
@@ -142,10 +143,10 @@ public abstract unsafe class PagedDb : IDb, IDisposable
                 nonce = default;
                 return false;
             }
-            
+
             // treat as data page
             var data = new DataPage(_db.GetAt(root));
-            
+
             return data.TryGetNonce(key, out nonce, RootLevel);
         }
 
@@ -160,7 +161,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             var ctx = new SetContext(in key, balance, nonce);
             data.Set(ctx, this, RootLevel);
         }
-       
+
         public void Commit(CommitOptions options)
         {
             // flush data first
@@ -202,8 +203,10 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
             // TODO: the previous page is dangling and the only information it has is the tx_id, mem management is needed.
             // Or a process that would scan pages for being old enough to be reused
-            
+
             return @new;
         }
+
+        public void Dispose() => _db.ReleaseRootPage(_root);
     }
 }

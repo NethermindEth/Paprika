@@ -7,7 +7,7 @@ public static class BitExtensions
     public static bool TryReserveBit(ref uint bitmask, int maxBitToReserveExclusive, out byte reserved)
     {
         var count = BitOperations.LeadingZeroCount(~bitmask);
-        
+
         if (count < maxBitToReserveExclusive)
         {
             bitmask |= 1U << count;

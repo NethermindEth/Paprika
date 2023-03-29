@@ -31,7 +31,7 @@ public readonly ref struct NibblePath
         var count = key.Length * NibblePerByte;
         return new NibblePath(key, nibbleFrom, count - nibbleFrom);
     }
-    
+
     public static NibblePath FromKey(Keccak key, int nibbleFrom = 0)
     {
         var count = Keccak.Size * NibblePerByte;
