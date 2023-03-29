@@ -17,6 +17,7 @@ env:
 
 jobs:
   tests:
+    timeout-minutes: 5
     name: 'Run Paprika tests'
     runs-on: ubuntu-latest
     permissions:
