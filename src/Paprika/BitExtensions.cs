@@ -5,7 +5,7 @@ namespace Paprika;
 public static class BitExtensions
 {
     private const int BitsPerUint = 32;
-    
+
     public static bool TryReserveBit(ref uint bitmask, int maxBitToReserveExclusive, out byte reserved)
     {
         var count = BitOperations.LeadingZeroCount(~bitmask);
