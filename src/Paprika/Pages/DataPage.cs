@@ -76,7 +76,7 @@ public readonly unsafe struct DataPage : IPage
     {
         // TODO: updates, check for the key existence, comparisons and more, for now just reserve a slot and set it
 
-        if (BitExtensions.TryReserveBit(ref Data.FrameUsed, Payload16.FrameCount, out var reserved))
+        if (BitExtensions.TrySetLowestBit(ref Data.FrameUsed, Payload16.FrameCount, out var reserved))
         {
             var path = NibblePath.FromKey(ctx.Key.BytesAsSpan, level);
             ref var bucket = ref Unsafe.Add(ref Data.Buckets, path.FirstNibble);

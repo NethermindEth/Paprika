@@ -10,13 +10,21 @@ public class BitExtensionsTests
         const int max = 31;
         uint bits = 0;
 
-        BitExtensions.TryReserveBit(ref bits, max, out var reserved);
+        BitExtensions.TrySetLowestBit(ref bits, max, out var reserved);
         Assert.AreEqual(0, reserved);
 
-        BitExtensions.TryReserveBit(ref bits, max, out reserved);
+        BitExtensions.TrySetLowestBit(ref bits, max, out reserved);
         Assert.AreEqual(1, reserved);
 
-        BitExtensions.TryReserveBit(ref bits, max, out reserved);
+        BitExtensions.TrySetLowestBit(ref bits, max, out reserved);
         Assert.AreEqual(2, reserved);
+
+        BitExtensions.ClearBit(ref bits, 1);
+
+        BitExtensions.TrySetLowestBit(ref bits, max, out reserved);
+        Assert.AreEqual(1, reserved);
+
+        BitExtensions.TrySetLowestBit(ref bits, max, out reserved);
+        Assert.AreEqual(3, reserved);
     }
 }
