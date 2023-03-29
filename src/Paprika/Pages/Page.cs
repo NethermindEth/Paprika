@@ -37,7 +37,7 @@ public struct PageHeader
 /// Jump pages consist only of jumps according to a part of <see cref="NibblePath"/>.
 /// Value pages have buckets + skip list for storing values.
 /// </summary>
-public readonly unsafe struct Page
+public readonly unsafe struct Page : IPage
 {
     public const int PageCount = 0x0100_0000; // 64GB addressable
     public const int PageAddressMask = PageCount - 1;

@@ -1,5 +1,6 @@
 ﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paprika.Db;
 
 namespace Paprika.Pages;
 
@@ -16,13 +17,11 @@ public readonly unsafe struct DataPage : IPage
 {
     private readonly Page _page;
 
-    public DataPage(byte* ptr) : this(new Page(ptr))
-    {
-    }
-
     public DataPage(Page root) => _page = root;
 
     public ref DataPageHeader Header => ref Unsafe.As<PageHeader, DataPageHeader>(ref _page.Header);
+    
+    public ref Payload16 Data => ref Unsafe.AsRef<Payload16>(_page.Payload);
 
     /// <summary>
     /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
@@ -47,8 +46,14 @@ public readonly unsafe struct DataPage : IPage
         /// <summary>
         /// The nibble addressable buckets.
         /// </summary>
-        [FieldOffset(sizeof(int))] public fixed int Buckets[BucketCount];
+        [FieldOffset(sizeof(int))] public fixed int BucketsData[BucketCount];
 
+        /// <summary>
+        /// Map of <see cref="BucketsData"/>.
+        /// </summary>
+        [FieldOffset(sizeof(int))]
+        public DbAddress Buckets;
+        
         /// <summary>
         /// Data for storing frames.
         /// </summary>
@@ -56,7 +61,7 @@ public readonly unsafe struct DataPage : IPage
         public fixed byte FramesData[FrameCount * AccountFrame.Size];
 
         /// <summary>
-        /// Map of <see cref="FramesData"/> as a type.
+        /// Map of <see cref="FramesData"/> as a type to allow ref to it.
         /// </summary>
         [FieldOffset(FramesDataOffset)]
         public AccountFrame Frame;
@@ -65,6 +70,16 @@ public readonly unsafe struct DataPage : IPage
         /// Access all the frames.
         /// </summary>
         public Span<AccountFrame> Frames => MemoryMarshal.CreateSpan(ref Frame, FrameCount);
+    }
+
+    public void Set(in SetContext ctx, IInternalTransaction tx, byte level)
+    {
+        // TODO: assume one per nibble for now, throw in other cases
+        var nibble = ctx.Key.FirstNibble;
+
+        ref var bucket = ref Unsafe.Add(ref Data.Buckets, nibble);
+        
+        
     }
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]

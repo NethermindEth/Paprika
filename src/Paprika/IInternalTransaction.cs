@@ -7,16 +7,16 @@ public interface IInternalTransaction
     /// <summary>
     /// Gets the page at given address.
     /// </summary>
-    Page GetAt(int address);
+    Page GetAt(DbAddress address);
 
     /// <summary>
     /// Get the address of the given page.
     /// </summary>
-    int GetAddress(in Page page);
+    DbAddress GetAddress(in Page page);
 
     /// <summary>
     /// Gets an unused page that is not clean.
     /// </summary>
     /// <returns></returns>
-    Page GetNewDirtyPage(out int addr);
+    Page GetNewDirtyPage(out DbAddress addr);
 }

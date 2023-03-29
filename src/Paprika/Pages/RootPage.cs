@@ -21,8 +21,6 @@ public readonly unsafe struct RootPage : IPage
 
     public ref Payload Data => ref Unsafe.AsRef<Payload>(_page.Payload);
 
-    public ref int NextFreePage => ref Unsafe.AsRef<int>(_page.Payload + sizeof(uint) + sizeof(Keccak));
-
     /// <summary>
     /// Represents the data of the page.
     /// </summary>
@@ -38,6 +36,13 @@ public readonly unsafe struct RootPage : IPage
         [FieldOffset(sizeof(uint) + Keccak.Size)] public DbAddress NextFreePage;
 
         [FieldOffset(sizeof(uint) + Keccak.Size + DbAddress.Size)] public DbAddress DataPage;
+
+        public DbAddress GetNextFreePage()
+        {
+            var free = NextFreePage;
+            NextFreePage = NextFreePage.Next;
+            return free;
+        }
     }
 }
 

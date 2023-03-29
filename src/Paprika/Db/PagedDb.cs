@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Nethermind.Int256;
@@ -46,15 +47,15 @@ public abstract unsafe class PagedDb : IDb, IDisposable
     protected void RootInit()
     {
         // create all root pages for the history depth
-        for (var i = 0; i < MinHistoryDepth; i++)
+        for (uint i = 0; i < _historyDepth; i++)
         {
-            _roots[i] = new RootPage(GetAt(i));
+            _roots[i] = new RootPage(GetAt(DbAddress.Page(i)));
         }
 
-        if (_roots[0].NextFreePage < _historyDepth)
+        if (_roots[0].Data.NextFreePage < _historyDepth)
         {
             // the 0th page will have the properly number set to first free page
-            _roots[0].NextFreePage = _historyDepth;
+            _roots[0].Data.NextFreePage = DbAddress.Page(_historyDepth);
         }
 
         _lastRoot = 0;
@@ -75,10 +76,9 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
     private void MoveRootNext() => _lastRoot++;
 
-    private Page GetAt(int address)
+    private Page GetAt(DbAddress address)
     {
-        if (address > _maxPage)
-            throw new ArgumentException($"Requested address {address} while the max page is {_maxPage}");
+        Debug.Assert(address.IsValidAddressPage, "The address page is invalid and breaches max page count");
 
         // Long here is required! Otherwise int overflow will turn it to negative value!
         // ReSharper disable once SuggestVarOrType_BuiltInTypes
@@ -86,10 +86,11 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         return new Page((byte*)Ptr + offset);
     }
 
-    private int GetAddress(in Page page)
+    private DbAddress GetAddress(in Page page)
     {
-        return (int)(Unsafe.ByteOffset(ref Unsafe.AsRef<byte>(Ptr), ref Unsafe.AsRef<byte>(page.Raw.ToPointer()))
-            .ToInt64() / Page.PageSize);
+        return DbAddress.Page((uint)(Unsafe
+            .ByteOffset(ref Unsafe.AsRef<byte>(Ptr), ref Unsafe.AsRef<byte>(page.Raw.ToPointer()))
+            .ToInt64() / Page.PageSize));
     }
 
     public abstract void Dispose();
@@ -120,6 +121,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
     class Transaction : ITransaction, IInternalTransaction
     {
+        private const byte RootLevel = 0;
         private readonly PagedDb _db;
         private readonly RootPage _root;
         private readonly long _txId;
@@ -134,22 +136,18 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             _txId = _root.Header.TransactionId++;
         }
 
-        public void Set(in Keccak key, UInt256 balance, UInt256 nonce)
+        public void Set(in Keccak key, in UInt256 balance, in UInt256 nonce)
         {
-            _root.
-        }
-        // public bool TryGet(in ReadOnlySpan<byte> key, out ReadOnlySpan<byte> value)
-        // {
-        //     var path = NibblePath.FromKey(key);
-        //     return _root.TryGet(path, out value, 0, this);
-        // }
-        //
-        // public void Set(in ReadOnlySpan<byte> key, in ReadOnlySpan<byte> value)
-        // {
-        //     var path = NibblePath.FromKey(key);
-        //     _root = _root.Set(path, value, 0, this);
-        // }
+            ref var root = ref _root.Data.DataPage;
+            var page = root.IsNull ? GetNewDirtyPage(out root) : GetWritable(ref root);
 
+            // treat as data page
+            var data = new DataPage(page);
+
+            var ctx = new SetContext(in key, balance, nonce);
+            data.Set(ctx, this, RootLevel);
+        }
+       
         public void Commit(CommitOptions options)
         {
             // flush data first
@@ -162,20 +160,37 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             }
         }
 
-        public double TotalUsedPages => (double)_root.NextFreePage / _db._maxPage;
+        public double TotalUsedPages => (double)_root.Data.NextFreePage / _db._maxPage;
 
-        Page IInternalTransaction.GetAt(int address) => _db.GetAt(address);
+        Page IInternalTransaction.GetAt(DbAddress address) => _db.GetAt(address);
 
-        int IInternalTransaction.GetAddress(in Page page) => _db.GetAddress(page);
+        DbAddress IInternalTransaction.GetAddress(in Page page) => _db.GetAddress(page);
 
-        Page IInternalTransaction.GetNewDirtyPage(out int addr)
+        public Page GetNewDirtyPage(out DbAddress addr)
         {
-            addr = _root.NextFreePage++;
+            addr = _root.Data.GetNextFreePage();
+            Debug.Assert(addr.IsValidAddressPage, "The page address retrieved is invalid");
+            var page = _db.GetAt(addr);
+            AssignTxId(page);
+            return page;
+        }
 
-            if (addr >= _db._maxPage)
-                throw new Exception("The db file is too small for this page");
+        private void AssignTxId(Page page) => page.Header.TransactionId = _txId;
 
-            return _db.GetAt(addr);
+        private Page GetWritable(ref DbAddress addr)
+        {
+            var page = _db.GetAt(addr);
+            if (page.Header.TransactionId == _txId)
+                return page;
+
+            var @new = GetNewDirtyPage(out addr);
+            page.CopyTo(@new);
+            AssignTxId(@new);
+
+            // TODO: the previous page is dangling and the only information it has is the tx_id, mem management is needed.
+            // Or a process that would scan pages for being old enough to be reused
+            
+            return @new;
         }
     }
 }

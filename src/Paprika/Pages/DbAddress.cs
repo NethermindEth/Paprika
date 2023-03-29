@@ -10,27 +10,27 @@ public readonly struct DbAddress
     public const int Size = sizeof(uint);
 
     /// <summary>
-    /// This value is bigger <see cref="Page.PageCount"/> so that regular pages don't overflow.
+    /// This value is bigger <see cref="Pages.Page.PageCount"/> so that regular pages don't overflow.
     /// </summary>
     private const uint SamePage = 0x1000_0000;
 
     private readonly uint _value;
 
     /// <summary>
-    /// Creates a database address that represents a jump to another frame within the same <see cref="Page"/>.
+    /// Creates a database address that represents a jump to another frame within the same <see cref="Pages.Page"/>.
     /// </summary>
     /// <param name="frame">The frame to jump to.</param>
     /// <returns>A db address.</returns>
     public static DbAddress JumpToFrame(byte frame) => new(frame | SamePage);
 
     /// <summary>
-    /// Creates a database address that represents a jump to another database <see cref="Page"/>.
+    /// Creates a database address that represents a jump to another database <see cref="Pages.Page"/>.
     /// </summary>
     /// <param name="page">The page to go to.</param>
     /// <returns></returns>
-    public static DbAddress AnotherPage(uint page)
+    public static DbAddress Page(uint page)
     {
-        Debug.Assert(page < Page.PageCount, "The page number breached the PageCount maximum");
+        Debug.Assert(page < Pages.Page.PageCount, "The page number breached the PageCount maximum");
         return new(page);
     }
 
@@ -52,4 +52,8 @@ public readonly struct DbAddress
     public bool IsNull => _value == 0;
 
     public bool IsSamePage => (_value & SamePage) == SamePage;
+
+    public bool IsValidAddressPage => _value < Pages.Page.PageCount;
+
+    public static implicit operator uint(DbAddress address) => address._value;
 }
