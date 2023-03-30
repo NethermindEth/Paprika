@@ -81,6 +81,31 @@ public readonly unsafe struct DataPage
 }
 ```
 
+The following ASCII Art should provide a better picture for the composition approach
+
+```bash
+                Page Header Size, the same for all pages
+  start, 0         │
+         |         │
+         ▼         ▼
+         ┌─────────┬────────────────────────────────────────────────────────────────────────────┐
+         │ Page    │                                                                            │
+Page 4kb │ Header  │                                                                            │
+         │         │                                                                            │
+         ├─────────┼─────────────┬──────────────────────────────────────────────────────────────┤
+         │ Page    │ Additional  │                                                              │
+DataPage │ Header  │ DataPage    │   Payload of the page                                        │
+         │         │ Header      │                                                              │
+         └─────────┴─────────────┴──────────────────────────────────────────────────────────────┘
+              ▲                  ▲
+              │                  │
+              │                  │  
+              │                  │                         
+          Page Header      DataPage Header, the same for all the DataPages
+          is shared by
+          all the pages
+```
+
 As fields are located in the same place (`DataPage` wraps `Page` that wraps `byte*`) and all the pages are a size of a `byte*`. To implemented the shared functionality, a markup interface `IPage` is used with some extension methods. Again, as pages have the data in the same place they can be cast with the help of `Unsafe`.
 
 ```csharp
