@@ -7,7 +7,7 @@ namespace Paprika.Crypto;
 /// <summary>
 /// Represents the value of a keccak.
 /// </summary>
-[StructLayout(LayoutKind.Explicit, Size= Size)]
+[StructLayout(LayoutKind.Explicit, Size = Size)]
 public readonly struct Keccak : IEquatable<Keccak>
 {
     public const int Size = 32;
@@ -32,12 +32,12 @@ public readonly struct Keccak : IEquatable<Keccak>
     public static bool operator ==(Keccak left, Keccak right) => left.Equals(right);
 
     public static bool operator !=(Keccak left, Keccak right) => !left.Equals(right);
-    
+
     /// <returns>
     ///     <string>0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470</string>
     /// </returns>
     public static readonly Keccak OfAnEmptyString = Compute(Span<byte>.Empty);
-    
+
     [DebuggerStepThrough]
     public static Keccak Compute(ReadOnlySpan<byte> input)
     {
