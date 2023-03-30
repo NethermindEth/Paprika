@@ -63,7 +63,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         _lastRoot = 0;
         for (var i = 0; i < MinHistoryDepth; i++)
         {
-            if (_roots[i].Header.TransactionId > _lastRoot)
+            if (_roots[i].Header.BatchId > _lastRoot)
             {
                 _lastRoot = i;
             }
@@ -123,7 +123,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         private const byte RootLevel = 0;
         private readonly PagedDb _db;
         private readonly RootPage _root;
-        private readonly long _txId;
+        public long BatchId { get; }
 
         public Batch(PagedDb db, RootPage tempRootPage)
         {
@@ -132,12 +132,13 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
             _db.Root.CopyTo(_root);
 
-            _root.Header.TransactionId++;
+            _root.Header.BatchId++;
 
             // for now, this handles only the forward by one block
             // when reorgs are implemented fully, this should be a jump to an arbitrary block from the kept history
             _root.Data.BlockNumber++;
-            _txId = _root.Header.TransactionId;
+
+            BatchId = _root.Header.BatchId;
         }
 
         public bool TryGetNonce(in Keccak account, out UInt256 nonce)
@@ -158,13 +159,16 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         public void Set(in Keccak account, in UInt256 balance, in UInt256 nonce)
         {
             ref var root = ref _root.Data.DataPage;
-            var page = root.IsNull ? GetNewDirtyPage(out root) : GetWritable(ref root);
+            var page = root.IsNull ? GetNewDirtyPage(out root) : GetAt(ref root);
 
             // treat as data page
             var data = new DataPage(page);
 
             var ctx = new SetContext(in account, balance, nonce);
-            data.Set(ctx, this, RootLevel);
+
+            var updated = data.Set(ctx, this, RootLevel);
+
+            _root.Data.DataPage = _db.GetAddress(updated);
         }
 
         public Keccak Commit(CommitOptions options)
@@ -207,15 +211,16 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             return page;
         }
 
-        private void AssignTxId(Page page) => page.Header.TransactionId = _txId;
+        private void AssignTxId(Page page) => page.Header.BatchId = BatchId;
 
-        private Page GetWritable(ref DbAddress addr)
+        private Page GetAt(ref DbAddress addr) => _db.GetAt(addr);
+
+        public Page GetWritableCopy(Page page)
         {
-            var page = _db.GetAt(addr);
-            if (page.Header.TransactionId == _txId)
+            if (page.Header.BatchId == BatchId)
                 return page;
 
-            var @new = GetNewDirtyPage(out addr);
+            var @new = GetNewDirtyPage(out _);
             page.CopyTo(@new);
             AssignTxId(@new);
 

@@ -13,35 +13,30 @@ public class PageTests
         const int max = 16;
 
         using var db = new NativeMemoryPagedDb(1024 * 1024UL, 2);
-        using var tx = db.BeginNextBlock();
 
-        var keccak = new Keccak();
-        var span = keccak.BytesAsSpan;
+        Span<byte> span = stackalloc byte[Keccak.Size];
+
+        span[1] = 0x12;
+        span[2] = 0x34;
+        span[3] = 0x56;
+        span[4] = 0x78;
 
         for (byte i = 0; i < max; i++)
         {
-            span[0] = i;
-            span[1] = 0x12;
-            span[2] = 0x34;
-            span[3] = 0x56;
-            span[4] = 0x78;
+            using var batch = db.BeginNextBlock();
 
-            tx.Set(keccak, i, i);
+            span[0] = (byte)(i << NibblePath.NibbleShift);
+
+            batch.Set(new Keccak(span), i, i);
+            batch.Commit(CommitOptions.FlushDataOnly);
         }
 
-        tx.Commit(CommitOptions.FlushDataOnly);
-
-        using var tx2 = db.BeginNextBlock();
+        using var read = db.BeginNextBlock();
 
         for (byte i = 0; i < max; i++)
         {
-            span[0] = i;
-            span[1] = 0x12;
-            span[2] = 0x34;
-            span[3] = 0x56;
-            span[4] = 0x78;
-
-            tx.TryGetNonce(keccak, out var nonce);
+            span[0] = (byte)(i << NibblePath.NibbleShift);
+            read.TryGetNonce(new Keccak(span), out var nonce);
 
             Assert.AreEqual((UInt256)i, nonce);
         }

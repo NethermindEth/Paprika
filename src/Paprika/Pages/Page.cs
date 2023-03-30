@@ -27,7 +27,7 @@ public struct PageHeader
     /// The id of the last transaction that wrote to this page.
     /// </summary>
     [FieldOffset(0)]
-    public long TransactionId;
+    public long BatchId;
 }
 
 
