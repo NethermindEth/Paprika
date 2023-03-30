@@ -6,6 +6,7 @@
     "Merkle",
     "mmap",
     "Nethermind",
+    "stackallocated",
     "Verkle"
   ]
 }
