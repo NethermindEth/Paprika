@@ -73,8 +73,28 @@ public readonly unsafe struct DataPage : IPage
         public Span<AccountFrame> Frames => MemoryMarshal.CreateSpan(ref Frame, FrameCount);
     }
 
-    public void Set(in SetContext ctx, IBatchContext tx, byte level)
+    /// <summary>
+    /// Sets values for the given <see cref="SetContext.Key"/>
+    /// </summary>
+    /// <param name="ctx"></param>
+    /// <param name="batch"></param>
+    /// <param name="level">The nesting level of the call</param>
+    /// <returns>
+    /// The actual page which handled the set operation. Due to page being COWed, it may be a different page.
+    /// 
+    /// </returns>
+    public Page Set(in SetContext ctx, IBatchContext batch, byte level)
     {
+        if (Header.PageHeader.BatchId != batch.BatchId)
+        {
+            // the page is from another batch, meaning, it's readonly. Copy
+            var writable = batch.GetWritableCopy(_page);
+            var data = new DataPage(writable);
+            data.Set(ctx, batch, level);
+
+            return data._page;
+        }
+
         // TODO: updates, check for the key existence, comparisons and more, for now just reserve a slot and set it
 
         if (BitExtensions.TrySetLowestBit(ref Data.FrameUsed, Payload16.FrameCount, out var reserved))
@@ -93,7 +113,7 @@ public readonly unsafe struct DataPage : IPage
 
             // overwrite the bucket with the recent one
             bucket = DbAddress.JumpToFrame(reserved);
-            return;
+            return _page;
         }
 
         throw new NotImplementedException("Should overflow to the next page or result in a page split");

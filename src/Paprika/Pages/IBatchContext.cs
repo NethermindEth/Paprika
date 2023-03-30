@@ -17,4 +17,8 @@ public interface IBatchContext
     /// </summary>
     /// <returns></returns>
     Page GetNewDirtyPage(out DbAddress addr);
+
+    long BatchId { get; }
+
+    Page GetWritableCopy(Page page);
 }
