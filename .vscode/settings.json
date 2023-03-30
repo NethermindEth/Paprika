@@ -1,3 +1,10 @@
 {
-  "cSpell.words": ["Nethermind"]
+  "cSpell.words": [
+    "Keccaks",
+    "LMBD",
+    "Merkle",
+    "mmap",
+    "Nethermind",
+    "Verkle"
+  ]
 }
