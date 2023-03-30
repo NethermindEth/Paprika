@@ -1,5 +1,6 @@
 ﻿using System.Runtime.CompilerServices;
 using Nethermind.Int256;
+using Paprika.Crypto;
 
 namespace Paprika;
 

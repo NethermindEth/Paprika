@@ -17,12 +17,11 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using static System.Numerics.BitOperations;
 
 // ReSharper disable InconsistentNaming
-namespace Tree.Crypto
+namespace Paprika.Crypto
 {
     public sealed class KeccakHash
     {

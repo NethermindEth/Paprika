@@ -3,7 +3,7 @@
 
 using System.Diagnostics;
 
-namespace Tree.Crypto
+namespace Paprika.Crypto
 {
     public static class SpanExtensions
     {

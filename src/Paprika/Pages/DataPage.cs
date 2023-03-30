@@ -1,6 +1,7 @@
 ﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Nethermind.Int256;
+using Paprika.Crypto;
 
 namespace Paprika.Pages;
 
