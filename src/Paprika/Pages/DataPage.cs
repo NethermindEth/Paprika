@@ -73,7 +73,7 @@ public readonly unsafe struct DataPage : IPage
         public Span<AccountFrame> Frames => MemoryMarshal.CreateSpan(ref Frame, FrameCount);
     }
 
-    public void Set(in SetContext ctx, IInternalTransaction tx, byte level)
+    public void Set(in SetContext ctx, IBatchContext tx, byte level)
     {
         // TODO: updates, check for the key existence, comparisons and more, for now just reserve a slot and set it
 

@@ -13,7 +13,7 @@ public class PageTests
         const int max = 16;
 
         using var db = new NativeMemoryPagedDb(1024 * 1024UL, 2);
-        using var tx = db.Begin();
+        using var tx = db.BeginNextBlock();
 
         var keccak = new Keccak();
         var span = keccak.BytesAsSpan;
@@ -31,7 +31,7 @@ public class PageTests
 
         tx.Commit(CommitOptions.FlushDataOnly);
 
-        using var tx2 = db.Begin();
+        using var tx2 = db.BeginNextBlock();
 
         for (byte i = 0; i < max; i++)
         {

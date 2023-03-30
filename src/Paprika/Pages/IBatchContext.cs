@@ -1,8 +1,6 @@
-﻿using Paprika.Pages;
+﻿namespace Paprika.Pages;
 
-namespace Paprika;
-
-public interface IInternalTransaction
+public interface IBatchContext
 {
     /// <summary>
     /// Gets the page at given address.

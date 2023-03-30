@@ -1,4 +1,5 @@
-﻿using System.Collections.Concurrent;
+﻿using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -109,7 +110,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
     private void ReleaseRootPage(RootPage page) => _pool.Push(page);
 
     // for now, omit block consideration
-    public ITransaction Begin() => new Transaction(this, RentRootPage());
+    public IBatch BeginNextBlock() => new Batch(this, RentRootPage());
 
     private void SetNewRoot(RootPage root)
     {
@@ -117,14 +118,14 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         root.CopyTo(_roots[_lastRoot % _historyDepth]);
     }
 
-    class Transaction : ITransaction, IInternalTransaction
+    class Batch : IBatch, IBatchContext
     {
         private const byte RootLevel = 0;
         private readonly PagedDb _db;
         private readonly RootPage _root;
         private readonly long _txId;
 
-        public Transaction(PagedDb db, RootPage tempRootPage)
+        public Batch(PagedDb db, RootPage tempRootPage)
         {
             _db = db;
             _root = tempRootPage;
@@ -133,10 +134,13 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
             _root.Header.TransactionId++;
 
+            // for now, this handles only the forward by one block
+            // when reorgs are implemented fully, this should be a jump to an arbitrary block from the kept history
+            _root.Data.BlockNumber++;
             _txId = _root.Header.TransactionId;
         }
 
-        public bool TryGetNonce(in Keccak key, out UInt256 nonce)
+        public bool TryGetNonce(in Keccak account, out UInt256 nonce)
         {
             var root = _root.Data.DataPage;
             if (root.IsNull)
@@ -148,10 +152,10 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             // treat as data page
             var data = new DataPage(_db.GetAt(root));
 
-            return data.TryGetNonce(key, out nonce, RootLevel);
+            return data.TryGetNonce(account, out nonce, RootLevel);
         }
 
-        public void Set(in Keccak key, in UInt256 balance, in UInt256 nonce)
+        public void Set(in Keccak account, in UInt256 balance, in UInt256 nonce)
         {
             ref var root = ref _root.Data.DataPage;
             var page = root.IsNull ? GetNewDirtyPage(out root) : GetWritable(ref root);
@@ -159,12 +163,14 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             // treat as data page
             var data = new DataPage(page);
 
-            var ctx = new SetContext(in key, balance, nonce);
+            var ctx = new SetContext(in account, balance, nonce);
             data.Set(ctx, this, RootLevel);
         }
 
-        public void Commit(CommitOptions options)
+        public Keccak Commit(CommitOptions options)
         {
+            CalculateRootHash();
+
             // flush data first
             _db.Flush();
             _db.SetNewRoot(_root);
@@ -173,13 +179,24 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             {
                 _db.Flush();
             }
+
+            return _root.Data.BlockHash;
+        }
+
+        private void CalculateRootHash()
+        {
+            // TODO: it's a dummy implementation now as there's no Merkle construct.
+            // when implementing, this will be the place to put the real Keccak
+            Span<byte> span = stackalloc byte[4];
+            BinaryPrimitives.WriteUInt32LittleEndian(span, _root.Data.BlockNumber);
+            _root.Data.BlockHash = Keccak.Compute(span);
         }
 
         public double TotalUsedPages => ((double)(uint)_root.Data.NextFreePage) / _db._maxPage;
 
-        Page IInternalTransaction.GetAt(DbAddress address) => _db.GetAt(address);
+        Page IBatchContext.GetAt(DbAddress address) => _db.GetAt(address);
 
-        DbAddress IInternalTransaction.GetAddress(in Page page) => _db.GetAddress(page);
+        DbAddress IBatchContext.GetAddress(in Page page) => _db.GetAddress(page);
 
         public Page GetNewDirtyPage(out DbAddress addr)
         {
