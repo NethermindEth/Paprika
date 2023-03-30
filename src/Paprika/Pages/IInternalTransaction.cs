@@ -1,6 +1,4 @@
-﻿using Paprika.Pages;
-
-namespace Paprika;
+﻿namespace Paprika.Pages;
 
 public interface IInternalTransaction
 {
