@@ -1,48 +1,41 @@
 # :hot_pepper: Paprika
 
-Paprika provides a custom implementation of the Patricia tree used in Ethereum. It's inspired mostly by [LMDB](https://github.com/LMDB/lmdb). It aims at delivering the following:
+Paprika provides a custom implementation of the Patricia tree used in Ethereum. It aims at delivering the following:
 
 1. no external KV storage
 1. no managed memory overhead - Paprika uses almost no managed memory as only `Span<byte>`, stackallocated variables and uses no managed representation of the tree
 1. atomic commit
 1. the history of N-th last versions of the db
 
-**No external KV storage** means that Paprika is selfsufficient in regards to writing and reading data from disk and requires no third party dbs like Rocks or others.
+**No external KV storage** means that Paprika is self-sufficient in regards to writing and reading data from disk and requires no third-party databases like `RocksDB` or others.
 
-**No managed memory overhead** means that Paprika uses almost no managed memory. Only `Span<byte>`, stackallocated variables are used. There's no representation of the tree stored in the managed memory. Also, it uses `[module: SkipLocalsInit]` to not clean any memory before accessing it.
+**No managed memory overhead** means that Paprika uses almost no managed memory. Only `Span<byte>` and stackallocated variables are used. There's no representation of the tree stored in the managed memory. Also, it uses `[module: SkipLocalsInit]` to not clean any memory before accessing it.
 
-**Atomic commit** means atomic in the meaning of ACID. If there's a failure during the commit the db shall not be corrupted and shall represent the previous state.
+**Atomic commit** means atomic in the meaning of ACID. If there's a failure during the commit the database shall not be corrupted and shall represent the previous state.
 
-**History** is preserved using additional metadata pages, that keep the root and the pages that were marked as abandoned .
+**History** is preserved using additional metadata pages, that keep the root and the pages that were marked as abandoned.
 
 ## Design
 
-Some design principles of Paprika:
-
-1. `memory mapped files` used to store and read data
-1. 4kb `page` based addressing and memory management
-1. `copy on write`, so no dirty write on previous data
-1. a single tx writer
-1. use `NibblePath` without decoding it to bytes, which allows easy slicing and fast comparisons. It's also compact
-1. use alloc free RLP/Keccak computations
+Visit [docs](/docs) for further information.
 
 ## Benchmarks
 
-After the redesign to be page oriented, the benchmarks use bigger numbers
+After the redesign to be page-oriented, the benchmarks use bigger numbers
 
-1. [160 millions of pairs](#160-millions-of-pairs), written in a single transaction, which shall simulate the initial population/sync
+1. [160 million pairs](#160-millions-of-pairs), written in a single transaction, which shall simulate the initial population/sync
 
-In each case the key is 32 bytes long. The value is 32 bytes long as well.
+In each case, the key is 32 bytes long. The value is 32 bytes long as well.
 
 ### General considerations
 
 #### Memory Profiling
 
-Almost no managed memory used
+Almost no managed memory is used
 
 ![image](https://user-images.githubusercontent.com/519707/204166299-81c05582-7e0d-4401-b2cf-91a3c1b7153b.png)
 
-### 160 millions of pairs
+### 160 million pairs
 
 Writing 160 million 32bytes -> 32bytes mappings
 
