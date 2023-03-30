@@ -3,7 +3,7 @@ using Paprika.Crypto;
 
 namespace Paprika;
 
-public interface ITransaction : IDisposable
+public interface IBatch : IDisposable
 {
     bool TryGetNonce(in Keccak account, out UInt256 nonce);
 

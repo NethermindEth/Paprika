@@ -1,6 +1,6 @@
 ﻿namespace Paprika.Pages;
 
-public interface IInternalTransaction
+public interface IBatchContext
 {
     /// <summary>
     /// Gets the page at given address.

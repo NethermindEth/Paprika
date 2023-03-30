@@ -110,7 +110,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
     private void ReleaseRootPage(RootPage page) => _pool.Push(page);
 
     // for now, omit block consideration
-    public ITransaction BeginNextBlock() => new Transaction(this, RentRootPage());
+    public IBatch BeginNextBlock() => new Batch(this, RentRootPage());
 
     private void SetNewRoot(RootPage root)
     {
@@ -118,14 +118,14 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         root.CopyTo(_roots[_lastRoot % _historyDepth]);
     }
 
-    class Transaction : ITransaction, IInternalTransaction
+    class Batch : IBatch, IBatchContext
     {
         private const byte RootLevel = 0;
         private readonly PagedDb _db;
         private readonly RootPage _root;
         private readonly long _txId;
 
-        public Transaction(PagedDb db, RootPage tempRootPage)
+        public Batch(PagedDb db, RootPage tempRootPage)
         {
             _db = db;
             _root = tempRootPage;
@@ -194,9 +194,9 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         public double TotalUsedPages => ((double)(uint)_root.Data.NextFreePage) / _db._maxPage;
 
-        Page IInternalTransaction.GetAt(DbAddress address) => _db.GetAt(address);
+        Page IBatchContext.GetAt(DbAddress address) => _db.GetAt(address);
 
-        DbAddress IInternalTransaction.GetAddress(in Page page) => _db.GetAddress(page);
+        DbAddress IBatchContext.GetAddress(in Page page) => _db.GetAddress(page);
 
         public Page GetNewDirtyPage(out DbAddress addr)
         {
