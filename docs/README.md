@@ -14,6 +14,17 @@ The foundation of any blockchain is a single list of blocks, a chain. The _canon
 
 Paprika focuses on delivering fast reads and writes, keeping the information about `Merkle` construct in separate pages. This allows to load and access of pages with data in a fast manner, leaving the update of the root hash (and other nodes) for the transaction commit. It also allows choosing which Keccaks are memoized. For example, the implementor may choose to store every other level of Keccaks.
 
+### ACID
+
+Paprika allows 2 modes of commits:
+
+1. `FlushDataOnly`
+1. `FlushDataAndRoot`
+
+`FlushDataOnly` allows flushing the data on disk but keeps the root page in memory only. The root page pointing to the recent changes will be flushed the next time. This effectively means that the database preserves the semantics of **Atomic** but is not durable as there's always one write hanging in the air. This mode should be used for greater throughput as it requires only one flushing of the underlying file (`MSYNC` + `FSYNC`).
+
+`FlushDataAndRoot` flushes both, all the data pages and the root page. This mode is not only **Atomic** but also **Durable** as after the commit, the database is fully stored on the disk. This requires two calls to `MSYNC` and two calls to `FSYNC` though, which is a lot heavier than the previous mode. `FlushDataOnly` should be the default one that is used and `FlushDataAndRoot` should be used mostly when closing the database.
+
 ### Memory-mapped caveats
 
 It's worth mentioning that memory-mapped files were lately critiqued by [Andy Pavlo and the team](https://db.cs.cmu.edu/mmap-cidr2022/). The paper's outcome is that any significant DBMS system will need to provide buffer pooling management and `mmap` is not the right tool to build a database. At the moment of writing the decision is to keep the codebase small and use `mmap` and later, if performance is shown to be degrading, migrate.
@@ -105,7 +116,7 @@ As pages may differ by how they use 4kb of provided memory, they need to share s
 
 The 1st point, the type differentiation, can be addressed either by storying the page type or reasoning about the page place where the page is used. For example, if a page is one of the N pages that support reorganizations, it must be a `RootPage`.
 
-The 2nd point that covers storing important information is stored at the shared page header. The shared `PageHeader` is an amount of memory that is coherent across all the pages. Again, the memory size is const and csharp `const` constructs are leveraged to have it calculated by the compiler and not to deal with them in the runtime.
+The 2nd point that covers storing important information is stored at the shared page header. The shared `PageHeader` is an amount of memory that is coherent across all the pages. Again, the memory size is const and C\# `const` constructs are leveraged to have it calculated by the compiler and not to deal with them in the runtime.
 
 ```csharp
 /// <summary>

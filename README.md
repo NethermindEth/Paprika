@@ -17,14 +17,7 @@ Paprika provides a custom implementation of the Patricia tree used in Ethereum. 
 
 ## Design
 
-Some design principles of Paprika:
-
-1. `memory mapped files` used to store and read data
-1. 4kb `page` based addressing and memory management
-1. `copy on write`, so no dirty write on previous data
-1. a single tx writer
-1. use `NibblePath` without decoding it to bytes, which allows easy slicing and fast comparisons. It's also compact
-1. use alloc free RLP/Keccak computations
+Visit [docs](\docs) for further information.
 
 ## Benchmarks
 
