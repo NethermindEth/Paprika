@@ -1,5 +1,6 @@
 ﻿using Nethermind.Int256;
 using NUnit.Framework;
+using Paprika.Crypto;
 using Paprika.Db;
 
 namespace Paprika.Tests;

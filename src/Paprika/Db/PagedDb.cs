@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Nethermind.Int256;
+using Paprika.Crypto;
 using Paprika.Pages;
 
 namespace Paprika.Db;
