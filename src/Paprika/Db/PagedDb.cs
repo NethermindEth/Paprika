@@ -133,7 +133,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             _db.Root.CopyTo(_root);
 
             _root.Header.TransactionId++;
-            
+
             // for now, this handles only the forward by one block
             // when reorgs are implemented fully, this should be a jump to an arbitrary block from the kept history
             _root.Data.BlockNumber++;
@@ -170,7 +170,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         public Keccak Commit(CommitOptions options)
         {
             CalculateRootHash();
-            
+
             // flush data first
             _db.Flush();
             _db.SetNewRoot(_root);
@@ -188,7 +188,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             // TODO: it's a dummy implementation now as there's no Merkle construct.
             // when implementing, this will be the place to put the real Keccak
             Span<byte> span = stackalloc byte[4];
-            BinaryPrimitives.WriteUInt32LittleEndian(span,_root.Data.BlockNumber);
+            BinaryPrimitives.WriteUInt32LittleEndian(span, _root.Data.BlockNumber);
             _root.Data.BlockHash = Keccak.Compute(span);
         }
 
