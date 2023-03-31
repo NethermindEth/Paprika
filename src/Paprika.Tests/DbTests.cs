@@ -5,7 +5,7 @@ using Paprika.Db;
 
 namespace Paprika.Tests;
 
-public class PageTests
+public class DbTests
 {
     [Test]
     public void Simple()
@@ -23,11 +23,11 @@ public class PageTests
 
         for (byte i = 0; i < max; i++)
         {
-            using var batch = db.BeginNextBlock();
-
             span[0] = (byte)(i << NibblePath.NibbleShift);
+            var key = new Keccak(span);
 
-            batch.Set(new Keccak(span), i, i);
+            using var batch = db.BeginNextBlock();
+            batch.Set(key, new Account(i, i));
             batch.Commit(CommitOptions.FlushDataOnly);
         }
 
@@ -36,9 +36,11 @@ public class PageTests
         for (byte i = 0; i < max; i++)
         {
             span[0] = (byte)(i << NibblePath.NibbleShift);
-            read.TryGetNonce(new Keccak(span), out var nonce);
+            var key = new Keccak(span);
 
-            Assert.AreEqual((UInt256)i, nonce);
+            var account = read.GetAccount(key);
+
+            Assert.AreEqual((UInt256)i, account.Nonce);
         }
 
         Console.WriteLine($"Used memory {db.TotalUsedPages:P}");

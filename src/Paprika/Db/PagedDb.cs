@@ -141,30 +141,30 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             BatchId = _root.Header.BatchId;
         }
 
-        public bool TryGetNonce(in Keccak account, out UInt256 nonce)
+        public Account GetAccount(in Keccak key)
         {
             var root = _root.Data.DataPage;
             if (root.IsNull)
             {
-                nonce = default;
-                return false;
+                return default;
             }
 
             // treat as data page
             var data = new DataPage(_db.GetAt(root));
 
-            return data.TryGetNonce(account, out nonce, RootLevel);
+            data.GetAccount(key, this, out var account, RootLevel);
+            return account;
         }
 
-        public void Set(in Keccak account, in UInt256 balance, in UInt256 nonce)
+        public void Set(in Keccak key, in Account account)
         {
             ref var root = ref _root.Data.DataPage;
-            var page = root.IsNull ? GetNewDirtyPage(out root) : GetAt(ref root);
+            var page = root.IsNull ? GetNewPage(out root, true) : GetAt(ref root);
 
             // treat as data page
             var data = new DataPage(page);
 
-            var ctx = new SetContext(in account, balance, nonce);
+            var ctx = new SetContext(in key, account.Balance, account.Nonce);
 
             var updated = data.Set(ctx, this, RootLevel);
 
@@ -202,11 +202,14 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         DbAddress IBatchContext.GetAddress(in Page page) => _db.GetAddress(page);
 
-        public Page GetNewDirtyPage(out DbAddress addr)
+        public Page GetNewPage(out DbAddress addr, bool clear)
         {
             addr = _root.Data.GetNextFreePage();
             Debug.Assert(addr.IsValidAddressPage, "The page address retrieved is invalid");
             var page = _db.GetAt(addr);
+            if (clear)
+                page.Clear();
+
             AssignTxId(page);
             return page;
         }
@@ -220,7 +223,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             if (page.Header.BatchId == BatchId)
                 return page;
 
-            var @new = GetNewDirtyPage(out _);
+            var @new = GetNewPage(out _, false);
             page.CopyTo(@new);
             AssignTxId(@new);
 
