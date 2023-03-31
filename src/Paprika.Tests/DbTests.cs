@@ -23,11 +23,14 @@ public class DbTests
 
         for (byte i = 0; i < max; i++)
         {
-            using var batch = db.BeginNextBlock();
-
             span[0] = (byte)(i << NibblePath.NibbleShift);
+            var key = new Keccak(span);
 
-            batch.Set(new Keccak(span), i, i);
+            using var batch = db.BeginNextBlock();
+            batch.Set(key, balance: i, nonce: i);
+
+            batch.TryGetNonce(key, out UInt256 accountNonce);
+
             batch.Commit(CommitOptions.FlushDataOnly);
         }
 
@@ -36,7 +39,9 @@ public class DbTests
         for (byte i = 0; i < max; i++)
         {
             span[0] = (byte)(i << NibblePath.NibbleShift);
-            read.TryGetNonce(new Keccak(span), out var nonce);
+            var key = new Keccak(span);
+
+            read.TryGetNonce(key, out var nonce);
 
             Assert.AreEqual((UInt256)i, nonce);
         }

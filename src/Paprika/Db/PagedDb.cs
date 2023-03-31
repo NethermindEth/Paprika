@@ -141,19 +141,31 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             BatchId = _root.Header.BatchId;
         }
 
-        public bool TryGetNonce(in Keccak account, out UInt256 nonce)
+        public bool TryGet(in Keccak account, out GetContext context)
         {
             var root = _root.Data.DataPage;
             if (root.IsNull)
             {
-                nonce = default;
+                context = default;
                 return false;
             }
 
             // treat as data page
             var data = new DataPage(_db.GetAt(root));
 
-            return data.TryGetNonce(account, out nonce, RootLevel);
+            return data.TryGet(account, out context, RootLevel);
+        }
+
+        public bool TryGetNonce(in Keccak account, out UInt256 nonce)
+        {
+            if (TryGet(account, out var context))
+            {
+                nonce = context.Nonce;
+                return true;
+            }
+
+            nonce = default;
+            return false;
         }
 
         public void Set(in Keccak account, in UInt256 balance, in UInt256 nonce)

@@ -139,7 +139,7 @@ public readonly unsafe struct DataPage : IPage
         // type of the page, and others
     }
 
-    public bool TryGetNonce(in Keccak key, out UInt256 nonce, byte level)
+    public bool TryGet(in Keccak key, out GetContext result, byte level)
     {
         var path = NibblePath.FromKey(key.BytesAsSpan, level);
 
@@ -153,14 +153,14 @@ public readonly unsafe struct DataPage : IPage
 
             if (frame.Key.Equals(key))
             {
-                nonce = frame.Nonce;
+                result = new GetContext(frame.Balance, frame.Nonce);
                 return true;
             }
 
             bucket = frame.Next;
         }
 
-        nonce = default;
+        result = default;
         return false;
     }
 }

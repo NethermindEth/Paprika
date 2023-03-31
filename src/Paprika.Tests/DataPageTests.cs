@@ -21,24 +21,25 @@ public unsafe class DataPageTests
     private static readonly UInt256 Nonce1 = 29;
     private static readonly UInt256 Nonce2 = 31;
 
-    private static readonly byte RootLevel = 0;
+    private const byte RootLevel = 0;
+
+    const uint BatchId = 1;
 
     [Test]
     public void Test()
     {
-        const uint batchId = 1;
-
         var page = AllocPage();
         page.Clear();
 
-        var batch = new BatchContext { BatchId = batchId };
+        var batch = new BatchContext { BatchId = BatchId };
         var dataPage = new DataPage(page);
         var ctx = new SetContext(Key0, Balance0, Nonce0);
 
         var updated = dataPage.Set(ctx, batch, RootLevel);
 
-        Assert.True(new DataPage(updated).TryGetNonce(Key0, out var nonce, RootLevel));
-        Assert.AreEqual(Nonce0, nonce);
+        Assert.True(new DataPage(updated).TryGet(Key0, out var context, RootLevel));
+        Assert.AreEqual(Nonce0, context.Nonce);
+        Assert.AreEqual(Balance0, context.Balance);
     }
 
     [Test]
