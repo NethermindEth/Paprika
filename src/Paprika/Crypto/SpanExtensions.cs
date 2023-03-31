@@ -40,7 +40,6 @@ public static class SpanExtensions
             char char1 = (char)val;
             char char2 = (char)(val >> 16);
 
-            string? hashHex;
             if (leadingZeros <= i * 2)
             {
                 result[2 * i + (withZeroX ? 2 : 0) - leadingZeros] = char1;

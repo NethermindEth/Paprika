@@ -16,7 +16,7 @@ public interface IBatchContext
     /// Gets an unused page that is not clean.
     /// </summary>
     /// <returns></returns>
-    Page GetNewDirtyPage(out DbAddress addr);
+    Page GetNewPage(out DbAddress addr, bool clear);
 
     long BatchId { get; }
 

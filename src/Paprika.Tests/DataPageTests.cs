@@ -1,4 +1,5 @@
 ﻿using System.Runtime.InteropServices;
+using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Crypto;
@@ -39,7 +40,7 @@ public unsafe class DataPageTests
 
         var updated = dataPage.Set(ctx, batch, RootLevel);
 
-        new DataPage(updated).GetAccount(Key0, out var account, RootLevel);
+        new DataPage(updated).GetAccount(Key0, batch, out var account, RootLevel);
 
         Assert.AreEqual(Nonce0, account.Nonce);
         Assert.AreEqual(Balance0, account.Balance);
@@ -60,7 +61,7 @@ public unsafe class DataPageTests
         var updated = dataPage.Set(ctx1, batch, RootLevel);
         updated = new DataPage(updated).Set(ctx2, batch, RootLevel);
 
-        new DataPage(updated).GetAccount(Key0, out var account, RootLevel);
+        new DataPage(updated).GetAccount(Key0, batch, out var account, RootLevel);
         Assert.AreEqual(Nonce1, account.Nonce);
         Assert.AreEqual(Balance1, account.Balance);
     }
@@ -80,11 +81,11 @@ public unsafe class DataPageTests
         var updated = dataPage.Set(ctx1, batch, RootLevel);
         updated = new DataPage(updated).Set(ctx2, batch, RootLevel);
 
-        new DataPage(updated).GetAccount(Key1a, out var account, RootLevel);
+        new DataPage(updated).GetAccount(Key1a, batch, out var account, RootLevel);
         Assert.AreEqual(Nonce0, account.Nonce);
         Assert.AreEqual(Balance0, account.Balance);
 
-        new DataPage(updated).GetAccount(Key1b, out account, RootLevel);
+        new DataPage(updated).GetAccount(Key1b, batch, out account, RootLevel);
         Assert.AreEqual(Nonce1, account.Nonce);
         Assert.AreEqual(Balance1, account.Balance);
     }
@@ -94,20 +95,28 @@ public unsafe class DataPageTests
     {
         var page = AllocPage();
         page.Clear();
-        
+
         var batch = new BatchContext { BatchId = BatchId };
         var dataPage = new DataPage(page);
 
-        const int count = 64;
-        
+        const int count = 769;
+
         for (uint i = 0; i < count; i++)
         {
             var key = Key1a;
             key.BytesAsSpan[0] = (byte)i;
-            
-            var ctx = new SetContext(key, i, i);
 
+            var ctx = new SetContext(key, i, i);
             dataPage = new DataPage(dataPage.Set(ctx, batch, RootLevel));
+        }
+
+        for (uint i = 0; i < count; i++)
+        {
+            var key = Key1a;
+            key.BytesAsSpan[0] = (byte)i;
+
+            dataPage.GetAccount(key, batch, out var account, RootLevel);
+            account.Should().Be(new Account(i, i));
         }
     }
 
@@ -149,9 +158,14 @@ public unsafe class DataPageTests
 
         public DbAddress GetAddress(in Page page) => _page2Address[page.Raw];
 
-        public Page GetNewDirtyPage(out DbAddress addr)
+        public Page GetNewPage(out DbAddress addr, bool clear)
         {
             var page = AllocPage();
+            if (clear)
+                page.Clear();
+
+            page.Header.BatchId = BatchId;
+
             addr = DbAddress.Page(_pageCount++);
 
             _address2Page[addr] = page;
@@ -167,7 +181,7 @@ public unsafe class DataPageTests
             if (page.Header.BatchId == BatchId)
                 return page;
 
-            var @new = GetNewDirtyPage(out _);
+            var @new = GetNewPage(out _, true);
             page.CopyTo(@new);
             @new.Header.BatchId = BatchId;
             return @new;

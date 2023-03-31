@@ -18,4 +18,11 @@ public readonly ref struct SetContext
         Balance = new UInt128(balance[1], balance[0]);
         Nonce = (uint)nonce;
     }
+
+    public SetContext(in Keccak keccak, in UInt128 balance, uint nonce)
+    {
+        Key = keccak;
+        Balance = balance;
+        Nonce = nonce;
+    }
 }

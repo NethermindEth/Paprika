@@ -14,13 +14,15 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     /// The null address.
     /// </summary>
     public static readonly DbAddress Null = default;
-    
+
     public const int Size = sizeof(uint);
 
     /// <summary>
     /// This value is bigger <see cref="Pages.Page.PageCount"/> so that regular pages don't overflow.
     /// </summary>
     private const uint SamePage = 0x8000_0000;
+
+    private const int ValueMask = 0x00FF_FFFF;
 
     /// <summary>
     /// The shift that is applied to the counter of the jumps captured by the address.
@@ -78,13 +80,14 @@ public readonly struct DbAddress : IEquatable<DbAddress>
 
     public bool IsSamePage => (_value & SamePage) == SamePage;
 
+    // ReSharper disable once MergeIntoPattern
     public bool IsValidAddressPage => _value < Pages.Page.PageCount;
 
     public bool TryGetSamePage(out byte frame)
     {
         if (IsSamePage)
         {
-            frame = (byte)(_value & ~SamePage);
+            frame = (byte)(_value & ValueMask);
             return true;
         }
 
@@ -96,7 +99,7 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     public static implicit operator int(DbAddress address) => (int)address._value;
 
     public override string ToString() => IsNull ? "null" :
-        IsSamePage ? $"Jump within page to index: {_value & ~SamePage}" : $"Page @{_value}";
+        IsSamePage ? $"Jump within page to index: {ValueMask & _value}" : $"Page @{_value}";
 
     public bool Equals(DbAddress other) => _value == other._value;
 

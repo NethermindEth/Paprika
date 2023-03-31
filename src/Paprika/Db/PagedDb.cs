@@ -152,14 +152,14 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             // treat as data page
             var data = new DataPage(_db.GetAt(root));
 
-            data.GetAccount(key, out var account, RootLevel);
+            data.GetAccount(key, this, out var account, RootLevel);
             return account;
         }
 
         public void Set(in Keccak key, in Account account)
         {
             ref var root = ref _root.Data.DataPage;
-            var page = root.IsNull ? GetNewDirtyPage(out root) : GetAt(ref root);
+            var page = root.IsNull ? GetNewPage(out root, true) : GetAt(ref root);
 
             // treat as data page
             var data = new DataPage(page);
@@ -202,11 +202,14 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         DbAddress IBatchContext.GetAddress(in Page page) => _db.GetAddress(page);
 
-        public Page GetNewDirtyPage(out DbAddress addr)
+        public Page GetNewPage(out DbAddress addr, bool clear)
         {
             addr = _root.Data.GetNextFreePage();
             Debug.Assert(addr.IsValidAddressPage, "The page address retrieved is invalid");
             var page = _db.GetAt(addr);
+            if (clear)
+                page.Clear();
+
             AssignTxId(page);
             return page;
         }
@@ -220,7 +223,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             if (page.Header.BatchId == BatchId)
                 return page;
 
-            var @new = GetNewDirtyPage(out _);
+            var @new = GetNewPage(out _, false);
             page.CopyTo(@new);
             AssignTxId(@new);
 
