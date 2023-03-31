@@ -1,5 +1,4 @@
 ﻿using System.Numerics;
-using System.Runtime.CompilerServices;
 using Nethermind.Int256;
 
 namespace Paprika.Pages;

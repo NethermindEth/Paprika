@@ -1,6 +1,6 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Nethermind.Int256;
 using Paprika.Crypto;
 
 namespace Paprika.Pages;
@@ -18,6 +18,7 @@ public readonly unsafe struct DataPage : IPage
 {
     private readonly Page _page;
 
+    [DebuggerStepThrough]
     public DataPage(Page page) => _page = page;
 
     public ref DataPageHeader Header => ref Unsafe.As<PageHeader, DataPageHeader>(ref _page.Header);
@@ -89,19 +90,36 @@ public readonly unsafe struct DataPage : IPage
         {
             // the page is from another batch, meaning, it's readonly. Copy
             var writable = batch.GetWritableCopy(_page);
-            var data = new DataPage(writable);
-            data.Set(ctx, batch, level);
-
-            return data._page;
+            new DataPage(writable).Set(ctx, batch, level);
+            return writable;
         }
 
-        // TODO: updates, check for the key existence, comparisons and more, for now just reserve a slot and set it
+        var frames = Data.Frames;
+        var path = NibblePath.FromKey(ctx.Key.BytesAsSpan, level);
+        var bucketId = Unsafe.Add(ref Data.Buckets, path.FirstNibble);
 
+        // try update existing
+        while (bucketId.TryGetSamePage(out var frameIndex))
+        {
+            ref var frame = ref frames[frameIndex];
+
+            if (frame.Key.Equals(ctx.Key))
+            {
+                // update
+                frame.Balance = ctx.Balance;
+                frame.Nonce = ctx.Nonce;
+
+                return _page;
+            }
+
+            // jump to the next
+            bucketId = frame.Next;
+        }
+
+        // fail to update, insert
+        ref var bucket = ref Unsafe.Add(ref Data.Buckets, path.FirstNibble);
         if (BitExtensions.TrySetLowestBit(ref Data.FrameUsed, Payload16.FrameCount, out var reserved))
         {
-            var path = NibblePath.FromKey(ctx.Key.BytesAsSpan, level);
-            ref var bucket = ref Unsafe.Add(ref Data.Buckets, path.FirstNibble);
-
             ref var frame = ref Data.Frames[reserved];
 
             frame.Key = ctx.Key;

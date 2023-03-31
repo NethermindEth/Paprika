@@ -9,9 +9,12 @@ namespace Paprika.Tests;
 
 public unsafe class DataPageTests
 {
-    private static readonly Keccak Key0 = Keccak.Compute(Encoding.UTF8.GetBytes(nameof(Key0)));
-    private static readonly Keccak Key1 = Keccak.Compute(Encoding.UTF8.GetBytes(nameof(Key1)));
-    private static readonly Keccak Key2 = Keccak.Compute(Encoding.UTF8.GetBytes(nameof(Key2)));
+    private static readonly Keccak Key0 = new(new byte[]
+        { 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
+    private static readonly Keccak Key1a = new(new byte[]
+        { 1, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
+    private static readonly Keccak Key1b = new(new byte[]
+        { 1, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 8 });
 
     private static readonly UInt256 Balance0 = 13;
     private static readonly UInt256 Balance1 = 17;
@@ -26,7 +29,7 @@ public unsafe class DataPageTests
     const uint BatchId = 1;
 
     [Test]
-    public void Test()
+    public void Set_then_Get()
     {
         var page = AllocPage();
         page.Clear();
@@ -40,6 +43,50 @@ public unsafe class DataPageTests
         Assert.True(new DataPage(updated).TryGet(Key0, out var context, RootLevel));
         Assert.AreEqual(Nonce0, context.Nonce);
         Assert.AreEqual(Balance0, context.Balance);
+    }
+
+    [Test]
+    public void Update_key()
+    {
+        var page = AllocPage();
+        page.Clear();
+
+        var batch = new BatchContext { BatchId = BatchId };
+
+        var dataPage = new DataPage(page);
+        var ctx1 = new SetContext(Key0, Balance0, Nonce0);
+        var ctx2 = new SetContext(Key0, Balance1, Nonce1);
+
+        var updated = dataPage.Set(ctx1, batch, RootLevel);
+        updated = new DataPage(updated).Set(ctx2, batch, RootLevel);
+
+        Assert.True(new DataPage(updated).TryGet(Key0, out var context, RootLevel));
+        Assert.AreEqual(Nonce1, context.Nonce);
+        Assert.AreEqual(Balance1, context.Balance);
+    }
+
+    [Test]
+    public void Works_with_bucket_collision()
+    {
+        var page = AllocPage();
+        page.Clear();
+
+        var batch = new BatchContext { BatchId = BatchId };
+
+        var dataPage = new DataPage(page);
+        var ctx1 = new SetContext(Key1a, Balance0, Nonce0);
+        var ctx2 = new SetContext(Key1b, Balance1, Nonce1);
+
+        var updated = dataPage.Set(ctx1, batch, RootLevel);
+        updated = new DataPage(updated).Set(ctx2, batch, RootLevel);
+
+        Assert.True(new DataPage(updated).TryGet(Key1a, out var result, RootLevel));
+        Assert.AreEqual(Nonce0, result.Nonce);
+        Assert.AreEqual(Balance0, result.Balance);
+
+        Assert.True(new DataPage(updated).TryGet(Key1b, out result, RootLevel));
+        Assert.AreEqual(Nonce1, result.Nonce);
+        Assert.AreEqual(Balance1, result.Balance);
     }
 
     [Test]
