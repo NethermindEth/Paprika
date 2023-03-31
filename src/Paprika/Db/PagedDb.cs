@@ -141,34 +141,22 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             BatchId = _root.Header.BatchId;
         }
 
-        public bool TryGet(in Keccak account, out GetContext context)
+        public Account GetAccount(in Keccak key)
         {
             var root = _root.Data.DataPage;
             if (root.IsNull)
             {
-                context = default;
-                return false;
+                return default;
             }
 
             // treat as data page
             var data = new DataPage(_db.GetAt(root));
 
-            return data.TryGet(account, out context, RootLevel);
+            data.GetAccount(key, out var account, RootLevel);
+            return account;
         }
 
-        public bool TryGetNonce(in Keccak account, out UInt256 nonce)
-        {
-            if (TryGet(account, out var context))
-            {
-                nonce = context.Nonce;
-                return true;
-            }
-
-            nonce = default;
-            return false;
-        }
-
-        public void Set(in Keccak account, in UInt256 balance, in UInt256 nonce)
+        public void Set(in Keccak key, in Account account)
         {
             ref var root = ref _root.Data.DataPage;
             var page = root.IsNull ? GetNewDirtyPage(out root) : GetAt(ref root);
@@ -176,7 +164,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             // treat as data page
             var data = new DataPage(page);
 
-            var ctx = new SetContext(in account, balance, nonce);
+            var ctx = new SetContext(in key, account.Balance, account.Nonce);
 
             var updated = data.Set(ctx, this, RootLevel);
 

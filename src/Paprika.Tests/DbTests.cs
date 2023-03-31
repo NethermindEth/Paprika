@@ -27,10 +27,7 @@ public class DbTests
             var key = new Keccak(span);
 
             using var batch = db.BeginNextBlock();
-            batch.Set(key, balance: i, nonce: i);
-
-            batch.TryGetNonce(key, out UInt256 accountNonce);
-
+            batch.Set(key, new Account(i, i));
             batch.Commit(CommitOptions.FlushDataOnly);
         }
 
@@ -41,9 +38,9 @@ public class DbTests
             span[0] = (byte)(i << NibblePath.NibbleShift);
             var key = new Keccak(span);
 
-            read.TryGetNonce(key, out var nonce);
+            var account = read.GetAccount(key);
 
-            Assert.AreEqual((UInt256)i, nonce);
+            Assert.AreEqual((UInt256)i, account.Nonce);
         }
 
         Console.WriteLine($"Used memory {db.TotalUsedPages:P}");

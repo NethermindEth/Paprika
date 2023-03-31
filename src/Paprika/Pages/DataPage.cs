@@ -157,11 +157,9 @@ public readonly unsafe struct DataPage : IPage
         // type of the page, and others
     }
 
-    public bool TryGet(in Keccak key, out GetContext result, byte level)
+    public void GetAccount(in Keccak key, out Account result, byte level)
     {
         var path = NibblePath.FromKey(key.BytesAsSpan, level);
-
-        // TODO: updates, check for the key existence, comparisons and more, and nested levels
 
         var frames = Data.Frames;
         var bucket = Unsafe.Add(ref Data.Buckets, path.FirstNibble);
@@ -171,14 +169,13 @@ public readonly unsafe struct DataPage : IPage
 
             if (frame.Key.Equals(key))
             {
-                result = new GetContext(frame.Balance, frame.Nonce);
-                return true;
+                result = new Account(frame.Balance, frame.Nonce);
+                return;
             }
 
             bucket = frame.Next;
         }
 
         result = default;
-        return false;
     }
 }

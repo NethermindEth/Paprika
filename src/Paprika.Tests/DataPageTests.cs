@@ -1,5 +1,4 @@
 ﻿using System.Runtime.InteropServices;
-using System.Text;
 using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Crypto;
@@ -40,9 +39,10 @@ public unsafe class DataPageTests
 
         var updated = dataPage.Set(ctx, batch, RootLevel);
 
-        Assert.True(new DataPage(updated).TryGet(Key0, out var context, RootLevel));
-        Assert.AreEqual(Nonce0, context.Nonce);
-        Assert.AreEqual(Balance0, context.Balance);
+        new DataPage(updated).GetAccount(Key0, out var account, RootLevel);
+
+        Assert.AreEqual(Nonce0, account.Nonce);
+        Assert.AreEqual(Balance0, account.Balance);
     }
 
     [Test]
@@ -60,9 +60,9 @@ public unsafe class DataPageTests
         var updated = dataPage.Set(ctx1, batch, RootLevel);
         updated = new DataPage(updated).Set(ctx2, batch, RootLevel);
 
-        Assert.True(new DataPage(updated).TryGet(Key0, out var context, RootLevel));
-        Assert.AreEqual(Nonce1, context.Nonce);
-        Assert.AreEqual(Balance1, context.Balance);
+        new DataPage(updated).GetAccount(Key0, out var account, RootLevel);
+        Assert.AreEqual(Nonce1, account.Nonce);
+        Assert.AreEqual(Balance1, account.Balance);
     }
 
     [Test]
@@ -80,13 +80,13 @@ public unsafe class DataPageTests
         var updated = dataPage.Set(ctx1, batch, RootLevel);
         updated = new DataPage(updated).Set(ctx2, batch, RootLevel);
 
-        Assert.True(new DataPage(updated).TryGet(Key1a, out var result, RootLevel));
-        Assert.AreEqual(Nonce0, result.Nonce);
-        Assert.AreEqual(Balance0, result.Balance);
+        new DataPage(updated).GetAccount(Key1a, out var account, RootLevel);
+        Assert.AreEqual(Nonce0, account.Nonce);
+        Assert.AreEqual(Balance0, account.Balance);
 
-        Assert.True(new DataPage(updated).TryGet(Key1b, out result, RootLevel));
-        Assert.AreEqual(Nonce1, result.Nonce);
-        Assert.AreEqual(Balance1, result.Balance);
+        new DataPage(updated).GetAccount(Key1b, out account, RootLevel);
+        Assert.AreEqual(Nonce1, account.Nonce);
+        Assert.AreEqual(Balance1, account.Balance);
     }
 
     [Test]

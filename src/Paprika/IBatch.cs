@@ -1,13 +1,22 @@
-﻿using Nethermind.Int256;
-using Paprika.Crypto;
+﻿using Paprika.Crypto;
 
 namespace Paprika;
 
 public interface IBatch : IDisposable
 {
-    bool TryGetNonce(in Keccak account, out UInt256 nonce);
+    /// <summary>
+    /// Gets the account information
+    /// </summary>
+    /// <param name="key"></param>
+    /// <returns></returns>
+    Account GetAccount(in Keccak key);
 
-    void Set(in Keccak account, in UInt256 balance, in UInt256 nonce);
+    /// <summary>
+    /// Sets the given account.
+    /// </summary>
+    /// <param name="key"></param>
+    /// <param name="account"></param>
+    void Set(in Keccak key, in Account account);
 
     /// <summary>
     /// Commits the block returning its root hash.
