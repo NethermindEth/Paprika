@@ -5,7 +5,7 @@ using Paprika.Db;
 
 namespace Paprika.Tests;
 
-public class PageTests
+public class DbTests
 {
     [Test]
     public void Simple()

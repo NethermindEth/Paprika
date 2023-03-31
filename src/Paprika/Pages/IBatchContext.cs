@@ -20,5 +20,11 @@ public interface IBatchContext
 
     long BatchId { get; }
 
+    /// <summary>
+    /// If <paramref name="page"/> is already writable in this batch,
+    /// returns the same page. If it's not, it will copy the page and return a new one.
+    /// </summary>
+    /// <param name="page">The page to be made writable.</param>
+    /// <returns>The same page or its copy.</returns>
     Page GetWritableCopy(Page page);
 }

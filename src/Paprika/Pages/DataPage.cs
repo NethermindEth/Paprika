@@ -18,7 +18,7 @@ public readonly unsafe struct DataPage : IPage
 {
     private readonly Page _page;
 
-    public DataPage(Page root) => _page = root;
+    public DataPage(Page page) => _page = page;
 
     public ref DataPageHeader Header => ref Unsafe.As<PageHeader, DataPageHeader>(ref _page.Header);
 
