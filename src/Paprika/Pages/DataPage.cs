@@ -48,25 +48,24 @@ public readonly unsafe struct DataPage : IPage
         /// <summary>
         /// The nibble addressable buckets.
         /// </summary>
-        [FieldOffset(sizeof(int))] public fixed int BucketsData[BucketCount];
+        [FieldOffset(sizeof(int))] private fixed int BucketsData[BucketCount];
 
         /// <summary>
         /// Map of <see cref="BucketsData"/>.
         /// </summary>
-        [FieldOffset(sizeof(int))]
-        public DbAddress Buckets;
+        [FieldOffset(sizeof(int))] private DbAddress Bucket;
+
+        public Span<DbAddress> Buckets => MemoryMarshal.CreateSpan(ref Bucket, BucketCount);
 
         /// <summary>
         /// Data for storing frames.
         /// </summary>
-        [FieldOffset(FramesDataOffset)]
-        public fixed byte FramesData[FrameCount * AccountFrame.Size];
+        [FieldOffset(FramesDataOffset)] private fixed byte FramesData[FrameCount * AccountFrame.Size];
 
         /// <summary>
         /// Map of <see cref="FramesData"/> as a type to allow ref to it.
         /// </summary>
-        [FieldOffset(FramesDataOffset)]
-        public AccountFrame Frame;
+        [FieldOffset(FramesDataOffset)] private AccountFrame Frame;
 
         /// <summary>
         /// Access all the frames.
@@ -96,7 +95,7 @@ public readonly unsafe struct DataPage : IPage
 
         var frames = Data.Frames;
         var path = NibblePath.FromKey(ctx.Key.BytesAsSpan, level);
-        var bucketId = Unsafe.Add(ref Data.Buckets, path.FirstNibble);
+        var bucketId = Data.Buckets[path.FirstNibble];
 
         // try update existing
         while (bucketId.TryGetSamePage(out var frameIndex))
@@ -117,7 +116,7 @@ public readonly unsafe struct DataPage : IPage
         }
 
         // fail to update, insert
-        ref var bucket = ref Unsafe.Add(ref Data.Buckets, path.FirstNibble);
+        ref var bucket = ref Data.Buckets[path.FirstNibble];
         if (BitExtensions.TrySetLowestBit(ref Data.FrameUsed, Payload16.FrameCount, out var reserved))
         {
             ref var frame = ref Data.Frames[reserved];
@@ -130,9 +129,14 @@ public readonly unsafe struct DataPage : IPage
             frame.Next = bucket;
 
             // overwrite the bucket with the recent one
-            bucket = DbAddress.JumpToFrame(reserved);
+            bucket = DbAddress.JumpToFrame(reserved, bucket);
             return _page;
         }
+        
+        // failed to find an empty frame,
+        // select a bucket to empty and proceed with creating a child page
+        
+        
 
         throw new NotImplementedException("Should overflow to the next page or result in a page split");
     }
@@ -162,7 +166,8 @@ public readonly unsafe struct DataPage : IPage
         var path = NibblePath.FromKey(key.BytesAsSpan, level);
 
         var frames = Data.Frames;
-        var bucket = Unsafe.Add(ref Data.Buckets, path.FirstNibble);
+        var bucket = Data.Buckets[path.FirstNibble];
+        
         while (bucket.TryGetSamePage(out var frameIndex))
         {
             ref var frame = ref frames[frameIndex];

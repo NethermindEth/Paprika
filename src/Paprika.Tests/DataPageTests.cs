@@ -90,6 +90,28 @@ public unsafe class DataPageTests
     }
 
     [Test]
+    public void Page_overflows()
+    {
+        var page = AllocPage();
+        page.Clear();
+        
+        var batch = new BatchContext { BatchId = BatchId };
+        var dataPage = new DataPage(page);
+
+        const int count = 64;
+        
+        for (uint i = 0; i < count; i++)
+        {
+            var key = Key1a;
+            key.BytesAsSpan[0] = (byte)i;
+            
+            var ctx = new SetContext(key, i, i);
+
+            dataPage = new DataPage(dataPage.Set(ctx, batch, RootLevel));
+        }
+    }
+
+    [Test]
     public void SetUp()
     {
         Pages.Clear();

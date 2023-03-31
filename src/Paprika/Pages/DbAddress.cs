@@ -10,12 +10,24 @@ namespace Paprika.Pages;
 /// </summary>
 public readonly struct DbAddress : IEquatable<DbAddress>
 {
+    /// <summary>
+    /// The null address.
+    /// </summary>
+    public static readonly DbAddress Null = default;
+    
     public const int Size = sizeof(uint);
 
     /// <summary>
     /// This value is bigger <see cref="Pages.Page.PageCount"/> so that regular pages don't overflow.
     /// </summary>
-    private const uint SamePage = 0x1000_0000;
+    private const uint SamePage = 0x8000_0000;
+
+    /// <summary>
+    /// The shift that is applied to the counter of the jumps captured by the address.
+    /// </summary>
+    private const int JumpCountShift = 24;
+
+    private const uint JumpCounter = byte.MaxValue - (SamePage >> JumpCountShift);
 
     private readonly uint _value;
 
@@ -23,8 +35,16 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     /// Creates a database address that represents a jump to another frame within the same <see cref="Pages.Page"/>.
     /// </summary>
     /// <param name="frame">The frame to jump to.</param>
+    /// <param name="previous">The previous jump within the same page.</param>
     /// <returns>A db address.</returns>
-    public static DbAddress JumpToFrame(byte frame) => new(frame | SamePage);
+    public static DbAddress JumpToFrame(byte frame, DbAddress previous)
+    {
+        Debug.Assert(previous.IsSamePage || previous.IsNull, "Only same page chaining is allowed");
+
+        var countShifted = (previous.SamePageJumpCount + 1) << JumpCountShift;
+
+        return new(frame | SamePage | countShifted);
+    }
 
     /// <summary>
     /// Creates a database address that represents a jump to another database <see cref="Pages.Page"/>.
@@ -53,6 +73,8 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     private DbAddress(uint value) => _value = value;
 
     public bool IsNull => _value == 0;
+
+    public uint SamePageJumpCount => (_value & ~SamePage) >> JumpCountShift;
 
     public bool IsSamePage => (_value & SamePage) == SamePage;
 
