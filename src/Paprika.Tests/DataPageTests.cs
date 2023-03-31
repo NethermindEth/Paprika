@@ -1,4 +1,5 @@
-﻿using System.Runtime.InteropServices;
+﻿using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
@@ -11,8 +12,10 @@ public unsafe class DataPageTests
 {
     private static readonly Keccak Key0 = new(new byte[]
         { 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
+
     private static readonly Keccak Key1a = new(new byte[]
         { 1, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
+
     private static readonly Keccak Key1b = new(new byte[]
         { 1, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 8 });
 
@@ -99,12 +102,12 @@ public unsafe class DataPageTests
         var batch = new BatchContext { BatchId = BatchId };
         var dataPage = new DataPage(page);
 
-        const int count = 769;
+        const int count = 2 * 1024 * 1024;
 
         for (uint i = 0; i < count; i++)
         {
             var key = Key1a;
-            key.BytesAsSpan[0] = (byte)i;
+            BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i);
 
             var ctx = new SetContext(key, i, i);
             dataPage = new DataPage(dataPage.Set(ctx, batch, RootLevel));
@@ -113,7 +116,7 @@ public unsafe class DataPageTests
         for (uint i = 0; i < count; i++)
         {
             var key = Key1a;
-            key.BytesAsSpan[0] = (byte)i;
+            BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i);
 
             dataPage.GetAccount(key, batch, out var account, RootLevel);
             account.Should().Be(new Account(i, i));
@@ -142,7 +145,18 @@ public unsafe class DataPageTests
         if (Pages.TryPop(out var page))
             return page;
 
-        page = new Page((byte*)NativeMemory.AlignedAlloc((UIntPtr)Page.PageSize, (UIntPtr)sizeof(long)));
+        const int slab = 16;
+
+        var memory = (byte*)NativeMemory.AlignedAlloc((UIntPtr)Page.PageSize * (nuint)slab, (UIntPtr)sizeof(long));
+
+        for (var i = 1; i < slab; i++)
+        {
+            var item = new Page(memory + Page.PageSize * i);
+            Pages.Push(item);
+            All.Add(item);
+        }
+
+        page = new Page(memory);
         All.Add(page); // memo for reuse
         return page;
     }
@@ -186,5 +200,7 @@ public unsafe class DataPageTests
             @new.Header.BatchId = BatchId;
             return @new;
         }
+
+        public override string ToString() => $"Batch context used {_pageCount} pages to write the data";
     }
 }
