@@ -172,19 +172,18 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         root.CopyTo(_roots[_lastRoot % _historyDepth]);
     }
 
-    class Batch : IBatch, IBatchContext
+    class Batch : BatchContextBase, IBatch
     {
         private const byte RootLevel = 0;
         private readonly PagedDb _db;
         private readonly RootPage _root;
-        public long BatchId { get; }
 
-        public Batch(PagedDb db, RootPage root)
+        // TODO: when read transactions enabled, provide second parameter as
+        // Math.Min(all reader transactions batches, root.Header.BatchId - db._historyDepth)
+        public Batch(PagedDb db, RootPage root) : base(root.Header.BatchId, root.Header.BatchId - db._historyDepth)
         {
             _db = db;
             _root = root;
-
-            BatchId = _root.Header.BatchId;
         }
 
         public Account GetAccount(in Keccak key)
@@ -205,7 +204,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         public void Set(in Keccak key, in Account account)
         {
             ref var root = ref _root.Data.DataPage;
-            var page = root.IsNull ? GetNewPage(out root, true) : GetAt(ref root);
+            var page = root.IsNull ? GetNewPage(out root, true) : GetAt(root);
 
             // treat as data page
             var data = new DataPage(page);
@@ -244,9 +243,10 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         public double TotalUsedPages => ((double)(uint)_root.Data.NextFreePage) / _db._maxPage;
 
-        Page IBatchContext.GetAt(DbAddress address) => _db.GetAt(address);
+        public override Page GetAt(DbAddress address) => _db.GetAt(address);
 
-        public Page GetNewPage(out DbAddress addr, bool clear)
+
+        public override Page GetNewPage(out DbAddress addr, bool clear)
         {
             addr = _root.Data.GetNextFreePage();
             Debug.Assert(addr.IsValidPageAddress, "The page address retrieved is invalid");
@@ -254,11 +254,14 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             if (clear)
                 page.Clear();
 
-            this.AssignTxId(page);
+            AssignBatchId(page);
             return page;
         }
 
-        private Page GetAt(ref DbAddress addr) => _db.GetAt(addr);
+        protected override void RegisterForFutureGC(Page page)
+        {
+            page.Header.BatchId;
+        }
 
         public void Dispose() => _db.ReleaseRootPage(_root);
     }

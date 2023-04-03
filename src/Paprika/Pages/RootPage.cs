@@ -28,7 +28,9 @@ public readonly unsafe struct RootPage : IPage
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     public struct Payload
     {
-        public const int Size = Page.PageSize - PageHeader.Size;
+        private const int Size = Page.PageSize - PageHeader.Size;
+        private const int FixedDataSize = sizeof(uint) + Keccak.Size + DbAddress.Size + DbAddress.Size;
+        private const int FreePageEntryCount = (Size - FixedDataSize)/DbAddress.Size;
 
         [FieldOffset(0)] public uint BlockNumber;
 
@@ -38,6 +40,8 @@ public readonly unsafe struct RootPage : IPage
 
         [FieldOffset(sizeof(uint) + Keccak.Size + DbAddress.Size)] public DbAddress DataPage;
 
+        [FieldOffset(FixedDataSize)] public DbAddress FreePages;
+        
         public DbAddress GetNextFreePage()
         {
             var free = NextFreePage;

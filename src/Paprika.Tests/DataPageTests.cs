@@ -19,7 +19,7 @@ public unsafe class DataPageTests
         var page = AllocPage();
         page.Clear();
 
-        var batch = new BatchContext { BatchId = BatchId };
+        var batch = new BatchContext(BatchId);
         var dataPage = new DataPage(page);
         var ctx = new SetContext(Key0, Balance0, Nonce0);
 
@@ -37,7 +37,7 @@ public unsafe class DataPageTests
         var page = AllocPage();
         page.Clear();
 
-        var batch = new BatchContext { BatchId = BatchId };
+        var batch = new BatchContext(BatchId);
 
         var dataPage = new DataPage(page);
         var ctx1 = new SetContext(Key0, Balance0, Nonce0);
@@ -57,7 +57,7 @@ public unsafe class DataPageTests
         var page = AllocPage();
         page.Clear();
 
-        var batch = new BatchContext { BatchId = BatchId };
+        var batch = new BatchContext(BatchId);
 
         var dataPage = new DataPage(page);
         var ctx1 = new SetContext(Key1a, Balance0, Nonce0);
@@ -81,7 +81,7 @@ public unsafe class DataPageTests
         var page = AllocPage();
         page.Clear();
 
-        var batch = new BatchContext { BatchId = BatchId };
+        var batch = new BatchContext(BatchId);
         var dataPage = new DataPage(page);
 
         const int count = 2 * 1024 * 1024;
@@ -143,7 +143,7 @@ public unsafe class DataPageTests
         return page;
     }
 
-    class BatchContext : IBatchContext
+    class BatchContext : BatchContextBase
     {
         private readonly Dictionary<DbAddress, Page> _address2Page = new();
 
@@ -151,9 +151,11 @@ public unsafe class DataPageTests
         // 0-N is take by metadata pages
         private uint _pageCount = 1U;
 
-        public Page GetAt(DbAddress address) => _address2Page[address];
+        public BatchContext(long batchId) : base(batchId, 0) { }
 
-        public Page GetNewPage(out DbAddress addr, bool clear)
+        public override Page GetAt(DbAddress address) => _address2Page[address];
+
+        public override Page GetNewPage(out DbAddress addr, bool clear)
         {
             var page = AllocPage();
             if (clear)
@@ -168,7 +170,10 @@ public unsafe class DataPageTests
             return page;
         }
 
-        public long BatchId { get; set; }
+        protected override void RegisterForFutureGC(Page page)
+        {
+            // NOOP
+        }
 
         public override string ToString() => $"Batch context used {_pageCount} pages to write the data";
     }
