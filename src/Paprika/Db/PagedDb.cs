@@ -112,10 +112,59 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         return new RootPage(memory);
     }
 
-    private void ReleaseRootPage(RootPage page) => _pool.Push(page);
+    private void ReleaseRootPage(RootPage page)
+    {
+        _pool.Push(page);
+    }
 
-    // for now, omit block consideration
-    public IBatch BeginNextBlock() => new Batch(this, RentRootPage());
+    /// <summary>
+    /// Begins a batch representing the next block.
+    /// </summary>
+    /// <returns></returns>
+    public IBatch BeginNextBlock() => BuildFromRoot(Root);
+
+    /// <summary>
+    /// Reorganizes chain back to the given block hash and starts building on top of it.
+    /// </summary>
+    /// <param name="blockHash">The block hash to reorganize to.</param>
+    /// <returns>The new batch.</returns>
+    public IBatch ReorganizeBackToAndStartNew(Keccak blockHash)
+    {
+        RootPage? reorganizedTo = default;
+
+        // find block with the given blockHash
+        foreach (var rootPage in _roots)
+        {
+            if (rootPage.Data.BlockHash == blockHash)
+            {
+                reorganizedTo = rootPage;
+            }
+        }
+
+        if (reorganizedTo == null)
+        {
+            throw new ArgumentException(
+                $"The block with hash '{blockHash}' was not found across history of recent {_historyDepth} blocks kept in Paprika",
+                nameof(blockHash));
+        }
+
+        return BuildFromRoot(reorganizedTo.Value);
+    }
+
+    private IBatch BuildFromRoot(RootPage rootPage)
+    {
+        var root = RentRootPage();
+
+        rootPage.CopyTo(root);
+
+        // always inc the batchId
+        root.Header.BatchId++;
+
+        // move to the next block
+        root.Data.BlockNumber++;
+
+        return new Batch(this, root);
+    }
 
     private void SetNewRoot(RootPage root)
     {
@@ -130,18 +179,10 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         private readonly RootPage _root;
         public long BatchId { get; }
 
-        public Batch(PagedDb db, RootPage tempRootPage)
+        public Batch(PagedDb db, RootPage root)
         {
             _db = db;
-            _root = tempRootPage;
-
-            _db.Root.CopyTo(_root);
-
-            _root.Header.BatchId++;
-
-            // for now, this handles only the forward by one block
-            // when reorgs are implemented fully, this should be a jump to an arbitrary block from the kept history
-            _root.Data.BlockNumber++;
+            _root = root;
 
             BatchId = _root.Header.BatchId;
         }

@@ -16,7 +16,7 @@ public static class Values
 
     public static readonly UInt256 Balance0 = 13;
     public static readonly UInt256 Balance1 = 17;
-    public static readonly UInt256 Balance3 = 19;
+    public static readonly UInt256 Balance2 = 19;
 
     public static readonly UInt256 Nonce0 = 23;
     public static readonly UInt256 Nonce1 = 29;
