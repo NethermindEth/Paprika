@@ -1,30 +1,31 @@
 ﻿using NUnit.Framework;
+using Paprika.Pages;
 
 namespace Paprika.Tests;
 
-public class BitExtensionsTests
+public class BitPool32Tests
 {
     [Test]
     public void TryReserveBit()
     {
         const int max = 31;
-        uint bits = 0;
+        BitPool32 bits = default;
 
-        BitExtensions.TrySetLowestBit(ref bits, max, out var reserved);
+        bits.TrySetLowestBit(max, out var reserved);
         Assert.AreEqual(0, reserved);
 
-        BitExtensions.TrySetLowestBit(ref bits, max, out reserved);
+        bits.TrySetLowestBit(max, out reserved);
         Assert.AreEqual(1, reserved);
 
-        BitExtensions.TrySetLowestBit(ref bits, max, out reserved);
+        bits.TrySetLowestBit(max, out reserved);
         Assert.AreEqual(2, reserved);
 
-        BitExtensions.ClearBit(ref bits, 1);
+        bits.ClearBit(1);
 
-        BitExtensions.TrySetLowestBit(ref bits, max, out reserved);
+        bits.TrySetLowestBit(max, out reserved);
         Assert.AreEqual(1, reserved);
 
-        BitExtensions.TrySetLowestBit(ref bits, max, out reserved);
+        bits.TrySetLowestBit(max, out reserved);
         Assert.AreEqual(3, reserved);
     }
 }
