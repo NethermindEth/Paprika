@@ -3,7 +3,6 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Pages;
 
@@ -78,7 +77,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
     private Page GetAt(DbAddress address)
     {
-        Debug.Assert(address.IsValidAddressPage, "The address page is invalid and breaches max page count");
+        Debug.Assert(address.IsValidPageAddress, "The address page is invalid and breaches max page count");
 
         // Long here is required! Otherwise int overflow will turn it to negative value!
         // ReSharper disable once SuggestVarOrType_BuiltInTypes
@@ -200,38 +199,19 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         Page IBatchContext.GetAt(DbAddress address) => _db.GetAt(address);
 
-        DbAddress IBatchContext.GetAddress(in Page page) => _db.GetAddress(page);
-
         public Page GetNewPage(out DbAddress addr, bool clear)
         {
             addr = _root.Data.GetNextFreePage();
-            Debug.Assert(addr.IsValidAddressPage, "The page address retrieved is invalid");
+            Debug.Assert(addr.IsValidPageAddress, "The page address retrieved is invalid");
             var page = _db.GetAt(addr);
             if (clear)
                 page.Clear();
 
-            AssignTxId(page);
+            this.AssignTxId(page);
             return page;
         }
 
-        private void AssignTxId(Page page) => page.Header.BatchId = BatchId;
-
         private Page GetAt(ref DbAddress addr) => _db.GetAt(addr);
-
-        public Page GetWritableCopy(Page page)
-        {
-            if (page.Header.BatchId == BatchId)
-                return page;
-
-            var @new = GetNewPage(out _, false);
-            page.CopyTo(@new);
-            AssignTxId(@new);
-
-            // TODO: the previous page is dangling and the only information it has is the tx_id, mem management is needed.
-            // Or a process that would scan pages for being old enough to be reused
-
-            return @new;
-        }
 
         public void Dispose() => _db.ReleaseRootPage(_root);
     }

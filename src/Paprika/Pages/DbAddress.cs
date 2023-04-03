@@ -30,6 +30,7 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     private const int JumpCountShift = 24;
 
     private const uint JumpCounter = byte.MaxValue - (SamePage >> JumpCountShift);
+    private const int NullValue = 0;
 
     private readonly uint _value;
 
@@ -74,14 +75,14 @@ public readonly struct DbAddress : IEquatable<DbAddress>
 
     private DbAddress(uint value) => _value = value;
 
-    public bool IsNull => _value == 0;
+    public bool IsNull => _value == NullValue;
 
     public uint SamePageJumpCount => (_value & ~SamePage) >> JumpCountShift;
 
     public bool IsSamePage => (_value & SamePage) == SamePage;
 
     // ReSharper disable once MergeIntoPattern
-    public bool IsValidAddressPage => _value < Pages.Page.PageCount;
+    public bool IsValidPageAddress => _value < Pages.Page.PageCount;
 
     public bool TryGetSamePage(out byte frame)
     {
