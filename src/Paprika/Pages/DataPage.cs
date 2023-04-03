@@ -98,8 +98,8 @@ public readonly unsafe struct DataPage : IPage
 
         var address = Data.Buckets[nibble];
 
-        // the bucket represents a page jump, follow it
-        if (address.IsNull == false && address.IsValidAddressPage)
+        // the bucket is not null and represents a page jump, follow it
+        if (address.IsNull == false && address.IsValidPageAddress)
         {
             var page = batch.GetAt(address);
             new DataPage(page).Set(ctx, batch, level + 1);
@@ -208,7 +208,8 @@ public readonly unsafe struct DataPage : IPage
         var nibble = NibblePath.FromKey(key.BytesAsSpan, level).FirstNibble;
         var bucket = Data.Buckets[nibble];
 
-        if (bucket.IsNull == false && bucket.IsValidAddressPage)
+        // non-null page jump, follow it!
+        if (bucket.IsNull == false && bucket.IsValidPageAddress)
         {
             new DataPage(batch.GetAt(bucket)).GetAccount(key, batch, out result, level + 1);
             return;

@@ -166,11 +166,11 @@ public unsafe class DataPageTests
         private readonly Dictionary<DbAddress, Page> _address2Page = new();
         private readonly Dictionary<UIntPtr, DbAddress> _page2Address = new();
 
-        private uint _pageCount;
+        // data pages should start at non-null addresses
+        // 0-N is take by metadata pages
+        private uint _pageCount = 1U;
 
         public Page GetAt(DbAddress address) => _address2Page[address];
-
-        public DbAddress GetAddress(in Page page) => _page2Address[page.Raw];
 
         public Page GetNewPage(out DbAddress addr, bool clear)
         {
@@ -189,17 +189,6 @@ public unsafe class DataPageTests
         }
 
         public long BatchId { get; set; }
-
-        public Page GetWritableCopy(Page page)
-        {
-            if (page.Header.BatchId == BatchId)
-                return page;
-
-            var @new = GetNewPage(out _, true);
-            page.CopyTo(@new);
-            @new.Header.BatchId = BatchId;
-            return @new;
-        }
 
         public override string ToString() => $"Batch context used {_pageCount} pages to write the data";
     }
