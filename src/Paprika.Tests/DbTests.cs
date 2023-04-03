@@ -46,6 +46,14 @@ public class DbTests
         Console.WriteLine($"Used memory {db.TotalUsedPages:P}");
     }
 
+    [Test]
+    public void Reorganization()
+    {
+        using var db = new NativeMemoryPagedDb(1024 * 1024UL, 2);
+
+        Span<byte> span = stackalloc byte[Keccak.Size];
+    }
+
     // [Test]
     // public void Random_big()
     // {

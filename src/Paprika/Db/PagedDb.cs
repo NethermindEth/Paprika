@@ -8,6 +8,12 @@ using Paprika.Pages;
 
 namespace Paprika.Db;
 
+/// <summary>
+/// The base class for page db implementations.
+/// </summary>
+/// <remarks>
+/// Assumes a continuous memory allocation as it provides addressing based on the pointers.
+/// </remarks>
 public abstract unsafe class PagedDb : IDb, IDisposable
 {
     /// <summary>
