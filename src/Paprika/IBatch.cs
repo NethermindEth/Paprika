@@ -22,7 +22,7 @@ public interface IBatch : IDisposable
     /// Commits the block returning its root hash.
     /// </summary>
     /// <param name="options">How to commit.</param>
-    /// <returns>The root hash.</returns>
+    /// <returns>The state root hash.</returns>
     Keccak Commit(CommitOptions options);
 
     double TotalUsedPages { get; }

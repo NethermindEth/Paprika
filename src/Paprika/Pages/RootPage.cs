@@ -32,7 +32,7 @@ public readonly unsafe struct RootPage : IPage
 
         [FieldOffset(0)] public uint BlockNumber;
 
-        [FieldOffset(sizeof(uint))] public Keccak BlockHash;
+        [FieldOffset(sizeof(uint))] public Keccak StateRootHash;
 
         [FieldOffset(sizeof(uint) + Keccak.Size)] public DbAddress NextFreePage;
 

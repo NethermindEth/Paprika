@@ -126,29 +126,29 @@ public abstract unsafe class PagedDb : IDb, IDisposable
     /// <summary>
     /// Reorganizes chain back to the given block hash and starts building on top of it.
     /// </summary>
-    /// <param name="blockHash">The block hash to reorganize to.</param>
+    /// <param name="stateRootHash">The block hash to reorganize to.</param>
     /// <returns>The new batch.</returns>
-    public IBatch ReorganizeBackToAndStartNew(Keccak blockHash)
+    public IBatch ReorganizeBackToAndStartNew(Keccak stateRootHash)
     {
-        RootPage? reorganizedTo = default;
+        RootPage? reorganizeTo = default;
 
-        // find block with the given blockHash
+        // find block with the given state root hash
         foreach (var rootPage in _roots)
         {
-            if (rootPage.Data.BlockHash == blockHash)
+            if (rootPage.Data.StateRootHash == stateRootHash)
             {
-                reorganizedTo = rootPage;
+                reorganizeTo = rootPage;
             }
         }
 
-        if (reorganizedTo == null)
+        if (reorganizeTo == null)
         {
             throw new ArgumentException(
-                $"The block with hash '{blockHash}' was not found across history of recent {_historyDepth} blocks kept in Paprika",
-                nameof(blockHash));
+                $"The block with the stateRootHash equal to '{stateRootHash}' was not found across history of recent {_historyDepth} blocks kept in Paprika",
+                nameof(stateRootHash));
         }
 
-        return BuildFromRoot(reorganizedTo.Value);
+        return BuildFromRoot(reorganizeTo.Value);
     }
 
     private IBatch BuildFromRoot(RootPage rootPage)
@@ -219,7 +219,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         public Keccak Commit(CommitOptions options)
         {
-            CalculateRootHash();
+            CalculateStateRootHash();
 
             // flush data first
             _db.Flush();
@@ -230,16 +230,16 @@ public abstract unsafe class PagedDb : IDb, IDisposable
                 _db.Flush();
             }
 
-            return _root.Data.BlockHash;
+            return _root.Data.StateRootHash;
         }
 
-        private void CalculateRootHash()
+        private void CalculateStateRootHash()
         {
             // TODO: it's a dummy implementation now as there's no Merkle construct.
             // when implementing, this will be the place to put the real Keccak
             Span<byte> span = stackalloc byte[4];
             BinaryPrimitives.WriteUInt32LittleEndian(span, _root.Data.BlockNumber);
-            _root.Data.BlockHash = Keccak.Compute(span);
+            _root.Data.StateRootHash = Keccak.Compute(span);
         }
 
         public double TotalUsedPages => ((double)(uint)_root.Data.NextFreePage) / _db._maxPage;
