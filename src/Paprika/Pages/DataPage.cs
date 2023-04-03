@@ -2,7 +2,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
-using Paprika.Db;
 
 namespace Paprika.Pages;
 
@@ -13,7 +12,8 @@ namespace Paprika.Pages;
 /// The page is capable of storing some data inside of it and provides fan out for lower layers.
 /// This means that for small amount of data no creation of further layers is required.
 ///
-/// TODO: the split algo should be implemented properly. 
+/// The page preserves locality of the data though. It's either all the children with a given nibble stored
+/// in the parent page, or they are flushed underneath. 
 /// </remarks>
 public readonly unsafe struct DataPage : IPage
 {
@@ -38,23 +38,23 @@ public readonly unsafe struct DataPage : IPage
 
         public const int BucketCount = 16;
 
-        private const int FramesDataOffset = sizeof(int) + sizeof(int) + BucketCount * DbAddress.Size;
+        private const int FramesDataOffset = sizeof(int) + BitPool32.Size + BucketCount * DbAddress.Size;
         public const int FrameCount = (Size - FramesDataOffset) / AccountFrame.Size;
 
         /// <summary>
         /// The bit map of frames used at this page.
         /// </summary>
-        [FieldOffset(0)] public uint FrameUsed;
+        [FieldOffset(0)] public BitPool32 FrameUsed;
 
         /// <summary>
         /// The nibble addressable buckets.
         /// </summary>
-        [FieldOffset(sizeof(int))] private fixed int BucketsData[BucketCount];
+        [FieldOffset(BitPool32.Size)] private fixed int BucketsData[BucketCount];
 
         /// <summary>
         /// Map of <see cref="BucketsData"/>.
         /// </summary>
-        [FieldOffset(sizeof(int))] private DbAddress Bucket;
+        [FieldOffset(BitPool32.Size)] private DbAddress Bucket;
 
         public Span<DbAddress> Buckets => MemoryMarshal.CreateSpan(ref Bucket, BucketCount);
 
@@ -126,7 +126,7 @@ public readonly unsafe struct DataPage : IPage
 
         // fail to update, insert
         ref var bucket = ref Data.Buckets[nibble];
-        if (BitExtensions.TrySetLowestBit(ref Data.FrameUsed, Payload16.FrameCount, out var reserved))
+        if (Data.FrameUsed.TrySetLowestBit(Payload16.FrameCount, out var reserved))
         {
             ref var frame = ref Data.Frames[reserved];
 
@@ -170,7 +170,7 @@ public readonly unsafe struct DataPage : IPage
             dataPage.Set(set, batch, (byte)(level + 1));
 
             // the frame is no longer used, clear it
-            BitExtensions.ClearBit(ref Data.FrameUsed, frameIndex);
+            Data.FrameUsed.ClearBit(frameIndex);
 
             // jump to the next
             biggestBucket = frame.Next;
