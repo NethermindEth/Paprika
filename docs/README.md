@@ -61,7 +61,7 @@ public struct PageHeader
 
 ### Pages
 
-Pages are designed as value types that provide a wrapper around a raw memory pointer. The underlying pointer does not change, so that pages can be implemented as `readonly unsafe struct` like in the following example.
+Pages are designed as value types that provide a wrapper around a raw memory pointer. The underlying pointer does not change, so pages can be implemented as `readonly unsafe struct` like in the following example.
 
 ```csharp
 public readonly unsafe struct Page
@@ -70,6 +70,16 @@ public readonly unsafe struct Page
     public Page(byte* ptr) => _ptr = ptr;
 }
 ```
+
+The following page types are now implemented in Paprika:
+
+1. `Page` - raw data wrapped in a `struct` that can be cast to another page type
+1. `RootPage` - a page responsible for holding metadata about the given version of the state and all information associated with it like
+   1. batch id - a monotonically increasing number, identifying each batch write to the database that happened
+   1. block information (number, hash)
+   1. (TBD) [free page list](https://github.com/NethermindEth/Paprika/issues/9) - a list of pages that can be potentially reused (TBD)
+   1. (TBD) [dirty map](https://github.com/NethermindEth/Paprika/issues/26)
+1. `DataPage` - a page responsible for storing the actual account data
 
 The differentiation of the pages and accessible methods is provided by poor man's derivation - composition. The following snippet presents a data page, that wraps around the generic `Page`.
 
@@ -99,8 +109,8 @@ DataPage │ Header  │ DataPage    │   Payload of the page                  
          └─────────┴─────────────┴──────────────────────────────────────────────────────────────┘
               ▲                  ▲
               │                  │
-              │                  │  
-              │                  │                         
+              │                  │
+              │                  │
           Page Header      DataPage Header, the same for all the DataPages
           is shared by
           all the pages
@@ -167,3 +177,7 @@ public struct PageHeader
     public long TransactionId;
 }
 ```
+
+#### Frames
+
+As stored values fall into one of several categories, like EOA or contract data, const length frames are used to store the data. This allows for fast bit-wise-based page memory management and removes the cost of var-length serialization and page buffer management.

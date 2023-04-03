@@ -1,23 +1,10 @@
 # :hot_pepper: Paprika
 
-Paprika provides a custom implementation of the Patricia tree used in Ethereum. It aims at delivering the following:
-
-1. no external KV storage
-1. no managed memory overhead - Paprika uses almost no managed memory as only `Span<byte>`, stackallocated variables and uses no managed representation of the tree
-1. atomic commit
-1. the history of N-th last versions of the db
-
-**No external KV storage** means that Paprika is self-sufficient in regards to writing and reading data from disk and requires no third-party databases like `RocksDB` or others.
-
-**No managed memory overhead** means that Paprika uses almost no managed memory. Only `Span<byte>` and stackallocated variables are used. There's no representation of the tree stored in the managed memory. Also, it uses `[module: SkipLocalsInit]` to not clean any memory before accessing it.
-
-**Atomic commit** means atomic in the meaning of ACID. If there's a failure during the commit the database shall not be corrupted and shall represent the previous state.
-
-**History** is preserved using additional metadata pages, that keep the root and the pages that were marked as abandoned.
+Paprika provides a custom implementation of the Patricia tree used in Ethereum. It aims at replacing the underlying storage as a solution on a higher level of abstraction.
 
 ## Design
 
-Visit [docs](/docs) for further information.
+Visit [docs](/docs) for all the design and implementation-specific information about Paprika.
 
 ## Benchmarks
 
@@ -61,3 +48,11 @@ Committing to disk took 00:00:10.4085680
 
 Reading of 160,000,000.00 items took 00:08:24.8362414 giving a throughput 316,934.00 items/s
 ```
+
+## Contributing
+
+Before you start work on a feature or fix, please read and follow our [contribution guide](./CONTRIBUTING.md) to help avoid any wasted or duplicate effort.
+
+## License
+
+Nethermind is open-source software licensed under the [LGPL-3.0](./LICENSE).
