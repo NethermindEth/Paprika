@@ -1,32 +1,14 @@
 ﻿using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using FluentAssertions;
-using Nethermind.Int256;
 using NUnit.Framework;
-using Paprika.Crypto;
 using Paprika.Pages;
+using static Paprika.Tests.Values;
 
 namespace Paprika.Tests;
 
 public unsafe class DataPageTests
 {
-    private static readonly Keccak Key0 = new(new byte[]
-        { 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
-
-    private static readonly Keccak Key1a = new(new byte[]
-        { 1, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
-
-    private static readonly Keccak Key1b = new(new byte[]
-        { 1, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 8 });
-
-    private static readonly UInt256 Balance0 = 13;
-    private static readonly UInt256 Balance1 = 17;
-    private static readonly UInt256 Balance3 = 19;
-
-    private static readonly UInt256 Nonce0 = 23;
-    private static readonly UInt256 Nonce1 = 29;
-    private static readonly UInt256 Nonce2 = 31;
-
     private const byte RootLevel = 0;
 
     const uint BatchId = 1;
@@ -164,7 +146,6 @@ public unsafe class DataPageTests
     class BatchContext : IBatchContext
     {
         private readonly Dictionary<DbAddress, Page> _address2Page = new();
-        private readonly Dictionary<UIntPtr, DbAddress> _page2Address = new();
 
         // data pages should start at non-null addresses
         // 0-N is take by metadata pages
@@ -183,7 +164,6 @@ public unsafe class DataPageTests
             addr = DbAddress.Page(_pageCount++);
 
             _address2Page[addr] = page;
-            _page2Address[page.Raw] = addr;
 
             return page;
         }
