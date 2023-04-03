@@ -8,13 +8,19 @@ namespace Paprika;
 /// </summary>
 public readonly struct Account : IEquatable<Account>
 {
-    private readonly UInt128 _balance;
-    private readonly uint _nonce;
+    private readonly UInt256 _balance;
+    private readonly UInt256 _nonce;
     public UInt256 Nonce => _nonce;
 
-    public UInt256 Balance => Convert(_balance);
+    public UInt256 Balance => _balance;
 
     public Account(in UInt128 balance, uint nonce)
+    {
+        _balance = Convert(balance);
+        _nonce = nonce;
+    }
+    
+    public Account(in UInt256 balance, UInt256 nonce)
     {
         _balance = balance;
         _nonce = nonce;

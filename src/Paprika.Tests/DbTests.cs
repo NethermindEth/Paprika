@@ -2,6 +2,7 @@
 using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Db;
+using static Paprika.Tests.Values;
 
 namespace Paprika.Tests;
 
@@ -51,7 +52,12 @@ public class DbTests
     {
         using var db = new NativeMemoryPagedDb(1024 * 1024UL, 2);
 
-        Span<byte> span = stackalloc byte[Keccak.Size];
+        using (var batch = db.BeginNextBlock())
+        {
+            batch.Set(Key0, new Account(Balance0, Nonce0));
+            batch.Commit(CommitOptions.FlushDataOnly);    
+        }
+        
     }
 
     // [Test]
