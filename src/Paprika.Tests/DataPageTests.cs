@@ -151,7 +151,7 @@ public unsafe class DataPageTests
         // 0-N is take by metadata pages
         private uint _pageCount = 1U;
 
-        public BatchContext(long batchId) : base(batchId, 0) { }
+        public BatchContext(uint batchId) : base(batchId, 0) { }
 
         public override Page GetAt(DbAddress address) => _address2Page[address];
 

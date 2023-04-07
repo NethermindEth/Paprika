@@ -19,7 +19,7 @@ public readonly struct MemoryPage : IPage
     /// The log2 of <see cref="Arity" />.
     /// </summary>
     private const int Log2Arity = 2;
-    
+
     private readonly Page _page;
 
     [DebuggerStepThrough]
@@ -54,7 +54,7 @@ public readonly struct MemoryPage : IPage
     {
         private const int Size = Page.PageSize - PageHeader.Size;
         private const int DataOffset = sizeof(uint);
-        
+
         public const int MaxCount = (Size - DataOffset) / PageInfo.Size;
 
         /// <summary>
@@ -81,7 +81,7 @@ public readonly struct MemoryPage : IPage
             MoveUp(info, Count - 1);
             return true;
         }
-        
+
         public bool TryPeekBatchId(out uint batchId)
         {
             if (Count == 0)
@@ -94,7 +94,7 @@ public readonly struct MemoryPage : IPage
             batchId = Item.Batch;
             return true;
         }
-        
+
         public DbAddress Dequeue()
         {
             if (Count == 0)
@@ -106,7 +106,7 @@ public readonly struct MemoryPage : IPage
             RemoveRootNode();
             return page;
         }
-        
+
         private void MoveUp(PageInfo info, int nodeIndex)
         {
             Debug.Assert(0 <= nodeIndex && nodeIndex < Count);
@@ -131,18 +131,18 @@ public readonly struct MemoryPage : IPage
 
             infos[nodeIndex] = info;
         }
-        
+
         private void RemoveRootNode()
         {
             var lastNodeIndex = --Count;
-            
+
             if (lastNodeIndex > 0)
             {
                 ref readonly var last = ref Unsafe.Add(ref Item, Count + 1);
                 MoveDown(last, 0);
             }
         }
-        
+
         private void MoveDown(PageInfo info, int nodeIndex)
         {
             Debug.Assert(0 <= nodeIndex && nodeIndex < Count);
@@ -161,7 +161,7 @@ public readonly struct MemoryPage : IPage
                 while (++i < childIndexUpperBound)
                 {
                     var nextChild = nodes[i];
-                    if (nextChild.Long <  minChild.Long)
+                    if (nextChild.Long < minChild.Long)
                     {
                         minChild = nextChild;
                         minChildIndex = i;
@@ -182,7 +182,7 @@ public readonly struct MemoryPage : IPage
 
             nodes[nodeIndex] = info;
         }
-        
+
         private static int GetParentIndex(int index) => (index - 1) >> Log2Arity;
         private static int GetFirstChildIndex(int index) => (index << Log2Arity) + 1;
     }

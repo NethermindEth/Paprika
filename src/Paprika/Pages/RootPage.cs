@@ -29,7 +29,7 @@ public readonly unsafe struct RootPage : IPage
     public struct Payload
     {
         private const int Size = Page.PageSize - PageHeader.Size;
-        
+
         /// <summary>
         /// The block number that the given batch represents.
         /// </summary>
@@ -56,7 +56,7 @@ public readonly unsafe struct RootPage : IPage
         /// for writes.
         /// </summary>
         [FieldOffset(sizeof(uint) + Keccak.Size + DbAddress.Size + DbAddress.Size)] public DbAddress MemoryPage;
-        
+
         public DbAddress GetNextFreePage()
         {
             var free = NextFreePage;
