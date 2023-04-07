@@ -1,13 +1,16 @@
 ﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Runtime.Serialization.Formatters.Binary;
 
 namespace Paprika.Pages;
 
 /// <summary>
 /// Represents a min-heap of pages that can be no longer used and can be reused.
 /// </summary>
+/// <remarks>
+/// Pages held by <see cref="MemoryPage"/> cannot be trusted in regards to their blocks id.
+/// Blocks Ids should be peeked from this page directly.
+/// </remarks>
 public readonly struct MemoryPage : IPage
 {
     /// <summary>
@@ -31,23 +34,13 @@ public readonly struct MemoryPage : IPage
     /// Pushes the page to the registry of pages to be freed.
     /// </summary>
     /// <returns>The raw page.</returns>
-    public Page Push(IBatchContext batch, DbAddress pageAddress, uint batchId)
+    public void Push(IBatchContext batch, DbAddress pageAddress, uint batchId)
     {
-        if (_page.Header.BatchId != batch.BatchId)
-        {
-            // the page is from another batch, meaning, it's readonly. Copy
-            var writable = batch.GetWritableCopy(_page);
-            return new MemoryPage(writable).Push(batch, pageAddress, batchId);
-        }
-
         if (Data.TryEnqueue(new PageInfo { Batch = batchId, Page = pageAddress }) == false)
         {
             throw new NotImplementedException("Implement overflow in free");
         }
-
-        return _page;
     }
-
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Payload

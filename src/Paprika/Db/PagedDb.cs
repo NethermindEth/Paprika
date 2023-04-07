@@ -33,7 +33,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
     private readonly RootPage[] _roots;
 
     // a simple pool of root pages
-    private readonly ConcurrentStack<RootPage> _pool = new();
+    private readonly ConcurrentStack<Page> _pool = new();
 
     /// <summary>
     /// Initializes the paged db.
@@ -101,21 +101,18 @@ public abstract unsafe class PagedDb : IDb, IDisposable
     public abstract void Dispose();
     protected abstract void Flush();
 
-    private RootPage RentRootPage()
+    private Page RentPage()
     {
-        if (_pool.TryPop(out RootPage page))
+        if (_pool.TryPop(out var page))
         {
             return page;
         }
 
         var memory = (byte*)NativeMemory.AlignedAlloc((UIntPtr)Page.PageSize, (UIntPtr)UIntPtr.Size);
-        return new RootPage(memory);
+        return new Page(memory);
     }
 
-    private void ReleaseRootPage(RootPage page)
-    {
-        _pool.Push(page);
-    }
+    private void ReturnPage(Page page) => _pool.Push(page);
 
     /// <summary>
     /// Begins a batch representing the next block.
@@ -153,9 +150,14 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
     private IBatch BuildFromRoot(RootPage rootPage)
     {
-        var root = RentRootPage();
-
+        // prepare root
+        var root = new RootPage(RentPage());
         rootPage.CopyTo(root);
+        
+        // prepare memory
+        var memoryPage = RentPage();
+        GetAt(rootPage.Data.MemoryPage).CopyTo(memoryPage);
+        var memory = new MemoryPage(memoryPage);
 
         // always inc the batchId
         root.Header.BatchId++;
@@ -163,7 +165,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         // move to the next block
         root.Data.BlockNumber++;
 
-        return new Batch(this, root);
+        return new Batch(this, root, memory);
     }
 
     private void SetNewRoot(RootPage root)
@@ -177,13 +179,15 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         private const byte RootLevel = 0;
         private readonly PagedDb _db;
         private readonly RootPage _root;
+        private readonly MemoryPage _memory;
 
         // TODO: when read transactions enabled, provide second parameter as
         // Math.Min(all reader transactions batches, root.Header.BatchId - db._historyDepth)
-        public Batch(PagedDb db, RootPage root) : base(root.Header.BatchId, root.Header.BatchId - db._historyDepth)
+        public Batch(PagedDb db, RootPage root, MemoryPage memory) : base(root.Header.BatchId, root.Header.BatchId - db._historyDepth)
         {
             _db = db;
             _root = root;
+            _memory = memory;
         }
 
         public Account GetAccount(in Keccak key)
@@ -222,6 +226,8 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
             // flush data first
             _db.Flush();
+            
+            // prepare root
             _db.SetNewRoot(_root);
 
             if (options == CommitOptions.FlushDataAndRoot)
@@ -263,6 +269,10 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             // TODO: register
         }
 
-        public void Dispose() => _db.ReleaseRootPage(_root);
+        public void Dispose()
+        {
+            _db.ReturnPage(_root.AsPage());
+            _db.ReturnPage(_memory.AsPage());
+        }
     }
 }
