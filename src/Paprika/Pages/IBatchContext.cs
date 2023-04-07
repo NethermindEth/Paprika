@@ -5,7 +5,7 @@ public interface IBatchContext
     /// <summary>
     /// Gets the current <see cref="IBatch"/> id.
     /// </summary>
-    long BatchId { get; }
+    uint BatchId { get; }
 
     /// <summary>
     /// Gets the page at given address.
@@ -31,15 +31,15 @@ public interface IBatchContext
 /// </summary>
 abstract class BatchContextBase : IBatchContext
 {
-    private readonly long _minBatchToPreserve;
+    private readonly uint _minBatchToPreserve;
 
-    protected BatchContextBase(long batchId, long minBatchToPreserve)
+    protected BatchContextBase(uint batchId, uint minBatchToPreserve)
     {
         _minBatchToPreserve = minBatchToPreserve;
         BatchId = batchId;
     }
 
-    public long BatchId { get; }
+    public uint BatchId { get; }
 
     public abstract Page GetAt(DbAddress address);
 
@@ -62,10 +62,8 @@ abstract class BatchContextBase : IBatchContext
             AssignBatchId(page);
             return page;
         }
-        else
-        {
-            RegisterForFutureGC(page);
-        }
+
+        RegisterForFutureGC(page);
 
         var @new = GetNewPage(out _, false);
         page.CopyTo(@new);
@@ -78,8 +76,8 @@ abstract class BatchContextBase : IBatchContext
     /// Registers the given page for future GC.
     /// </summary>
     /// <param name="page">The page to be analyzed and registered for future GC.</param>
-    protected abstract void RegisterForFutureGC(Page page);
 
+    protected abstract void RegisterForFutureGC(Page page);
     /// <summary>
     /// Assigns the batch identifier to a given page, marking it writable by this batch.
     /// </summary>

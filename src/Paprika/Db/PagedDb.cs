@@ -260,7 +260,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         protected override void RegisterForFutureGC(Page page)
         {
-            page.Header.BatchId;
+            _root.Data.MemoryPage 
         }
 
         public void Dispose() => _db.ReleaseRootPage(_root);

@@ -29,18 +29,33 @@ public readonly unsafe struct RootPage : IPage
     public struct Payload
     {
         private const int Size = Page.PageSize - PageHeader.Size;
-        private const int FixedDataSize = sizeof(uint) + Keccak.Size + DbAddress.Size + DbAddress.Size;
-        private const int FreePageEntryCount = (Size - FixedDataSize)/DbAddress.Size;
-
+        
+        /// <summary>
+        /// The block number that the given batch represents.
+        /// </summary>
         [FieldOffset(0)] public uint BlockNumber;
 
+        /// <summary>
+        /// The hash of the state root of the given block identified by <see cref="BlockNumber"/>.
+        /// </summary>
         [FieldOffset(sizeof(uint))] public Keccak StateRootHash;
 
+        /// <summary>
+        /// The address of the next free page. This should be used rarely as pages should be reused
+        /// with <see cref="MemoryPage"/>.
+        /// </summary>
         [FieldOffset(sizeof(uint) + Keccak.Size)] public DbAddress NextFreePage;
 
+        /// <summary>
+        /// The actual root of the trie, the first page of the state.
+        /// </summary>
         [FieldOffset(sizeof(uint) + Keccak.Size + DbAddress.Size)] public DbAddress DataPage;
 
-        [FieldOffset(FixedDataSize)] public DbAddress FreePages;
+        /// <summary>
+        /// The memory managing page. The one used to keep the list of abandon pages that might be used in the future
+        /// for writes.
+        /// </summary>
+        [FieldOffset(sizeof(uint) + Keccak.Size + DbAddress.Size + DbAddress.Size)] public DbAddress MemoryPage;
         
         public DbAddress GetNextFreePage()
         {
