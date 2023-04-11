@@ -154,18 +154,13 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         var root = new RootPage(RentPage());
         rootPage.CopyTo(root);
         
-        // prepare memory
-        var memoryPage = RentPage();
-        GetAt(rootPage.Data.AbandonedPages).CopyTo(memoryPage);
-        var memory = new AbandonedPage(memoryPage);
-
         // always inc the batchId
         root.Header.BatchId++;
 
         // move to the next block
         root.Data.BlockNumber++;
 
-        return new Batch(this, root, memory);
+        return new Batch(this, root);
     }
 
     private void SetNewRoot(RootPage root)
@@ -179,15 +174,13 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         private const byte RootLevel = 0;
         private readonly PagedDb _db;
         private readonly RootPage _root;
-        private readonly AbandonedPage _abandoned;
 
         // TODO: when read transactions enabled, provide second parameter as
         // Math.Min(all reader transactions batches, root.Header.BatchId - db._historyDepth)
-        public Batch(PagedDb db, RootPage root, AbandonedPage abandoned) : base(root.Header.BatchId, root.Header.BatchId - db._historyDepth)
+        public Batch(PagedDb db, RootPage root) : base(root.Header.BatchId, root.Header.BatchId - db._historyDepth)
         {
             _db = db;
             _root = root;
-            _abandoned = abandoned;
         }
 
         public Account GetAccount(in Keccak key)
@@ -227,16 +220,6 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             // flush data first
             _db.Flush();
             
-            // prepare root: copy the current in-memory to the NextFreePage and swap
-            var next = _root.Data.NextFreePage;
-            var current = _root.Data.AbandonedPages;
-            
-            _abandoned.CopyTo(new AbandonedPage(_db.GetAt(next)));
-
-            // swap
-            _root.Data.AbandonedPages = next;
-            _root.Data.NextFreePage = current;
-                
             _db.SetNewRoot(_root);
 
             if (options == CommitOptions.FlushDataAndRoot)
@@ -275,13 +258,12 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         protected override void RegisterForFutureGC(Page page)
         {
-            _abandoned.EnqueueAbandoned(this, _db.GetAddress(page));
+            // _abandoned.EnqueueAbandoned(this, _db.GetAddress(page));
         }
 
         public void Dispose()
         {
             _db.ReturnPage(_root.AsPage());
-            _db.ReturnPage(_abandoned.AsPage());
         }
     }
 }

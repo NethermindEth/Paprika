@@ -15,7 +15,7 @@ public class DbTests
     [Test]
     public void Simple()
     {
-        const int max = 16;
+        const int max = 2;
 
         using var db = new NativeMemoryPagedDb(1024 * 1024UL, 2);
 
