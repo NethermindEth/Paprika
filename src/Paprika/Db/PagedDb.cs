@@ -275,7 +275,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         protected override void RegisterForFutureGC(Page page)
         {
-            _abandoned.Push(this, _db.GetAddress(page));
+            _abandoned.EnqueueAbandoned(this, _db.GetAddress(page));
         }
 
         public void Dispose()

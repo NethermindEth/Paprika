@@ -18,10 +18,9 @@ public readonly struct AbandonedPage : IPage
     private unsafe ref Payload Data => ref Unsafe.AsRef<Payload>(_page.Payload);
 
     /// <summary>
-    /// Pushes the page to the registry of pages to be freed.
+    /// Equeues the page to the registry of pages to be freed.
     /// </summary>
-    /// <returns>The raw page.</returns>
-    public void Push(IBatchContext batch, DbAddress page)
+    public void EnqueueAbandoned(IBatchContext batch, DbAddress page)
     {
         if (Data.TryEnqueueAbandoned(page) == false)
         {
@@ -34,6 +33,11 @@ public readonly struct AbandonedPage : IPage
             // return @new
         }
     }
+    
+    /// <summary>
+    /// Tries to dequeue a free page.
+    /// </summary>
+    public bool TryDequeueFree(out DbAddress page) => Data.TryDequeueFree(out page);
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Payload
@@ -42,13 +46,12 @@ public readonly struct AbandonedPage : IPage
 
         private const int PageAddressesOffset = sizeof(int) + sizeof(uint) + DbAddress.Size;
 
-        public const int MaxCount = (Size - PageAddressesOffset) / DbAddress.Size;
+        private const int MaxCount = (Size - PageAddressesOffset) / DbAddress.Size;
 
         /// <summary>
         /// The count of pages contained in this page.
         /// </summary>
         [FieldOffset(0)] public int Count;
-
         
         /// <summary>
         /// Provides the id of the batch that pages were abandoned at.
@@ -97,9 +100,9 @@ public readonly struct AbandonedPage : IPage
                 page = DbAddress.Null;
                 return false;
             }
-
-            page = Unsafe.Add(ref AbandonedPages, Count);
+            
             Count--;
+            page = Unsafe.Add(ref AbandonedPages, Count);
             return true;
         }
     }
