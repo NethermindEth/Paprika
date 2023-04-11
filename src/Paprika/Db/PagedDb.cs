@@ -177,7 +177,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         // TODO: when read transactions enabled, provide second parameter as
         // Math.Min(all reader transactions batches, root.Header.BatchId - db._historyDepth)
-        public Batch(PagedDb db, RootPage root) : base(root.Header.BatchId, root.Header.BatchId - db._historyDepth)
+        public Batch(PagedDb db, RootPage root) : base(root.Header.BatchId)
         {
             _db = db;
             _root = root;

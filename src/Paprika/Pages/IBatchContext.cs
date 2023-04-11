@@ -31,11 +31,8 @@ public interface IBatchContext
 /// </summary>
 abstract class BatchContextBase : IBatchContext
 {
-    private readonly uint _minBatchToPreserve;
-
-    protected BatchContextBase(uint batchId, uint minBatchToPreserve)
+    protected BatchContextBase(uint batchId)
     {
-        _minBatchToPreserve = minBatchToPreserve;
         BatchId = batchId;
     }
 
@@ -56,13 +53,6 @@ abstract class BatchContextBase : IBatchContext
         if (page.Header.BatchId == BatchId)
             return page;
 
-        if (page.Header.BatchId < _minBatchToPreserve)
-        {
-            // no need to preserve this page, can be reused
-            AssignBatchId(page);
-            return page;
-        }
-
         RegisterForFutureGC(page);
 
         var @new = GetNewPage(out _, false);
@@ -78,6 +68,7 @@ abstract class BatchContextBase : IBatchContext
     /// <param name="page">The page to be analyzed and registered for future GC.</param>
 
     protected abstract void RegisterForFutureGC(Page page);
+    
     /// <summary>
     /// Assigns the batch identifier to a given page, marking it writable by this batch.
     /// </summary>

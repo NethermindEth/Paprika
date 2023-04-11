@@ -53,7 +53,7 @@ public readonly unsafe struct RootPage : IPage
 
         /// <summary>
         /// The address of the next free page. This should be used rarely as pages should be reused
-        /// with <see cref="AbandonedPages"/>.
+        /// with <see cref="AbandonedPage"/>.
         /// </summary>
         [FieldOffset(sizeof(uint) + Keccak.Size)] public DbAddress NextFreePage;
 
@@ -65,7 +65,13 @@ public readonly unsafe struct RootPage : IPage
         /// <summary>
         /// The start of the abandoned pages.
         /// </summary>
-        [FieldOffset(sizeof(uint) + Keccak.Size + DbAddress.Size + DbAddress.Size)] public DbAddress AbandonedPages;
+        [FieldOffset(sizeof(uint) + Keccak.Size + DbAddress.Size + DbAddress.Size)]
+        private DbAddress AbandonedPage;
+
+        /// <summary>
+        /// Gets the span of the abandoned pages roots.
+        /// </summary>
+        public Span<DbAddress> AbandonedPages => MemoryMarshal.CreateSpan(ref AbandonedPage, AbandonedPagesCount);
 
         public DbAddress GetNextFreePage()
         {

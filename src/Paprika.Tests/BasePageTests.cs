@@ -51,7 +51,7 @@ public abstract class BasePageTests
         // 0-N is take by metadata pages
         private uint _pageCount = 1U;
 
-        public TestBatchContext(uint batchId) : base(batchId, 0) { }
+        public TestBatchContext(uint batchId) : base(batchId) { }
 
         public override Page GetAt(DbAddress address) => _address2Page[address];
 
