@@ -19,7 +19,7 @@ public unsafe class DataPageTests
         var page = AllocPage();
         page.Clear();
 
-        var batch = new BatchContext(BatchId);
+        var batch = new TestBatchContext(BatchId);
         var dataPage = new DataPage(page);
         var ctx = new SetContext(Key0, Balance0, Nonce0);
 
@@ -37,7 +37,7 @@ public unsafe class DataPageTests
         var page = AllocPage();
         page.Clear();
 
-        var batch = new BatchContext(BatchId);
+        var batch = new TestBatchContext(BatchId);
 
         var dataPage = new DataPage(page);
         var ctx1 = new SetContext(Key0, Balance0, Nonce0);
@@ -57,7 +57,7 @@ public unsafe class DataPageTests
         var page = AllocPage();
         page.Clear();
 
-        var batch = new BatchContext(BatchId);
+        var batch = new TestBatchContext(BatchId);
 
         var dataPage = new DataPage(page);
         var ctx1 = new SetContext(Key1a, Balance0, Nonce0);
@@ -81,7 +81,7 @@ public unsafe class DataPageTests
         var page = AllocPage();
         page.Clear();
 
-        var batch = new BatchContext(BatchId);
+        var batch = new TestBatchContext(BatchId);
         var dataPage = new DataPage(page);
 
         const int count = 2 * 1024 * 1024;
@@ -143,7 +143,7 @@ public unsafe class DataPageTests
         return page;
     }
 
-    class BatchContext : BatchContextBase
+    internal class TestBatchContext : BatchContextBase
     {
         private readonly Dictionary<DbAddress, Page> _address2Page = new();
 
@@ -151,7 +151,7 @@ public unsafe class DataPageTests
         // 0-N is take by metadata pages
         private uint _pageCount = 1U;
 
-        public BatchContext(uint batchId) : base(batchId, 0) { }
+        public TestBatchContext(uint batchId) : base(batchId, 0) { }
 
         public override Page GetAt(DbAddress address) => _address2Page[address];
 

@@ -30,6 +30,17 @@ public readonly unsafe struct RootPage : IPage
     {
         private const int Size = Page.PageSize - PageHeader.Size;
 
+        private const int AbandonedPagesStart = sizeof(uint) + Keccak.Size + DbAddress.Size + DbAddress.Size;
+        
+        /// <summary>
+        /// This gives the upper boundary of the number of abandoned pages that can be kept in the list.
+        /// </summary>
+        /// <remarks>
+        /// For the current values, it's 1012. With blocks happening every 12s, this should be enough to support
+        /// a reader that last for over 3h.
+        /// </remarks>
+        private const int AbandonedPagesCount = (Size - AbandonedPagesStart) / DbAddress.Size;
+
         /// <summary>
         /// The block number that the given batch represents.
         /// </summary>
@@ -42,7 +53,7 @@ public readonly unsafe struct RootPage : IPage
 
         /// <summary>
         /// The address of the next free page. This should be used rarely as pages should be reused
-        /// with <see cref="MemoryPage"/>.
+        /// with <see cref="AbandonedPages"/>.
         /// </summary>
         [FieldOffset(sizeof(uint) + Keccak.Size)] public DbAddress NextFreePage;
 
@@ -52,10 +63,9 @@ public readonly unsafe struct RootPage : IPage
         [FieldOffset(sizeof(uint) + Keccak.Size + DbAddress.Size)] public DbAddress DataPage;
 
         /// <summary>
-        /// The memory managing page. The one used to keep the list of abandon pages that might be used in the future
-        /// for writes.
+        /// The start of the abandoned pages.
         /// </summary>
-        [FieldOffset(sizeof(uint) + Keccak.Size + DbAddress.Size + DbAddress.Size)] public DbAddress MemoryPage;
+        [FieldOffset(sizeof(uint) + Keccak.Size + DbAddress.Size + DbAddress.Size)] public DbAddress AbandonedPages;
 
         public DbAddress GetNextFreePage()
         {
