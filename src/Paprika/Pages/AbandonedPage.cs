@@ -25,7 +25,7 @@ public readonly struct AbandonedPage : IPage
         if (Data.TryEnqueueAbandoned(page) == false)
         {
             // failed to provide
-            
+
             throw new NotImplementedException("Implement overflow in free");
 
             // var @new = batch.GetNewPage(out page, true);
@@ -33,7 +33,7 @@ public readonly struct AbandonedPage : IPage
             // return @new
         }
     }
-    
+
     /// <summary>
     /// Tries to dequeue a free page.
     /// </summary>
@@ -52,14 +52,14 @@ public readonly struct AbandonedPage : IPage
         /// The count of pages contained in this page.
         /// </summary>
         [FieldOffset(0)] public int Count;
-        
+
         /// <summary>
         /// Provides the id of the batch that pages were abandoned at.
         /// </summary>
         /// <remarks>
         /// It's separate from <see cref="Page.Header.BatchId"/> represents the writability of the page. 
         /// </remarks>
-        [FieldOffset(sizeof(uint))] public uint AbandonedAtBatchId; 
+        [FieldOffset(sizeof(uint))] public uint AbandonedAtBatchId;
 
         /// <summary>
         /// The address of the next page that contains information about this <see cref="IBatchContext.BatchId"/>
@@ -100,7 +100,7 @@ public readonly struct AbandonedPage : IPage
                 page = DbAddress.Null;
                 return false;
             }
-            
+
             Count--;
             page = Unsafe.Add(ref AbandonedPages, Count);
             return true;

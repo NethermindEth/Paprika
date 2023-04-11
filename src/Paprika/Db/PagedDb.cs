@@ -153,7 +153,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         // prepare root
         var root = new RootPage(RentPage());
         rootPage.CopyTo(root);
-        
+
         // always inc the batchId
         root.Header.BatchId++;
 
@@ -219,7 +219,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
             // flush data first
             _db.Flush();
-            
+
             _db.SetNewRoot(_root);
 
             if (options == CommitOptions.FlushDataAndRoot)

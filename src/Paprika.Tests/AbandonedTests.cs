@@ -18,15 +18,15 @@ public class AbandonedTests : BasePageTests
         const int count = 1000;
 
         var pages = new HashSet<uint>();
-        
+
         for (uint i = 0; i < count; i++)
         {
             var page = i + fromPage;
             pages.Add(page);
-            
+
             abandoned.EnqueueAbandoned(batch, DbAddress.Page(page));
-        }        
-        
+        }
+
         for (uint i = 0; i < count; i++)
         {
             abandoned.TryDequeueFree(out var page).Should().BeTrue();

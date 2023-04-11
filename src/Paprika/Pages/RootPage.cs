@@ -31,7 +31,7 @@ public readonly unsafe struct RootPage : IPage
         private const int Size = Page.PageSize - PageHeader.Size;
 
         private const int AbandonedPagesStart = sizeof(uint) + Keccak.Size + DbAddress.Size + DbAddress.Size;
-        
+
         /// <summary>
         /// This gives the upper boundary of the number of abandoned pages that can be kept in the list.
         /// </summary>
