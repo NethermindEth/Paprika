@@ -160,7 +160,9 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         // move to the next block
         root.Data.BlockNumber++;
 
-        return new Batch(this, root);
+        // TODO: when read transactions enabled, provide second parameter as
+        // Math.Min(all reader transactions batches, root.Header.BatchId - db._historyDepth)
+        return new Batch(this, root, root.Header.BatchId - _historyDepth);
     }
 
     private void SetNewRoot(RootPage root)
@@ -174,13 +176,19 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         private const byte RootLevel = 0;
         private readonly PagedDb _db;
         private readonly RootPage _root;
+        private readonly uint _reusePagesOlderThanBatchId;
 
-        // TODO: when read transactions enabled, provide second parameter as
-        // Math.Min(all reader transactions batches, root.Header.BatchId - db._historyDepth)
-        public Batch(PagedDb db, RootPage root) : base(root.Header.BatchId)
+        /// <summary>
+        /// A pool of pages that are no longer used and can be reused now.
+        /// </summary>
+        private AbandonedPage? _unusedPool;
+
+        public Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId) : base(root.Header.BatchId)
         {
             _db = db;
             _root = root;
+            _reusePagesOlderThanBatchId = reusePagesOlderThanBatchId;
+            _unusedPool = null;
         }
 
         public Account GetAccount(in Keccak key)
@@ -246,14 +254,113 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         public override Page GetNewPage(out DbAddress addr, bool clear)
         {
-            addr = _root.Data.GetNextFreePage();
+            if (TryGetNoLongerUsedPage(out addr) == false)
+            {
+                // on failure to reuse a page, default to allocating a new one.
+                addr = _root.Data.GetNextFreePage();
+            }
+
             Debug.Assert(addr.IsValidPageAddress, "The page address retrieved is invalid");
+
             var page = _db.GetAt(addr);
             if (clear)
                 page.Clear();
 
             AssignBatchId(page);
             return page;
+        }
+
+        private bool TryGetNoLongerUsedPage(out DbAddress found)
+        {
+            // check whether previous operations allocated the pool of unused pages
+            if (_unusedPool == null)
+            {
+                // find the page across all the abandoned pages, so that it's the oldest one
+                AbandonedPage? oldest = default;
+                DbAddress oldestAddress = default;
+
+                var abandonedPages = _root.Data.AbandonedPages;
+
+                foreach (var abandonedPageAddr in abandonedPages)
+                {
+                    if (abandonedPageAddr.IsNull == false)
+                    {
+                        var current = new AbandonedPage(_db.GetAt(abandonedPageAddr));
+                        uint oldestBatchId = oldest?.AbandonedAtBatch ?? uint.MaxValue;
+                        if (current.AbandonedAtBatch < oldestBatchId)
+                        {
+                            oldest = current;
+                            oldestAddress = abandonedPageAddr;
+                        }
+                    }
+                }
+
+                if (oldest != null)
+                {
+                    var o = oldest.Value;
+
+                    // check whether the oldest page qualifies for being the pool
+                    if (o.AbandonedAtBatch < _reusePagesOlderThanBatchId)
+                    {
+                        _unusedPool = o;
+
+                        // write next in place of this page so that it's used as the pool
+                        var indexInRoot = abandonedPages.IndexOf(oldestAddress);
+                        abandonedPages[indexInRoot] = o.Next;
+                    }
+                }
+            }
+
+            if (_unusedPool != null)
+            {
+                var pool = _unusedPool.Value;
+
+                if (pool.PageCount == 0)
+                {
+                    // the page itself can be reused
+                    found = _db.GetAddress(pool.AsPage());
+                    _unusedPool = null;
+                    return true;
+                }
+
+                if (pool.BatchId != BatchId)
+                {
+                    // need to COW the page
+
+                    // peek the last to copy to
+                    pool.TryPeekFree(out var copyTo);
+                    var copy = _db.GetAt(copyTo);
+
+                    // copy and assign current batch
+                    pool.CopyTo(copy);
+                    AssignBatchId(copy);
+
+                    _unusedPool = new AbandonedPage(copy);
+
+                    // dequeue last, which is the same page
+                    _unusedPool.Value.TryDequeueFree(out _);
+
+                    // now the pool var contains the old page that can be returned and reused.
+                    // the _unusedPool holds the copy
+                    found = _db.GetAddress(pool.AsPage());
+                    return true;
+                }
+
+
+                if (pool.TryDequeueFree(out found))
+                {
+                    // the happy case of pool containing some
+                    return true;
+                }
+
+                // pool contains no pages, and should be reused
+                found = _db.GetAddress(pool.AsPage());
+                _unusedPool = null;
+                return true;
+            }
+
+            found = default;
+            return false;
         }
 
         protected override void RegisterForFutureGC(Page page)

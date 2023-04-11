@@ -15,6 +15,23 @@ public readonly struct AbandonedPage : IPage
     [DebuggerStepThrough]
     public AbandonedPage(Page page) => _page = page;
 
+    public uint AbandonedAtBatch => Data.AbandonedAtBatchId;
+
+    /// <summary>
+    /// The id of the page that this page was written with.
+    /// </summary>
+    public uint BatchId => _page.Header.BatchId;
+
+    /// <summary>
+    /// Gets the number of pages this contains.
+    /// </summary>
+    public int PageCount => Data.Count;
+
+    /// <summary>
+    /// The next chunk of pages with the same batch id.
+    /// </summary>
+    public DbAddress Next => Data.Next;
+
     private unsafe ref Payload Data => ref Unsafe.AsRef<Payload>(_page.Payload);
 
     /// <summary>
@@ -38,6 +55,11 @@ public readonly struct AbandonedPage : IPage
     /// Tries to dequeue a free page.
     /// </summary>
     public bool TryDequeueFree(out DbAddress page) => Data.TryDequeueFree(out page);
+
+    /// <summary>
+    /// Tries to dequeue a free page.
+    /// </summary>
+    public bool TryPeekFree(out DbAddress page) => Data.TryPeekFree(out page);
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Payload
@@ -103,6 +125,18 @@ public readonly struct AbandonedPage : IPage
 
             Count--;
             page = Unsafe.Add(ref AbandonedPages, Count);
+            return true;
+        }
+
+        public bool TryPeekFree(out DbAddress page)
+        {
+            if (Count == 0)
+            {
+                page = DbAddress.Null;
+                return false;
+            }
+
+            page = Unsafe.Add(ref AbandonedPages, Count - 1);
             return true;
         }
     }

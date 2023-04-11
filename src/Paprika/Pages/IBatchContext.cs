@@ -68,7 +68,7 @@ abstract class BatchContextBase : IBatchContext
     /// <param name="page">The page to be analyzed and registered for future GC.</param>
 
     protected abstract void RegisterForFutureGC(Page page);
-    
+
     /// <summary>
     /// Assigns the batch identifier to a given page, marking it writable by this batch.
     /// </summary>
