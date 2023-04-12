@@ -85,13 +85,13 @@ public readonly struct AbandonedPage : IPage
         /// <remarks>
         /// It's separate from <see cref="Page.Header.BatchId"/> represents the writability of the page. 
         /// </remarks>
-        [FieldOffset(sizeof(uint))] public uint AbandonedAtBatchId;
+        [FieldOffset(sizeof(int))] public uint AbandonedAtBatchId;
 
         /// <summary>
         /// The address of the next page that contains information about this <see cref="IBatchContext.BatchId"/>
         /// abandoned pages.
         /// </summary>
-        [FieldOffset(sizeof(int))] public DbAddress Next;
+        [FieldOffset(sizeof(int) + DbAddress.Size)] public DbAddress Next;
 
         [FieldOffset(PageAddressesOffset)] private DbAddress AbandonedPages;
 

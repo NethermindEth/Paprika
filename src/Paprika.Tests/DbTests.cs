@@ -124,7 +124,7 @@ public class DbTests
     {
         using var db = new NativeMemoryPagedDb(SmallDb, 2);
 
-        const int blockCount = 1000;
+        const int blockCount = 1_000_000;
 
         for (var i = 0; i < blockCount; i++)
         {
@@ -137,5 +137,7 @@ public class DbTests
                 block.Commit(CommitOptions.FlushDataOnly);
             }
         }
+
+        Console.WriteLine($"Used {db.TotalUsedPages:P} pages for writing {blockCount} blocks");
     }
 }
