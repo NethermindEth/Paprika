@@ -233,6 +233,9 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             // flush data first
             _db.Flush();
 
+            // memoize the abandoned so that it's preserved for future uses 
+            MemoizeAbandoned();
+
             _db.SetNewRoot(_root);
 
             if (options == CommitOptions.FlushDataAndRoot)
@@ -272,6 +275,53 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
             AssignBatchId(page);
             return page;
+        }
+
+        private void MemoizeAbandoned()
+        {
+            if (_abandoned == null)
+                return;
+
+            var abandoned = _abandoned.Value;
+            var abandonedPages = _root.Data.AbandonedPages;
+
+            // remember the abandoned by either finding an empty slot, or chaining it to the highest number there
+            var nullAddress = abandonedPages.IndexOf(DbAddress.Null);
+            if (nullAddress != -1)
+            {
+                abandonedPages[nullAddress] = _db.GetAddress(abandoned.AsPage());
+            }
+            else
+            {
+                var youngest = new AbandonedPage(_db.GetAt(abandonedPages[0]));
+                ref var youngestAddr = ref abandonedPages[0];
+
+                foreach (ref var pageAddr in abandonedPages)
+                {
+                    var current = new AbandonedPage(_db.GetAt(pageAddr));
+                    if (current.AbandonedAtBatch > youngest.AbandonedAtBatch)
+                    {
+                        youngest = current;
+                        youngestAddr = pageAddr;
+                    }
+                }
+
+                // the youngest contains the youngest abandoned pages, but it's not younger than this batch.
+                // but... we can't write previously used pages only the current one, so...
+                // link back from this batch to previously decomissioned
+
+                var last = abandoned;
+                while (last.Next.IsNull == false)
+                {
+                    last = new AbandonedPage(_db.GetAt(last.Next));
+                }
+
+                // chain this batch->youngest_previously decomissioned
+                last.Next = youngestAddr;
+
+                // write the abandoned in the youngestAddr
+                youngestAddr = _db.GetAddress(abandoned.AsPage());
+            }
         }
 
         private bool TryGetNoLongerUsedPage(out DbAddress found)
@@ -378,7 +428,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
             var abandoned = _abandoned.Value;
             _abandoned =
-                abandoned.EnqueueAbandoned(this, _db.GetAddress(page.AsPage()), _db.GetAddress(abandoned.AsPage()));
+                abandoned.EnqueueAbandoned(this, _db.GetAddress(abandoned.AsPage()), _db.GetAddress(page.AsPage()));
         }
 
         public void Dispose()

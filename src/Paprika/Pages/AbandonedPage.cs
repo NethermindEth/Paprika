@@ -30,7 +30,7 @@ public readonly struct AbandonedPage : IPage
     /// <summary>
     /// The next chunk of pages with the same batch id.
     /// </summary>
-    public DbAddress Next => Data.Next;
+    public ref DbAddress Next => ref Data.Next;
 
     private unsafe ref Payload Data => ref Unsafe.AsRef<Payload>(_page.Payload);
 

@@ -119,58 +119,23 @@ public class DbTests
         Assert.Throws<ArgumentException>(() => db.ReorganizeBackToAndStartNew(invalidBlock).Should());
     }
 
-    // [Test]
-    // public void Random_big()
-    // {
-    //     using var db = new NativeMemoryPagedDb(1024 * 1024 * 1024UL);
-    //     var tx = db.Begin();
-    //
-    //     const int count = 1000_000;
-    //
-    //     var random = new Random(13);
-    //
-    //     var key = new byte[32];
-    //
-    //     for (int i = 0; i < count; i++)
-    //     {
-    //         random.NextBytes(key);
-    //         tx.Set(key, key);
-    //
-    //         AssertValue(tx, key, i);
-    //     }
-    //
-    //     tx.Commit();
-    //
-    //     // reset random
-    //     random = new Random(13);
-    //     for (int i = 0; i < count; i++)
-    //     {
-    //         random.NextBytes(key);
-    //         AssertValue(tx, key, i);
-    //     }
-    //
-    //     static void AssertValue(ITransaction tx, byte[] key, int i)
-    //     {
-    //         Assert.True(tx.TryGet(key, out var value), $"Failed getting  at {i}");
-    //         Assert.True(value.SequenceEqual(key.AsSpan()));
-    //     }
-    // }
-    //
-    // [Test]
-    // [Ignore("Currently updates in place are not supported")]
-    // public void Same_path()
-    // {
-    //     using var db = new NativeMemoryPagedDb(1024 * 1024UL);
-    //     var tx = db.Begin();
-    //
-    //     var key = new byte[32];
-    //
-    //     for (int i = 0; i < 1000000; i++)
-    //     {
-    //         BinaryPrimitives.WriteInt32BigEndian(key.AsSpan(28, 4), i);
-    //         tx.Set(key, key);
-    //     }
-    //
-    //     Console.WriteLine($"Used memory {db.TotalUsedPages:P}");
-    // }
+    [Test]
+    public void Page_reuse_heavy()
+    {
+        using var db = new NativeMemoryPagedDb(SmallDb, 2);
+
+        const int blockCount = 1000;
+
+        for (var i = 0; i < blockCount; i++)
+        {
+            // ReSharper disable once ConvertToUsingDeclaration
+            using (var block = db.BeginNextBlock())
+            {
+                var account = new Account(Balance0, (UInt256)i);
+
+                block.Set(Key0, account);
+                block.Commit(CommitOptions.FlushDataOnly);
+            }
+        }
+    }
 }
