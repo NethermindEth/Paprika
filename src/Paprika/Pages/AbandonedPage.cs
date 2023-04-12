@@ -15,7 +15,7 @@ public readonly struct AbandonedPage : IPage
     [DebuggerStepThrough]
     public AbandonedPage(Page page) => _page = page;
 
-    public uint AbandonedAtBatch => Data.AbandonedAtBatchId;
+    public ref uint AbandonedAtBatch => ref Data.AbandonedAtBatchId;
 
     /// <summary>
     /// The id of the page that this page was written with.
@@ -35,20 +35,24 @@ public readonly struct AbandonedPage : IPage
     private unsafe ref Payload Data => ref Unsafe.AsRef<Payload>(_page.Payload);
 
     /// <summary>
-    /// Equeues the page to the registry of pages to be freed.
+    /// Enqueues the page to the registry of pages to be freed.
     /// </summary>
-    public void EnqueueAbandoned(IBatchContext batch, DbAddress page)
+    public AbandonedPage EnqueueAbandoned(IBatchContext batch, DbAddress thisPageAddress, DbAddress abandoned)
     {
-        if (Data.TryEnqueueAbandoned(page) == false)
+        if (Data.TryEnqueueAbandoned(abandoned))
         {
-            // failed to provide
-
-            throw new NotImplementedException("Implement overflow in free");
-
-            // var @new = batch.GetNewPage(out page, true);
-            // point to the this, but write in the new one
-            // return @new
+            return this;
         }
+
+        // no more space, needs another next AbandonedPage
+        var next = new AbandonedPage(batch.GetNewPage(out var nextAddr, true));
+        next.EnqueueAbandoned(batch, nextAddr, abandoned);
+
+        // chain the new to the current
+        next.Data.Next = thisPageAddress;
+
+        // return next as this is chained via Next field
+        return next;
     }
 
     /// <summary>

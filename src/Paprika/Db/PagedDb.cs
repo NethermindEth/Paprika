@@ -183,6 +183,11 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         /// </summary>
         private AbandonedPage? _unusedPool;
 
+        /// <summary>
+        /// A pool of pages that are abandoned during this batch.
+        /// </summary>
+        private AbandonedPage? _abandoned;
+
         public Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId) : base(root.Header.BatchId)
         {
             _db = db;
@@ -250,7 +255,6 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         public double TotalUsedPages => ((double)(uint)_root.Data.NextFreePage) / _db._maxPage;
 
         public override Page GetAt(DbAddress address) => _db.GetAt(address);
-
 
         public override Page GetNewPage(out DbAddress addr, bool clear)
         {
@@ -346,14 +350,13 @@ public abstract unsafe class PagedDb : IDb, IDisposable
                     return true;
                 }
 
-
                 if (pool.TryDequeueFree(out found))
                 {
                     // the happy case of pool containing some
                     return true;
                 }
 
-                // pool contains no pages, and should be reused
+                // pool contains no pages, and should be reused on its own
                 found = _db.GetAddress(pool.AsPage());
                 _unusedPool = null;
                 return true;
@@ -363,9 +366,19 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             return false;
         }
 
-        protected override void RegisterForFutureGC(Page page)
+        protected override void RegisterForFutureReuse(Page page)
         {
-            // _abandoned.EnqueueAbandoned(this, _db.GetAddress(page));
+            if (_abandoned == null)
+            {
+                _abandoned = new AbandonedPage(GetNewPage(out _, true))
+                {
+                    AbandonedAtBatch = BatchId
+                };
+            }
+
+            var abandoned = _abandoned.Value;
+            _abandoned =
+                abandoned.EnqueueAbandoned(this, _db.GetAddress(page.AsPage()), _db.GetAddress(abandoned.AsPage()));
         }
 
         public void Dispose()

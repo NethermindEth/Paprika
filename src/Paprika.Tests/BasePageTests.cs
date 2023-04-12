@@ -53,6 +53,7 @@ public abstract class BasePageTests
 
         public TestBatchContext(uint batchId) : base(batchId) { }
 
+
         public override Page GetAt(DbAddress address) => _address2Page[address];
 
         public override Page GetNewPage(out DbAddress addr, bool clear)
@@ -70,7 +71,7 @@ public abstract class BasePageTests
             return page;
         }
 
-        protected override void RegisterForFutureGC(Page page)
+        protected override void RegisterForFutureReuse(Page page)
         {
             // NOOP
         }

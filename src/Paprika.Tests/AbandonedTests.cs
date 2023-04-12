@@ -12,7 +12,7 @@ public class AbandonedTests : BasePageTests
     public void Simple()
     {
         var batch = NewBatch(BatchId);
-        var abandoned = new AbandonedPage(batch.GetNewPage(out _, true));
+        var abandoned = new AbandonedPage(batch.GetNewPage(out var addr, true));
 
         const int fromPage = 13;
         const int count = 1000;
@@ -24,7 +24,7 @@ public class AbandonedTests : BasePageTests
             var page = i + fromPage;
             pages.Add(page);
 
-            abandoned.EnqueueAbandoned(batch, DbAddress.Page(page));
+            abandoned.EnqueueAbandoned(batch, addr, DbAddress.Page(page));
         }
 
         for (uint i = 0; i < count; i++)
