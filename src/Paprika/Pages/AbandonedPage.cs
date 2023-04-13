@@ -49,6 +49,7 @@ public readonly struct AbandonedPage : IPage
         next.EnqueueAbandoned(batch, nextAddr, abandoned);
 
         // chain the new to the current
+        next.AbandonedAtBatch = AbandonedAtBatch;
         next.Data.Next = thisPageAddress;
 
         // return next as this is chained via Next field
