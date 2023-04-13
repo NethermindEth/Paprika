@@ -122,7 +122,7 @@ public class DbTests
     }
 
     [TestCase(1_000_000, 1, TestName = "Long history, single account")]
-    [TestCase(50, 2_000, TestName = "Short history, single account")]
+    [TestCase(50, 2_000, TestName = "Short history, many accounts")]
     public void Page_reuse(int blockCount, int accountsCount)
     {
         using var db = new NativeMemoryPagedDb(MB64, 2);
