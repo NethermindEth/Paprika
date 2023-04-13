@@ -24,6 +24,4 @@ public interface IBatch : IDisposable
     /// <param name="options">How to commit.</param>
     /// <returns>The state root hash.</returns>
     Keccak Commit(CommitOptions options);
-
-    double TotalUsedPages { get; }
 }

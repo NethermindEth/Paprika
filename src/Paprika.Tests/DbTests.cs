@@ -1,4 +1,5 @@
-﻿using FluentAssertions;
+﻿using System.Buffers.Binary;
+using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Crypto;
@@ -11,6 +12,7 @@ namespace Paprika.Tests;
 public class DbTests
 {
     private const int SmallDb = 256 * Page.PageSize;
+    private const int MB64 = 128 * 1024 * 1024;
 
     [Test]
     public void Simple()
@@ -119,25 +121,30 @@ public class DbTests
         Assert.Throws<ArgumentException>(() => db.ReorganizeBackToAndStartNew(invalidBlock).Should());
     }
 
-    [Test]
-    public void Page_reuse_heavy()
+    [TestCase(1_000_000, 1, TestName = "Long history, single account")]
+    [TestCase(50, 2_000, TestName = "Short history, single account")]
+    public void Page_reuse(int blockCount, int accountsCount)
     {
-        using var db = new NativeMemoryPagedDb(SmallDb, 2);
-
-        const int blockCount = 1_000_000;
+        using var db = new NativeMemoryPagedDb(MB64, 2);
 
         for (var i = 0; i < blockCount; i++)
         {
             // ReSharper disable once ConvertToUsingDeclaration
             using (var block = db.BeginNextBlock())
             {
-                var account = new Account(Balance0, (UInt256)i);
+                for (var account = 0; account < accountsCount; account++)
+                {
+                    var key = Key0;
 
-                block.Set(Key0, account);
+                    BinaryPrimitives.WriteInt32LittleEndian(key.BytesAsSpan, account);
+
+                    block.Set(key, new Account(Balance0, (UInt256)i));
+                }
+
                 block.Commit(CommitOptions.FlushDataOnly);
             }
         }
 
-        Console.WriteLine($"Used {db.TotalUsedPages:P} pages for writing {blockCount} blocks");
+        Console.WriteLine($"Used {db.TotalUsedPages:P} pages for storing with {db.ActualMegabytesOnDisk:F2}MB on disk ");
     }
 }

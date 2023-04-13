@@ -79,6 +79,8 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
     public double TotalUsedPages => ((double)(int)Root.Data.NextFreePage) / _maxPage;
 
+    public double ActualMegabytesOnDisk => (double)(int)Root.Data.NextFreePage * Page.PageSize / 1024 / 1024;
+
     private RootPage Root => _roots[_lastRoot % _historyDepth];
 
     private Page GetAt(DbAddress address)
@@ -255,8 +257,6 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             _root.Data.StateRootHash = Keccak.Compute(span);
         }
 
-        public double TotalUsedPages => ((double)(uint)_root.Data.NextFreePage) / _db._maxPage;
-
         public override Page GetAt(DbAddress address) => _db.GetAt(address);
 
         public override Page GetNewPage(out DbAddress addr, bool clear)
@@ -265,9 +265,9 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             {
                 // on failure to reuse a page, default to allocating a new one.
                 addr = _root.Data.GetNextFreePage();
-            }
 
-            Debug.Assert(addr.IsValidPageAddress, "The page address retrieved is invalid");
+                Debug.Assert(addr.Raw < _db._maxPage, "The database breached its size! The returned page is invalid");
+            }
 
             var page = _db.GetAt(addr);
             if (clear)

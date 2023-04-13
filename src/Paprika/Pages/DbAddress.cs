@@ -34,6 +34,8 @@ public readonly struct DbAddress : IEquatable<DbAddress>
 
     private readonly uint _value;
 
+    public uint Raw => _value;
+
     /// <summary>
     /// Creates a database address that represents a jump to another frame within the same <see cref="Pages.Page"/>.
     /// </summary>
