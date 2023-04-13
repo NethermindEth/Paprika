@@ -1,4 +1,6 @@
-﻿namespace Paprika.Pages;
+﻿using System.Runtime.CompilerServices;
+
+namespace Paprika.Pages;
 
 public interface IBatchContext
 {
