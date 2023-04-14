@@ -157,14 +157,14 @@ public class DbTests
         const int size = MB16;
         const int blocksDuringReadAcquired = 1_000;
         const int blocksPostRead = 10_000;
-        const int start = 13;
+        UInt256 start = 13;
 
         using var db = new NativeMemoryPagedDb(size, 2);
 
         // write first value
         using (var block = db.BeginNextBlock())
         {
-            block.Set(Key0, new Account(Balance0, (UInt256)start));
+            block.Set(Key0, new Account(Balance0, start));
             block.Commit(CommitOptions.FlushDataOnly);
         }
 
@@ -176,13 +176,15 @@ public class DbTests
             // ReSharper disable once ConvertToUsingDeclaration
             using (var block = db.BeginNextBlock())
             {
-                var value = (UInt256)(i + start);
+                var value = start + (UInt256)i;
 
                 // assert previous
                 block.GetAccount(Key0).Nonce.Should().Be(value);
 
                 block.Set(Key0, new Account(Balance0, value + 1));
                 block.Commit(CommitOptions.FlushDataOnly);
+
+                readBatch.GetAccount(Key0).Nonce.Should().Be(start);
             }
         }
 
@@ -197,7 +199,7 @@ public class DbTests
             // ReSharper disable once ConvertToUsingDeclaration
             using (var block = db.BeginNextBlock())
             {
-                var value = (UInt256)(i + start);
+                var value = (UInt256)i + start;
 
                 block.Set(Key0, new Account(Balance0, value + 1));
                 block.Commit(CommitOptions.FlushDataOnly);
@@ -207,6 +209,5 @@ public class DbTests
         db.TotalUsedPages.Should().Be(snapshot, "Database should not grow without read transaction active.");
 
         Console.WriteLine($"Uses {db.TotalUsedPages:P} pages out of pre-allocated {size / MB}MB od disk. This gives the actual {db.ActualMegabytesOnDisk:F2}MB on disk ");
-
     }
 }
