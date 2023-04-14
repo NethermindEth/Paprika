@@ -104,4 +104,41 @@ public unsafe class DataPageTests : BasePageTests
             account.Should().Be(new Account(i, i));
         }
     }
+
+    [Test(Description = "The scenario to test handling updates over multiple batches so that the pages are properly linked and used.")]
+    public void Multiple_batches()
+    {
+        var page = AllocPage();
+        page.Clear();
+
+        var batch = NewBatch(BatchId);
+        var dataPage = new DataPage(page);
+
+        const int count = 128 * 1024;
+        const int batchEvery = 128;
+
+        for (uint i = 0; i < count; i++)
+        {
+            var key = Key1a;
+            BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i);
+
+            var ctx = new SetContext(key, i, i);
+
+            if (i % batchEvery == 0)
+            {
+                batch = batch.Next();
+            }
+
+            dataPage = new DataPage(dataPage.Set(ctx, batch, RootLevel));
+        }
+
+        for (uint i = 0; i < count; i++)
+        {
+            var key = Key1a;
+            BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i);
+
+            dataPage.GetAccount(key, batch, out var account, RootLevel);
+            account.Should().Be(new Account(i, i));
+        }
+    }
 }

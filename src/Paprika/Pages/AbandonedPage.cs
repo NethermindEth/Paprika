@@ -45,11 +45,14 @@ public readonly struct AbandonedPage : IPage
         }
 
         // no more space, needs another next AbandonedPage
-        var next = new AbandonedPage(batch.GetNewPage(out var nextAddr, true));
+        var next = new AbandonedPage(batch.GetNewPage(out var nextAddr, true))
+        {
+            AbandonedAtBatch = AbandonedAtBatch
+        };
+
         next.EnqueueAbandoned(batch, nextAddr, abandoned);
 
         // chain the new to the current
-        next.AbandonedAtBatch = AbandonedAtBatch;
         next.Data.Next = thisPageAddress;
 
         // return next as this is chained via Next field

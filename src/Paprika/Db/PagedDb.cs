@@ -262,6 +262,8 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         public override Page GetAt(DbAddress address) => _db.GetAt(address);
 
+        public override DbAddress GetAddress(Page page) => _db.GetAddress(page);
+
         public override Page GetNewPage(out DbAddress addr, bool clear)
         {
             if (TryGetNoLongerUsedPage(out addr, out var registerForGC))
@@ -313,6 +315,8 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             // process abandoned
             while (_abandoned.TryDequeue(out var page))
             {
+                Debug.Assert(page.IsValidPageAddress, "Only valid pages should be reused");
+
                 last = last.EnqueueAbandoned(this, _db.GetAddress(last.AsPage()), page);
             }
 
@@ -372,7 +376,6 @@ public abstract unsafe class PagedDb : IDb, IDisposable
                         // 1. copy all the pages to the pool
                         while (oldest.TryDequeueFree(out var addr))
                         {
-                            Debug.Assert(addr.IsValidPageAddress, "Should be valid page address");
                             _unusedPool.Enqueue(addr);
                         }
 
@@ -412,7 +415,11 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             return currentOldest != null;
         }
 
-        protected override void RegisterForFutureReuse(Page page) => _abandoned.Enqueue(_db.GetAddress(page));
+        protected override void RegisterForFutureReuse(Page page)
+        {
+            var addr = _db.GetAddress(page);
+            _abandoned.Enqueue(addr);
+        }
 
         public void Dispose()
         {

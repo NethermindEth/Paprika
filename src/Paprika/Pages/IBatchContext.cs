@@ -15,6 +15,11 @@ public interface IBatchContext
     Page GetAt(DbAddress address);
 
     /// <summary>
+    /// Get the address of the given page.
+    /// </summary>
+    DbAddress GetAddress(Page page);
+
+    /// <summary>
     /// Gets an unused page that is not clean.
     /// </summary>
     /// <returns></returns>
@@ -41,6 +46,8 @@ abstract class BatchContextBase : IBatchContext
     public uint BatchId { get; }
 
     public abstract Page GetAt(DbAddress address);
+
+    public abstract DbAddress GetAddress(Page page);
 
     public abstract Page GetNewPage(out DbAddress addr, bool clear);
 

@@ -102,7 +102,10 @@ public readonly unsafe struct DataPage : IPage
         if (address.IsNull == false && address.IsValidPageAddress)
         {
             var page = batch.GetAt(address);
-            new DataPage(page).Set(ctx, batch, level + 1);
+            var updated = new DataPage(page).Set(ctx, batch, level + 1);
+
+            // remember the updated
+            Data.Buckets[nibble] = batch.GetAddress(updated);
             return _page;
         }
 
