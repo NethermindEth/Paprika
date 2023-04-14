@@ -205,7 +205,7 @@ public readonly unsafe struct DataPage : IPage
         // type of the page, and others
     }
 
-    public void GetAccount(in Keccak key, IBatchContext batch, out Account result, int level)
+    public void GetAccount(in Keccak key, IReadOnlyBatchContext batch, out Account result, int level)
     {
         var frames = Data.Frames;
         var nibble = NibblePath.FromKey(key.BytesAsSpan, level).FirstNibble;

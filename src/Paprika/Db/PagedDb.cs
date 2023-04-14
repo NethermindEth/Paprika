@@ -27,10 +27,17 @@ public abstract unsafe class PagedDb : IDb, IDisposable
     /// </remarks>
     private const int MinHistoryDepth = 2;
 
+    private const byte RootLevel = 0;
+
     private readonly byte _historyDepth;
     private readonly int _maxPage;
     private long _lastRoot;
     private readonly RootPage[] _roots;
+
+    // batches
+    private readonly object _batchLock = new();
+    private readonly List<ReadOnlyBatch> _batchesReadOnly = new();
+    private Batch? _batchCurrent;
 
     // a simple pool of root pages
     private readonly ConcurrentStack<Page> _pool = new();
@@ -49,6 +56,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         _historyDepth = historyDepth;
         _maxPage = (int)(size / Page.PageSize);
         _roots = new RootPage[MinHistoryDepth];
+        _batchCurrent = null;
     }
 
     protected void RootInit()
@@ -150,21 +158,45 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         return BuildFromRoot(reorganizeTo.Value);
     }
 
+    public IReadOnlyBatch BeginReadOnlyBatch()
+    {
+        lock (_batchLock)
+        {
+            var data = new DataPage(GetAt(Root.Data.DataPage));
+            var batchId = Root.Header.BatchId;
+
+            return new ReadOnlyBatch(this, batchId, data);
+        }
+    }
+
     private IBatch BuildFromRoot(RootPage rootPage)
     {
-        // prepare root
-        var root = new RootPage(RentPage());
-        rootPage.CopyTo(root);
+        lock (_batchLock)
+        {
+            if (_batchCurrent != null)
+            {
+                throw new Exception("There is another batch active at the moment. Commit the other first");
+            }
 
-        // always inc the batchId
-        root.Header.BatchId++;
+            // prepare root
+            var root = new RootPage(RentPage());
+            rootPage.CopyTo(root);
 
-        // move to the next block
-        root.Data.BlockNumber++;
+            // always inc the batchId
+            root.Header.BatchId++;
 
-        // TODO: when read transactions enabled, provide second parameter as
-        // Math.Min(all reader transactions batches, root.Header.BatchId - db._historyDepth)
-        return new Batch(this, root, root.Header.BatchId - _historyDepth);
+            // move to the next block
+            root.Data.BlockNumber++;
+
+            // select min batch across the one respecting history and the min of all the read-only batches
+            var minBatch = root.Header.BatchId - _historyDepth;
+            foreach (var batch in _batchesReadOnly)
+            {
+                minBatch = Math.Min(batch.BatchId, minBatch);
+            }
+
+            return _batchCurrent = new Batch(this, root, minBatch);
+        }
     }
 
     private void SetNewRoot(RootPage root)
@@ -173,9 +205,49 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         root.CopyTo(_roots[_lastRoot % _historyDepth]);
     }
 
+    class ReadOnlyBatch : IReadOnlyBatch, IReadOnlyBatchContext
+    {
+        private readonly PagedDb _db;
+        private bool _disposed;
+
+        private readonly DataPage _data;
+
+        public ReadOnlyBatch(PagedDb db, uint batchId, DataPage data)
+        {
+            _db = db;
+            _data = data;
+            BatchId = batchId;
+
+            lock (_db._batchLock)
+            {
+                _db._batchesReadOnly.Add(this);
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (_db._batchLock)
+            {
+                _db._batchesReadOnly.Remove(this);
+                _disposed = true;
+            }
+        }
+
+        public Account GetAccount(in Keccak key)
+        {
+            if (_disposed)
+                throw new ObjectDisposedException("The readonly batch has already been disposed");
+
+            _data.GetAccount(key, this, out var account, RootLevel);
+            return account;
+        }
+
+        public uint BatchId { get; }
+        public Page GetAt(DbAddress address) => _db.GetAt(address);
+    }
+
     class Batch : BatchContextBase, IBatch
     {
-        private const byte RootLevel = 0;
         private readonly PagedDb _db;
         private readonly RootPage _root;
         private readonly uint _reusePagesOlderThanBatchId;
@@ -235,20 +307,27 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         {
             CalculateStateRootHash();
 
-            // flush data first
-            _db.Flush();
-
             // memoize the abandoned so that it's preserved for future uses 
             MemoizeAbandoned();
 
-            _db.SetNewRoot(_root);
+            // flush data first
+            _db.Flush();
 
-            if (options == CommitOptions.FlushDataAndRoot)
+            lock (_db._batchLock)
             {
-                _db.Flush();
-            }
+                Debug.Assert(ReferenceEquals(this, _db._batchCurrent));
 
-            return _root.Data.StateRootHash;
+                _db.SetNewRoot(_root);
+
+                if (options == CommitOptions.FlushDataAndRoot)
+                {
+                    _db.Flush();
+                }
+
+                _db._batchCurrent = null;
+
+                return _root.Data.StateRootHash;
+            }
         }
 
         private void CalculateStateRootHash()
