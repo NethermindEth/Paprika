@@ -7,7 +7,7 @@ using static Paprika.Tests.Values;
 
 namespace Paprika.Tests;
 
-public unsafe class DataPageTests
+public unsafe class DataPageTests : BasePageTests
 {
     private const byte RootLevel = 0;
 
@@ -19,7 +19,7 @@ public unsafe class DataPageTests
         var page = AllocPage();
         page.Clear();
 
-        var batch = new BatchContext { BatchId = BatchId };
+        var batch = NewBatch(BatchId);
         var dataPage = new DataPage(page);
         var ctx = new SetContext(Key0, Balance0, Nonce0);
 
@@ -37,7 +37,7 @@ public unsafe class DataPageTests
         var page = AllocPage();
         page.Clear();
 
-        var batch = new BatchContext { BatchId = BatchId };
+        var batch = NewBatch(BatchId);
 
         var dataPage = new DataPage(page);
         var ctx1 = new SetContext(Key0, Balance0, Nonce0);
@@ -57,7 +57,7 @@ public unsafe class DataPageTests
         var page = AllocPage();
         page.Clear();
 
-        var batch = new BatchContext { BatchId = BatchId };
+        var batch = NewBatch(BatchId);
 
         var dataPage = new DataPage(page);
         var ctx1 = new SetContext(Key1a, Balance0, Nonce0);
@@ -81,7 +81,7 @@ public unsafe class DataPageTests
         var page = AllocPage();
         page.Clear();
 
-        var batch = new BatchContext { BatchId = BatchId };
+        var batch = NewBatch(BatchId);
         var dataPage = new DataPage(page);
 
         const int count = 2 * 1024 * 1024;
@@ -105,71 +105,40 @@ public unsafe class DataPageTests
         }
     }
 
-    [Test]
-    public void SetUp()
+    [Test(Description = "The scenario to test handling updates over multiple batches so that the pages are properly linked and used.")]
+    public void Multiple_batches()
     {
-        Pages.Clear();
+        var page = AllocPage();
+        page.Clear();
 
-        foreach (var page in All)
+        var batch = NewBatch(BatchId);
+        var dataPage = new DataPage(page);
+
+        const int count = 128 * 1024;
+        const int batchEvery = 128;
+
+        for (uint i = 0; i < count; i++)
         {
-            Pages.Push(page);
+            var key = Key1a;
+            BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i);
+
+            var ctx = new SetContext(key, i, i);
+
+            if (i % batchEvery == 0)
+            {
+                batch = batch.Next();
+            }
+
+            dataPage = new DataPage(dataPage.Set(ctx, batch, RootLevel));
         }
 
-        All.Clear();
-    }
-
-
-    private static readonly Stack<Page> Pages = new();
-    private static readonly List<Page> All = new();
-
-    private static Page AllocPage()
-    {
-        if (Pages.TryPop(out var page))
-            return page;
-
-        const int slab = 16;
-
-        var memory = (byte*)NativeMemory.AlignedAlloc((UIntPtr)Page.PageSize * (nuint)slab, (UIntPtr)sizeof(long));
-
-        for (var i = 1; i < slab; i++)
+        for (uint i = 0; i < count; i++)
         {
-            var item = new Page(memory + Page.PageSize * i);
-            Pages.Push(item);
-            All.Add(item);
+            var key = Key1a;
+            BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i);
+
+            dataPage.GetAccount(key, batch, out var account, RootLevel);
+            account.Should().Be(new Account(i, i));
         }
-
-        page = new Page(memory);
-        All.Add(page); // memo for reuse
-        return page;
-    }
-
-    class BatchContext : IBatchContext
-    {
-        private readonly Dictionary<DbAddress, Page> _address2Page = new();
-
-        // data pages should start at non-null addresses
-        // 0-N is take by metadata pages
-        private uint _pageCount = 1U;
-
-        public Page GetAt(DbAddress address) => _address2Page[address];
-
-        public Page GetNewPage(out DbAddress addr, bool clear)
-        {
-            var page = AllocPage();
-            if (clear)
-                page.Clear();
-
-            page.Header.BatchId = BatchId;
-
-            addr = DbAddress.Page(_pageCount++);
-
-            _address2Page[addr] = page;
-
-            return page;
-        }
-
-        public long BatchId { get; set; }
-
-        public override string ToString() => $"Batch context used {_pageCount} pages to write the data";
     }
 }

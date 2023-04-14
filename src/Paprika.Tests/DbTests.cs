@@ -1,4 +1,5 @@
-﻿using FluentAssertions;
+﻿using System.Buffers.Binary;
+using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Crypto;
@@ -11,11 +12,13 @@ namespace Paprika.Tests;
 public class DbTests
 {
     private const int SmallDb = 256 * Page.PageSize;
+    private const int MB = 1024 * 1024;
+    private const int MB16 = 16 * MB;
 
     [Test]
     public void Simple()
     {
-        const int max = 16;
+        const int max = 2;
 
         using var db = new NativeMemoryPagedDb(1024 * 1024UL, 2);
 
@@ -119,58 +122,32 @@ public class DbTests
         Assert.Throws<ArgumentException>(() => db.ReorganizeBackToAndStartNew(invalidBlock).Should());
     }
 
-    // [Test]
-    // public void Random_big()
-    // {
-    //     using var db = new NativeMemoryPagedDb(1024 * 1024 * 1024UL);
-    //     var tx = db.Begin();
-    //
-    //     const int count = 1000_000;
-    //
-    //     var random = new Random(13);
-    //
-    //     var key = new byte[32];
-    //
-    //     for (int i = 0; i < count; i++)
-    //     {
-    //         random.NextBytes(key);
-    //         tx.Set(key, key);
-    //
-    //         AssertValue(tx, key, i);
-    //     }
-    //
-    //     tx.Commit();
-    //
-    //     // reset random
-    //     random = new Random(13);
-    //     for (int i = 0; i < count; i++)
-    //     {
-    //         random.NextBytes(key);
-    //         AssertValue(tx, key, i);
-    //     }
-    //
-    //     static void AssertValue(ITransaction tx, byte[] key, int i)
-    //     {
-    //         Assert.True(tx.TryGet(key, out var value), $"Failed getting  at {i}");
-    //         Assert.True(value.SequenceEqual(key.AsSpan()));
-    //     }
-    // }
-    //
-    // [Test]
-    // [Ignore("Currently updates in place are not supported")]
-    // public void Same_path()
-    // {
-    //     using var db = new NativeMemoryPagedDb(1024 * 1024UL);
-    //     var tx = db.Begin();
-    //
-    //     var key = new byte[32];
-    //
-    //     for (int i = 0; i < 1000000; i++)
-    //     {
-    //         BinaryPrimitives.WriteInt32BigEndian(key.AsSpan(28, 4), i);
-    //         tx.Set(key, key);
-    //     }
-    //
-    //     Console.WriteLine($"Used memory {db.TotalUsedPages:P}");
-    // }
+    [TestCase(1_000_000, 1, TestName = "Long history, single account")]
+    [TestCase(500, 2_000, TestName = "Short history, many accounts")]
+    public void Page_reuse(int blockCount, int accountsCount)
+    {
+        const int size = MB16;
+
+        using var db = new NativeMemoryPagedDb(size, 2);
+
+        for (var i = 0; i < blockCount; i++)
+        {
+            // ReSharper disable once ConvertToUsingDeclaration
+            using (var block = db.BeginNextBlock())
+            {
+                for (var account = 0; account < accountsCount; account++)
+                {
+                    var key = Key0;
+
+                    BinaryPrimitives.WriteInt32LittleEndian(key.BytesAsSpan, account);
+
+                    block.Set(key, new Account(Balance0, (UInt256)i));
+                }
+
+                block.Commit(CommitOptions.FlushDataOnly);
+            }
+        }
+
+        Console.WriteLine($"Uses {db.TotalUsedPages:P} pages out of pre-allocated {size / MB}MB od disk. This gives the actual {db.ActualMegabytesOnDisk:F2}MB on disk ");
+    }
 }
