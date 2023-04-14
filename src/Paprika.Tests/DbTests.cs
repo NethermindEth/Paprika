@@ -12,7 +12,8 @@ namespace Paprika.Tests;
 public class DbTests
 {
     private const int SmallDb = 256 * Page.PageSize;
-    private const int MB64 = 128 * 1024 * 1024;
+    private const int MB = 1024 * 1024;
+    private const int MB16 = 16 * MB;
 
     [Test]
     public void Simple()
@@ -122,10 +123,12 @@ public class DbTests
     }
 
     [TestCase(1_000_000, 1, TestName = "Long history, single account")]
-    [TestCase(50, 2_000, TestName = "Short history, many accounts")]
+    [TestCase(500, 2_000, TestName = "Short history, many accounts")]
     public void Page_reuse(int blockCount, int accountsCount)
     {
-        using var db = new NativeMemoryPagedDb(MB64, 2);
+        const int size = MB16;
+
+        using var db = new NativeMemoryPagedDb(size, 2);
 
         for (var i = 0; i < blockCount; i++)
         {
@@ -145,6 +148,6 @@ public class DbTests
             }
         }
 
-        Console.WriteLine($"Used {db.TotalUsedPages:P} pages for storing with {db.ActualMegabytesOnDisk:F2}MB on disk ");
+        Console.WriteLine($"Uses {db.TotalUsedPages:P} pages out of pre-allocated {size / MB}MB od disk. This gives the actual {db.ActualMegabytesOnDisk:F2}MB on disk ");
     }
 }

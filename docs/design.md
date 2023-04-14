@@ -61,6 +61,38 @@ public struct PageHeader
 
 ### Pages
 
+Paprika uses paged-based addressing. Every page is 4kb. The size of the page is constant and cannot be changed. This makes pages lighter as they do not need to pass the information about their size. The page address, called `DbAddress`, can be encoded within first 3 bytes of an `uint` if the database size is smaller than 64GB. This leaves one byte for addressing within the page without blowing the address beyond 4 bytes.
+
+There are different types of pages:
+
+1. `RootPage`
+1. `AbandonedPage`
+1. `DataPage`
+
+#### Root page
+
+The `RootPage` is a page responsible for holding all the metadata information needed to query and amend data. It consist of:
+
+1. batch id - a monotonically increasing number, identifying each batch write to the database that happened
+1. block information including its number and the hash
+1. abandoned pages
+
+The last one is a collection of `DbAddress` pointing to the `Abandoned Pages`. As the amount of metadata is not big, one root page can store over 1 thousand addresses of the abandoned pages.
+
+#### Abandoned Page
+
+An abandoned page is a page storying information about pages that were abandoned during a given batch. Let's describe what abandonment means. When a page is COWed, the original copy should be maintain for the readers. After a given period of time, defined by the reorganization max depth, the page should be reused to do not blow up the database. That is why `AbandonedPage` memoizes the batch which it was created at. Whenever a new page is requested, the allocator checks the list of unused pages (pages that were abandoned that passed the threshold of max reorg depth. If there's some, the page can be reused.
+
+As each `AbandonedPage` can store ~1,000 of pages, in cases of big updates, several pages are required to store addresses of all the abandoned pages. As they share the batch number in which they are abandoned, a linked list is used to occupy only a single slot in the `AbandonedPages` of the `RootPage`. The unlinking and proper management of the list is left up to the allocator that updates slots in the `RootPage` accordingly.
+
+The biggest caveat is where to store the `AbandonedPage`. The same mechanism is used for them as for other pages. This means, that when a block is committed, to store an `AbandonedPage`, the batch needs to allocate (which may get it from the pool) a page and copy to it.
+
+#### Data Page
+
+A data page is responsible for storying data, meaning a map from the `Keccak`->`Account`. The data page tries to store as much data as possible inline. If there's no more space, left, it selects a bucket, defined by a nibble. The one with the highest count of items is flushed as a separate page and a pointer to that page is stored in the bucket of the original `DataPage`. This is a bit different approach from using page splits. Instead of splitting the page and updating the parent, the page can flush down some of its data, leaving more space for the new. A single `PageData` can hold roughly 31-60 accounts. This divided by the count of nibbles 16 gives a rough minimal estimate how much flushing down can save memory (at least 2 frames).
+
+### Page design in C\#
+
 Pages are designed as value types that provide a wrapper around a raw memory pointer. The underlying pointer does not change, so pages can be implemented as `readonly unsafe struct` like in the following example.
 
 ```csharp
@@ -70,16 +102,6 @@ public readonly unsafe struct Page
     public Page(byte* ptr) => _ptr = ptr;
 }
 ```
-
-The following page types are now implemented in Paprika:
-
-1. `Page` - raw data wrapped in a `struct` that can be cast to another page type
-1. `RootPage` - a page responsible for holding metadata about the given version of the state and all information associated with it like
-   1. batch id - a monotonically increasing number, identifying each batch write to the database that happened
-   1. block information (number, hash)
-   1. (TBD) [free page list](https://github.com/NethermindEth/Paprika/issues/9) - a list of pages that can be potentially reused (TBD)
-   1. (TBD) [dirty map](https://github.com/NethermindEth/Paprika/issues/26)
-1. `DataPage` - a page responsible for storing the actual account data
 
 The differentiation of the pages and accessible methods is provided by poor man's derivation - composition. The following snippet presents a data page, that wraps around the generic `Page`.
 
@@ -133,10 +155,6 @@ public static class PageExtensions
 }
 ```
 
-#### Page size
-
-Every page is 4kb. The size of the page is constant and cannot be changed. This makes pages lighter as they do not need to pass the information about their size.
-
 #### Page number
 
 As each page is a wrapper for a pointer. It contains no information about the page number. The page number can be retrieved from the database though, that provides it with the following calculation:
@@ -157,7 +175,7 @@ As pages may differ by how they use 4kb of provided memory, they need to share s
 1. differentiate the type of the page
 2. memoize the last time when the page was written to
 
-The 1st point, the type differentiation, can be addressed either by storying the page type or reasoning about the page place where the page is used. For example, if a page is one of the N pages that support reorganizations, it must be a `RootPage`.
+The 1st point, the type differentiation, can be addressed either by storying the page type or reasoning about the page place where the page is used. For example, if a page is one of the N pages that support reorganizations, it must be a `RootPage`. Whenever the information can be reasoned out of the context, the type won't be stored to save some memory.
 
 The 2nd point that covers storing important information is stored at the shared page header. The shared `PageHeader` is an amount of memory that is coherent across all the pages. Again, the memory size is const and C\# `const` constructs are leveraged to have it calculated by the compiler and not to deal with them in the runtime.
 
