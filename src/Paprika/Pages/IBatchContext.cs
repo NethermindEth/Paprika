@@ -2,18 +2,8 @@
 
 namespace Paprika.Pages;
 
-public interface IBatchContext
+public interface IBatchContext : IReadOnlyBatchContext
 {
-    /// <summary>
-    /// Gets the current <see cref="IBatch"/> id.
-    /// </summary>
-    uint BatchId { get; }
-
-    /// <summary>
-    /// Gets the page at given address.
-    /// </summary>
-    Page GetAt(DbAddress address);
-
     /// <summary>
     /// Get the address of the given page.
     /// </summary>
@@ -31,6 +21,19 @@ public interface IBatchContext
     /// <param name="page"></param>
     /// <returns></returns>
     Page GetWritableCopy(Page page);
+}
+
+public interface IReadOnlyBatchContext
+{
+    /// <summary>
+    /// Gets the current <see cref="IBatch"/> id.
+    /// </summary>
+    uint BatchId { get; }
+
+    /// <summary>
+    /// Gets the page at given address.
+    /// </summary>
+    Page GetAt(DbAddress address);
 }
 
 /// <summary>

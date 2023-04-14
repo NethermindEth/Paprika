@@ -1,46 +1,14 @@
 ﻿using System.Runtime.InteropServices;
-using NUnit.Framework;
 using Paprika.Pages;
 
 namespace Paprika.Tests;
 
 public abstract class BasePageTests
 {
-    private static readonly Stack<Page> Pages = new();
-    private static readonly List<Page> All = new();
-
-    [Test]
-    public void SetUp()
-    {
-        Pages.Clear();
-
-        foreach (var page in All)
-        {
-            Pages.Push(page);
-        }
-
-        All.Clear();
-    }
-
     protected static unsafe Page AllocPage()
     {
-        if (Pages.TryPop(out var page))
-            return page;
-
-        const int slab = 16;
-
-        var memory = (byte*)NativeMemory.AlignedAlloc((UIntPtr)Page.PageSize * (nuint)slab, (UIntPtr)sizeof(long));
-
-        for (var i = 1; i < slab; i++)
-        {
-            var item = new Page(memory + Page.PageSize * i);
-            Pages.Push(item);
-            All.Add(item);
-        }
-
-        page = new Page(memory);
-        All.Add(page); // memo for reuse
-        return page;
+        var memory = (byte*)NativeMemory.AlignedAlloc((UIntPtr)Page.PageSize, (UIntPtr)sizeof(long));
+        return new Page(memory);
     }
 
     internal class TestBatchContext : BatchContextBase

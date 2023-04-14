@@ -10,6 +10,7 @@ public unsafe class NativeMemoryPagedDb : PagedDb
     public NativeMemoryPagedDb(ulong size, byte historyDepth) : base(size, historyDepth)
     {
         _ptr = NativeMemory.AlignedAlloc((UIntPtr)size, (UIntPtr)Page.PageSize);
+        NativeMemory.Clear(_ptr, (UIntPtr)size);
 
         RootInit();
     }
