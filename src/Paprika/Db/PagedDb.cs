@@ -164,8 +164,17 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         {
             var data = new DataPage(GetAt(Root.Data.DataPage));
             var batchId = Root.Header.BatchId;
+            var batch = new ReadOnlyBatch(this, batchId, data);
+            _batchesReadOnly.Add(batch);
+            return batch;
+        }
+    }
 
-            return new ReadOnlyBatch(this, batchId, data);
+    private void DisposeReadOnlyBatch(ReadOnlyBatch batch)
+    {
+        lock (_batchLock)
+        {
+            _batchesReadOnly.Remove(batch);
         }
     }
 
@@ -217,20 +226,12 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             _db = db;
             _data = data;
             BatchId = batchId;
-
-            lock (_db._batchLock)
-            {
-                _db._batchesReadOnly.Add(this);
-            }
         }
 
         public void Dispose()
         {
-            lock (_db._batchLock)
-            {
-                _db._batchesReadOnly.Remove(this);
-                _disposed = true;
-            }
+            _disposed = true;
+            _db.DisposeReadOnlyBatch(this);
         }
 
         public Account GetAccount(in Keccak key)
@@ -321,6 +322,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
                 if (options == CommitOptions.FlushDataAndRoot)
                 {
+                    // TODO: make it flush only the root page, not the whole file
                     _db.Flush();
                 }
 
@@ -429,7 +431,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
                 // the youngest contains the youngest abandoned pages, but it's not younger than this batch.
                 // but... we can't write previously used pages only the current one, so...
-                // link back from this batch to previously decomissioned
+                // link back from this batch to previously decommissioned
                 last.Next = youngestAddr;
 
                 // write the abandoned in the youngestAddr
@@ -471,7 +473,8 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             return _unusedPool.TryDequeue(out found);
         }
 
-        private bool TryFindOldest(Span<DbAddress> abandonedPages, out AbandonedPage oldest, out DbAddress oldestAddress)
+        private bool TryFindOldest(Span<DbAddress> abandonedPages, out AbandonedPage oldest,
+            out DbAddress oldestAddress)
         {
             AbandonedPage? currentOldest = default;
             oldestAddress = default;
@@ -502,6 +505,14 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         public void Dispose()
         {
+            lock (_db._batchLock)
+            {
+                if (ReferenceEquals(_db._batchCurrent, this))
+                {
+                    _db._batchCurrent = null;
+                }
+            }
+
             _db.ReturnPage(_root.AsPage());
         }
     }
