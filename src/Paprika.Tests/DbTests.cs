@@ -150,4 +150,63 @@ public class DbTests
 
         Console.WriteLine($"Uses {db.TotalUsedPages:P} pages out of pre-allocated {size / MB}MB od disk. This gives the actual {db.ActualMegabytesOnDisk:F2}MB on disk ");
     }
+
+    [Test]
+    public void Readonly_transaction_block_till_they_are_released()
+    {
+        const int size = MB16;
+        const int blocksDuringReadAcquired = 1_000;
+        const int blocksPostRead = 10_000;
+        const int start = 13;
+
+        using var db = new NativeMemoryPagedDb(size, 2);
+
+        // write first value
+        using (var block = db.BeginNextBlock())
+        {
+            block.Set(Key0, new Account(Balance0, (UInt256)start));
+            block.Commit(CommitOptions.FlushDataOnly);
+        }
+
+        // start read batch, it will make new allocs only
+        var readBatch = db.BeginReadOnlyBatch();
+
+        for (var i = 0; i < blocksDuringReadAcquired; i++)
+        {
+            // ReSharper disable once ConvertToUsingDeclaration
+            using (var block = db.BeginNextBlock())
+            {
+                var value = (UInt256)(i + start);
+
+                // assert previous
+                block.GetAccount(Key0).Nonce.Should().Be(value);
+
+                block.Set(Key0, new Account(Balance0, value + 1));
+                block.Commit(CommitOptions.FlushDataOnly);
+            }
+        }
+
+        var snapshot = db.TotalUsedPages;
+
+        // disable read
+        readBatch.Dispose();
+
+        // write again
+        for (var i = 0; i < blocksPostRead; i++)
+        {
+            // ReSharper disable once ConvertToUsingDeclaration
+            using (var block = db.BeginNextBlock())
+            {
+                var value = (UInt256)(i + start);
+
+                block.Set(Key0, new Account(Balance0, value + 1));
+                block.Commit(CommitOptions.FlushDataOnly);
+            }
+        }
+
+        db.TotalUsedPages.Should().Be(snapshot, "Database should not grow without read transaction active.");
+
+        Console.WriteLine($"Uses {db.TotalUsedPages:P} pages out of pre-allocated {size / MB}MB od disk. This gives the actual {db.ActualMegabytesOnDisk:F2}MB on disk ");
+
+    }
 }
