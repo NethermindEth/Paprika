@@ -39,8 +39,8 @@ public abstract unsafe class PagedDb : IDb, IDisposable
     private readonly List<ReadOnlyBatch> _batchesReadOnly = new();
     private Batch? _batchCurrent;
 
-    // a simple pool of root pages
-    private readonly ConcurrentStack<Page> _pool = new();
+    // pool
+    private Context? _ctx;
 
     /// <summary>
     /// Initializes the paged db.
@@ -57,6 +57,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         _maxPage = (int)(size / Page.PageSize);
         _roots = new RootPage[MinHistoryDepth];
         _batchCurrent = null;
+        _ctx = new Context();
     }
 
     protected void RootInit()
@@ -110,19 +111,6 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
     public abstract void Dispose();
     protected abstract void Flush();
-
-    private Page RentPage()
-    {
-        if (_pool.TryPop(out var page))
-        {
-            return page;
-        }
-
-        var memory = (byte*)NativeMemory.AlignedAlloc((UIntPtr)Page.PageSize, (UIntPtr)UIntPtr.Size);
-        return new Page(memory);
-    }
-
-    private void ReturnPage(Page page) => _pool.Push(page);
 
     /// <summary>
     /// Begins a batch representing the next block.
@@ -187,8 +175,11 @@ public abstract unsafe class PagedDb : IDb, IDisposable
                 throw new Exception("There is another batch active at the moment. Commit the other first");
             }
 
+            var ctx = _ctx ?? new Context();
+            _ctx = null;
+
             // prepare root
-            var root = new RootPage(RentPage());
+            var root = new RootPage(ctx.Page);
             rootPage.CopyTo(root);
 
             // always inc the batchId
@@ -204,7 +195,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
                 minBatch = Math.Min(batch.BatchId, minBatch);
             }
 
-            return _batchCurrent = new Batch(this, root, minBatch);
+            return _batchCurrent = new Batch(this, root, minBatch, ctx);
         }
     }
 
@@ -253,29 +244,34 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         private readonly RootPage _root;
         private readonly uint _reusePagesOlderThanBatchId;
 
+        private bool _disposed;
+
+        private readonly Context _ctx;
+
         /// <summary>
         /// A pool of pages that are no longer used and can be reused now.
         /// </summary>
-        // TODO: optimize away the allocation here
         private readonly Queue<DbAddress> _unusedPool;
 
         /// <summary>
         /// A pool of pages that are abandoned during this batch.
         /// </summary>
-        // TODO: optimize away the allocation here
         private readonly Queue<DbAddress> _abandoned;
 
-        public Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId) : base(root.Header.BatchId)
+        public Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx) : base(root.Header.BatchId)
         {
             _db = db;
             _root = root;
             _reusePagesOlderThanBatchId = reusePagesOlderThanBatchId;
-            _unusedPool = new Queue<DbAddress>();
-            _abandoned = new Queue<DbAddress>();
+            _ctx = ctx;
+            _unusedPool = ctx.Unused;
+            _abandoned = ctx.Abandoned;
         }
 
         public Account GetAccount(in Keccak key)
         {
+            CheckDisposed();
+
             var root = _root.Data.DataPage;
             if (root.IsNull)
             {
@@ -291,6 +287,8 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         public void Set(in Keccak key, in Account account)
         {
+            CheckDisposed();
+
             ref var root = ref _root.Data.DataPage;
             var page = root.IsNull ? GetNewPage(out root, true) : GetAt(root);
 
@@ -304,8 +302,18 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             _root.Data.DataPage = _db.GetAddress(updated);
         }
 
+        private void CheckDisposed()
+        {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException("This batch has been disposed already.");
+            }
+        }
+
         public Keccak Commit(CommitOptions options)
         {
+            CheckDisposed();
+
             CalculateStateRootHash();
 
             // memoize the abandoned so that it's preserved for future uses 
@@ -505,15 +513,47 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         public void Dispose()
         {
+            _disposed = true;
+
             lock (_db._batchLock)
             {
                 if (ReferenceEquals(_db._batchCurrent, this))
                 {
                     _db._batchCurrent = null;
                 }
-            }
 
-            _db.ReturnPage(_root.AsPage());
+                // clear and return
+                _ctx.Clear();
+                _db._ctx = _ctx;
+            }
+        }
+    }
+
+    /// <summary>
+    /// A reusable context for the write batch.
+    /// </summary>
+    private sealed class Context
+    {
+        public Context()
+        {
+            Page = new Page((byte*)NativeMemory.AlignedAlloc((UIntPtr)Page.PageSize, (UIntPtr)UIntPtr.Size));
+            Abandoned = new Queue<DbAddress>();
+            Unused = new Queue<DbAddress>();
+        }
+
+        public Page Page { get; }
+
+        public Queue<DbAddress> Unused { get; }
+
+        public Queue<DbAddress> Abandoned { get; }
+
+        public void Clear()
+        {
+            Unused.Clear();
+            Abandoned.Clear();
+
+            // no need to clear, it's always overwritten
+            //Page.Clear();
         }
     }
 }
