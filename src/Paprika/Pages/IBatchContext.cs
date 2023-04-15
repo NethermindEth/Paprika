@@ -1,6 +1,4 @@
-﻿using System.Runtime.CompilerServices;
-
-namespace Paprika.Pages;
+﻿namespace Paprika.Pages;
 
 public interface IBatchContext : IReadOnlyBatchContext
 {

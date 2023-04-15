@@ -39,8 +39,9 @@ public abstract unsafe class PagedDb : IDb, IDisposable
     private readonly List<ReadOnlyBatch> _batchesReadOnly = new();
     private Batch? _batchCurrent;
 
-    // a simple pool of root pages
-    private readonly ConcurrentStack<Page> _pool = new();
+    // pools
+    private readonly ConcurrentStack<Page> _poolOfPages = new();
+    private readonly ConcurrentStack<Queue<DbAddress>> _poolOfAddressQueues = new();
 
     /// <summary>
     /// Initializes the paged db.
@@ -113,16 +114,14 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
     private Page RentPage()
     {
-        if (_pool.TryPop(out var page))
-        {
-            return page;
-        }
-
-        var memory = (byte*)NativeMemory.AlignedAlloc((UIntPtr)Page.PageSize, (UIntPtr)UIntPtr.Size);
-        return new Page(memory);
+        return Rent(_poolOfPages,
+            () => new Page((byte*)NativeMemory.AlignedAlloc((UIntPtr)Page.PageSize, (UIntPtr)UIntPtr.Size)));
     }
 
-    private void ReturnPage(Page page) => _pool.Push(page);
+    private static T Rent<T>(ConcurrentStack<T> pool, Func<T> factory) => pool.TryPop(out var item) ? item : factory();
+    private static T Rent<T>(ConcurrentStack<T> pool) where T : new() => pool.TryPop(out var item) ? item : new T();
+
+    private void ReturnPage(Page page) => _poolOfPages.Push(page);
 
     /// <summary>
     /// Begins a batch representing the next block.
@@ -253,16 +252,16 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         private readonly RootPage _root;
         private readonly uint _reusePagesOlderThanBatchId;
 
+        private bool _disposed;
+
         /// <summary>
         /// A pool of pages that are no longer used and can be reused now.
         /// </summary>
-        // TODO: optimize away the allocation here
         private readonly Queue<DbAddress> _unusedPool;
 
         /// <summary>
         /// A pool of pages that are abandoned during this batch.
         /// </summary>
-        // TODO: optimize away the allocation here
         private readonly Queue<DbAddress> _abandoned;
 
         public Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId) : base(root.Header.BatchId)
@@ -270,12 +269,14 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             _db = db;
             _root = root;
             _reusePagesOlderThanBatchId = reusePagesOlderThanBatchId;
-            _unusedPool = new Queue<DbAddress>();
-            _abandoned = new Queue<DbAddress>();
+            _unusedPool = Rent(_db._poolOfAddressQueues);
+            _abandoned = Rent(_db._poolOfAddressQueues);
         }
 
         public Account GetAccount(in Keccak key)
         {
+            CheckDisposed();
+
             var root = _root.Data.DataPage;
             if (root.IsNull)
             {
@@ -291,6 +292,8 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         public void Set(in Keccak key, in Account account)
         {
+            CheckDisposed();
+
             ref var root = ref _root.Data.DataPage;
             var page = root.IsNull ? GetNewPage(out root, true) : GetAt(root);
 
@@ -304,8 +307,18 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             _root.Data.DataPage = _db.GetAddress(updated);
         }
 
+        private void CheckDisposed()
+        {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException("This batch has been disposed already.");
+            }
+        }
+
         public Keccak Commit(CommitOptions options)
         {
+            CheckDisposed();
+
             CalculateStateRootHash();
 
             // memoize the abandoned so that it's preserved for future uses 
@@ -505,6 +518,8 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         public void Dispose()
         {
+            _disposed = true;
+
             lock (_db._batchLock)
             {
                 if (ReferenceEquals(_db._batchCurrent, this))
@@ -514,6 +529,12 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             }
 
             _db.ReturnPage(_root.AsPage());
+
+            _abandoned.Clear();
+            _db._poolOfAddressQueues.Push(_abandoned);
+
+            _unusedPool.Clear();
+            _db._poolOfAddressQueues.Push(_unusedPool);
         }
     }
 }
