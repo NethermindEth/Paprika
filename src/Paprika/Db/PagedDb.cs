@@ -1,5 +1,4 @@
 ﻿using System.Buffers.Binary;
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -55,7 +54,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         _historyDepth = historyDepth;
         _maxPage = (int)(size / Page.PageSize);
-        _roots = new RootPage[MinHistoryDepth];
+        _roots = new RootPage[historyDepth];
         _batchCurrent = null;
         _ctx = new Context();
     }
@@ -110,7 +109,11 @@ public abstract unsafe class PagedDb : IDb, IDisposable
     }
 
     public abstract void Dispose();
-    protected abstract void Flush();
+
+    /// <summary>
+    /// Flushes all the mapped pages.
+    /// </summary>
+    protected abstract void FlushAllPages();
 
     /// <summary>
     /// Begins a batch representing the next block.
@@ -199,10 +202,12 @@ public abstract unsafe class PagedDb : IDb, IDisposable
         }
     }
 
-    private void SetNewRoot(RootPage root)
+    private DbAddress SetNewRoot(RootPage root)
     {
         _lastRoot += 1;
-        root.CopyTo(_roots[_lastRoot % _historyDepth]);
+        var pageAddress = _lastRoot % _historyDepth;
+        root.CopyTo(_roots[pageAddress]);
+        return DbAddress.Page((uint)pageAddress);
     }
 
     class ReadOnlyBatch : IReadOnlyBatch, IReadOnlyBatchContext
@@ -319,22 +324,19 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             // memoize the abandoned so that it's preserved for future uses 
             MemoizeAbandoned();
 
-            // flush data first
-            _db.Flush();
-
             lock (_db._batchLock)
             {
                 Debug.Assert(ReferenceEquals(this, _db._batchCurrent));
+                _db._batchCurrent = null;
 
-                _db.SetNewRoot(_root);
+                _db.FlushAllPages();
+
+                var newRootPage = _db.SetNewRoot(_root);
 
                 if (options == CommitOptions.FlushDataAndRoot)
                 {
-                    // TODO: make it flush only the root page, not the whole file
-                    _db.Flush();
+                    _db.FlushRootPage(GetAt(newRootPage));
                 }
-
-                _db._batchCurrent = null;
 
                 return _root.Data.StateRootHash;
             }
@@ -556,4 +558,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             //Page.Clear();
         }
     }
+
+    // ReSharper disable once UnusedParameter.Global
+    protected abstract void FlushRootPage(in Page rootPage);
 }
