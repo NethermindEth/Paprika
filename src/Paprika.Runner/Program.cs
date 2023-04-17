@@ -1,111 +1,66 @@
-﻿using System.Diagnostics;
+﻿using System.Buffers.Binary;
+using System.Diagnostics;
+using Paprika.Crypto;
 using Paprika.Db;
 
 namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int Count = 160_000_000;
-    private const int LogEvery = 10_000_000;
+    private const int BlockCount = 1000;
+    private const int AccountCount = 1000;
+    private const long DbFileSize = 4 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
-    private const long DbFileSize = 20 * Gb;
 
     public static void Main(String[] args)
     {
-        // const int seed = 17;
-        //
-        // var dir = Directory.GetCurrentDirectory();
-        // var dataPath = Path.Combine(dir, "db");
-        //
-        // if (Directory.Exists(dataPath))
-        // {
-        //     Directory.Delete(dataPath, true);
-        // }
-        //
-        // Directory.CreateDirectory(dataPath);
-        //
-        // var db = new MemoryMappedPagedDb(DbFileSize, dataPath, true);
-        // var tx = db.Begin();
-        //
-        // MeasureThroughput(tx, tx =>
-        // {
-        //     var key = new byte[32];
-        //     var random = new Random(seed);
-        //
-        //     for (var i = 0; i < Count; i++)
-        //     {
-        //         random.NextBytes(key);
-        //
-        //         tx.Set(key, key);
-        //
-        //         if (i % LogEvery == 0 && i > 0)
-        //         {
-        //             var used = tx.TotalUsedPages;
-        //             Console.WriteLine(
-        //                 "Wrote {0:N0} items, DB usage is at {1:P} which gives {2:F2}GB out of allocated {3}GB", i, used,
-        //                 used * DbFileSize / Gb, DbFileSize / Gb);
-        //         }
-        //     }
-        // }, "Writing", Count);
-        //
-        // Measure(tx, tx => tx.Commit(), "Committing to disk (including the root)");
-        //
-        // MeasureThroughput(db, db =>
-        // {
-        //     var key = new byte[32];
-        //     var random = new Random(seed);
-        //
-        //     tx = db.Begin();
-        //
-        //     for (var i = 0; i < Count; i++)
-        //     {
-        //         random.NextBytes(key);
-        //
-        //         if (!tx.TryGet(key, out var v))
-        //         {
-        //             throw new Exception($"Missing value at {i}!");
-        //         }
-        //
-        //         // if (!v.SequenceEqual(key))
-        //         // {
-        //         //     throw new Exception($"Wrong value at {i}!");
-        //         // }
-        //
-        //         if (i % LogEvery == 0 && i > 0)
-        //         {
-        //             Console.WriteLine("Read {0:N0} items", i);
-        //         }
-        //     }
-        // }, "Reading", Count);
-    }
+        var dir = Directory.GetCurrentDirectory();
+        var dataPath = Path.Combine(dir, "db");
 
-    private static void MeasureThroughput<TState>(TState t, Action<TState> action, string name, int count)
-    {
-        var sw = Stopwatch.StartNew();
-        try
+        if (Directory.Exists(dataPath) == false)
         {
-            action(t);
+            Directory.Delete(dataPath, true);
         }
-        finally
-        {
-            var elapsed = sw.Elapsed;
-            var throughput = (int)(count / elapsed.TotalSeconds);
-            Console.WriteLine(
-                $"{name} of {count:N} items took {elapsed.ToString()} giving a throughput {throughput:N} items/s");
-        }
-    }
 
-    private static void Measure<TState>(TState t, Action<TState> action, string name)
-    {
-        var sw = Stopwatch.StartNew();
-        try
+        Directory.CreateDirectory(dataPath);
+
+        Console.WriteLine("Creating accounts data");
+
+        var db = new MemoryMappedPagedDb(DbFileSize, 64, dataPath);
+
+        // writing
+        var writing = Stopwatch.StartNew();
+
+        for (uint block = 0; block < BlockCount; block++)
         {
-            action(t);
+            using var batch = db.BeginNextBlock();
+
+            for (var account = 0; account < AccountCount; account++)
+            {
+                var key = Keccak.Zero;
+                BinaryPrimitives.WriteInt32LittleEndian(key.BytesAsSpan, account);
+
+                batch.Set(key, new Account(block, block));
+            }
+
+            batch.Commit(CommitOptions.FlushDataOnly);
         }
-        finally
+
+        Console.WriteLine("Writing state of {0} accounts through {1} blocks took {2} and used {3:F2}GB",
+            AccountCount, BlockCount, writing.Elapsed, db.ActualMegabytesOnDisk / 1024);
+
+        // reading
+        var reading = Stopwatch.StartNew();
+        using var read = db.BeginReadOnlyBatch();
+
+        for (var account = 0; account < AccountCount; account++)
         {
-            Console.WriteLine();
-            Console.WriteLine($"{name} took {sw.Elapsed.ToString()}");
+            var key = Keccak.Zero;
+            BinaryPrimitives.WriteInt32LittleEndian(key.BytesAsSpan, account);
+            read.GetAccount(key);
         }
+
+        Console.WriteLine("Reading state of {0} accounts from the last block took {1}",
+            AccountCount, reading.Elapsed);
     }
 }
