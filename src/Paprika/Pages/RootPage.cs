@@ -12,10 +12,6 @@ public readonly unsafe struct RootPage : IPage
 {
     private readonly Page _page;
 
-    public RootPage(byte* ptr) : this(new Page(ptr))
-    {
-    }
-
     public RootPage(Page root) => _page = root;
 
     public ref PageHeader Header => ref _page.Header;
