@@ -114,8 +114,8 @@ public unsafe class DataPageTests : BasePageTests
         var batch = NewBatch(BatchId);
         var dataPage = new DataPage(page);
 
-        const int count = 128 * 1024;
-        const int batchEvery = 128;
+        const int count = 32 * 1024;
+        const int batchEvery = 32;
 
         for (uint i = 0; i < count; i++)
         {

@@ -1,7 +1,10 @@
 ﻿using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using Paprika.Crypto;
 using Paprika.Db;
+
+[assembly: ExcludeFromCodeCoverage]
 
 namespace Paprika.Runner;
 
