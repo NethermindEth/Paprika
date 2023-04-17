@@ -54,7 +54,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
         _historyDepth = historyDepth;
         _maxPage = (int)(size / Page.PageSize);
-        _roots = new RootPage[MinHistoryDepth];
+        _roots = new RootPage[historyDepth];
         _batchCurrent = null;
         _ctx = new Context();
     }

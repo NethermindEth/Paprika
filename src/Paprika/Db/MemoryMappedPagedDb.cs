@@ -59,14 +59,6 @@ public unsafe class MemoryMappedPagedDb : PagedDb
 
     protected override void* Ptr => _ptr;
 
-    public override void Dispose()
-    {
-        _whole.Flush();
-        _whole.SafeMemoryMappedViewHandle.ReleasePointer();
-        _whole.Dispose();
-        _mapped.Dispose();
-    }
-
     protected override void FlushAllPages()
     {
         // On Windows LMDB does not use FlushViewOfFile + FlushFileBuffers due to some performance gains.
@@ -86,5 +78,13 @@ public unsafe class MemoryMappedPagedDb : PagedDb
 
         _rootsOnly.Flush();
         _file.Flush(true);
+    }
+
+    public override void Dispose()
+    {
+        _whole.Flush();
+        _whole.SafeMemoryMappedViewHandle.ReleasePointer();
+        _whole.Dispose();
+        _mapped.Dispose();
     }
 }

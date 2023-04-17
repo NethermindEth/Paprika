@@ -7,24 +7,26 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = 1000;
-    private const int AccountCount = 1000;
+    private const int BlockCount = 10000;
+    private const int AccountCount = 10000;
     private const long DbFileSize = 4 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
+    private const CommitOptions Commit = CommitOptions.FlushDataOnly;
 
     public static void Main(String[] args)
     {
         var dir = Directory.GetCurrentDirectory();
         var dataPath = Path.Combine(dir, "db");
 
-        if (Directory.Exists(dataPath) == false)
+        if (Directory.Exists(dataPath))
         {
             Directory.Delete(dataPath, true);
         }
 
         Directory.CreateDirectory(dataPath);
 
-        Console.WriteLine("Creating accounts data");
+        Console.WriteLine("Initializing db of size {0}GB", DbFileSize / Gb);
+        Console.WriteLine("Starting benchmark with commit level {0}", Commit);
 
         var db = new MemoryMappedPagedDb(DbFileSize, 64, dataPath);
 
@@ -43,7 +45,7 @@ public static class Program
                 batch.Set(key, new Account(block, block));
             }
 
-            batch.Commit(CommitOptions.FlushDataOnly);
+            batch.Commit(Commit);
         }
 
         Console.WriteLine("Writing state of {0} accounts through {1} blocks took {2} and used {3:F2}GB",
