@@ -12,12 +12,7 @@ public static class SpanExtensions
         return ToHexString(span, withZeroX, false, false);
     }
 
-    public static string ToHexString(this in Span<byte> span)
-    {
-        return ToHexString(span, false, false, false);
-    }
-
-    public static string ToHexString(this in Span<byte> span, bool withZeroX, bool noLeadingZeros, bool withEip55Checksum)
+    private static string ToHexString(this in Span<byte> span, bool withZeroX, bool noLeadingZeros, bool withEip55Checksum)
     {
         return ToHexViaLookup(span, withZeroX, noLeadingZeros);
     }
