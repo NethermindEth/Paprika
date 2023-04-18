@@ -13,7 +13,7 @@ namespace Paprika.Db;
 /// <remarks>
 /// Assumes a continuous memory allocation as it provides addressing based on the pointers.
 /// </remarks>
-public abstract unsafe class PagedDb : IDb, IDisposable
+public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
 {
     /// <summary>
     /// The number of roots kept in the history.
@@ -91,7 +91,7 @@ public abstract unsafe class PagedDb : IDb, IDisposable
 
     private RootPage Root => _roots[_lastRoot % _historyDepth];
 
-    private Page GetAt(DbAddress address)
+    public Page GetAt(DbAddress address)
     {
         Debug.Assert(address.IsValidPageAddress, "The address page is invalid and breaches max page count");
 
@@ -158,6 +158,18 @@ public abstract unsafe class PagedDb : IDb, IDisposable
             var batch = new ReadOnlyBatch(this, batchId, data);
             _batchesReadOnly.Add(batch);
             return batch;
+        }
+    }
+
+    public void Accept(IPageVisitor visitor)
+    {
+        var i = 0U;
+
+        foreach (var root in _roots)
+        {
+            visitor.On(root, DbAddress.Page(i++));
+
+            root.Accept(visitor, this);
         }
     }
 

@@ -1,9 +1,10 @@
 ﻿using System.Text;
 using Paprika.Crypto;
+using Paprika.Db;
 
 namespace Paprika.Pages;
 
-public class Printer
+public class Printer : IPageVisitor
 {
     const char UL = '┌';
     const char UR = '┐';
@@ -23,7 +24,6 @@ public class Printer
     private const int PageHeight = BodyHeight + Margins;
 
     private const int BodyWidth = 30;
-    private const int PageWidth = BodyWidth + Margins;
 
     private const int LastBuilder = PageHeight - 1;
 
@@ -43,8 +43,27 @@ public class Printer
         ("UNKNOWN", "PAGE TYPE"),
     };
 
-    public void Add(RootPage page, DbAddress addr)
+    public static void Print(PagedDb db, TextWriter writer)
     {
+        var printer = new Printer();
+        db.Accept(printer);
+
+        writer.WriteLine();
+        writer.WriteLine();
+        writer.WriteLine("Batch id: {0}", printer._maxRootBatchId);
+
+        printer.Print(writer);
+    }
+
+    private uint _maxRootBatchId;
+
+    public void On(RootPage page, DbAddress addr)
+    {
+        if (page.Header.BatchId > _maxRootBatchId)
+        {
+            _maxRootBatchId = page.Header.BatchId;
+        }
+
         if (page.Header.BatchId == default)
         {
             PrintEmpty(addr);
@@ -57,12 +76,39 @@ public class Printer
                 ("BatchId", page.Header.BatchId.ToString()),
                 ("BlockNumber", page.Data.BlockNumber.ToString()),
                 ("StateRootHash", Abbr(page.Data.StateRootHash)),
+                ("DataPage", page.Data.DataPage.ToString()),
                 ("NextFreePage", page.Data.NextFreePage.ToString()),
                 ("Abandoned", ListPages(page.Data.AbandonedPages))
             };
 
             _printable.Add(addr.Raw, p);
         }
+    }
+
+    public void On(AbandonedPage page, DbAddress addr)
+    {
+        var p = new[]
+        {
+            (Type, "Abandoned"),
+            ("AbandonedAt", page.AbandonedAtBatch.ToString()),
+            ("Pages", ListPages(page.Abandoned)),
+            ("Next", page.Next.ToString())
+        };
+
+        _printable.Add(addr.Raw, p);
+    }
+
+    public void On(DataPage page, DbAddress addr)
+    {
+        var nextPages = page.Data.Buckets.ToArray().Where(a => a.IsNull == false && a.IsValidPageAddress).ToArray();
+        var p = new[]
+        {
+            (Type, "DataPage"),
+            ("BatchId", page.Header.PageHeader.BatchId.ToString()),
+            ("Points Down To Pages",ListPages(nextPages)),
+        };
+
+        _printable.Add(addr.Raw, p);
     }
 
     public void Print(TextWriter writer)
@@ -98,7 +144,7 @@ public class Printer
 
     private static string Abbr(Keccak hash) => hash.ToString(true).Substring(0, 6) + "...";
 
-    private static string ListPages(Span<DbAddress> addresses) => "[" + string.Join(",",
+    private static string ListPages(ReadOnlySpan<DbAddress> addresses) => "[" + string.Join(",",
         addresses.ToArray().Where(addr => addr.IsNull == false).Select(addr => addr.Raw)) + "]";
 
     private static void TrimOneEnd(StringBuilder[] builders)

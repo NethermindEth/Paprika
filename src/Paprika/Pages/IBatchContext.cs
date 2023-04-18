@@ -21,13 +21,16 @@ public interface IBatchContext : IReadOnlyBatchContext
     Page GetWritableCopy(Page page);
 }
 
-public interface IReadOnlyBatchContext
+public interface IReadOnlyBatchContext : IPageResolver
 {
     /// <summary>
     /// Gets the current <see cref="IBatch"/> id.
     /// </summary>
     uint BatchId { get; }
+}
 
+public interface IPageResolver
+{
     /// <summary>
     /// Gets the page at given address.
     /// </summary>
