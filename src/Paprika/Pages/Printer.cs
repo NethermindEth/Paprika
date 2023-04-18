@@ -8,26 +8,39 @@ public class Printer
     const char UL = '┌';
     const char UR = '┐';
     const char DL = '└';
-    const char DR = '┐';
+    const char DR = '┘';
 
     const char LineH = '─';
-    const char LineV = '─';
+    const char LineV = '│';
 
     const char CrossU = '┬';
     const char CrossD = '┴';
 
+    private const string Type = "Type";
+
+    private const int Margins = 2;
     private const int BodyHeight = 9;
-    private const int PageHeight = BodyHeight + 2;
+    private const int PageHeight = BodyHeight + Margins;
+
+    private const int BodyWidth = 30;
+    private const int PageWidth = BodyWidth + Margins;
+
+    private const int LastBuilder = PageHeight - 1;
+
+    private static readonly string SpaceOnlyLine = new(' ', BodyWidth);
+    private static readonly string HorizontalLine = new(LineH, BodyWidth);
 
     private readonly SortedDictionary<uint, (string, string)[]> _printable = new();
 
+
     private static readonly (string, string)[] Empty =
     {
-        ("", ""),
-        ("", ""),
         ("EMPTY", "EMPTY"),
-        ("", ""),
-        ("", "")
+    };
+
+    private static readonly (string, string)[] Unknown =
+    {
+        ("UNKNOWN", "PAGE TYPE"),
     };
 
     public void Add(RootPage page, DbAddress addr)
@@ -40,6 +53,7 @@ public class Printer
         {
             var p = new[]
             {
+                (Type, "Root"),
                 ("BatchId", page.Header.BatchId.ToString()),
                 ("BlockNumber", page.Data.BlockNumber.ToString()),
                 ("StateRootHash", Abbr(page.Data.StateRootHash)),
@@ -53,18 +67,32 @@ public class Printer
 
     public void Print(TextWriter writer)
     {
+        var builders = Enumerable.Range(0, PageHeight)
+            .Select(i => new StringBuilder()).ToArray();
+
+        ColumnStart(builders);
+
         uint current = 0; // start with zero
 
         foreach (var page in _printable)
         {
-            if (page.Key != current)
+            while (page.Key != current)
             {
-                throw new Exception($"Missing page at address {DbAddress.Page(current)}");
+                // the page is unknown, print anything 
+                WritePage(Unknown, current, builders);
+                current++;
             }
 
-            // TODO
-
+            WritePage(page.Value, current, builders);
             current++;
+        }
+
+        TrimOneEnd(builders);
+        ColumnEnd(builders);
+
+        foreach (var builder in builders)
+        {
+            writer.WriteLine(builder);
         }
     }
 
@@ -72,6 +100,64 @@ public class Printer
 
     private static string ListPages(Span<DbAddress> addresses) => "[" + string.Join(",",
         addresses.ToArray().Where(addr => addr.IsNull == false).Select(addr => addr.Raw)) + "]";
+
+    private static void TrimOneEnd(StringBuilder[] builders)
+    {
+        foreach (var builder in builders)
+        {
+            builder.Remove(builder.Length - 1, 1);
+        }
+    }
+
+    private static void WritePage((string, string)[] page, uint address, StringBuilder[] builders)
+    {
+        // frame up and down
+        builders[0].Append(HorizontalLine);
+        builders[LastBuilder].Append(HorizontalLine);
+
+        // write type and address in first line and follow with a line
+        const int addrSize = 3;
+        var type = page[0].Item2;
+
+        builders[1].AppendFormat("{0}{1}{2, 10}", address.ToString().PadLeft(addrSize), LineV,
+            type.PadLeft(BodyWidth - addrSize - 1));
+        builders[2].Append(HorizontalLine);
+
+        // fill with spaces for sure
+        const int startFromLine = 3;
+        for (int i = startFromLine; i < LastBuilder; i++)
+        {
+            var pageProperty = i - startFromLine + 1;
+            if (pageProperty < page.Length)
+            {
+                var (name, value) = page[pageProperty];
+                builders[i].AppendFormat("{0}: {1}", name, value.PadRight(BodyWidth - 2 - name.Length));
+            }
+            else
+            {
+                builders[i].Append(SpaceOnlyLine);
+            }
+        }
+
+        ColumnMiddle(builders);
+    }
+
+    private static void ColumnStart(StringBuilder[] builders) => Column(UL, LineV, DL, builders);
+    private static void ColumnMiddle(StringBuilder[] builders) => Column(CrossU, LineV, CrossD, builders);
+    private static void ColumnEnd(StringBuilder[] builders) => Column(UR, LineV, DR, builders);
+
+
+    private static void Column(char first, char middle, char last, StringBuilder[] builders)
+    {
+        builders[0].Append(first);
+
+        for (int i = 1; i < LastBuilder; i++)
+        {
+            builders[i].Append(middle);
+        }
+
+        builders[LastBuilder].Append(last);
+    }
 
     private void PrintEmpty(DbAddress addr) => _printable.Add(addr.Raw, Empty);
 }
