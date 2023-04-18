@@ -18,7 +18,7 @@ Benchmarks are described and provided in the [benchmarks](/docs/benchmarks.md) d
 
 It's great that you want to contribute your time and effort to Paprika! Please take a look at [good first issues](https://github.com/NethermindEth/Paprika/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22). They tend to provide a lower entry level. Do not forget to take a look at the [design](/docs/design.md) document.
 
-Before you start work on a feature or fix, please read and follow our [contribution guide](./CONTRIBUTING.md) to help avoid any wasted or duplicate effort.
+Before you start to work on a feature or fix, please read and follow our [contribution guide](./CONTRIBUTING.md) to help avoid any wasted or duplicate effort.
 
 ## License
 
