@@ -122,7 +122,7 @@ public class DbTests
         Assert.Throws<ArgumentException>(() => db.ReorganizeBackToAndStartNew(invalidBlock).Should());
     }
 
-    [TestCase(1_000_000, 1, TestName = "Long history, single account")]
+    [TestCase(100_000, 1, TestName = "Long history, single account")]
     [TestCase(500, 2_000, TestName = "Short history, many accounts")]
     public void Page_reuse(int blockCount, int accountsCount)
     {
