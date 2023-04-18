@@ -71,7 +71,7 @@ There are different types of pages:
 
 #### Root page
 
-The `RootPage` is a page responsible for holding all the metadata information needed to query and amend data. It consist of:
+The `RootPage` is a page responsible for holding all the metadata information needed to query and amend data. It consists of:
 
 1. batch id - a monotonically increasing number, identifying each batch write to the database that happened
 1. block information including its number and the hash
@@ -81,7 +81,7 @@ The last one is a collection of `DbAddress` pointing to the `Abandoned Pages`. A
 
 #### Abandoned Page
 
-An abandoned page is a page storying information about pages that were abandoned during a given batch. Let's describe what abandonment means. When a page is COWed, the original copy should be maintain for the readers. After a given period of time, defined by the reorganization max depth, the page should be reused to do not blow up the database. That is why `AbandonedPage` memoizes the batch which it was created at. Whenever a new page is requested, the allocator checks the list of unused pages (pages that were abandoned that passed the threshold of max reorg depth. If there's some, the page can be reused.
+An abandoned page is a page storing information about pages that were abandoned during a given batch. Let's describe what abandonment means. When a page is COWed, the original copy should be maintain for the readers. After a given period of time, defined by the reorganization max depth, the page should be reused to not blow up the database. That is why `AbandonedPage` memoizes the batch which it was created at. Whenever a new page is requested, the allocator checks the list of unused pages (pages that were abandoned that passed the threshold of max reorg depth. If there's some, the page can be reused.
 
 As each `AbandonedPage` can store ~1,000 of pages, in cases of big updates, several pages are required to store addresses of all the abandoned pages. As they share the batch number in which they are abandoned, a linked list is used to occupy only a single slot in the `AbandonedPages` of the `RootPage`. The unlinking and proper management of the list is left up to the allocator that updates slots in the `RootPage` accordingly.
 
@@ -89,7 +89,7 @@ The biggest caveat is where to store the `AbandonedPage`. The same mechanism is 
 
 #### Data Page
 
-A data page is responsible for storying data, meaning a map from the `Keccak`->`Account`. The data page tries to store as much data as possible inline. If there's no more space, left, it selects a bucket, defined by a nibble. The one with the highest count of items is flushed as a separate page and a pointer to that page is stored in the bucket of the original `DataPage`. This is a bit different approach from using page splits. Instead of splitting the page and updating the parent, the page can flush down some of its data, leaving more space for the new. A single `PageData` can hold roughly 31-60 accounts. This divided by the count of nibbles 16 gives a rough minimal estimate how much flushing down can save memory (at least 2 frames).
+A data page is responsible for storying data, meaning a map from the `Keccak`->`Account`. The data page tries to store as much data as possible inline. If there's no more space, left, it selects a bucket, defined by a nibble. The one with the highest count of items is flushed as a separate page and a pointer to that page is stored in the bucket of the original `DataPage`. This is a bit different approach from using page splits. Instead of splitting the page and updating the parent, the page can flush down some of its data, leaving more space for the new. A single `PageData` can hold roughly 31-60 accounts. This divided by the count of nibbles 16 gives a rough minimal estimate of how much flushing down can save memory (at least 2 frames).
 
 ### Page design in C\#
 
@@ -138,7 +138,7 @@ DataPage │ Header  │ DataPage    │   Payload of the page                  
           all the pages
 ```
 
-As fields are located in the same place (`DataPage` wraps `Page` that wraps `byte*`) and all the pages are a size of a `byte*`. To implemented the shared functionality, a markup interface `IPage` is used with some extension methods. Again, as pages have the data in the same place they can be cast with the help of `Unsafe`.
+As fields are located in the same place (`DataPage` wraps `Page` that wraps `byte*`) and all the pages are a size of a `byte*`. To implement the shared functionality, a markup interface `IPage` is used with some extension methods. Again, as pages have the data in the same place they can be cast with the help of `Unsafe`.
 
 ```csharp
 // The markup interface IPage implemented
