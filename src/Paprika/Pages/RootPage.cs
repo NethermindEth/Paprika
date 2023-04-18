@@ -12,10 +12,6 @@ public readonly unsafe struct RootPage : IPage
 {
     private readonly Page _page;
 
-    public RootPage(byte* ptr) : this(new Page(ptr))
-    {
-    }
-
     public RootPage(Page root) => _page = root;
 
     public ref PageHeader Header => ref _page.Header;
@@ -78,6 +74,27 @@ public readonly unsafe struct RootPage : IPage
             var free = NextFreePage;
             NextFreePage = NextFreePage.Next;
             return free;
+        }
+    }
+
+    public void Accept(IPageVisitor visitor, IPageResolver resolver)
+    {
+        var dataAddr = Data.DataPage;
+        if (dataAddr.IsNull == false)
+        {
+            var data = new DataPage(resolver.GetAt(dataAddr));
+            visitor.On(data, dataAddr);
+        }
+
+        foreach (var addr in Data.AbandonedPages)
+        {
+            if (addr.IsNull == false)
+            {
+                var abandoned = new AbandonedPage(resolver.GetAt(addr));
+                visitor.On(abandoned, addr);
+
+                abandoned.Accept(visitor, resolver);
+            }
         }
     }
 }

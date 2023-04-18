@@ -36,7 +36,7 @@ public class DbTests
 
             using var batch = db.BeginNextBlock();
             batch.Set(key, new Account(i, i));
-            batch.Commit(CommitOptions.FlushDataOnly);
+            batch.Commit(CommitOptions.FlushDataAndRoot);
         }
 
         using var read = db.BeginNextBlock();

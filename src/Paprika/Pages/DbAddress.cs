@@ -29,7 +29,7 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     /// </summary>
     private const int JumpCountShift = 24;
 
-    private const uint JumpCounter = byte.MaxValue - (SamePage >> JumpCountShift);
+    // private const uint JumpCounter = byte.MaxValue - (SamePage >> JumpCountShift);
     private const int NullValue = 0;
 
     private readonly uint _value;

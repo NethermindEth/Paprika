@@ -8,6 +8,7 @@ public abstract class BasePageTests
     protected static unsafe Page AllocPage()
     {
         var memory = (byte*)NativeMemory.AlignedAlloc((UIntPtr)Page.PageSize, (UIntPtr)sizeof(long));
+        new Span<byte>(memory, Page.PageSize).Clear();
         return new Page(memory);
     }
 

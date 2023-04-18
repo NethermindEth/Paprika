@@ -7,7 +7,7 @@ using static Paprika.Tests.Values;
 
 namespace Paprika.Tests;
 
-public unsafe class DataPageTests : BasePageTests
+public class DataPageTests : BasePageTests
 {
     private const byte RootLevel = 0;
 
