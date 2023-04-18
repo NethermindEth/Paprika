@@ -24,7 +24,7 @@ public readonly unsafe struct DataPage : IPage
 
     public ref DataPageHeader Header => ref Unsafe.As<PageHeader, DataPageHeader>(ref _page.Header);
 
-    public ref Payload16 Data => ref Unsafe.AsRef<Payload16>(_page.Payload);
+    public ref Payload Data => ref Unsafe.AsRef<Payload>(_page.Payload);
 
     /// <summary>
     /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
@@ -32,7 +32,7 @@ public readonly unsafe struct DataPage : IPage
     /// like page split. 
     /// </summary>
     [StructLayout(LayoutKind.Explicit, Size = Size)]
-    public struct Payload16
+    public struct Payload
     {
         public const int Size = Page.PageSize - DataPageHeader.Size;
 
@@ -129,7 +129,7 @@ public readonly unsafe struct DataPage : IPage
 
         // fail to update, insert
         ref var bucket = ref Data.Buckets[nibble];
-        if (Data.FrameUsed.TrySetLowestBit(Payload16.FrameCount, out var reserved))
+        if (Data.FrameUsed.TrySetLowestBit(Payload.FrameCount, out var reserved))
         {
             ref var frame = ref Data.Frames[reserved];
 
@@ -151,7 +151,7 @@ public readonly unsafe struct DataPage : IPage
         var biggestBucket = DbAddress.Null;
         var index = -1;
 
-        for (var i = 0; i < Payload16.BucketCount; i++)
+        for (var i = 0; i < Payload.BucketCount; i++)
         {
             if (Data.Buckets[i].IsSamePage && Data.Buckets[i].SamePageJumpCount > biggestBucket.SamePageJumpCount)
             {
