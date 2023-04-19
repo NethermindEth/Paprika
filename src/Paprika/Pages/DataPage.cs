@@ -18,6 +18,8 @@ namespace Paprika.Pages;
 /// </remarks>
 public readonly unsafe struct DataPage : IPage
 {
+    private const byte FrameShift = 1;
+
     private readonly Page _page;
 
     [DebuggerStepThrough]
@@ -111,27 +113,29 @@ public readonly unsafe struct DataPage : IPage
         }
 
         // try update existing
-        var frameIndex = address.GetFrameIndex();
-
-        while (frameIndex != 0)
+        if (address.TryGetFrameIndex(out var frameIndex))
         {
-            ref var frame = ref frames[frameIndex];
-
-            if (frame.Key.Equals(ctx.Key))
+            // there is at least one frame with this nibble
+            while (frameIndex != 0)
             {
-                // update
-                frame.Balance = ctx.Balance;
-                frame.Nonce = ctx.Nonce;
+                ref var frame = ref frames[frameIndex - FrameShift];
 
-                return _page;
+                if (frame.Key.Equals(ctx.Key))
+                {
+                    // update
+                    frame.Balance = ctx.Balance;
+                    frame.Nonce = ctx.Nonce;
+
+                    return _page;
+                }
+
+                // jump to the next
+                frameIndex = frame.Header.NextFrame;
             }
-
-            // jump to the next
-            frameIndex = frame.Header.NextFrame;
         }
 
         // fail to update, insert
-        frameIndex = address.GetFrameIndex();
+        address.TryGetFrameIndex(out var previousFrameIndex);
         if (Data.FrameUsed.TrySetLowestBit(Payload.FrameCount, out var reserved))
         {
             ref var frame = ref Data.Frames[reserved];
@@ -141,10 +145,10 @@ public readonly unsafe struct DataPage : IPage
             frame.Nonce = ctx.Nonce;
 
             // set the next to create the linked list
-            frame.Header = FrameHeader.BuildContract(frameIndex);
+            frame.Header = FrameHeader.BuildContract(previousFrameIndex);
 
             // overwrite the bucket with the recent one
-            Data.Buckets[nibble] = DbAddress.JumpToFrame(reserved, Data.Buckets[nibble]);
+            Data.Buckets[nibble] = DbAddress.JumpToFrame((byte)(reserved + FrameShift), Data.Buckets[nibble]);
             return _page;
         }
 
@@ -168,20 +172,20 @@ public readonly unsafe struct DataPage : IPage
         var dataPage = new DataPage(child);
 
         // copy the data pointed by address to the new dataPage, clean up its bits from reserved frames
-        frameIndex = biggestBucket.GetFrameIndex();
+        biggestBucket.TryGetFrameIndex(out var biggestFrameChain);
 
-        while (frameIndex != 0)
+        while (biggestFrameChain != 0)
         {
-            ref var frame = ref frames[frameIndex];
+            ref var frame = ref frames[biggestFrameChain - FrameShift];
 
             var set = new SetContext(frame.Key, frame.Balance, frame.Nonce);
             dataPage.Set(set, batch, (byte)(level + 1));
 
             // the frame is no longer used, clear it
-            Data.FrameUsed.ClearBit(frameIndex);
+            Data.FrameUsed.ClearBit((byte)(biggestFrameChain - FrameShift));
 
             // jump to the next
-            frameIndex = frame.Header.NextFrame;
+            biggestFrameChain = frame.Header.NextFrame;
         }
 
         // there's a place on this page now, add it again
@@ -195,11 +199,9 @@ public readonly unsafe struct DataPage : IPage
     {
         public const int Size = PageHeader.Size + sizeof(DataPageFlags);
 
-        [FieldOffset(0)]
-        public PageHeader PageHeader;
+        [FieldOffset(0)] public PageHeader PageHeader;
 
-        [FieldOffset(PageHeader.Size)]
-        public DataPageFlags Flags;
+        [FieldOffset(PageHeader.Size)] public DataPageFlags Flags;
     }
 
     /// <summary>
@@ -223,19 +225,20 @@ public readonly unsafe struct DataPage : IPage
             return;
         }
 
-        var frameIndex = bucket.GetFrameIndex();
-
-        while (frameIndex != 0)
+        if (bucket.TryGetFrameIndex(out var frameIndex))
         {
-            ref var frame = ref frames[frameIndex];
-
-            if (frame.Key.Equals(key))
+            while (frameIndex != 0)
             {
-                result = new Account(frame.Balance, frame.Nonce);
-                return;
-            }
+                ref var frame = ref frames[frameIndex - FrameShift];
 
-            frameIndex = frame.Header.NextFrame;
+                if (frame.Key.Equals(key))
+                {
+                    result = new Account(frame.Balance, frame.Nonce);
+                    return;
+                }
+
+                frameIndex = frame.Header.NextFrame;
+            }
         }
 
         result = default;

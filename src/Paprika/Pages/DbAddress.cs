@@ -94,9 +94,16 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     /// Gets the <see cref="IFrame"/> index where this address points to.
     /// </summary>
     /// <returns></returns>
-    public byte GetFrameIndex()
+    public bool TryGetFrameIndex(out byte frameIndex)
     {
-        return IsSamePage ? (byte)(_value & ValueMask) : default;
+        if (IsSamePage)
+        {
+            frameIndex = (byte)(_value & ValueMask);
+            return true;
+        }
+
+        frameIndex = default;
+        return false;
     }
 
     public static implicit operator uint(DbAddress address) => address._value;
