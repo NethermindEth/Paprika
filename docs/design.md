@@ -124,16 +124,16 @@ The following ASCII Art should provide a better picture for the composition appr
          │ Page    │                                                                            │
 Page 4kb │ Header  │                                                                            │
          │         │                                                                            │
-         ├─────────┼─────────────┬──────────────────────────────────────────────────────────────┤
-         │ Page    │ Additional  │                                                              │
-DataPage │ Header  │ DataPage    │   Payload of the page                                        │
-         │         │ Header      │                                                              │
-         └─────────┴─────────────┴──────────────────────────────────────────────────────────────┘
-              ▲                  ▲
-              │                  │
-              │                  │
-              │                  │
-          Page Header      DataPage Header, the same for all the DataPages
+         ├─────────┼────────────────────────────────────────────────────────────────────────────┤
+         │ Page    │                                                                            │
+DataPage │ Header  │                 Payload of the DataPage                                    │
+         │         │                                                                            │
+         └─────────┴────────────────────────────────────────────────────────────────────────────┘
+              ▲
+              │
+              │
+              │
+          Page Header
           is shared by
           all the pages
 ```
