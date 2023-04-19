@@ -18,8 +18,6 @@ namespace Paprika.Pages;
 /// </remarks>
 public readonly unsafe struct DataPage : IPage
 {
-    private const byte FrameShift = 1;
-
     private readonly Page _page;
 
     [DebuggerStepThrough]
@@ -116,9 +114,9 @@ public readonly unsafe struct DataPage : IPage
         if (address.TryGetFrameIndex(out var frameIndex))
         {
             // there is at least one frame with this nibble
-            while (frameIndex != 0)
+            while (frameIndex.IsNull == false)
             {
-                ref var frame = ref frames[frameIndex - FrameShift];
+                ref var frame = ref frames[frameIndex.Value];
 
                 if (frame.Key.Equals(ctx.Key))
                 {
@@ -148,7 +146,7 @@ public readonly unsafe struct DataPage : IPage
             frame.Header = FrameHeader.BuildContract(previousFrameIndex);
 
             // overwrite the bucket with the recent one
-            Data.Buckets[nibble] = DbAddress.JumpToFrame((byte)(reserved + FrameShift), Data.Buckets[nibble]);
+            Data.Buckets[nibble] = DbAddress.JumpToFrame(FrameIndex.FromIndex(reserved), Data.Buckets[nibble]);
             return _page;
         }
 
@@ -174,15 +172,15 @@ public readonly unsafe struct DataPage : IPage
         // copy the data pointed by address to the new dataPage, clean up its bits from reserved frames
         biggestBucket.TryGetFrameIndex(out var biggestFrameChain);
 
-        while (biggestFrameChain != 0)
+        while (biggestFrameChain.IsNull == false)
         {
-            ref var frame = ref frames[biggestFrameChain - FrameShift];
+            ref var frame = ref frames[biggestFrameChain.Value];
 
             var set = new SetContext(frame.Key, frame.Balance, frame.Nonce);
             dataPage.Set(set, batch, (byte)(level + 1));
 
             // the frame is no longer used, clear it
-            Data.FrameUsed.ClearBit((byte)(biggestFrameChain - FrameShift));
+            Data.FrameUsed.ClearBit(biggestFrameChain.Value);
 
             // jump to the next
             biggestFrameChain = frame.Header.NextFrame;
@@ -227,9 +225,9 @@ public readonly unsafe struct DataPage : IPage
 
         if (bucket.TryGetFrameIndex(out var frameIndex))
         {
-            while (frameIndex != 0)
+            while (frameIndex.IsNull == false)
             {
-                ref var frame = ref frames[frameIndex - FrameShift];
+                ref var frame = ref frames[frameIndex.Value];
 
                 if (frame.Key.Equals(key))
                 {

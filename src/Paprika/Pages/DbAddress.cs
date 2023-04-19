@@ -43,13 +43,13 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     /// <param name="frame">The frame to jump to.</param>
     /// <param name="previous">The previous jump within the same page.</param>
     /// <returns>A db address.</returns>
-    public static DbAddress JumpToFrame(byte frame, DbAddress previous)
+    public static DbAddress JumpToFrame(FrameIndex frame, DbAddress previous)
     {
         Debug.Assert(previous.IsSamePage || previous.IsNull, "Only same page chaining is allowed");
 
         var countShifted = (previous.SamePageJumpCount + 1) << JumpCountShift;
 
-        return new(frame | SamePage | countShifted);
+        return new(frame.Raw | SamePage | countShifted);
     }
 
     /// <summary>
@@ -94,15 +94,15 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     /// Gets the <see cref="IFrame"/> index where this address points to.
     /// </summary>
     /// <returns></returns>
-    public bool TryGetFrameIndex(out byte frameIndex)
+    public bool TryGetFrameIndex(out FrameIndex index)
     {
         if (IsSamePage)
         {
-            frameIndex = (byte)(_value & ValueMask);
+            index = FrameIndex.FromRaw((byte)(_value & ValueMask));
             return true;
         }
 
-        frameIndex = default;
+        index = FrameIndex.Null;
         return false;
     }
 

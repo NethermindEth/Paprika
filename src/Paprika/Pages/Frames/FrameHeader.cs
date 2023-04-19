@@ -23,12 +23,12 @@ public struct FrameHeader
     /// What is the next linked frame in this bucket.
     /// </summary>
     [FieldOffset(3)]
-    public byte NextFrame;
+    public FrameIndex NextFrame;
 
     /// <summary>
     /// Builds the next header pointing to the previous one.
     /// </summary>
-    public static FrameHeader BuildContract(byte current) =>
+    public static FrameHeader BuildContract(FrameIndex current) =>
         new()
         {
             Type = FrameType.Contract,
