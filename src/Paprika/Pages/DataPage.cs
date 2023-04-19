@@ -23,7 +23,7 @@ public readonly unsafe struct DataPage : IPage
     [DebuggerStepThrough]
     public DataPage(Page page) => _page = page;
 
-    public ref DataPageHeader Header => ref Unsafe.As<PageHeader, DataPageHeader>(ref _page.Header);
+    public ref PageHeader Header => ref _page.Header;
 
     public ref Payload Data => ref Unsafe.AsRef<Payload>(_page.Payload);
 
@@ -35,11 +35,18 @@ public readonly unsafe struct DataPage : IPage
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     public struct Payload
     {
-        public const int Size = Page.PageSize - DataPageHeader.Size;
+        private const int Size = Page.PageSize - PageHeader.Size;
 
         public const int BucketCount = 16;
 
+        /// <summary>
+        /// The offset to the first frame.
+        /// </summary>
         private const int FramesDataOffset = sizeof(int) + BitPool32.Size + BucketCount * DbAddress.Size;
+
+        /// <summary>
+        /// How many frames fit in this page.
+        /// </summary>
         public const int FrameCount = (Size - FramesDataOffset) / ContractFrame.Size;
 
         /// <summary>
@@ -87,7 +94,7 @@ public readonly unsafe struct DataPage : IPage
     /// </returns>
     public Page Set(in SetContext ctx, IBatchContext batch, int level)
     {
-        if (Header.PageHeader.BatchId != batch.BatchId)
+        if (Header.BatchId != batch.BatchId)
         {
             // the page is from another batch, meaning, it's readonly. Copy
             var writable = batch.GetWritableCopy(_page);
@@ -190,24 +197,6 @@ public readonly unsafe struct DataPage : IPage
         Set(ctx, batch, level);
 
         return _page;
-    }
-
-    [StructLayout(LayoutKind.Explicit, Size = Size)]
-    public struct DataPageHeader
-    {
-        public const int Size = PageHeader.Size + sizeof(DataPageFlags);
-
-        [FieldOffset(0)] public PageHeader PageHeader;
-
-        [FieldOffset(PageHeader.Size)] public DataPageFlags Flags;
-    }
-
-    /// <summary>
-    /// All the flags for the <see cref="DataPage"/>s.
-    /// </summary>
-    public enum DataPageFlags : int
-    {
-        // type of the page, and others
     }
 
     public void GetAccount(in Keccak key, IReadOnlyBatchContext batch, out Account result, int level)
