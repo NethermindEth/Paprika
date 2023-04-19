@@ -4,7 +4,7 @@ using Paprika.Crypto;
 namespace Paprika.Pages;
 
 /// <summary>
-/// See <see cref="AccountFrame"/> for more considerations about narrowing types.
+/// See <see cref="ContractFrame"/> for more considerations about narrowing types.
 /// </summary>
 public readonly ref struct SetContext
 {

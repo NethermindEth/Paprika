@@ -79,6 +79,9 @@ public readonly struct DbAddress : IEquatable<DbAddress>
 
     public bool IsNull => _value == NullValue;
 
+    /// <summary>
+    /// Keeps the number of frames used in the same page by jumps to the same nibble.
+    /// </summary>
     public uint SamePageJumpCount => (_value & ~SamePage) >> JumpCountShift;
 
     public bool IsSamePage => (_value & SamePage) == SamePage;

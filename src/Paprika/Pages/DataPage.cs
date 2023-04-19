@@ -39,7 +39,7 @@ public readonly unsafe struct DataPage : IPage
         public const int BucketCount = 16;
 
         private const int FramesDataOffset = sizeof(int) + BitPool32.Size + BucketCount * DbAddress.Size;
-        public const int FrameCount = (Size - FramesDataOffset) / AccountFrame.Size;
+        public const int FrameCount = (Size - FramesDataOffset) / ContractFrame.Size;
 
         /// <summary>
         /// The bit map of frames used at this page.
@@ -61,17 +61,17 @@ public readonly unsafe struct DataPage : IPage
         /// <summary>
         /// Data for storing frames.
         /// </summary>
-        [FieldOffset(FramesDataOffset)] private fixed byte FramesData[FrameCount * AccountFrame.Size];
+        [FieldOffset(FramesDataOffset)] private fixed byte FramesData[FrameCount * ContractFrame.Size];
 
         /// <summary>
         /// Map of <see cref="FramesData"/> as a type to allow ref to it.
         /// </summary>
-        [FieldOffset(FramesDataOffset)] private AccountFrame Frame;
+        [FieldOffset(FramesDataOffset)] private ContractFrame Frame;
 
         /// <summary>
         /// Access all the frames.
         /// </summary>
-        public Span<AccountFrame> Frames => MemoryMarshal.CreateSpan(ref Frame, FrameCount);
+        public Span<ContractFrame> Frames => MemoryMarshal.CreateSpan(ref Frame, FrameCount);
     }
 
     /// <summary>
