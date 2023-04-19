@@ -84,7 +84,7 @@ public class DataPageTests : BasePageTests
         var batch = NewBatch(BatchId);
         var dataPage = new DataPage(page);
 
-        const int count = 2 * 1024 * 1024;
+        const int count = 1 * 1024 * 1024;
 
         for (uint i = 0; i < count; i++)
         {

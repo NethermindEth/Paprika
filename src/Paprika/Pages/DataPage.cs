@@ -118,32 +118,21 @@ public readonly unsafe struct DataPage : IPage
         }
 
         // try update existing
-        if (address.TryGetFrameIndex(out var frameIndex))
+        if (TryFindFrameInBucket(address, ctx.Key, out var frameIndex))
         {
-            // there is at least one frame with this nibble
-            while (frameIndex.IsNull == false)
-            {
-                ref var frame = ref frames[frameIndex.Value];
+            ref var frame = ref frames[frameIndex.Value];
 
-                if (frame.Key.Equals(ctx.Key))
-                {
-                    // update
-                    frame.Balance = ctx.Balance;
-                    frame.Nonce = ctx.Nonce;
+            frame.Balance = ctx.Balance;
+            frame.Nonce = ctx.Nonce;
 
-                    return _page;
-                }
-
-                // jump to the next
-                frameIndex = frame.Header.NextFrame;
-            }
+            return _page;
         }
 
-        // fail to update, insert
+        // fail to update, insert if there's place
         address.TryGetFrameIndex(out var previousFrameIndex);
         if (Data.FrameUsed.TrySetLowestBit(Payload.FrameCount, out var reserved))
         {
-            ref var frame = ref Data.Frames[reserved];
+            ref var frame = ref frames[reserved];
 
             frame.Key = ctx.Key;
             frame.Balance = ctx.Balance;
@@ -201,7 +190,6 @@ public readonly unsafe struct DataPage : IPage
 
     public void GetAccount(in Keccak key, IReadOnlyBatchContext batch, out Account result, int level)
     {
-        var frames = Data.Frames;
         var nibble = NibblePath.FromKey(key.BytesAsSpan, level).FirstNibble;
         var bucket = Data.Buckets[nibble];
 
@@ -212,22 +200,39 @@ public readonly unsafe struct DataPage : IPage
             return;
         }
 
+        if (TryFindFrameInBucket(bucket, key, out var index))
+        {
+            ref readonly var frame = ref Data.Frames[index.Value];
+            result = new Account(frame.Balance, frame.Nonce);
+            return;
+        }
+
+        result = default;
+    }
+
+    /// <summary>
+    /// Tries to find a frame with a matching <paramref name="key"/> within a given <paramref name="bucket"/>.
+    /// </summary>
+    private bool TryFindFrameInBucket(DbAddress bucket, in Keccak key, out FrameIndex index)
+    {
+        var frames = Data.Frames;
         if (bucket.TryGetFrameIndex(out var frameIndex))
         {
             while (frameIndex.IsNull == false)
             {
-                ref var frame = ref frames[frameIndex.Value];
+                ref readonly var frame = ref frames[frameIndex.Value];
 
                 if (frame.Key.Equals(key))
                 {
-                    result = new Account(frame.Balance, frame.Nonce);
-                    return;
+                    index = frameIndex;
+                    return true;
                 }
 
                 frameIndex = frame.Header.NextFrame;
             }
         }
 
-        result = default;
+        index = default;
+        return false;
     }
 }
