@@ -1,5 +1,6 @@
 ﻿using Nethermind.Int256;
 using Paprika.Crypto;
+using Paprika.Pages.Frames;
 
 namespace Paprika.Pages;
 

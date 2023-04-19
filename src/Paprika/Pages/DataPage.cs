@@ -2,6 +2,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
+using Paprika.Pages.Frames;
 
 namespace Paprika.Pages;
 
@@ -110,7 +111,9 @@ public readonly unsafe struct DataPage : IPage
         }
 
         // try update existing
-        while (address.TryGetSamePage(out var frameIndex))
+        var frameIndex = address.GetFrameIndex();
+
+        while (frameIndex != 0)
         {
             ref var frame = ref frames[frameIndex];
 
@@ -124,11 +127,11 @@ public readonly unsafe struct DataPage : IPage
             }
 
             // jump to the next
-            address = frame.Next;
+            frameIndex = frame.Header.NextFrame;
         }
 
         // fail to update, insert
-        ref var bucket = ref Data.Buckets[nibble];
+        frameIndex = address.GetFrameIndex();
         if (Data.FrameUsed.TrySetLowestBit(Payload.FrameCount, out var reserved))
         {
             ref var frame = ref Data.Frames[reserved];
@@ -138,10 +141,10 @@ public readonly unsafe struct DataPage : IPage
             frame.Nonce = ctx.Nonce;
 
             // set the next to create the linked list
-            frame.Next = bucket;
+            frame.Header = FrameHeader.BuildContract(frameIndex);
 
             // overwrite the bucket with the recent one
-            bucket = DbAddress.JumpToFrame(reserved, bucket);
+            Data.Buckets[nibble] = DbAddress.JumpToFrame(reserved, Data.Buckets[nibble]);
             return _page;
         }
 
@@ -165,7 +168,9 @@ public readonly unsafe struct DataPage : IPage
         var dataPage = new DataPage(child);
 
         // copy the data pointed by address to the new dataPage, clean up its bits from reserved frames
-        while (biggestBucket.TryGetSamePage(out var frameIndex))
+        frameIndex = biggestBucket.GetFrameIndex();
+
+        while (frameIndex != 0)
         {
             ref var frame = ref frames[frameIndex];
 
@@ -176,7 +181,7 @@ public readonly unsafe struct DataPage : IPage
             Data.FrameUsed.ClearBit(frameIndex);
 
             // jump to the next
-            biggestBucket = frame.Next;
+            frameIndex = frame.Header.NextFrame;
         }
 
         // there's a place on this page now, add it again
@@ -218,7 +223,9 @@ public readonly unsafe struct DataPage : IPage
             return;
         }
 
-        while (bucket.TryGetSamePage(out var frameIndex))
+        var frameIndex = bucket.GetFrameIndex();
+
+        while (frameIndex != 0)
         {
             ref var frame = ref frames[frameIndex];
 
@@ -228,7 +235,7 @@ public readonly unsafe struct DataPage : IPage
                 return;
             }
 
-            bucket = frame.Next;
+            frameIndex = frame.Header.NextFrame;
         }
 
         result = default;

@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using Paprika.Pages.Frames;
 
 namespace Paprika.Pages;
 
@@ -89,16 +90,13 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     // ReSharper disable once MergeIntoPattern
     public bool IsValidPageAddress => _value < Pages.Page.PageCount;
 
-    public bool TryGetSamePage(out byte frame)
+    /// <summary>
+    /// Gets the <see cref="IFrame"/> index where this address points to.
+    /// </summary>
+    /// <returns></returns>
+    public byte GetFrameIndex()
     {
-        if (IsSamePage)
-        {
-            frame = (byte)(_value & ValueMask);
-            return true;
-        }
-
-        frame = default;
-        return false;
+        return IsSamePage ? (byte)(_value & ValueMask) : default;
     }
 
     public static implicit operator uint(DbAddress address) => address._value;

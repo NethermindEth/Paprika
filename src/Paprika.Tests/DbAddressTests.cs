@@ -16,13 +16,11 @@ public class DbAddressTests
 
         var jump2 = DbAddress.JumpToFrame(2, jump1);
         jump2.SamePageJumpCount.Should().Be(2);
-        jump2.TryGetSamePage(out var frame2).Should().BeTrue();
-        frame2.Should().Be(2);
+        jump2.GetFrameIndex().Should().Be(2);
 
         var jump3 = DbAddress.JumpToFrame(3, jump2);
         jump3.SamePageJumpCount.Should().Be(3);
-        jump3.TryGetSamePage(out var frame3).Should().BeTrue();
-        frame3.Should().Be(3);
+        jump3.GetFrameIndex().Should().Be(3);
     }
 
     [Test]
