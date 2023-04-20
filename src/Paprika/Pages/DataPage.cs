@@ -129,7 +129,6 @@ public readonly unsafe struct DataPage : IPage
         }
 
         // fail to update, insert if there's place
-        address.TryGetFrameIndex(out var previousFrameIndex);
         if (Data.FrameUsed.TrySetLowestBit(Payload.FrameCount, out var reserved))
         {
             ref var frame = ref frames[reserved];
@@ -139,6 +138,7 @@ public readonly unsafe struct DataPage : IPage
             frame.Nonce = ctx.Nonce;
 
             // set the next to create the linked list
+            address.TryGetFrameIndex(out var previousFrameIndex);
             frame.Header = FrameHeader.BuildContract(previousFrameIndex);
 
             // overwrite the bucket with the recent one
