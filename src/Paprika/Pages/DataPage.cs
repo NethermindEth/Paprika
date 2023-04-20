@@ -87,13 +87,13 @@ public readonly unsafe struct DataPage : IPage
     /// The actual page which handled the set operation. Due to page being COWed, it may be a different page.
     /// 
     /// </returns>
-    public Page Set(in SetContext ctx, IBatchContext batch, int level)
+    public Page Set(in SetContext ctx, int level)
     {
-        if (Header.BatchId != batch.BatchId)
+        if (Header.BatchId != ctx.Batch.BatchId)
         {
             // the page is from another batch, meaning, it's readonly. Copy
-            var writable = batch.GetWritableCopy(_page);
-            return new DataPage(writable).Set(ctx, batch, level);
+            var writable = ctx.Batch.GetWritableCopy(_page);
+            return new DataPage(writable).Set(ctx, level);
         }
 
         var frames = Data.Frames;
@@ -104,11 +104,11 @@ public readonly unsafe struct DataPage : IPage
         // the bucket is not null and represents a page jump, follow it
         if (address.IsNull == false && address.IsValidPageAddress)
         {
-            var page = batch.GetAt(address);
-            var updated = new DataPage(page).Set(ctx, batch, level + 1);
+            var page = ctx.Batch.GetAt(address);
+            var updated = new DataPage(page).Set(ctx, level + 1);
 
             // remember the updated
-            Data.Buckets[nibble] = batch.GetAddress(updated);
+            Data.Buckets[nibble] = ctx.Batch.GetAddress(updated);
             return _page;
         }
 
@@ -157,7 +157,7 @@ public readonly unsafe struct DataPage : IPage
         }
 
         // address is set to the most counted
-        var child = batch.GetNewPage(out Data.Buckets[index], true);
+        var child = ctx.Batch.GetNewPage(out Data.Buckets[index], true);
         var dataPage = new DataPage(child);
 
         // copy the data pointed by address to the new dataPage, clean up its bits from reserved frames
@@ -167,8 +167,8 @@ public readonly unsafe struct DataPage : IPage
         {
             ref var frame = ref frames[biggestFrameChain.Value];
 
-            var set = new SetContext(frame.Key, frame.Balance, frame.Nonce);
-            dataPage.Set(set, batch, (byte)(level + 1));
+            var set = new SetContext(frame.Key, frame.Balance, frame.Nonce, ctx.Batch);
+            dataPage.Set(set, (byte)(level + 1));
 
             // the frame is no longer used, clear it
             Data.FrameUsed.ClearBit(biggestFrameChain.Value);
@@ -178,7 +178,7 @@ public readonly unsafe struct DataPage : IPage
         }
 
         // there's a place on this page now, add it again
-        Set(ctx, batch, level);
+        Set(ctx, level);
 
         return _page;
     }

@@ -312,9 +312,9 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             // treat as data page
             var data = new DataPage(page);
 
-            var ctx = new SetContext(in key, account.Balance, account.Nonce);
+            var ctx = new SetContext(in key, account.Balance, account.Nonce, this);
 
-            var updated = data.Set(ctx, this, RootLevel);
+            var updated = data.Set(ctx, RootLevel);
 
             _root.Data.DataPage = _db.GetAddress(updated);
         }
