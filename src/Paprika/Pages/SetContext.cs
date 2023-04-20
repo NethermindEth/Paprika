@@ -8,7 +8,7 @@ namespace Paprika.Pages;
 /// </summary>
 public readonly ref struct SetContext
 {
-    public readonly ref Keccak Key;
+    public readonly Keccak Key;
     public readonly UInt128 Balance;
     public readonly uint Nonce;
 

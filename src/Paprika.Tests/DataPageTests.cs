@@ -1,5 +1,4 @@
 ﻿using System.Buffers.Binary;
-using System.Runtime.InteropServices;
 using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Pages;

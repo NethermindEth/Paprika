@@ -8,13 +8,13 @@ namespace Paprika.Pages;
 /// <remarks>
 /// Finding a settable bit is done with a fast <see cref="BitOperations.LeadingZeroCount(uint)"/>.
 /// </remarks>
-public struct BitPool32
+public struct BitPool64
 {
-    public const int Size = sizeof(uint);
+    public const int Size = sizeof(ulong);
+    private const ulong One = 1UL;
+    private const int BitsPerPool = 64;
 
-    private uint _value;
-
-    private const int BitsPerUint = 32;
+    private ulong _value;
 
     /// <summary>
     /// Tries to set the first bit that is not set.
@@ -28,7 +28,7 @@ public struct BitPool32
 
         if (count < maxBitToReserveExclusive)
         {
-            _value |= 1U << (BitsPerUint - count - 1);
+            _value |= One << (BitsPerPool - count - 1);
             reserved = (byte)count;
             return true;
         }
@@ -41,5 +41,5 @@ public struct BitPool32
     /// Clears the given bit, without asserting whether it was set first
     /// </summary>
     /// <param name="bit">The bit to be cleared.</param>
-    public void ClearBit(byte bit) => _value &= ~(1U << (BitsPerUint - bit - 1));
+    public void ClearBit(byte bit) => _value &= ~(One << (BitsPerPool - bit - 1));
 }

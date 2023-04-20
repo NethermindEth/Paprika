@@ -42,7 +42,7 @@ public readonly unsafe struct DataPage : IPage
         /// <summary>
         /// The offset to the first frame.
         /// </summary>
-        private const int FramesDataOffset = sizeof(int) + BitPool32.Size + BucketCount * DbAddress.Size;
+        private const int FramesDataOffset = sizeof(int) + BitPool64.Size + BucketCount * DbAddress.Size;
 
         /// <summary>
         /// How many frames fit in this page.
@@ -52,17 +52,17 @@ public readonly unsafe struct DataPage : IPage
         /// <summary>
         /// The bit map of frames used at this page.
         /// </summary>
-        [FieldOffset(0)] public BitPool32 FrameUsed;
+        [FieldOffset(0)] public BitPool64 FrameUsed;
 
         /// <summary>
         /// The nibble addressable buckets.
         /// </summary>
-        [FieldOffset(BitPool32.Size)] private fixed int BucketsData[BucketCount];
+        [FieldOffset(BitPool64.Size)] private fixed int BucketsData[BucketCount];
 
         /// <summary>
         /// Map of <see cref="BucketsData"/>.
         /// </summary>
-        [FieldOffset(BitPool32.Size)] private DbAddress Bucket;
+        [FieldOffset(BitPool64.Size)] private DbAddress Bucket;
 
         public Span<DbAddress> Buckets => MemoryMarshal.CreateSpan(ref Bucket, BucketCount);
 
