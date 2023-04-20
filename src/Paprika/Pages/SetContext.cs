@@ -1,15 +1,14 @@
 ﻿using Nethermind.Int256;
 using Paprika.Crypto;
-using Paprika.Pages.Frames;
 
 namespace Paprika.Pages;
 
 /// <summary>
-/// See <see cref="ContractFrame"/> for more considerations about narrowing types.
+/// Represents an intent to set the account data.
 /// </summary>
 public readonly ref struct SetContext
 {
-    public readonly Keccak Key;
+    public readonly ref Keccak Key;
     public readonly UInt128 Balance;
     public readonly uint Nonce;
 
