@@ -8,7 +8,7 @@ namespace Paprika.Tests;
 public class BitPool64Tests
 {
     const int Max = 63;
-    
+
     [Test]
     public void TryReserveBit()
     {

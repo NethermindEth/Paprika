@@ -35,4 +35,15 @@ public struct FrameHeader
             FrameSizeInUnits = ContractFrame.SizeInUnits,
             NextFrame = current
         };
+
+    /// <summary>
+    /// Builds the next header pointing to the previous one.
+    /// </summary>
+    public static FrameHeader BuildEOA(FrameIndex current) =>
+        new()
+        {
+            Type = FrameType.EOA,
+            FrameSizeInUnits = EOAFrame.SizeInUnits,
+            NextFrame = current
+        };
 }

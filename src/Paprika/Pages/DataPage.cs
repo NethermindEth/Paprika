@@ -47,7 +47,7 @@ public readonly unsafe struct DataPage : IPage
         /// <summary>
         /// How many frames fit in this page.
         /// </summary>
-        public const int FrameCount = (Size - FramesDataOffset) / ContractFrame.Size;
+        public const int FrameCount = (Size - FramesDataOffset) / EOAFrame.Size;
 
         /// <summary>
         /// The bit map of frames used at this page.
@@ -67,19 +67,14 @@ public readonly unsafe struct DataPage : IPage
         public Span<DbAddress> Buckets => MemoryMarshal.CreateSpan(ref Bucket, BucketCount);
 
         /// <summary>
-        /// Data for storing frames.
+        /// The first item of map of frames to allow ref to it.
         /// </summary>
-        [FieldOffset(FramesDataOffset)] private fixed byte FramesData[FrameCount * ContractFrame.Size];
-
-        /// <summary>
-        /// Map of <see cref="FramesData"/> as a type to allow ref to it.
-        /// </summary>
-        [FieldOffset(FramesDataOffset)] private ContractFrame Frame;
+        [FieldOffset(FramesDataOffset)] private EOAFrame Frame;
 
         /// <summary>
         /// Access all the frames.
         /// </summary>
-        public Span<ContractFrame> Frames => MemoryMarshal.CreateSpan(ref Frame, FrameCount);
+        public Span<EOAFrame> Frames => MemoryMarshal.CreateSpan(ref Frame, FrameCount);
     }
 
     /// <summary>
@@ -139,7 +134,7 @@ public readonly unsafe struct DataPage : IPage
 
             // set the next to create the linked list
             address.TryGetFrameIndex(out var previousFrameIndex);
-            frame.Header = FrameHeader.BuildContract(previousFrameIndex);
+            frame.Header = FrameHeader.BuildEOA(previousFrameIndex);
 
             // overwrite the bucket with the recent one
             Data.Buckets[nibble] = DbAddress.JumpToFrame(FrameIndex.FromIndex(reserved), Data.Buckets[nibble]);
