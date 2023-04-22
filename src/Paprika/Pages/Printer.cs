@@ -76,7 +76,7 @@ public class Printer : IPageVisitor
                 ("BatchId", page.Header.BatchId.ToString()),
                 ("BlockNumber", page.Data.BlockNumber.ToString()),
                 ("StateRootHash", Abbr(page.Data.StateRootHash)),
-                ("DataPage", page.Data.DataPage.ToString()),
+                ("DataPages", ListPages(page.Data.DataPages)),
                 ("NextFreePage", page.Data.NextFreePage.ToString()),
                 ("Abandoned", ListPages(page.Data.AbandonedPages))
             };

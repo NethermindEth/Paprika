@@ -18,6 +18,7 @@ public readonly unsafe struct RootPage : IPage
 
     public ref Payload Data => ref Unsafe.AsRef<Payload>(_page.Payload);
 
+
     /// <summary>
     /// Represents the data of the page.
     /// </summary>
@@ -26,14 +27,25 @@ public readonly unsafe struct RootPage : IPage
     {
         private const int Size = Page.PageSize - PageHeader.Size;
 
-        private const int AbandonedPagesStart = sizeof(uint) + Keccak.Size + DbAddress.Size + DbAddress.Size;
+        /// <summary>
+        /// How big is the fan out for the root.
+        /// </summary>
+        private const int DataPageFanOut = 256;
+
+        /// <summary>
+        /// The number of nibbles that are "consumed" on the root level.
+        /// </summary>
+        public const byte RootNibbleLevel = 2;
+
+        private const int AbandonedPagesStart = sizeof(uint) + Keccak.Size + DbAddress.Size + DbAddress.Size * DataPageFanOut;
 
         /// <summary>
         /// This gives the upper boundary of the number of abandoned pages that can be kept in the list.
         /// </summary>
         /// <remarks>
-        /// For the current values, it's 1012. With blocks happening every 12s, this should be enough to support
-        /// a reader that last for over 3h.
+        /// The value is dependent on <see cref="DataPageFanOut"/> as the more data pages addresses, the less space for
+        /// the abandoned. Still, the number of abandoned that is required is ~max reorg depth as later, pages are reused.
+        /// Even with fan-out of data pages equal to 256, there's still a lot of room here.
         /// </remarks>
         private const int AbandonedPagesCount = (Size - AbandonedPagesStart) / DbAddress.Size;
 
@@ -54,14 +66,19 @@ public readonly unsafe struct RootPage : IPage
         [FieldOffset(sizeof(uint) + Keccak.Size)] public DbAddress NextFreePage;
 
         /// <summary>
-        /// The actual root of the trie, the first page of the state.
+        /// The first of the data pages.
         /// </summary>
-        [FieldOffset(sizeof(uint) + Keccak.Size + DbAddress.Size)] public DbAddress DataPage;
+        [FieldOffset(sizeof(uint) + Keccak.Size + DbAddress.Size)] private DbAddress DataPage;
+
+        /// <summary>
+        /// Gets the span of data pages of the root
+        /// </summary>
+        public Span<DbAddress> DataPages => MemoryMarshal.CreateSpan(ref DataPage, DataPageFanOut);
 
         /// <summary>
         /// The start of the abandoned pages.
         /// </summary>
-        [FieldOffset(sizeof(uint) + Keccak.Size + DbAddress.Size + DbAddress.Size)]
+        [FieldOffset(AbandonedPagesStart)]
         private DbAddress AbandonedPage;
 
         /// <summary>
@@ -77,13 +94,21 @@ public readonly unsafe struct RootPage : IPage
         }
     }
 
+    public static ref DbAddress FindDataPage(Span<DbAddress> dataPages, in Keccak key)
+    {
+        var b = key.Span[0];
+        return ref dataPages[b];
+    }
+
     public void Accept(IPageVisitor visitor, IPageResolver resolver)
     {
-        var dataAddr = Data.DataPage;
-        if (dataAddr.IsNull == false)
+        foreach (var dataAddr in Data.DataPages)
         {
-            var data = new DataPage(resolver.GetAt(dataAddr));
-            visitor.On(data, dataAddr);
+            if (dataAddr.IsNull == false)
+            {
+                var data = new DataPage(resolver.GetAt(dataAddr));
+                visitor.On(data, dataAddr);
+            }
         }
 
         foreach (var addr in Data.AbandonedPages)

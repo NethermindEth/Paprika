@@ -26,8 +26,6 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
     /// </remarks>
     private const int MinHistoryDepth = 2;
 
-    private const byte RootLevel = 0;
-
     private readonly byte _historyDepth;
     private readonly Action<IBatchMetrics>? _reporter;
     private readonly int _maxPage;
@@ -156,9 +154,8 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
     {
         lock (_batchLock)
         {
-            var data = new DataPage(GetAt(Root.Data.DataPage));
             var batchId = Root.Header.BatchId;
-            var batch = new ReadOnlyBatch(this, batchId, data);
+            var batch = new ReadOnlyBatch(this, batchId, Root.Data.DataPages.ToArray());
             _batchesReadOnly.Add(batch);
             return batch;
         }
@@ -230,12 +227,12 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         private readonly PagedDb _db;
         private bool _disposed;
 
-        private readonly DataPage _data;
+        private readonly DbAddress[] _rootDataPages;
 
-        public ReadOnlyBatch(PagedDb db, uint batchId, DataPage data)
+        public ReadOnlyBatch(PagedDb db, uint batchId, DbAddress[] rootDataPages)
         {
             _db = db;
-            _data = data;
+            _rootDataPages = rootDataPages;
             BatchId = batchId;
         }
 
@@ -250,7 +247,12 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             if (_disposed)
                 throw new ObjectDisposedException("The readonly batch has already been disposed");
 
-            _data.GetAccount(key, this, out var account, RootLevel);
+            var addr = RootPage.FindDataPage(_rootDataPages, key);
+            if (addr.IsNull)
+                return default;
+
+            var dataPage = new DataPage(GetAt(addr));
+            dataPage.GetAccount(key, this, out var account, RootPage.Payload.RootNibbleLevel);
             return account;
         }
 
@@ -298,16 +300,17 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         {
             CheckDisposed();
 
-            var root = _root.Data.DataPage;
-            if (root.IsNull)
+            var addr = RootPage.FindDataPage(_root.Data.DataPages, key);
+
+            if (addr.IsNull)
             {
                 return default;
             }
 
             // treat as data page
-            var data = new DataPage(_db.GetAt(root));
+            var data = new DataPage(_db.GetAt(addr));
 
-            data.GetAccount(key, this, out var account, RootLevel);
+            data.GetAccount(key, this, out var account, RootPage.Payload.RootNibbleLevel);
             return account;
         }
 
@@ -315,17 +318,17 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         {
             CheckDisposed();
 
-            ref var root = ref _root.Data.DataPage;
-            var page = root.IsNull ? GetNewPage(out root, true) : GetAt(root);
+            ref var addr = ref RootPage.FindDataPage(_root.Data.DataPages, key);
+            var page = addr.IsNull ? GetNewPage(out addr, true) : GetAt(addr);
 
             // treat as data page
             var data = new DataPage(page);
 
             var ctx = new SetContext(in key, account.Balance, account.Nonce, this);
 
-            var updated = data.Set(ctx, RootLevel);
+            var updated = data.Set(ctx, RootPage.Payload.RootNibbleLevel);
 
-            _root.Data.DataPage = _db.GetAddress(updated);
+            addr = _db.GetAddress(updated);
         }
 
         private void CheckDisposed()
