@@ -46,6 +46,7 @@ public static class Program
             allocated = new IntHistogram(short.MaxValue, 3),
             reused = new IntHistogram(short.MaxValue, 3),
             total = new IntHistogram(short.MaxValue, 3),
+            abandonedSlots = new IntHistogram(short.MaxValue, 3)
         };
 
         var db = new MemoryMappedPagedDb(DbFileSize, 64, dataPath, metrics =>
@@ -53,6 +54,7 @@ public static class Program
             histograms.allocated.RecordValue(metrics.PagesAllocated);
             histograms.reused.RecordValue(metrics.PagesReused);
             histograms.total.RecordValue(metrics.TotalPagesWritten);
+            histograms.abandonedSlots.RecordValue(metrics.AbandonedPagesSlotsCount);
         });
 
         var accountsBytes = PrepareAccounts();
@@ -77,13 +79,15 @@ public static class Program
             if (block > 0 & block % LogEvery == 0)
             {
                 // log
-                Console.WriteLine(
-                    $"At block: {block,4} with total avg. speed {TimeSpan.FromTicks(writing.ElapsedTicks / LogEvery)}/block");
+                Console.WriteLine("At block: {0,4}", block);
+                Console.WriteLine("- total avg. speed {0}/block", TimeSpan.FromTicks(writing.ElapsedTicks / LogEvery));
+                Console.WriteLine("- disk space used {0:F2}GB", db.ActualMegabytesOnDisk / 1024);
 
-                Console.WriteLine("90th percentiles:");
+                Console.WriteLine("- 90th percentiles:");
                 Write90Th(histograms.allocated, "new pages allocated");
                 Write90Th(histograms.reused, "pages reused allocated");
                 Write90Th(histograms.total, "total pages written");
+                Write90Th(histograms.abandonedSlots, "abandoned slots in the root");
 
                 writing.Restart();
 
@@ -117,7 +121,7 @@ public static class Program
 
     private static void Write90Th(HistogramBase histogram, string name)
     {
-        Console.WriteLine($"- {name} per block: {histogram.GetValueAtPercentile(0.9)}");
+        Console.WriteLine($"   - {name} per block: {histogram.GetValueAtPercentile(0.9)}");
         histogram.Reset();
     }
 

@@ -475,6 +475,18 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
                 // write the abandoned in the youngestAddr
                 youngestAddr = _db.GetAddress(first.AsPage());
             }
+
+            if (_db._reporter != null)
+            {
+                var occupied = 0;
+                foreach (var abandoned in abandonedPages)
+                {
+                    if (abandoned != DbAddress.Null)
+                        occupied++;
+                }
+
+                _metrics.ReportAbandonedPagesSlotsCount(occupied);
+            }
         }
 
         private bool TryGetNoLongerUsedPage(out DbAddress found, out DbAddress registerForGC)

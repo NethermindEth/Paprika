@@ -5,16 +5,19 @@ class BatchMetrics : IBatchMetrics
     public int PagesReused { get; private set; }
     public int PagesAllocated { get; private set; }
     public int UnusedPoolFetch { get; private set; }
-
-    public BatchMetrics()
-    {
-    }
+    public int AbandonedPagesSlotsCount { get; private set; }
 
     public void ReportPageReused() => PagesReused++;
 
     public void ReportNewPageAllocation() => PagesAllocated++;
 
     public void ReportUnusedPoolFetch() => UnusedPoolFetch++;
+
+
+    public void ReportAbandonedPagesSlotsCount(int abandonedPagesSlotsCount)
+    {
+        AbandonedPagesSlotsCount = abandonedPagesSlotsCount;
+    }
 }
 
 public interface IBatchMetrics
@@ -33,6 +36,11 @@ public interface IBatchMetrics
     /// The count of unused pool fetches.
     /// </summary>
     int UnusedPoolFetch { get; }
+
+    /// <summary>
+    /// How many abandoned pages slots are used in the root page.
+    /// </summary>
+    int AbandonedPagesSlotsCount { get; }
 
     /// <summary>
     /// Total pages written during this batch.
