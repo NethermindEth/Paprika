@@ -155,7 +155,7 @@ public class DbTests
     public void Readonly_transaction_block_till_they_are_released()
     {
         const int size = MB16;
-        const int blocksDuringReadAcquired = 1_000;
+        const int blocksDuringReadAcquired = 500; // the number should be smaller than the number of buckets in the root
         const int blocksPostRead = 10_000;
         UInt256 start = 13;
 
