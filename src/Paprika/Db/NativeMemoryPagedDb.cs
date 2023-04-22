@@ -7,7 +7,7 @@ public unsafe class NativeMemoryPagedDb : PagedDb
 {
     private readonly void* _ptr;
 
-    public NativeMemoryPagedDb(ulong size, byte historyDepth) : base(size, historyDepth)
+    public NativeMemoryPagedDb(ulong size, byte historyDepth, Action<IBatchMetrics>? reporter = null) : base(size, historyDepth, reporter)
     {
         _ptr = NativeMemory.AlignedAlloc((UIntPtr)size, (UIntPtr)Page.PageSize);
         NativeMemory.Clear(_ptr, (UIntPtr)size);

@@ -12,4 +12,8 @@
       <ProjectReference Include="..\Paprika\Paprika.csproj" />
     </ItemGroup>
 
+    <ItemGroup>
+      <PackageReference Include="HdrHistogram" Version="2.5.0" />
+    </ItemGroup>
+
 </Project>

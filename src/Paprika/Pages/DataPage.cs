@@ -81,7 +81,6 @@ public readonly unsafe struct DataPage : IPage
     /// Sets values for the given <see cref="SetContext.Key"/>
     /// </summary>
     /// <param name="ctx"></param>
-    /// <param name="batch"></param>
     /// <param name="level">The nesting level of the call</param>
     /// <returns>
     /// The actual page which handled the set operation. Due to page being COWed, it may be a different page.

@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
+using HdrHistogram;
 using Paprika.Crypto;
 using Paprika.Db;
 
@@ -11,17 +12,18 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = 4_000;
+    private const int BlockCount = 2_000;
     private const int AccountCount = 260_000_000;
     private const int AccountsPerBlock = 1000;
 
     private const int RandomSeed = 17;
 
-    private const int LogEveryNBlocks = 100;
+    private const int NumberOfLogs = 10;
 
-    private const long DbFileSize = 16 * Gb;
+    private const long DbFileSize = 8 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
     private const CommitOptions Commit = CommitOptions.FlushDataOnly;
+    private const int LogEvery = BlockCount / NumberOfLogs;
 
     public static void Main(String[] args)
     {
@@ -39,7 +41,19 @@ public static class Program
         Console.WriteLine("Initializing db of size {0}GB", DbFileSize / Gb);
         Console.WriteLine("Starting benchmark with commit level {0}", Commit);
 
-        var db = new MemoryMappedPagedDb(DbFileSize, 64, dataPath);
+        var histograms = new
+        {
+            allocated = new IntHistogram(short.MaxValue, 3),
+            reused = new IntHistogram(short.MaxValue, 3),
+            total = new IntHistogram(short.MaxValue, 3),
+        };
+
+        var db = new MemoryMappedPagedDb(DbFileSize, 64, dataPath, metrics =>
+        {
+            histograms.allocated.RecordValue(metrics.PagesAllocated);
+            histograms.reused.RecordValue(metrics.PagesReused);
+            histograms.total.RecordValue(metrics.TotalPagesWritten);
+        });
 
         var accountsBytes = PrepareAccounts();
 
@@ -60,17 +74,27 @@ public static class Program
                 counter++;
             }
 
-            if (block > 0 & block % LogEveryNBlocks == 0)
+            if (block > 0 & block % LogEvery == 0)
             {
+                // log
                 Console.WriteLine(
-                    $"At block: {block,4} with speed {TimeSpan.FromTicks(writing.ElapsedTicks / block)}/block");
+                    $"At block: {block,4} with total avg. speed {TimeSpan.FromTicks(writing.ElapsedTicks / LogEvery)}/block");
+
+                Console.WriteLine("90th percentiles:");
+                Write90Th(histograms.allocated, "new pages allocated");
+                Write90Th(histograms.reused, "pages reused allocated");
+                Write90Th(histograms.total, "total pages written");
+
+                writing.Restart();
+
+                Console.WriteLine();
             }
 
             batch.Commit(Commit);
         }
 
-        Console.WriteLine("Writing state of {0} accounts per block through {1} blocks, generated {2} accounts, took {3} used {4:F2}GB",
-            AccountsPerBlock, BlockCount, counter, writing.Elapsed, db.ActualMegabytesOnDisk / 1024);
+        Console.WriteLine("Writing state of {0} accounts per block through {1} blocks, generated {2} accounts, used {3:F2}GB",
+            AccountsPerBlock, BlockCount, counter, db.ActualMegabytesOnDisk / 1024);
 
         // reading
         var reading = Stopwatch.StartNew();
@@ -84,6 +108,17 @@ public static class Program
 
         Console.WriteLine("Reading state of all of {0} accounts from the last block took {1}",
             counter, reading.Elapsed);
+
+        Console.WriteLine("90th percentiles:");
+        Write90Th(histograms.allocated, "new pages allocated");
+        Write90Th(histograms.reused, "pages reused allocated");
+        Write90Th(histograms.total, "total pages written");
+    }
+
+    private static void Write90Th(HistogramBase histogram, string name)
+    {
+        Console.WriteLine($"- {name} per block: {histogram.GetValueAtPercentile(0.9)}");
+        histogram.Reset();
     }
 
     private static Keccak GetAccountKey(Span<byte> accountsBytes, int counter)

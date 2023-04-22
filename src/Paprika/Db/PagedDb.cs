@@ -29,6 +29,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
     private const byte RootLevel = 0;
 
     private readonly byte _historyDepth;
+    private readonly Action<IBatchMetrics>? _reporter;
     private readonly int _maxPage;
     private long _lastRoot;
     private readonly RootPage[] _roots;
@@ -46,13 +47,15 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
     /// </summary>
     /// <param name="size">The size of the database, should be a multiple of <see cref="Page.PageSize"/>.</param>
     /// <param name="historyDepth">The depth history represent how many blocks should be able to be restored from the past. Effectively,
-    /// a reorg depth. At least 2 are required</param>
-    protected PagedDb(ulong size, byte historyDepth)
+    ///     a reorg depth. At least 2 are required</param>
+    /// <param name="reporter"></param>
+    protected PagedDb(ulong size, byte historyDepth, Action<IBatchMetrics>? reporter)
     {
         if (historyDepth < MinHistoryDepth)
             throw new ArgumentException($"{nameof(historyDepth)} should be bigger than {MinHistoryDepth}");
 
         _historyDepth = historyDepth;
+        _reporter = reporter;
         _maxPage = (int)(size / Page.PageSize);
         _roots = new RootPage[historyDepth];
         _batchCurrent = null;
@@ -270,10 +273,14 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         /// </summary>
         private readonly Queue<DbAddress> _unusedPool;
 
+        private bool _noUnusedPages;
+
         /// <summary>
         /// A pool of pages that are abandoned during this batch.
         /// </summary>
         private readonly Queue<DbAddress> _abandoned;
+
+        private readonly BatchMetrics _metrics;
 
         public Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx) : base(root.Header.BatchId)
         {
@@ -283,6 +290,8 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             _ctx = ctx;
             _unusedPool = ctx.Unused;
             _abandoned = ctx.Abandoned;
+
+            _metrics = new BatchMetrics();
         }
 
         public Account GetAccount(in Keccak key)
@@ -350,6 +359,9 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
                     _db.FlushRootPage(GetAt(newRootPage));
                 }
 
+                // if reporter passed
+                _db._reporter?.Invoke(_metrics);
+
                 return _root.Data.StateRootHash;
             }
         }
@@ -371,6 +383,8 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         {
             if (TryGetNoLongerUsedPage(out addr, out var registerForGC))
             {
+                _metrics.ReportPageReused();
+
                 // succeeded getting the page from no longer used, register for gc if needed
                 if (registerForGC.IsNull == false)
                 {
@@ -379,6 +393,8 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             }
             else
             {
+                _metrics.ReportNewPageAllocation();
+
                 // on failure to reuse a page, default to allocating a new one.
                 addr = _root.Data.GetNextFreePage();
             }
@@ -465,9 +481,17 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         {
             registerForGC = default;
 
+            if (_noUnusedPages)
+            {
+                found = default;
+                return false;
+            }
+
             // check whether previous operations allocated the pool of unused pages
             if (_unusedPool.Count == 0)
             {
+                _metrics.ReportUnusedPoolFetch();
+
                 var abandonedPages = _root.Data.AbandonedPages;
 
                 // find the page across all the abandoned pages, so that it's the oldest one
@@ -488,6 +512,12 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
                         // 3. write its next in place of this page so that it's used as the pool
                         var indexInRoot = abandonedPages.IndexOf(oldestAddress);
                         abandonedPages[indexInRoot] = oldest.Next;
+                    }
+                    else
+                    {
+                        // there are no matching sets of unused pages
+                        // memoize it so that the follow up won't query over and over again
+                        _noUnusedPages = true;
                     }
                 }
             }
