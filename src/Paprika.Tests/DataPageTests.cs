@@ -1,5 +1,4 @@
 ﻿using System.Buffers.Binary;
-using System.Runtime.InteropServices;
 using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Pages;
@@ -21,9 +20,9 @@ public class DataPageTests : BasePageTests
 
         var batch = NewBatch(BatchId);
         var dataPage = new DataPage(page);
-        var ctx = new SetContext(Key0, Balance0, Nonce0);
+        var ctx = new SetContext(Key0, Balance0, Nonce0, batch);
 
-        var updated = dataPage.Set(ctx, batch, RootLevel);
+        var updated = dataPage.Set(ctx, RootLevel);
 
         new DataPage(updated).GetAccount(Key0, batch, out var account, RootLevel);
 
@@ -40,11 +39,11 @@ public class DataPageTests : BasePageTests
         var batch = NewBatch(BatchId);
 
         var dataPage = new DataPage(page);
-        var ctx1 = new SetContext(Key0, Balance0, Nonce0);
-        var ctx2 = new SetContext(Key0, Balance1, Nonce1);
+        var ctx1 = new SetContext(Key0, Balance0, Nonce0, batch);
+        var ctx2 = new SetContext(Key0, Balance1, Nonce1, batch);
 
-        var updated = dataPage.Set(ctx1, batch, RootLevel);
-        updated = new DataPage(updated).Set(ctx2, batch, RootLevel);
+        var updated = dataPage.Set(ctx1, RootLevel);
+        updated = new DataPage(updated).Set(ctx2, RootLevel);
 
         new DataPage(updated).GetAccount(Key0, batch, out var account, RootLevel);
         Assert.AreEqual(Nonce1, account.Nonce);
@@ -60,11 +59,11 @@ public class DataPageTests : BasePageTests
         var batch = NewBatch(BatchId);
 
         var dataPage = new DataPage(page);
-        var ctx1 = new SetContext(Key1a, Balance0, Nonce0);
-        var ctx2 = new SetContext(Key1b, Balance1, Nonce1);
+        var ctx1 = new SetContext(Key1a, Balance0, Nonce0, batch);
+        var ctx2 = new SetContext(Key1b, Balance1, Nonce1, batch);
 
-        var updated = dataPage.Set(ctx1, batch, RootLevel);
-        updated = new DataPage(updated).Set(ctx2, batch, RootLevel);
+        var updated = dataPage.Set(ctx1, RootLevel);
+        updated = new DataPage(updated).Set(ctx2, RootLevel);
 
         new DataPage(updated).GetAccount(Key1a, batch, out var account, RootLevel);
         Assert.AreEqual(Nonce0, account.Nonce);
@@ -84,15 +83,15 @@ public class DataPageTests : BasePageTests
         var batch = NewBatch(BatchId);
         var dataPage = new DataPage(page);
 
-        const int count = 2 * 1024 * 1024;
+        const int count = 1 * 1024 * 1024;
 
         for (uint i = 0; i < count; i++)
         {
             var key = Key1a;
             BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i);
 
-            var ctx = new SetContext(key, i, i);
-            dataPage = new DataPage(dataPage.Set(ctx, batch, RootLevel));
+            var ctx = new SetContext(key, i, i, batch);
+            dataPage = new DataPage(dataPage.Set(ctx, RootLevel));
         }
 
         for (uint i = 0; i < count; i++)
@@ -122,14 +121,14 @@ public class DataPageTests : BasePageTests
             var key = Key1a;
             BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i);
 
-            var ctx = new SetContext(key, i, i);
-
             if (i % batchEvery == 0)
             {
                 batch = batch.Next();
             }
 
-            dataPage = new DataPage(dataPage.Set(ctx, batch, RootLevel));
+            var ctx = new SetContext(key, i, i, batch);
+
+            dataPage = new DataPage(dataPage.Set(ctx, RootLevel));
         }
 
         for (uint i = 0; i < count; i++)

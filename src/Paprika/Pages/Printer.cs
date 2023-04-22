@@ -104,7 +104,7 @@ public class Printer : IPageVisitor
         var p = new[]
         {
             (Type, "DataPage"),
-            ("BatchId", page.Header.PageHeader.BatchId.ToString()),
+            ("BatchId", page.Header.BatchId.ToString()),
             ("Points Down To Pages",ListPages(nextPages)),
         };
 

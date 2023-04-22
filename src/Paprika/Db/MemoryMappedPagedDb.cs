@@ -17,7 +17,7 @@ public unsafe class MemoryMappedPagedDb : PagedDb
     private readonly MemoryMappedViewAccessor _rootsOnly;
     private readonly byte* _ptr;
 
-    public MemoryMappedPagedDb(ulong size, byte historyDepth, string dir) : base(size, historyDepth)
+    public MemoryMappedPagedDb(ulong size, byte historyDepth, string dir, Action<IBatchMetrics>? reporter = null) : base(size, historyDepth, reporter)
     {
         Path = System.IO.Path.Combine(dir, "paprika.db");
 

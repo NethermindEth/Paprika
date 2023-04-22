@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using Paprika.Pages.Frames;
 
 namespace Paprika.Pages;
 
@@ -42,13 +43,13 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     /// <param name="frame">The frame to jump to.</param>
     /// <param name="previous">The previous jump within the same page.</param>
     /// <returns>A db address.</returns>
-    public static DbAddress JumpToFrame(byte frame, DbAddress previous)
+    public static DbAddress JumpToFrame(FrameIndex frame, DbAddress previous)
     {
         Debug.Assert(previous.IsSamePage || previous.IsNull, "Only same page chaining is allowed");
 
         var countShifted = (previous.SamePageJumpCount + 1) << JumpCountShift;
 
-        return new(frame | SamePage | countShifted);
+        return new(frame.Raw | SamePage | countShifted);
     }
 
     /// <summary>
@@ -79,6 +80,9 @@ public readonly struct DbAddress : IEquatable<DbAddress>
 
     public bool IsNull => _value == NullValue;
 
+    /// <summary>
+    /// Keeps the number of frames used in the same page by jumps to the same nibble.
+    /// </summary>
     public uint SamePageJumpCount => (_value & ~SamePage) >> JumpCountShift;
 
     public bool IsSamePage => (_value & SamePage) == SamePage;
@@ -86,15 +90,19 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     // ReSharper disable once MergeIntoPattern
     public bool IsValidPageAddress => _value < Pages.Page.PageCount;
 
-    public bool TryGetSamePage(out byte frame)
+    /// <summary>
+    /// Gets the <see cref="IFrame"/> index where this address points to.
+    /// </summary>
+    /// <returns></returns>
+    public bool TryGetFrameIndex(out FrameIndex index)
     {
         if (IsSamePage)
         {
-            frame = (byte)(_value & ValueMask);
+            index = FrameIndex.FromRaw((byte)(_value & ValueMask));
             return true;
         }
 
-        frame = default;
+        index = FrameIndex.Null;
         return false;
     }
 

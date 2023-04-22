@@ -2,6 +2,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
+using Paprika.Pages.Frames;
 
 namespace Paprika.Pages;
 
@@ -22,9 +23,9 @@ public readonly unsafe struct DataPage : IPage
     [DebuggerStepThrough]
     public DataPage(Page page) => _page = page;
 
-    public ref DataPageHeader Header => ref Unsafe.As<PageHeader, DataPageHeader>(ref _page.Header);
+    public ref PageHeader Header => ref _page.Header;
 
-    public ref Payload16 Data => ref Unsafe.AsRef<Payload16>(_page.Payload);
+    public ref Payload Data => ref Unsafe.AsRef<Payload>(_page.Payload);
 
     /// <summary>
     /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
@@ -32,65 +33,66 @@ public readonly unsafe struct DataPage : IPage
     /// like page split. 
     /// </summary>
     [StructLayout(LayoutKind.Explicit, Size = Size)]
-    public struct Payload16
+    public struct Payload
     {
-        public const int Size = Page.PageSize - DataPageHeader.Size;
+        private const int Size = Page.PageSize - PageHeader.Size;
 
         public const int BucketCount = 16;
 
-        private const int FramesDataOffset = sizeof(int) + BitPool32.Size + BucketCount * DbAddress.Size;
-        public const int FrameCount = (Size - FramesDataOffset) / AccountFrame.Size;
+        /// <summary>
+        /// The offset to the first frame.
+        /// </summary>
+        private const int FramesDataOffset = sizeof(int) + BitPool64.Size + BucketCount * DbAddress.Size;
+
+        /// <summary>
+        /// How many frames fit in this page.
+        /// </summary>
+        public const int FrameCount = (Size - FramesDataOffset) / EOAFrame.Size;
 
         /// <summary>
         /// The bit map of frames used at this page.
         /// </summary>
-        [FieldOffset(0)] public BitPool32 FrameUsed;
+        [FieldOffset(0)] public BitPool64 FrameUsed;
 
         /// <summary>
         /// The nibble addressable buckets.
         /// </summary>
-        [FieldOffset(BitPool32.Size)] private fixed int BucketsData[BucketCount];
+        [FieldOffset(BitPool64.Size)] private fixed int BucketsData[BucketCount];
 
         /// <summary>
         /// Map of <see cref="BucketsData"/>.
         /// </summary>
-        [FieldOffset(BitPool32.Size)] private DbAddress Bucket;
+        [FieldOffset(BitPool64.Size)] private DbAddress Bucket;
 
         public Span<DbAddress> Buckets => MemoryMarshal.CreateSpan(ref Bucket, BucketCount);
 
         /// <summary>
-        /// Data for storing frames.
+        /// The first item of map of frames to allow ref to it.
         /// </summary>
-        [FieldOffset(FramesDataOffset)] private fixed byte FramesData[FrameCount * AccountFrame.Size];
-
-        /// <summary>
-        /// Map of <see cref="FramesData"/> as a type to allow ref to it.
-        /// </summary>
-        [FieldOffset(FramesDataOffset)] private AccountFrame Frame;
+        [FieldOffset(FramesDataOffset)] private EOAFrame Frame;
 
         /// <summary>
         /// Access all the frames.
         /// </summary>
-        public Span<AccountFrame> Frames => MemoryMarshal.CreateSpan(ref Frame, FrameCount);
+        public Span<EOAFrame> Frames => MemoryMarshal.CreateSpan(ref Frame, FrameCount);
     }
 
     /// <summary>
     /// Sets values for the given <see cref="SetContext.Key"/>
     /// </summary>
     /// <param name="ctx"></param>
-    /// <param name="batch"></param>
     /// <param name="level">The nesting level of the call</param>
     /// <returns>
     /// The actual page which handled the set operation. Due to page being COWed, it may be a different page.
     /// 
     /// </returns>
-    public Page Set(in SetContext ctx, IBatchContext batch, int level)
+    public Page Set(in SetContext ctx, int level)
     {
-        if (Header.PageHeader.BatchId != batch.BatchId)
+        if (Header.BatchId != ctx.Batch.BatchId)
         {
             // the page is from another batch, meaning, it's readonly. Copy
-            var writable = batch.GetWritableCopy(_page);
-            return new DataPage(writable).Set(ctx, batch, level);
+            var writable = ctx.Batch.GetWritableCopy(_page);
+            return new DataPage(writable).Set(ctx, level);
         }
 
         var frames = Data.Frames;
@@ -101,47 +103,40 @@ public readonly unsafe struct DataPage : IPage
         // the bucket is not null and represents a page jump, follow it
         if (address.IsNull == false && address.IsValidPageAddress)
         {
-            var page = batch.GetAt(address);
-            var updated = new DataPage(page).Set(ctx, batch, level + 1);
+            var page = ctx.Batch.GetAt(address);
+            var updated = new DataPage(page).Set(ctx, level + 1);
 
             // remember the updated
-            Data.Buckets[nibble] = batch.GetAddress(updated);
+            Data.Buckets[nibble] = ctx.Batch.GetAddress(updated);
             return _page;
         }
 
         // try update existing
-        while (address.TryGetSamePage(out var frameIndex))
+        if (TryFindFrameInBucket(address, ctx.Key, out var frameIndex))
         {
-            ref var frame = ref frames[frameIndex];
+            ref var frame = ref frames[frameIndex.Value];
 
-            if (frame.Key.Equals(ctx.Key))
-            {
-                // update
-                frame.Balance = ctx.Balance;
-                frame.Nonce = ctx.Nonce;
+            frame.Balance = ctx.Balance;
+            frame.Nonce = ctx.Nonce;
 
-                return _page;
-            }
-
-            // jump to the next
-            address = frame.Next;
+            return _page;
         }
 
-        // fail to update, insert
-        ref var bucket = ref Data.Buckets[nibble];
-        if (Data.FrameUsed.TrySetLowestBit(Payload16.FrameCount, out var reserved))
+        // fail to update, insert if there's place
+        if (Data.FrameUsed.TrySetLowestBit(Payload.FrameCount, out var reserved))
         {
-            ref var frame = ref Data.Frames[reserved];
+            ref var frame = ref frames[reserved];
 
             frame.Key = ctx.Key;
             frame.Balance = ctx.Balance;
             frame.Nonce = ctx.Nonce;
 
             // set the next to create the linked list
-            frame.Next = bucket;
+            address.TryGetFrameIndex(out var previousFrameIndex);
+            frame.Header = FrameHeader.BuildEOA(previousFrameIndex);
 
             // overwrite the bucket with the recent one
-            bucket = DbAddress.JumpToFrame(reserved, bucket);
+            Data.Buckets[nibble] = DbAddress.JumpToFrame(FrameIndex.FromIndex(reserved), Data.Buckets[nibble]);
             return _page;
         }
 
@@ -151,7 +146,7 @@ public readonly unsafe struct DataPage : IPage
         var biggestBucket = DbAddress.Null;
         var index = -1;
 
-        for (var i = 0; i < Payload16.BucketCount; i++)
+        for (var i = 0; i < Payload.BucketCount; i++)
         {
             if (Data.Buckets[i].IsSamePage && Data.Buckets[i].SamePageJumpCount > biggestBucket.SamePageJumpCount)
             {
@@ -161,53 +156,34 @@ public readonly unsafe struct DataPage : IPage
         }
 
         // address is set to the most counted
-        var child = batch.GetNewPage(out Data.Buckets[index], true);
+        var child = ctx.Batch.GetNewPage(out Data.Buckets[index], true);
         var dataPage = new DataPage(child);
 
         // copy the data pointed by address to the new dataPage, clean up its bits from reserved frames
-        while (biggestBucket.TryGetSamePage(out var frameIndex))
-        {
-            ref var frame = ref frames[frameIndex];
+        biggestBucket.TryGetFrameIndex(out var biggestFrameChain);
 
-            var set = new SetContext(frame.Key, frame.Balance, frame.Nonce);
-            dataPage.Set(set, batch, (byte)(level + 1));
+        while (biggestFrameChain.IsNull == false)
+        {
+            ref var frame = ref frames[biggestFrameChain.Value];
+
+            var set = new SetContext(frame.Key, frame.Balance, frame.Nonce, ctx.Batch);
+            dataPage.Set(set, (byte)(level + 1));
 
             // the frame is no longer used, clear it
-            Data.FrameUsed.ClearBit(frameIndex);
+            Data.FrameUsed.ClearBit(biggestFrameChain.Value);
 
             // jump to the next
-            biggestBucket = frame.Next;
+            biggestFrameChain = frame.Header.NextFrame;
         }
 
         // there's a place on this page now, add it again
-        Set(ctx, batch, level);
+        Set(ctx, level);
 
         return _page;
     }
 
-    [StructLayout(LayoutKind.Explicit, Size = Size)]
-    public struct DataPageHeader
-    {
-        public const int Size = PageHeader.Size + sizeof(DataPageFlags);
-
-        [FieldOffset(0)]
-        public PageHeader PageHeader;
-
-        [FieldOffset(PageHeader.Size)]
-        public DataPageFlags Flags;
-    }
-
-    /// <summary>
-    /// All the flags for the <see cref="DataPage"/>s.
-    /// </summary>
-    public enum DataPageFlags : int
-    {
-        // type of the page, and others
-    }
-
     public void GetAccount(in Keccak key, IReadOnlyBatchContext batch, out Account result, int level)
     {
-        var frames = Data.Frames;
         var nibble = NibblePath.FromKey(key.BytesAsSpan, level).FirstNibble;
         var bucket = Data.Buckets[nibble];
 
@@ -218,19 +194,39 @@ public readonly unsafe struct DataPage : IPage
             return;
         }
 
-        while (bucket.TryGetSamePage(out var frameIndex))
+        if (TryFindFrameInBucket(bucket, key, out var index))
         {
-            ref var frame = ref frames[frameIndex];
-
-            if (frame.Key.Equals(key))
-            {
-                result = new Account(frame.Balance, frame.Nonce);
-                return;
-            }
-
-            bucket = frame.Next;
+            ref readonly var frame = ref Data.Frames[index.Value];
+            result = new Account(frame.Balance, frame.Nonce);
+            return;
         }
 
         result = default;
+    }
+
+    /// <summary>
+    /// Tries to find a frame with a matching <paramref name="key"/> within a given <paramref name="bucket"/>.
+    /// </summary>
+    private bool TryFindFrameInBucket(DbAddress bucket, in Keccak key, out FrameIndex index)
+    {
+        var frames = Data.Frames;
+        if (bucket.TryGetFrameIndex(out var frameIndex))
+        {
+            while (frameIndex.IsNull == false)
+            {
+                ref readonly var frame = ref frames[frameIndex.Value];
+
+                if (frame.Key.Equals(key))
+                {
+                    index = frameIndex;
+                    return true;
+                }
+
+                frameIndex = frame.Header.NextFrame;
+            }
+        }
+
+        index = default;
+        return false;
     }
 }
