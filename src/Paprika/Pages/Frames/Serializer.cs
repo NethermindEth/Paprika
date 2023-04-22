@@ -1,0 +1,66 @@
+﻿using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using Nethermind.Int256;
+using Paprika.Crypto;
+
+namespace Paprika.Pages.Frames;
+
+public static class Serializer
+{
+    private const int Uint256Size = 32;
+    private const int Uint256PrefixSize = 1;
+    private const int MaxUint256SizeWithPrefix = Uint256Size + Uint256PrefixSize;
+    private const bool BigEndian = true;
+    private const int MaxNibblePathLength = Keccak.Size + 1;
+
+    private static Span<byte> WriteTo(Span<byte> destination, UInt256 value)
+    {
+        var uint256 = destination.Slice(1, Uint256Size);
+        value.ToBigEndian(uint256);
+        var firstNonZero = uint256.IndexOfAnyExcept((byte)0);
+
+        var nonZeroBytes = (byte)(Uint256Size - firstNonZero);
+        destination[0] = nonZeroBytes;
+
+        // this will be usually the case, no need to check with if
+        // move to first non zero
+        uint256.Slice(firstNonZero).CopyTo(uint256);
+
+        return destination.Slice(Uint256PrefixSize + nonZeroBytes);
+    }
+
+    private static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out UInt256 value)
+    {
+        var nonZeroBytes = source[0];
+        Span<byte> uint256 = stackalloc byte[Uint256Size];
+
+        source.Slice(Uint256PrefixSize, nonZeroBytes).CopyTo(uint256.Slice(Uint256Size - nonZeroBytes));
+        value = new UInt256(uint256, BigEndian);
+        return source.Slice(nonZeroBytes + Uint256PrefixSize);
+    }
+
+    public static class Account
+    {
+        // TODO: provide header differentiating type of the account and the codeHash and storage
+        public const int EOAMaxByteCount = MaxNibblePathLength + MaxUint256SizeWithPrefix + MaxUint256SizeWithPrefix;
+
+        public static Span<byte> WriteEOA(Span<byte> destination, NibblePath key, UInt256 balance, UInt256 nonce)
+        {
+            var span = key.WriteTo(destination);
+            span = WriteTo(span, balance);
+            span = WriteTo(span, nonce);
+            return span;
+        }
+
+        public static void ReadPath(ReadOnlySpan<byte> source, out NibblePath path) =>
+            NibblePath.ReadFrom(source, out path);
+
+        public static void ReadAccount(ReadOnlySpan<byte> source, out NibblePath path, out UInt256 balance,
+            out UInt256 nonce)
+        {
+            var span = NibblePath.ReadFrom(source, out path);
+            span = ReadFrom(span, out balance);
+            span = ReadFrom(span, out nonce);
+        }
+    }
+}
