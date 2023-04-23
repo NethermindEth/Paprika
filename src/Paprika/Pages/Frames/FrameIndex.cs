@@ -31,4 +31,6 @@ public readonly struct FrameIndex
     public byte Raw => _raw;
 
     public bool IsNull => _raw == 0;
+
+    public override string ToString() => IsNull ? "null" : $"@{Value}";
 }

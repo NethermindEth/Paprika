@@ -23,22 +23,16 @@ public readonly struct Frame
         /// <summary>
         /// Releases the given frame adding it to the released set.
         /// </summary>
-        public void Release(ref Frame frame, Span<Frame> frames)
+        public void Release(FrameIndex index, Span<Frame> frames)
         {
-            ref var header = ref Unsafe.As<Frame, Header>(ref frame);
+            ref var refFrame = ref frames[index.Value];
+            ref var header = ref Unsafe.As<Frame, Header>(ref refFrame);
 
             // point to the current released
             header.Next = Released;
 
-            var index = GetIndex(frames, ref frame);
-
             // set to the frame
-            Released = FrameIndex.FromIndex(index);
-        }
-
-        private static byte GetIndex(in Span<Frame> frames, ref Frame frame)
-        {
-            return (byte)(Unsafe.ByteOffset(ref frames[0], ref frame).ToInt64() / Frame.Size);
+            Released = index;
         }
 
         /// <summary>
@@ -67,9 +61,25 @@ public readonly struct Frame
 
             ref var frame = ref frames[Released.Value];
 
-            // check header
+            // fast check for exact match
             ref var header = ref Unsafe.As<Frame, Header>(ref frame);
+            if (header.Length == frameCount)
+            {
+                Write(ref frame, payload, next);
+                writtenTo = Released;
+
+                // move to next
+                Released = header.Next;
+                return true;
+            }
+
             throw new NotImplementedException();
+        }
+
+        public Span<byte> Read(FrameIndex index, Span<Frame> frames, out FrameIndex next)
+        {
+            ref var frame = ref frames[index.Value];
+            return Frame.Read(ref frame, out next);
         }
     }
 
@@ -77,7 +87,7 @@ public readonly struct Frame
     /// Reads a <see cref="Span{Byte}"/> from the given frame pointed by <paramref name="frame"/>
     /// </summary>
     /// <returns>Byte representation.</returns>
-    public static Span<byte> Read(ref Frame frame, out FrameIndex next)
+    private static Span<byte> Read(ref Frame frame, out FrameIndex next)
     {
         var header = Unsafe.As<Frame, Header>(ref frame);
         next = header.Next;

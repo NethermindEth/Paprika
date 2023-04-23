@@ -22,8 +22,7 @@ public class FrameTests
 
         pool.TryWrite(bytes, Next, frames, out var writtenTo).Should().BeTrue();
 
-        ref var frame = ref frames[writtenTo.Value];
-        var read = Frame.Read(ref frame, out var next);
+        var read = pool.Read(writtenTo, frames, out var next);
 
         Assert.AreEqual(Next, next);
 
@@ -31,16 +30,31 @@ public class FrameTests
             .BeTrue("There can be more bytes in the frame, but they should start with original");
     }
 
-    // [Test]
-    // public void Write_Release_Write()
-    // {
-    //     var bytes0 = new byte[] { 13 };
-    //     var bytes1 = new byte[] { 17 };
-    //     var bytes2 = new byte[] { 23 };
-    //     
-    //     Span<Frame> frames = stackalloc Frame[2];
-    //     var pool = new Frame.Pool();
-    //     
-    //     pool.
-    // }
+    [Test]
+    public void Write_Release_Write()
+    {
+        var bytes0 = new byte[] { 13 };
+        var bytes1 = new byte[] { 17 };
+        var bytes2 = new byte[] { 23 };
+
+        Span<Frame> frames = stackalloc Frame[2];
+        var pool = new Frame.Pool();
+
+        pool.TryWrite(bytes0, FrameIndex.Null, frames, out var writtenTo0).Should().BeTrue();
+        pool.TryWrite(bytes1, writtenTo0, frames, out var writtenTo1).Should().BeTrue();
+
+        // TODO: how to check links?
+        pool.Release(writtenTo1, frames);
+
+        pool.TryWrite(bytes2, writtenTo0, frames, out var writtenTo2).Should().BeTrue();
+
+        writtenTo1.Raw.Should().Be(writtenTo2.Raw);
+
+        var read = pool.Read(writtenTo2, frames, out var next);
+
+        Assert.AreEqual(writtenTo0, next);
+
+        read.StartsWith(bytes2).Should()
+            .BeTrue("There can be more bytes in the frame, but they should start with original");
+    }
 }
