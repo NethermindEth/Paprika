@@ -4,14 +4,18 @@ using System.Runtime.InteropServices;
 namespace Paprika.Pages.Frames;
 
 /// <summary>
-/// Provides a wrapping for a <see cref="byte"/> based index of a <see cref="IFrame"/> on the page,
-/// so that 0 can be used as a value and is different from the null value. 
+/// Provides a coarse grained primitive used for memory management on the page.
 /// </summary>
 [StructLayout(LayoutKind.Explicit, Size = Size)]
 public readonly struct Frame
 {
-    public const int Size = 8;
+    public const int Size = 16;
 
+    /// <summary>
+    /// The pool used to manage free and released memory on page.
+    /// Depends on the external <see cref="Span{Frame}"/> provided by the caller
+    /// as this is usually created on the page and depends on the size available in there.
+    /// </summary>
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     public struct Pool
     {
@@ -73,7 +77,8 @@ public readonly struct Frame
                 return true;
             }
 
-            throw new NotImplementedException();
+            throw new NotImplementedException(
+                "Iteration through the frames releases is not yet implemented");
         }
 
         public Span<byte> Read(FrameIndex index, Span<Frame> frames, out FrameIndex next)
