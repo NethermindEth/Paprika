@@ -19,6 +19,13 @@ public static class Serializer
         value.ToBigEndian(uint256);
         var firstNonZero = uint256.IndexOfAnyExcept((byte)0);
 
+        if (firstNonZero == -1)
+        {
+            // only zeros, special case
+            destination[0] = 0;
+            return destination.Slice(1);
+        }
+
         var nonZeroBytes = (byte)(Uint256Size - firstNonZero);
         destination[0] = nonZeroBytes;
 
@@ -42,7 +49,9 @@ public static class Serializer
     public static class Account
     {
         // TODO: provide header differentiating type of the account and the codeHash and storage
-        public const int EOAMaxByteCount = MaxNibblePathLength + MaxUint256SizeWithPrefix + MaxUint256SizeWithPrefix;
+        public const int EOAMaxByteCount = MaxNibblePathLength + // path
+                                           MaxUint256SizeWithPrefix + // balance
+                                           MaxUint256SizeWithPrefix; // nonce
 
         public static Span<byte> WriteEOA(Span<byte> destination, NibblePath key, UInt256 balance, UInt256 nonce)
         {

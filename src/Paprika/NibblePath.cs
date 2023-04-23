@@ -58,6 +58,11 @@ public readonly ref struct NibblePath
     /// </summary>
     public int MaxLength => Length / 2 + 2;
 
+    /// <summary>
+    /// Writes the nibble path into the destination.
+    /// </summary>
+    /// <param name="destination"></param>
+    /// <returns>The leftover.</returns>
     public Span<byte> WriteTo(Span<byte> destination)
     {
         var odd = _odd & OddBit;
