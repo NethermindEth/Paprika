@@ -7,7 +7,7 @@ namespace Paprika.Tests;
 public class PageBufferTests
 {
     [Test]
-    public void Minimal()
+    public void Set_Get_Delete_Get_AnotherSet()
     {
         Span<byte> span = stackalloc byte[PageBuffer.MixSize];
         var buffer = new PageBuffer(span);
@@ -21,7 +21,9 @@ public class PageBufferTests
         buffer.TrySet(key, data, ref prev).Should().BeTrue();
 
         buffer.TryGet(key, out var retrieved, prev).Should().BeTrue();
-
         data.SequenceEqual(retrieved).Should().BeTrue();
+
+        buffer.Delete(key, prev).Should().BeTrue("Should find and delete entry");
+        buffer.TryGet(key, out _, prev).Should().BeFalse("The entry shall no longer exist");
     }
 }
