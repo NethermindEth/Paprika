@@ -8,19 +8,20 @@ namespace Paprika.Pages;
 /// Represents an in-page buffer, responsible for storing items and information related to them.
 /// </summary>
 /// <remarks>
-/// The page buffer is bucket-aware, meaning that the component using it can use the notion of buckets
-/// so that the internal linked lists are shorter. For example <see cref="DataPage"/> with spread of 16
-/// buckets can use <see cref="DbAddress"/> either as a page address or <see cref="Index{Ushort}"/> to
-/// provide the bucket for the buffer.
+/// The page buffer is a modified version of a slot array, that does not extrenalize slot indexes.
+/// It keeps an internal map, now implemented with a not-the-best loop over slots. With the use of hash,
+/// it should be small enough and fast enough for now.
 /// </remarks>
 public readonly ref struct PageBuffer
 {
     public const int AllocationGranularity = 8;
     public const int MixSize = AllocationGranularity * 3;
 
+    private const int ItemLengthLength = 2;
+
     private readonly ref Header _header;
     private readonly Span<byte> _data;
-    private readonly Span<ItemId> _ids;
+    private readonly Span<Slot> _slots;
 
     public enum SetOptions
     {
@@ -37,77 +38,77 @@ public readonly ref struct PageBuffer
     {
         _header = ref Unsafe.As<byte, Header>(ref buffer[0]);
         _data = buffer.Slice(Header.Size);
-        _ids = MemoryMarshal.Cast<byte, ItemId>(_data);
+        _slots = MemoryMarshal.Cast<byte, Slot>(_data);
     }
 
-    public bool TrySet(ReadOnlySpan<byte> key, ReadOnlySpan<byte> data, ref Index<ushort> bucket,
-        SetOptions options = SetOptions.None)
+    public bool TrySet(ReadOnlySpan<byte> key, ReadOnlySpan<byte> data, SetOptions options = SetOptions.None)
     {
-        var prefix = ItemId.ExtractKeyBytes(key);
+        var hash = Slot.HashKey(key);
 
-        if (bucket.IsNull == false)
-        {
-            // try search first and replace in situ. If possible,
-            if (TryGetImpl(key, bucket, out var oldData, out var index))
-            {
-                // if exact match in length or options allow to write to a bigger bucket
-                // copy inline and change nothing
-                if (oldData.Length == data.Length ||
-                    (options == SetOptions.ValueEncodesLength && oldData.Length > data.Length))
-                {
-                    data.CopyTo(oldData);
-                    return true;
-                }
-
-                // no possibility to write in situ, mark as deleted and move further
-                _ids[index.Value].IsDeleted = true;
-            }
-        }
+        // TODO: implement search and in-situ replacement
 
         // does not exist yet, calculate
-        var dataRequiredWithNoLength =
-            (ushort)(key.Length + data.Length - ItemId.KeyExtractedBytes);
-        var dataRequired = (ushort)(dataRequiredWithNoLength + ItemId.ItemLengthLength);
+        var dataRequiredWithNoLength = (ushort)(key.Length + data.Length);
+        var dataRequired = (ushort)(dataRequiredWithNoLength + Slot.ItemLengthLength);
 
-        if (_header.Taken + dataRequired + ItemId.Size > _data.Length)
+        if (_header.Taken + dataRequired + Slot.Size > _data.Length)
         {
             return false;
         }
 
         var at = _header.Low;
-        ref var id = ref _ids[at / ItemId.Size];
+        ref var id = ref _slots[at / Slot.Size];
 
-        // write ItemId
-        id.ItemPrefix = prefix;
-        id.NextAddress = bucket.Raw;
+        // write slot
+        id.Hash = hash;
         id.ItemAddress = (ushort)(_data.Length - _header.Low - dataRequired);
+        id.IsDeleted = false;
 
         // write item, first length, then key, then data
         var dest = _data.Slice(id.ItemAddress, dataRequired);
         WriteDataLength(dest, dataRequiredWithNoLength);
 
-        key.Slice(ItemId.KeyExtractedBytes).CopyTo(dest.Slice(ItemId.ItemLengthLength));
-        data.CopyTo(dest.Slice(ItemId.ItemLengthLength + key.Length - ItemId.KeyExtractedBytes));
+        key.CopyTo(dest.Slice(Slot.ItemLengthLength));
+        data.CopyTo(dest.Slice(Slot.ItemLengthLength + key.Length));
 
         // commit low and high
-        bucket = Index<ushort>.FromIndex(_header.Low);
-        _header.Low += ItemId.Size;
+        _header.Low += Slot.Size;
         _header.High += dataRequired;
         return true;
     }
 
-    public bool Delete(ReadOnlySpan<byte> key, Index<ushort> bucket)
+    public bool Delete(ReadOnlySpan<byte> key)
     {
-        if (TryGetImpl(key, bucket, out _, out var index))
+        if (TryGetImpl(key, out _, out var index))
         {
-            if (index.Value == _header.Low - ItemId.Size)
+            // mark as deleted first
+            _slots[index].IsDeleted = true;
+
+            // check if it's the last one and free space if possible
+            var lastWrittenIndex = _header.Low / Slot.Size - 1;
+
+            if (index == lastWrittenIndex)
             {
-                // special case, the entry is the last one
-                throw new NotImplementedException("Implement the special case trimming this all the previous " +
-                                                  "that were deleted ");
+                while (index >= 0 && _slots[index].IsDeleted)
+                {
+                    // undo writing low
+                    _header.Low -= Slot.Size;
+
+                    // undo writing high
+                    var slice = _data.Slice(_slots[index].ItemAddress);
+                    var total = ReadDataLength(slice) + ItemLengthLength;
+                    _header.High = (ushort)(_header.High - total);
+
+                    // cleanup
+                    _slots[index] = default;
+
+                    // move back by one to see if it's deleted as well
+                    index--;
+                }
+
+                return true;
             }
-            
-            _ids[index.Value].IsDeleted = true;
+
             return true;
         }
 
@@ -119,9 +120,9 @@ public readonly ref struct PageBuffer
 
     private static ushort ReadDataLength(Span<byte> source) => BinaryPrimitives.ReadUInt16LittleEndian(source);
 
-    public bool TryGet(ReadOnlySpan<byte> key, out ReadOnlySpan<byte> data, Index<ushort> bucket)
+    public bool TryGet(ReadOnlySpan<byte> key, out ReadOnlySpan<byte> data)
     {
-        if (TryGetImpl(key, bucket, out var span, out _))
+        if (TryGetImpl(key, out var span, out _))
         {
             data = span;
             return true;
@@ -131,89 +132,86 @@ public readonly ref struct PageBuffer
         return false;
     }
 
-    private bool TryGetImpl(ReadOnlySpan<byte> key, Index<ushort> bucket, out Span<byte> data,
-        out Index<ushort> indexPointingToData)
+    private bool TryGetImpl(ReadOnlySpan<byte> key, out Span<byte> data, out int slotIndex)
     {
-        var prefix = ItemId.ExtractKeyBytes(key);
+        var hash = Slot.HashKey(key);
 
-        var index = bucket;
-        while (index.IsNull == false)
+        // TODO: replace with
+        // var cast = MemoryMarshal.Cast<Slot, ushort>(_slots.Slice(_header.Low));
+        // cast.IndexOf(hash);
+
+        var to = _header.Low / Slot.Size;
+        for (int i = 0; i < to; i++)
         {
-            ref readonly var id = ref _ids[index.Value];
-
-            // compare only not deleted and with the same prefix
-            if (id.IsDeleted == false && id.ItemPrefix == prefix)
+            ref readonly var slot = ref _slots[i];
+            if (slot.IsDeleted == false &&
+                slot.Hash == hash)
             {
-                var slice = _data.Slice(id.ItemAddress);
+                var slice = _data.Slice(slot.ItemAddress);
                 var dataLength = ReadDataLength(slice);
                 var actual = slice.Slice(2, dataLength);
 
                 // The StartsWith check assumes that all the keys have the same length.
-                var keyLeftover = key.Slice(ItemId.KeyExtractedBytes);
-                if (actual.StartsWith(keyLeftover))
+                if (actual.StartsWith(key))
                 {
-                    data = actual.Slice(keyLeftover.Length);
-                    indexPointingToData = index;
+                    data = actual.Slice(key.Length);
+                    slotIndex = i;
                     return true;
                 }
             }
-
-            index = Index<ushort>.FromRaw(id.NextAddress);
         }
 
         data = default;
-        indexPointingToData = default;
+        slotIndex = default;
         return false;
     }
 
-
     [StructLayout(LayoutKind.Explicit, Size = Size)]
-    private struct ItemId
+    private struct Slot
     {
         public const int Size = 8;
-        public const int KeyExtractedBytes = 4;
         public const int ItemLengthLength = 2;
 
-        private const int BitsForPageAddress = 12;
-        private const uint InPageAddressMask = Page.PageSize - 1;
-        private const uint Bit = 1;
+        // ItemAddress
+        private const ushort AddressMask = Page.PageSize - 1;
 
-        private const int NextShift = BitsForPageAddress * 0;
-        private const int ItemShift = BitsForPageAddress * 1;
-        private const int DeletedShift = BitsForPageAddress * 2; // 24
-
-        /// <summary>
-        /// The next chained item.
-        /// </summary>
-        public ushort NextAddress
-        {
-            get => (ushort)((Raw >> NextShift) & InPageAddressMask);
-            set => Raw = Raw & ~(uint)(InPageAddressMask << NextShift) | ((uint)value << NextShift);
-        }
+        // IsDeleted
+        private const int DeletedShift = 15;
+        private const ushort DeletedBit = 1 << DeletedShift;
 
         /// <summary>
         /// The address of this item.
         /// </summary>
         public ushort ItemAddress
         {
-            get => (ushort)((Raw >> ItemShift) & InPageAddressMask);
-            set => Raw = Raw & ~(InPageAddressMask << ItemShift) | ((uint)value << ItemShift);
+            get => (ushort)(Raw & AddressMask);
+            set => Raw = (ushort)((Raw & ~AddressMask) | value);
         }
-
-        public bool IsDeleted
-        {
-            get => ((Raw >> DeletedShift) & Bit) == Bit;
-            set => Raw = Raw & ~(Bit << DeletedShift) | ((value ? Bit : 0) << DeletedShift);
-        }
-
-        [FieldOffset(0)] private uint Raw;
 
         /// <summary>
-        /// First 4 bytes extracted from the item for fast comparisons.
+        /// Whether it's deleted
         /// </summary>
-        [FieldOffset(4)] public uint ItemPrefix;
+        public bool IsDeleted
+        {
+            get => (Raw & DeletedBit) == DeletedBit;
+            set => Raw = (ushort)((Raw & ~DeletedBit) | (value ? DeletedBit : 0));
+        }
 
-        public static uint ExtractKeyBytes(ReadOnlySpan<byte> key) => BinaryPrimitives.ReadUInt32LittleEndian(key);
+        [FieldOffset(0)] private ushort Raw;
+
+        /// <summary>
+        /// The memorized result of <see cref="HashKey"/> of this item.
+        /// </summary>
+        [FieldOffset(2)] public ushort Hash;
+
+        /// <summary>
+        /// Builds the hash for the key.
+        /// </summary>
+        public static ushort HashKey(ReadOnlySpan<byte> key)
+        {
+            var prefix = BinaryPrimitives.ReadUInt32LittleEndian(key);
+            return unchecked((ushort)(prefix ^ (prefix >> 16)));
+        }
     }
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
