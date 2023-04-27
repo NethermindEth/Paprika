@@ -278,7 +278,7 @@ public readonly ref struct FixedMap
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Slot
     {
-        public const int Size = 8;
+        public const int Size = 4;
 
         // ItemAddress
         private const ushort AddressMask = Page.PageSize - 1;
@@ -319,6 +319,11 @@ public readonly ref struct FixedMap
         {
             rest = key.SliceFrom(4);
             return key.GetFirst4Nibbles();
+        }
+
+        public override string ToString()
+        {
+            return $"{nameof(Prefix)}: {Prefix}, {nameof(ItemAddress)}: {ItemAddress}, {nameof(IsDeleted)}: {IsDeleted}";
         }
     }
 
