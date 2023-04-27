@@ -35,10 +35,14 @@ public class NibblePathTests
 
         var path = NibblePath.FromKey(span);
 
-        Assert.AreEqual(0xD, path.GetAt(0));
-        Assert.AreEqual(0xC, path.GetAt(1));
-        Assert.AreEqual(0xB, path.GetAt(2));
-        Assert.AreEqual(0xA, path.GetAt(3));
+        Span<byte> expected = stackalloc byte[] { 0xD, 0xC, 0xB, 0xA };
+
+        for (int i = 0; i < expected.Length; i++)
+        {
+            path.GetAt(i).Should().Be(expected[i]);
+        }
+
+        path.GetFirst4Nibbles().Should().Be(BinaryPrimitives.ReadUInt16LittleEndian(span));
     }
 
     [Test]
@@ -48,16 +52,21 @@ public class NibblePathTests
         const byte second = 0xBA;
         const byte third = 0x90;
         Span<byte> span = stackalloc byte[3] { first, second, third };
+        const ushort value = 0x9ABC;
 
         var path = NibblePath.FromKey(span, 1);
 
-        Assert.AreEqual(0xC, path.GetAt(0));
-        Assert.AreEqual(0xB, path.GetAt(1));
-        Assert.AreEqual(0xA, path.GetAt(2));
-        Assert.AreEqual(0x9, path.GetAt(3));
+        Span<byte> expected = stackalloc byte[] { 0xC, 0xB, 0xA, 0x9 };
+
+        for (int i = 0; i < expected.Length; i++)
+        {
+            path.GetAt(i).Should().Be(expected[i]);
+        }
+
+        path.GetFirst4Nibbles().Should().Be(value);
     }
 
-    private void AssertDiffAt(in NibblePath path1, in NibblePath path2, int diffAt)
+    private static void AssertDiffAt(in NibblePath path1, in NibblePath path2, int diffAt)
     {
         Assert.AreEqual(diffAt, path1.FindFirstDifferentNibble(path2));
         Assert.AreEqual(diffAt, path2.FindFirstDifferentNibble(path1));
