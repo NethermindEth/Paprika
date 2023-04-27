@@ -100,11 +100,9 @@ public readonly unsafe struct DataPage : IPage
 
         // in-page write
         Span<byte> key = path.WriteTo(stackalloc byte[path.MaxByteLength]);
-        Span<byte> data = stackalloc byte[Serializer.Account.EOAMaxByteCount];
 
-        // TODO: remove path from here
-        var leftover = Serializer.Account.WriteEOA(data, ctx.Balance, ctx.Nonce);
-        data = data.Slice(0, data.Length - leftover.Length);
+        var data = Serializer.Account.WriteEOATo(stackalloc byte[Serializer.Account.EOAMaxByteCount],
+            ctx.Balance, ctx.Nonce);
 
         var map = new FixedMap(Data.FixedMapSpan);
         if (map.TrySet(key, data))

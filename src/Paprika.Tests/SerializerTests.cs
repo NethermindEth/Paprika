@@ -18,8 +18,7 @@ public class SerializerTests
     {
         Span<byte> destination = stackalloc byte[Serializer.Account.EOAMaxByteCount];
 
-        var leftover = Serializer.Account.WriteEOA(destination, balance, nonce);
-        var actual = destination.Slice(0, destination.Length - leftover.Length);
+        var actual = Serializer.Account.WriteEOATo(destination, balance, nonce);
 
         Serializer.Account.ReadAccount(actual, out var balanceRead, out var nonceRead);
 

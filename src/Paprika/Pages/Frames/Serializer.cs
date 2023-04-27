@@ -51,14 +51,15 @@ public static class Serializer
                                            MaxUint256SizeWithPrefix; // nonce
 
         /// <summary>
-        /// Serializes the account
+        /// Serializes the account.
         /// </summary>
-        /// <returns>The leftover.</returns>
-        public static Span<byte> WriteEOA(Span<byte> destination, UInt256 balance, UInt256 nonce)
+        /// <returns>The actual payload written.</returns>
+        public static Span<byte> WriteEOATo(Span<byte> destination, UInt256 balance, UInt256 nonce)
         {
-            var span = WriteToWithLeftover(destination, balance);
-            span = WriteToWithLeftover(span, nonce);
-            return span;
+            var leftover = WriteToWithLeftover(destination, balance);
+            leftover = WriteToWithLeftover(leftover, nonce);
+
+            return destination.Slice(0, destination.Length - leftover.Length);
         }
 
         public static void ReadAccount(ReadOnlySpan<byte> source, out UInt256 balance,
