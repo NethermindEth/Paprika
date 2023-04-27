@@ -52,6 +52,7 @@ jobs:
 
     - name: Code Coverage Report
       uses: irongut/CodeCoverageSummary@v1.3.0
+      if: ${{ false }} # until https://github.com/irongut/CodeCoverageSummary/issues/168
       with:
         filename: coverage/**/coverage.cobertura.xml
         badge: true
@@ -65,7 +66,7 @@ jobs:
     
     - name: Coverage PR Comment
       uses: marocchino/sticky-pull-request-comment@v2
-      if: github.event_name == 'pull_request'
+      if: ${{ false }} # until https://github.com/irongut/CodeCoverageSummary/issues/168 github.event_name == 'pull_request'
       with:
         recreate: true
         path: code-coverage-results.md
