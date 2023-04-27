@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Buffers;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
@@ -99,16 +100,16 @@ public readonly unsafe struct DataPage : IPage
         }
 
         // in-page write
-        Span<byte> key = path.WriteTo(stackalloc byte[path.MaxByteLength]);
-
         var data = Serializer.Account.WriteEOATo(stackalloc byte[Serializer.Account.EOAMaxByteCount],
             ctx.Balance, ctx.Nonce);
 
         var map = new FixedMap(Data.FixedMapSpan);
-        if (map.TrySet(key, data))
+        if (map.TrySet(path, data))
         {
             return _page;
         }
+
+        map.CountValuesInBuckets(Payload.BucketCount);
 
         throw new InsufficientMemoryException();
 
@@ -198,9 +199,7 @@ public readonly unsafe struct DataPage : IPage
         // read in-page
         var map = new FixedMap(Data.FixedMapSpan);
 
-        Span<byte> pathWritten = path.WriteTo(stackalloc byte[path.MaxByteLength]);
-
-        if (map.TryGet(pathWritten, out var data))
+        if (map.TryGet(path, out var data))
         {
             Serializer.Account.ReadAccount(data, out var balance, out var nonce);
             result = new Account(balance, nonce);

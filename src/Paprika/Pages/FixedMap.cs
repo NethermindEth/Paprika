@@ -18,9 +18,9 @@ namespace Paprika.Pages;
 /// </remarks>
 public readonly ref struct FixedMap
 {
-    public const int AllocationGranularity = 8;
-    public const int MixSize = AllocationGranularity * 3;
+    public const int MinSize = AllocationGranularity * 3;
 
+    private const int AllocationGranularity = 8;
     private const int ItemLengthLength = 2;
 
     private readonly ref Header _header;
@@ -36,7 +36,7 @@ public readonly ref struct FixedMap
         _slots = MemoryMarshal.Cast<byte, Slot>(_data);
     }
 
-    public bool TrySet(ReadOnlySpan<byte> key, ReadOnlySpan<byte> data)
+    public bool TrySet(NibblePath key, ReadOnlySpan<byte> data)
     {
         if (TryGetImpl(key, out var existingData, out var index))
         {
@@ -51,10 +51,11 @@ public readonly ref struct FixedMap
             DeleteImpl(index);
         }
 
-        var hash = Slot.HashKey(key);
+        var hash = Slot.ExtractPrefix(key, out key);
+        var encodedKey = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
         // does not exist yet, calculate total memory needed
-        var total = GetTotalSpaceRequired(key, data);
+        var total = GetTotalSpaceRequired(encodedKey, data);
 
         if (_header.Taken + total + Slot.Size > _data.Length)
         {
@@ -79,16 +80,16 @@ public readonly ref struct FixedMap
         ref var id = ref _slots[at / Slot.Size];
 
         // write slot
-        id.Hash = hash;
+        id.Prefix = hash;
         id.ItemAddress = (ushort)(_data.Length - _header.High - total);
 
         // write item, first length, then key, then data
         var dest = _data.Slice(id.ItemAddress, total);
 
-        WriteEntryLength(dest, (ushort)(key.Length + data.Length));
+        WriteEntryLength(dest, (ushort)(encodedKey.Length + data.Length));
 
-        key.CopyTo(dest.Slice(ItemLengthLength));
-        data.CopyTo(dest.Slice(ItemLengthLength + key.Length));
+        encodedKey.CopyTo(dest.Slice(ItemLengthLength));
+        data.CopyTo(dest.Slice(ItemLengthLength + encodedKey.Length));
 
         // commit low and high
         _header.Low += Slot.Size;
@@ -96,12 +97,44 @@ public readonly ref struct FixedMap
         return true;
     }
 
+    /// <summary>
+    /// Counts values according to specified buckets.
+    /// </summary>
+    public void CountValuesInBuckets(int count)
+    {
+        Span<ushort> buckets = stackalloc ushort[count];
+
+        var mod = buckets.Length;
+
+        var to = _header.Low / Slot.Size;
+        for (var i = 0; i < to; i++)
+        {
+            ref readonly var slot = ref _slots[i];
+            if (slot.IsDeleted == false)
+            {
+                buckets[slot.Prefix % mod]++;
+            }
+        }
+
+        var maxI = 0;
+
+        for (int i = 1; i < count; i++)
+        {
+            if (buckets[i] > buckets[maxI])
+            {
+                maxI = i;
+            }
+        }
+
+        // maxI represents the biggest by count bucket now
+    }
+
     private static ushort GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> data)
     {
         return (ushort)(key.Length + data.Length + ItemLengthLength);
     }
 
-    public bool Delete(ReadOnlySpan<byte> key)
+    public bool Delete(NibblePath key)
     {
         if (TryGetImpl(key, out _, out var index))
         {
@@ -148,7 +181,7 @@ public readonly ref struct FixedMap
                 var high = (ushort)(copy._data.Length - copy._header.High - fromSpan.Length);
                 fromSpan.CopyTo(copy._data.Slice(high));
 
-                copyTo.Hash = copyFrom.Hash;
+                copyTo.Prefix = copyFrom.Prefix;
                 copyTo.ItemAddress = high;
 
                 copy._header.Low += Slot.Size;
@@ -195,7 +228,7 @@ public readonly ref struct FixedMap
 
     private static ushort ReadDataLength(Span<byte> source) => BinaryPrimitives.ReadUInt16LittleEndian(source);
 
-    public bool TryGet(ReadOnlySpan<byte> key, out ReadOnlySpan<byte> data)
+    public bool TryGet(NibblePath key, out ReadOnlySpan<byte> data)
     {
         if (TryGetImpl(key, out var span, out _))
         {
@@ -207,9 +240,10 @@ public readonly ref struct FixedMap
         return false;
     }
 
-    private bool TryGetImpl(ReadOnlySpan<byte> key, out Span<byte> data, out int slotIndex)
+    private bool TryGetImpl(NibblePath key, out Span<byte> data, out int slotIndex)
     {
-        var hash = Slot.HashKey(key);
+        var hash = Slot.ExtractPrefix(key, out key);
+        var encodedKey = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
         // TODO: maybe replace with
         // var cast = MemoryMarshal.Cast<Slot, ushort>(_slots.Slice(_header.Low));
@@ -220,16 +254,16 @@ public readonly ref struct FixedMap
         {
             ref readonly var slot = ref _slots[i];
             if (slot.IsDeleted == false &&
-                slot.Hash == hash)
+                slot.Prefix == hash)
             {
                 var slice = _data.Slice(slot.ItemAddress);
                 var dataLength = ReadDataLength(slice);
                 var actual = slice.Slice(2, dataLength);
 
                 // The StartsWith check assumes that all the keys have the same length.
-                if (actual.StartsWith(key))
+                if (actual.StartsWith(encodedKey))
                 {
-                    data = actual.Slice(key.Length);
+                    data = actual.Slice(encodedKey.Length);
                     slotIndex = i;
                     return true;
                 }
@@ -274,17 +308,17 @@ public readonly ref struct FixedMap
         [FieldOffset(0)] private ushort Raw;
 
         /// <summary>
-        /// The memorized result of <see cref="HashKey"/> of this item.
+        /// The memorized result of <see cref="ExtractPrefix"/> of this item.
         /// </summary>
-        [FieldOffset(2)] public ushort Hash;
+        [FieldOffset(2)] public ushort Prefix;
 
         /// <summary>
         /// Builds the hash for the key.
         /// </summary>
-        public static ushort HashKey(ReadOnlySpan<byte> key)
+        public static ushort ExtractPrefix(NibblePath key, out NibblePath rest)
         {
-            var prefix = BinaryPrimitives.ReadUInt32LittleEndian(key);
-            return unchecked((ushort)(prefix ^ (prefix >> 16)));
+            rest = key.SliceFrom(4);
+            return key.GetFirst4Nibbles();
         }
     }
 

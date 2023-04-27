@@ -6,18 +6,18 @@ namespace Paprika.Tests;
 
 public class FixedMapTests
 {
-    private static ReadOnlySpan<byte> Key0 => new byte[] { 1, 2, 3, 5 };
+    private static NibblePath Key0 => NibblePath.FromKey(new byte[] { 1, 2, 3, 5 });
     private static ReadOnlySpan<byte> Data0 => new byte[] { 23 };
-    private static ReadOnlySpan<byte> Key1 => new byte[] { 7, 11, 13, 17 };
+    private static NibblePath Key1 => NibblePath.FromKey(new byte[] { 7, 11, 13, 17 });
     private static ReadOnlySpan<byte> Data1 => new byte[] { 29, 31 };
-    private static ReadOnlySpan<byte> Key2 => new byte[] { 19, 21, 23, 29 };
+    private static NibblePath Key2 => NibblePath.FromKey(new byte[] { 19, 21, 23, 29 });
     private static ReadOnlySpan<byte> Data2 => new byte[] { 37, 39 };
 
 
     [Test]
     public void Set_Get_Delete_Get_AnotherSet()
     {
-        Span<byte> span = stackalloc byte[FixedMap.MixSize];
+        Span<byte> span = stackalloc byte[FixedMap.MinSize];
         var buffer = new FixedMap(span);
 
         buffer.TrySet(Key0, Data0).Should().BeTrue();
