@@ -52,6 +52,7 @@ jobs:
 
     - name: Code Coverage Report
       uses: irongut/CodeCoverageSummary@v1.3.0
+      if: ${{ false }} # until https://github.com/irongut/CodeCoverageSummary/issues/168
       with:
         filename: coverage/**/coverage.cobertura.xml
         badge: true
