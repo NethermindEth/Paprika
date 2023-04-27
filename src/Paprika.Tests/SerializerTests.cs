@@ -2,7 +2,7 @@
 using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Crypto;
-using Paprika.Pages.Frames;
+using Paprika.Pages;
 
 namespace Paprika.Tests;
 

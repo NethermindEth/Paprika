@@ -1,7 +1,7 @@
 ﻿using Nethermind.Int256;
 using Paprika.Crypto;
 
-namespace Paprika.Pages.Frames;
+namespace Paprika.Pages;
 
 public static class Serializer
 {
