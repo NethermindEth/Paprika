@@ -103,7 +103,7 @@ public readonly unsafe struct DataPage : IPage
         Span<byte> data = stackalloc byte[Serializer.Account.EOAMaxByteCount];
 
         // TODO: remove path from here
-        var leftover = Serializer.Account.WriteEOA(data, path, ctx.Balance, ctx.Nonce);
+        var leftover = Serializer.Account.WriteEOA(data, ctx.Balance, ctx.Nonce);
         data = data.Slice(0, data.Length - leftover.Length);
 
         var map = new FixedMap(Data.FixedMapSpan);
@@ -204,7 +204,7 @@ public readonly unsafe struct DataPage : IPage
 
         if (map.TryGet(pathWritten, out var data))
         {
-            Serializer.Account.ReadAccount(data, out path, out var balance, out var nonce);
+            Serializer.Account.ReadAccount(data, out var balance, out var nonce);
             result = new Account(balance, nonce);
             return;
         }

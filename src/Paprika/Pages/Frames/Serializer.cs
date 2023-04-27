@@ -1,6 +1,4 @@
-﻿using System.Diagnostics;
-using System.Runtime.CompilerServices;
-using Nethermind.Int256;
+﻿using Nethermind.Int256;
 using Paprika.Crypto;
 
 namespace Paprika.Pages.Frames;
@@ -13,7 +11,7 @@ public static class Serializer
     private const bool BigEndian = true;
     private const int MaxNibblePathLength = Keccak.Size + 1;
 
-    private static Span<byte> WriteTo(Span<byte> destination, UInt256 value)
+    private static Span<byte> WriteToWithLeftover(Span<byte> destination, UInt256 value)
     {
         var uint256 = destination.Slice(1, Uint256Size);
         value.ToBigEndian(uint256);
@@ -49,30 +47,24 @@ public static class Serializer
     public static class Account
     {
         // TODO: provide header differentiating type of the account and the codeHash and storage
-        public const int EOAMaxByteCount = MaxNibblePathLength + // path
-                                           MaxUint256SizeWithPrefix + // balance
+        public const int EOAMaxByteCount = MaxUint256SizeWithPrefix + // balance
                                            MaxUint256SizeWithPrefix; // nonce
 
         /// <summary>
         /// Serializes the account
         /// </summary>
         /// <returns>The leftover.</returns>
-        public static Span<byte> WriteEOA(Span<byte> destination, NibblePath key, UInt256 balance, UInt256 nonce)
+        public static Span<byte> WriteEOA(Span<byte> destination, UInt256 balance, UInt256 nonce)
         {
-            var span = key.WriteToWithLeftover(destination);
-            span = WriteTo(span, balance);
-            span = WriteTo(span, nonce);
+            var span = WriteToWithLeftover(destination, balance);
+            span = WriteToWithLeftover(span, nonce);
             return span;
         }
 
-        public static void ReadPath(ReadOnlySpan<byte> source, out NibblePath path) =>
-            NibblePath.ReadFrom(source, out path);
-
-        public static void ReadAccount(ReadOnlySpan<byte> source, out NibblePath path, out UInt256 balance,
+        public static void ReadAccount(ReadOnlySpan<byte> source, out UInt256 balance,
             out UInt256 nonce)
         {
-            var span = NibblePath.ReadFrom(source, out path);
-            span = ReadFrom(span, out balance);
+            var span = ReadFrom(source, out balance);
             span = ReadFrom(span, out nonce);
         }
     }
