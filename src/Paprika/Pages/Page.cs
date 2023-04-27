@@ -21,13 +21,16 @@ public interface IPage
 [StructLayout(LayoutKind.Explicit, Pack = 1, Size = Size)]
 public struct PageHeader
 {
-    public const int Size = sizeof(uint);
+    public const int Size = sizeof(ulong);
 
     /// <summary>
     /// The id of the last transaction that wrote to this page.
     /// </summary>
     [FieldOffset(0)]
     public uint BatchId;
+
+    [FieldOffset(4)]
+    public uint Reserved; // for not it's just alignment
 }
 
 

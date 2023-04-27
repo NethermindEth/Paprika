@@ -18,8 +18,8 @@ public class NibblePathTests
 
         var path = NibblePath.FromKey(span, from);
 
-        Span<byte> destination = stackalloc byte[path.MaxLength];
-        var leftover = path.WriteTo(destination);
+        Span<byte> destination = stackalloc byte[path.MaxByteLength];
+        var leftover = path.WriteToWithLeftover(destination);
 
         NibblePath.ReadFrom(destination, out var parsed);
 

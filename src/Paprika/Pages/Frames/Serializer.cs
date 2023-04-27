@@ -53,9 +53,13 @@ public static class Serializer
                                            MaxUint256SizeWithPrefix + // balance
                                            MaxUint256SizeWithPrefix; // nonce
 
+        /// <summary>
+        /// Serializes the account
+        /// </summary>
+        /// <returns>The leftover.</returns>
         public static Span<byte> WriteEOA(Span<byte> destination, NibblePath key, UInt256 balance, UInt256 nonce)
         {
-            var span = key.WriteTo(destination);
+            var span = key.WriteToWithLeftover(destination);
             span = WriteTo(span, balance);
             span = WriteTo(span, nonce);
             return span;

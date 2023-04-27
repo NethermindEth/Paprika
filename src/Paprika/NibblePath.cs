@@ -56,14 +56,31 @@ public readonly ref struct NibblePath
     /// <summary>
     /// The estimate of the max length, used for stackalloc estimations.
     /// </summary>
-    public int MaxLength => Length / 2 + 2;
+    public int MaxByteLength => Length / 2 + 2;
 
     /// <summary>
     /// Writes the nibble path into the destination.
     /// </summary>
+    /// <param name="destination">The destination to write to.</param>
+    /// <returns>The leftover that other writers can write to.</returns>
+    public Span<byte> WriteToWithLeftover(Span<byte> destination)
+    {
+        var lenght = WriteImpl(destination);
+        return destination.Slice(lenght);
+    }
+
+    /// <summary>
+    /// Writes the nibbles to the destination.
+    /// </summary>
     /// <param name="destination"></param>
-    /// <returns>The leftover.</returns>
+    /// <returns>The actual bytes written.</returns>
     public Span<byte> WriteTo(Span<byte> destination)
+    {
+        var lenght = WriteImpl(destination);
+        return destination.Slice(0, lenght);
+    }
+
+    private int WriteImpl(Span<byte> destination)
     {
         var odd = _odd & OddBit;
         var lenght = GetSpanLength(Length, _odd);
@@ -71,8 +88,7 @@ public readonly ref struct NibblePath
         destination[0] = (byte)(odd | (Length << LengthShift));
 
         MemoryMarshal.CreateSpan(ref _span, lenght).CopyTo(destination.Slice(PreambleLength));
-
-        return destination.Slice(lenght + PreambleLength);
+        return lenght + PreambleLength;
     }
 
     /// <summary>
