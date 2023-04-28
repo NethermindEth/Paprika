@@ -100,11 +100,15 @@ public readonly ref struct FixedMap
     /// <summary>
     /// Counts values according to specified buckets.
     /// </summary>
-    public void CountValuesInBuckets(int count)
+    /// <returns>
+    /// The nibble that was selected to be pushed out.
+    /// </returns>
+    public byte PushOutBiggestBucketOneLevelDeeper(FixedMap oneLevelDeeper)
     {
-        Span<ushort> buckets = stackalloc ushort[count];
+        // TODO: weird dependency here. Remove later when there are multiple buckets present
+        const int bucketCount = DataPage.Payload.BucketCount;
 
-        var mod = buckets.Length;
+        Span<ushort> buckets = stackalloc ushort[DataPage.Payload.BucketCount];
 
         var to = _header.Low / Slot.Size;
         for (var i = 0; i < to; i++)
@@ -112,13 +116,13 @@ public readonly ref struct FixedMap
             ref readonly var slot = ref _slots[i];
             if (slot.IsDeleted == false)
             {
-                buckets[slot.Prefix % mod]++;
+                buckets[slot.FirstNibbleOfPrefix % bucketCount]++;
             }
         }
 
         var maxI = 0;
 
-        for (int i = 1; i < count; i++)
+        for (int i = 1; i < bucketCount; i++)
         {
             if (buckets[i] > buckets[maxI])
             {
@@ -126,7 +130,26 @@ public readonly ref struct FixedMap
             }
         }
 
-        // maxI represents the biggest by count bucket now
+        // maxI represents the biggest by count bucket now, move through, push out, delete
+        for (var i = 0; i < to; i++)
+        {
+            ref var slot = ref _slots[i];
+            if (slot.IsDeleted == false && slot.FirstNibbleOfPrefix == maxI)
+            {
+                var payload = GetSlotPayload(slot);
+                var data = NibblePath.ReadFrom(payload, out var key);
+
+                // copy with slice one
+                if (oneLevelDeeper.TrySet(key.SliceFrom(1), data) == false)
+                {
+                    throw new Exception("There should always be space for in the nested map");
+                }
+
+                slot.IsDeleted = true;
+            }
+        }
+
+        return (byte)maxI;
     }
 
     private static ushort GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> data)
@@ -240,12 +263,15 @@ public readonly ref struct FixedMap
         return false;
     }
 
+    [OptimizationOpportunity(OptimizationType.CPU,
+        "Scanning through slots could be done with MemoryMarshal.Cast<Slot, ushort> and IndexOf? " +
+        "When index is odd, this means prefix is hit.")]
     private bool TryGetImpl(NibblePath key, out Span<byte> data, out int slotIndex)
     {
         var hash = Slot.ExtractPrefix(key, out key);
         var encodedKey = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
-        // TODO: maybe replace with
+        // optimization opportunity
         // var cast = MemoryMarshal.Cast<Slot, ushort>(_slots.Slice(_header.Low));
         // cast.IndexOf(hash);
 
@@ -256,9 +282,7 @@ public readonly ref struct FixedMap
             if (slot.IsDeleted == false &&
                 slot.Prefix == hash)
             {
-                var slice = _data.Slice(slot.ItemAddress);
-                var dataLength = ReadDataLength(slice);
-                var actual = slice.Slice(2, dataLength);
+                var actual = GetSlotPayload(slot);
 
                 // The StartsWith check assumes that all the keys have the same length.
                 if (actual.StartsWith(encodedKey))
@@ -273,6 +297,16 @@ public readonly ref struct FixedMap
         data = default;
         slotIndex = default;
         return false;
+    }
+
+    /// <summary>
+    /// Gets the payload pointed to by the given slot without the length prefix.
+    /// </summary>
+    private Span<byte> GetSlotPayload(Slot slot)
+    {
+        var slice = _data.Slice(slot.ItemAddress);
+        var dataLength = ReadDataLength(slice);
+        return slice.Slice(ItemLengthLength, dataLength);
     }
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
@@ -315,11 +349,23 @@ public readonly ref struct FixedMap
         /// <summary>
         /// Builds the hash for the key.
         /// </summary>
+        [OptimizationOpportunity(OptimizationType.DiskSpace,
+            "NibblePath provides no support for concat so no easy way to reintroduce the prefix here. " +
+            "If it provided one, 2 bytes to save per key")]
         public static ushort ExtractPrefix(NibblePath key, out NibblePath rest)
         {
-            rest = key.SliceFrom(4);
-            return key.GetFirst4Nibbles();
+            var prefix = (key.GetAt(0) << NibblePath.NibbleShift * 0) +
+                (key.GetAt(1) << NibblePath.NibbleShift * 1) +
+                (key.GetAt(2) << NibblePath.NibbleShift * 2) +
+                (key.GetAt(3) << NibblePath.NibbleShift * 3);
+
+            // optimization           
+            //rest = key.SliceFrom(4);
+            rest = key;
+            return (ushort)prefix;
         }
+
+        public byte FirstNibbleOfPrefix => (byte)(Prefix & 0x0F);
 
         public override string ToString()
         {

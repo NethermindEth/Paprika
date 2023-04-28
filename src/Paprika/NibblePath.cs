@@ -109,26 +109,6 @@ public readonly ref struct NibblePath
         return (byte)((b >> ((1 - ((nibble + _odd) & OddBit)) * NibbleShift)) & NibbleMask);
     }
 
-    /// <summary>
-    /// Gets first 4 nibbles.
-    /// </summary>
-    public ushort GetFirst4Nibbles()
-    {
-        const int count = 2;
-
-        if (_odd == OddBit)
-        {
-            // TODO: maybe optimize
-            return (ushort)(GetAt(0) |
-                            (GetAt(1) << NibbleShift) |
-                            (GetAt(2) << NibbleShift * 2) |
-                            (GetAt(3) << (NibbleShift * 3)));
-        }
-
-        var span = MemoryMarshal.CreateSpan(ref _span, count);
-        return BinaryPrimitives.ReadUInt16LittleEndian(span);
-    }
-
     public byte FirstNibble => (byte)((_span >> ((1 - _odd) * NibbleShift)) & NibbleMask);
 
     private static int GetSpanLength(byte length, int odd) => (length + 1 + odd) / 2;

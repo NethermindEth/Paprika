@@ -108,78 +108,14 @@ public readonly unsafe struct DataPage : IPage
             return _page;
         }
 
-        map.CountValuesInBuckets(Payload.BucketCount);
+        // not enough memory in this page, need to push some data one level deeper to a new page
+        var child = ctx.Batch.GetNewPage(out var childAddr, true);
+        var dataPage = new DataPage(child);
 
-        throw new InsufficientMemoryException();
+        var selectedNibble = map.PushOutBiggestBucketOneLevelDeeper(new FixedMap(dataPage.Data.FixedMapSpan));
+        Data.Buckets[selectedNibble] = childAddr;
 
-        // if (TryFindFrameInBucket(address, ctx.Key, out var frameIndex))
-        // {
-        //     ref var frame = ref frames[frameIndex.Value];
-        //
-        //     frame.Balance = ctx.Balance;
-        //     frame.Nonce = ctx.Nonce;
-        //
-        //     return _page;
-        // }
-        //
-        // // fail to update, insert if there's place
-        // if (Data.FrameUsed.TrySetLowestBit(Payload.FixedMapSize, out var reserved))
-        // {
-        //     ref var frame = ref frames[reserved];
-        //
-        //     frame.Key = ctx.Key;
-        //     frame.Balance = ctx.Balance;
-        //     frame.Nonce = ctx.Nonce;
-        //
-        //     // set the next to create the linked list
-        //     address.TryGetFrameIndex(out var previousFrameIndex);
-        //     frame.Header = FrameHeader.BuildEOA(previousFrameIndex);
-        //
-        //     // overwrite the bucket with the recent one
-        //     Data.Buckets[nibble] = DbAddress.JumpToFrame(FrameIndex.FromIndex(reserved), Data.Buckets[nibble]);
-        //     return _page;
-        // }
-        //
-        // // failed to find an empty frame,
-        // // select a bucket to empty and proceed with creating a child page
-        // // there must be at least one as otherwise it would be propagated down to the page
-        // var biggestBucket = DbAddress.Null;
-        // var index = -1;
-        //
-        // for (var i = 0; i < Payload.BucketCount; i++)
-        // {
-        //     if (Data.Buckets[i].IsSamePage && Data.Buckets[i].SamePageJumpCount > biggestBucket.SamePageJumpCount)
-        //     {
-        //         biggestBucket = Data.Buckets[i];
-        //         index = i;
-        //     }
-        // }
-        //
-        // // address is set to the most counted
-        // var child = ctx.Batch.GetNewPage(out Data.Buckets[index], true);
-        // var dataPage = new DataPage(child);
-        //
-        // // copy the data pointed by address to the new dataPage, clean up its bits from reserved frames
-        // biggestBucket.TryGetFrameIndex(out var biggestFrameChain);
-        //
-        // while (biggestFrameChain.IsNull == false)
-        // {
-        //     ref var frame = ref frames[biggestFrameChain.Value];
-        //
-        //     var set = new SetContext(frame.Key, frame.Balance, frame.Nonce, ctx.Batch);
-        //     dataPage.Set(set, (byte)(level + 1));
-        //
-        //     // the frame is no longer used, clear it
-        //     Data.FrameUsed.ClearBit(biggestFrameChain.Value);
-        //
-        //     // jump to the next
-        //     biggestFrameChain = frame.Header.NextFrame;
-        // }
-        //
-        // // there's a place on this page now, add it again
-        // Set(ctx, level);
-        //
-        // return _page;
+        return _page;
     }
 
     public void GetAccount(in Keccak key, IReadOnlyBatchContext batch, out Account result, int level)

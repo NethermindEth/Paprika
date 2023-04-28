@@ -1,7 +1,6 @@
 ﻿using System.Buffers.Binary;
 using FluentAssertions;
 using NUnit.Framework;
-using static Paprika.Tests.Values;
 
 // ReSharper disable HeapView.BoxingAllocation
 
@@ -41,8 +40,6 @@ public class NibblePathTests
         {
             path.GetAt(i).Should().Be(expected[i]);
         }
-
-        path.GetFirst4Nibbles().Should().Be(BinaryPrimitives.ReadUInt16LittleEndian(span));
     }
 
     [Test]
@@ -52,7 +49,6 @@ public class NibblePathTests
         const byte second = 0xBA;
         const byte third = 0x90;
         Span<byte> span = stackalloc byte[3] { first, second, third };
-        const ushort value = 0x9ABC;
 
         var path = NibblePath.FromKey(span, 1);
 
@@ -62,8 +58,6 @@ public class NibblePathTests
         {
             path.GetAt(i).Should().Be(expected[i]);
         }
-
-        path.GetFirst4Nibbles().Should().Be(value);
     }
 
     private static void AssertDiffAt(in NibblePath path1, in NibblePath path2, int diffAt)
