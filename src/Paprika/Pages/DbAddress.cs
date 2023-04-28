@@ -1,5 +1,4 @@
 ﻿using System.Diagnostics;
-using Paprika.Pages.Frames;
 
 namespace Paprika.Pages;
 
@@ -38,21 +37,6 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     public uint Raw => _value;
 
     /// <summary>
-    /// Creates a database address that represents a jump to another frame within the same <see cref="Pages.Page"/>.
-    /// </summary>
-    /// <param name="frame">The frame to jump to.</param>
-    /// <param name="previous">The previous jump within the same page.</param>
-    /// <returns>A db address.</returns>
-    public static DbAddress JumpToFrame(FrameIndex frame, DbAddress previous)
-    {
-        Debug.Assert(previous.IsSamePage || previous.IsNull, "Only same page chaining is allowed");
-
-        var countShifted = (previous.SamePageJumpCount + 1) << JumpCountShift;
-
-        return new(frame.Raw | SamePage | countShifted);
-    }
-
-    /// <summary>
     /// Creates a database address that represents a jump to another database <see cref="Pages.Page"/>.
     /// </summary>
     /// <param name="page">The page to go to.</param>
@@ -89,22 +73,6 @@ public readonly struct DbAddress : IEquatable<DbAddress>
 
     // ReSharper disable once MergeIntoPattern
     public bool IsValidPageAddress => _value < Pages.Page.PageCount;
-
-    /// <summary>
-    /// Gets the <see cref="IFrame"/> index where this address points to.
-    /// </summary>
-    /// <returns></returns>
-    public bool TryGetFrameIndex(out FrameIndex index)
-    {
-        if (IsSamePage)
-        {
-            index = FrameIndex.FromRaw((byte)(_value & ValueMask));
-            return true;
-        }
-
-        index = FrameIndex.Null;
-        return false;
-    }
 
     public static implicit operator uint(DbAddress address) => address._value;
     public static implicit operator int(DbAddress address) => (int)address._value;

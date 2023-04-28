@@ -1,7 +1,6 @@
 ﻿using System.Buffers.Binary;
 using FluentAssertions;
 using NUnit.Framework;
-using static Paprika.Tests.Values;
 
 // ReSharper disable HeapView.BoxingAllocation
 
@@ -18,8 +17,8 @@ public class NibblePathTests
 
         var path = NibblePath.FromKey(span, from);
 
-        Span<byte> destination = stackalloc byte[path.MaxLength];
-        var leftover = path.WriteTo(destination);
+        Span<byte> destination = stackalloc byte[path.MaxByteLength];
+        var leftover = path.WriteToWithLeftover(destination);
 
         NibblePath.ReadFrom(destination, out var parsed);
 
@@ -35,10 +34,12 @@ public class NibblePathTests
 
         var path = NibblePath.FromKey(span);
 
-        Assert.AreEqual(0xD, path.GetAt(0));
-        Assert.AreEqual(0xC, path.GetAt(1));
-        Assert.AreEqual(0xB, path.GetAt(2));
-        Assert.AreEqual(0xA, path.GetAt(3));
+        Span<byte> expected = stackalloc byte[] { 0xD, 0xC, 0xB, 0xA };
+
+        for (int i = 0; i < expected.Length; i++)
+        {
+            path.GetAt(i).Should().Be(expected[i]);
+        }
     }
 
     [Test]
@@ -51,13 +52,15 @@ public class NibblePathTests
 
         var path = NibblePath.FromKey(span, 1);
 
-        Assert.AreEqual(0xC, path.GetAt(0));
-        Assert.AreEqual(0xB, path.GetAt(1));
-        Assert.AreEqual(0xA, path.GetAt(2));
-        Assert.AreEqual(0x9, path.GetAt(3));
+        Span<byte> expected = stackalloc byte[] { 0xC, 0xB, 0xA, 0x9 };
+
+        for (int i = 0; i < expected.Length; i++)
+        {
+            path.GetAt(i).Should().Be(expected[i]);
+        }
     }
 
-    private void AssertDiffAt(in NibblePath path1, in NibblePath path2, int diffAt)
+    private static void AssertDiffAt(in NibblePath path1, in NibblePath path2, int diffAt)
     {
         Assert.AreEqual(diffAt, path1.FindFirstDifferentNibble(path2));
         Assert.AreEqual(diffAt, path2.FindFirstDifferentNibble(path1));

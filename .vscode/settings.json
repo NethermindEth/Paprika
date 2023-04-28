@@ -8,5 +8,11 @@
     "Nethermind",
     "stackallocated",
     "Verkle"
+  ],
+  "grammarly.selectors": [
+    {
+      "language": "markdown",
+      "scheme": "file"
+    }
   ]
 }
