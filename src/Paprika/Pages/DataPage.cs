@@ -115,7 +115,8 @@ public readonly unsafe struct DataPage : IPage
         var selectedNibble = map.PushOutBiggestBucketOneLevelDeeper(new FixedMap(dataPage.Data.FixedMapSpan));
         Data.Buckets[selectedNibble] = childAddr;
 
-        return _page;
+        // The page has some of the values flushed down, try to add again.
+        return Set(ctx, level);
     }
 
     public void GetAccount(in Keccak key, IReadOnlyBatchContext batch, out Account result, int level)

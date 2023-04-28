@@ -145,7 +145,7 @@ public readonly ref struct FixedMap
                     throw new Exception("There should always be space for in the nested map");
                 }
 
-                slot.IsDeleted = true;
+                DeleteImpl(i);
             }
         }
 
