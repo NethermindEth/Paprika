@@ -1,4 +1,5 @@
 ﻿using System.Buffers.Binary;
+using System.Diagnostics;
 using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
@@ -14,6 +15,7 @@ public class DbTests
     private const int SmallDb = 256 * Page.PageSize;
     private const int MB = 1024 * 1024;
     private const int MB16 = 16 * MB;
+    private const int MB64 = 64 * MB;
 
     [Test]
     public void Simple()
@@ -126,9 +128,12 @@ public class DbTests
     [TestCase(500, 2_000, TestName = "Short history, many accounts")]
     public void Page_reuse(int blockCount, int accountsCount)
     {
-        const int size = MB16;
+        const int size = MB64;
 
-        using var db = new NativeMemoryPagedDb(size, 2);
+        using var db = new NativeMemoryPagedDb(size, 2, metrics =>
+        {
+            Debugger.Break();
+        });
 
         for (var i = 0; i < blockCount; i++)
         {

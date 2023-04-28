@@ -6,6 +6,7 @@ class BatchMetrics : IBatchMetrics
     public int PagesAllocated { get; private set; }
     public int UnusedPoolFetch { get; private set; }
     public int AbandonedPagesSlotsCount { get; private set; }
+    public int AbandonedPagesCount { get; set; }
 
     public void ReportPageReused() => PagesReused++;
 
@@ -47,3 +48,4 @@ public interface IBatchMetrics
     /// </summary>
     int TotalPagesWritten => PagesAllocated + PagesReused;
 }
+

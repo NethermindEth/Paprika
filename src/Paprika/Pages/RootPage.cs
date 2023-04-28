@@ -30,20 +30,20 @@ public readonly unsafe struct RootPage : IPage
         /// <summary>
         /// How big is the fan out for the root.
         /// </summary>
-        private const int DataPageFanOut = 256;
+        private const int AccountPageFanOut = 256;
 
         /// <summary>
         /// The number of nibbles that are "consumed" on the root level.
         /// </summary>
         public const byte RootNibbleLevel = 2;
 
-        private const int AbandonedPagesStart = sizeof(uint) + Keccak.Size + DbAddress.Size + DbAddress.Size * DataPageFanOut;
+        private const int AbandonedPagesStart = sizeof(uint) + Keccak.Size + DbAddress.Size + DbAddress.Size * AccountPageFanOut;
 
         /// <summary>
         /// This gives the upper boundary of the number of abandoned pages that can be kept in the list.
         /// </summary>
         /// <remarks>
-        /// The value is dependent on <see cref="DataPageFanOut"/> as the more data pages addresses, the less space for
+        /// The value is dependent on <see cref="AccountPageFanOut"/> as the more data pages addresses, the less space for
         /// the abandoned. Still, the number of abandoned that is required is ~max reorg depth as later, pages are reused.
         /// Even with fan-out of data pages equal to 256, there's still a lot of room here.
         /// </remarks>
@@ -68,12 +68,12 @@ public readonly unsafe struct RootPage : IPage
         /// <summary>
         /// The first of the data pages.
         /// </summary>
-        [FieldOffset(sizeof(uint) + Keccak.Size + DbAddress.Size)] private DbAddress DataPage;
+        [FieldOffset(sizeof(uint) + Keccak.Size + DbAddress.Size)] private DbAddress AccountPage;
 
         /// <summary>
-        /// Gets the span of data pages of the root
+        /// Gets the span of account pages of the root
         /// </summary>
-        public Span<DbAddress> DataPages => MemoryMarshal.CreateSpan(ref DataPage, DataPageFanOut);
+        public Span<DbAddress> AccountPages => MemoryMarshal.CreateSpan(ref AccountPage, AccountPageFanOut);
 
         /// <summary>
         /// The start of the abandoned pages.
@@ -102,11 +102,11 @@ public readonly unsafe struct RootPage : IPage
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver)
     {
-        foreach (var dataAddr in Data.DataPages)
+        foreach (var dataAddr in Data.AccountPages)
         {
             if (dataAddr.IsNull == false)
             {
-                var data = new DataPage(resolver.GetAt(dataAddr));
+                var data = new FanOut256Page(resolver.GetAt(dataAddr));
                 visitor.On(data, dataAddr);
             }
         }
