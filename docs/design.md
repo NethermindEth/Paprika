@@ -267,3 +267,16 @@ With this, the `FixedMap` memory representation looks like the following.
 ```
 
 The `FixedMap` can wrap an arbitrary span of memory so it can be used for any page that wants to store data by key.
+
+## Learning materials
+
+1. PostgreSQL
+   1. [page layout docs](https://www.postgresql.org/docs/current/storage-page-layout.html)
+   1. [bufapge.c implementation](https://github.com/postgres/postgres/blob/master/src/backend/storage/page/bufpage.c)
+   1. [hio.c and bufpage usage](https://github.com/postgres/postgres/blob/master/src/backend/access/heap/hio.c)
+1. Database Storage lectures by Andy Pavlo from CMU Intro to Database Systems / Fall 2022:
+   1. Database Storage, pt. 1 https://www.youtube.com/watch?v=df-l2PxUidI
+   1. Database Storage, pt. 2 https://www.youtube.com/watch?v=2HtfGdsrwqA
+1. LMBD
+   1. Howard Chu - LMDB [The Databaseology Lectures - CMU Fall 2015](https://www.youtube.com/watch?v=tEa5sAh-kVk)
+   1. The main file of LMDB [mdb.c](https://github.com/LMDB/lmdb/blob/mdb.master/libraries/liblmdb/mdb.c)
