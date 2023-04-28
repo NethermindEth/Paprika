@@ -1,5 +1,6 @@
 ﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paprika.Crypto;
 
 namespace Paprika.Pages;
 
@@ -13,6 +14,13 @@ namespace Paprika.Pages;
 /// </remarks>
 public interface IPage
 {
+}
+
+public interface IAccountPage : IPage
+{
+    void GetAccount(in Keccak key, IReadOnlyBatchContext batch, out Account result, int level);
+
+    Page Set(in SetContext ctx, int level);
 }
 
 /// <summary>

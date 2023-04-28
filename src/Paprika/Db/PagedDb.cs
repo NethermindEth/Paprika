@@ -155,7 +155,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         lock (_batchLock)
         {
             var batchId = Root.Header.BatchId;
-            var batch = new ReadOnlyBatch(this, batchId, Root.Data.DataPages.ToArray());
+            var batch = new ReadOnlyBatch(this, batchId, Root.Data.AccountPages.ToArray());
             _batchesReadOnly.Add(batch);
             return batch;
         }
@@ -251,7 +251,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             if (addr.IsNull)
                 return default;
 
-            var dataPage = new DataPage(GetAt(addr));
+            var dataPage = new FanOut256Page(GetAt(addr));
             dataPage.GetAccount(key, this, out var account, RootPage.Payload.RootNibbleLevel);
             return account;
         }
@@ -300,7 +300,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         {
             CheckDisposed();
 
-            var addr = RootPage.FindDataPage(_root.Data.DataPages, key);
+            var addr = RootPage.FindDataPage(_root.Data.AccountPages, key);
 
             if (addr.IsNull)
             {
@@ -308,7 +308,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             }
 
             // treat as data page
-            var data = new DataPage(_db.GetAt(addr));
+            var data = new FanOut256Page(_db.GetAt(addr));
 
             data.GetAccount(key, this, out var account, RootPage.Payload.RootNibbleLevel);
             return account;
@@ -318,11 +318,11 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         {
             CheckDisposed();
 
-            ref var addr = ref RootPage.FindDataPage(_root.Data.DataPages, key);
+            ref var addr = ref RootPage.FindDataPage(_root.Data.AccountPages, key);
             var page = addr.IsNull ? GetNewPage(out addr, true) : GetAt(addr);
 
             // treat as data page
-            var data = new DataPage(page);
+            var data = new FanOut256Page(page);
 
             var ctx = new SetContext(in key, account.Balance, account.Nonce, this);
 
@@ -344,6 +344,8 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             CheckDisposed();
 
             CalculateStateRootHash();
+
+            _metrics.AbandonedPagesCount = _abandoned.Count;
 
             // memoize the abandoned so that it's preserved for future uses 
             MemoizeAbandoned();
@@ -402,7 +404,10 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
                 addr = _root.Data.GetNextFreePage();
             }
 
-            Debug.Assert(addr.Raw < _db._maxPage, "The database breached its size! The returned page is invalid");
+            if (addr.Raw >= _db._maxPage)
+            {
+                throw new IndexOutOfRangeException("The database breached its size! The returned page is invalid");
+            }
 
             var page = _db.GetAt(addr);
             if (clear)
@@ -428,6 +433,8 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             // The advantage is that usually, there number of abandoned pages create is lower and
             // the book keeping is simpler.
 
+            // The pages are put in a linked list, when first -> ... -> last -> NULL
+
             var first = new AbandonedPage(GetNewPage(out var firstAddr, true))
             {
                 AbandonedAtBatch = BatchId
@@ -439,20 +446,20 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             {
                 Debug.Assert(page.IsValidPageAddress, "Only valid pages should be reused");
 
-                last = last.EnqueueAbandoned(this, _db.GetAddress(last.AsPage()), page);
+                first = first.EnqueueAbandoned(this, _db.GetAddress(first.AsPage()), page);
             }
 
             // process unused
             while (_unusedPool.TryDequeue(out var page))
             {
-                last = last.EnqueueAbandoned(this, _db.GetAddress(last.AsPage()), page);
+                first = first.EnqueueAbandoned(this, _db.GetAddress(first.AsPage()), page);
             }
 
             // remember the abandoned by either finding an empty slot, or chaining it to the highest number there
             var nullAddress = abandonedPages.IndexOf(DbAddress.Null);
             if (nullAddress != -1)
             {
-                abandonedPages[nullAddress] = firstAddr;
+                abandonedPages[nullAddress] = GetAddress(first.AsPage());
             }
             else
             {
