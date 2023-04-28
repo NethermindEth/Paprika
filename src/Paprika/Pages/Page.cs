@@ -24,7 +24,7 @@ public struct PageHeader
     public const int Size = sizeof(ulong);
 
     /// <summary>
-    /// The id of the last transaction that wrote to this page.
+    /// The id of the last batch that wrote to this page.
     /// </summary>
     [FieldOffset(0)]
     public uint BatchId;
