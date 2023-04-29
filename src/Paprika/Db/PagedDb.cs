@@ -386,15 +386,9 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
 
         public override Page GetNewPage(out DbAddress addr, bool clear)
         {
-            if (TryGetNoLongerUsedPage(out addr, out var registerForGC))
+            if (TryGetNoLongerUsedPage(out addr))
             {
                 _metrics.ReportPageReused();
-
-                // succeeded getting the page from no longer used, register for gc if needed
-                if (registerForGC.IsNull == false)
-                {
-                    RegisterForFutureReuse(_db.GetAt(registerForGC));
-                }
             }
             else
             {
@@ -499,10 +493,8 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             }
         }
 
-        private bool TryGetNoLongerUsedPage(out DbAddress found, out DbAddress registerForGC)
+        private bool TryGetNoLongerUsedPage(out DbAddress found)
         {
-            registerForGC = default;
-
             if (_noUnusedPages)
             {
                 found = default;
@@ -528,8 +520,8 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
                             _unusedPool.Enqueue(addr);
                         }
 
-                        // 2. register the oldest page for reuse, without using RegisterForFutureReuse that may be a re-entrant
-                        registerForGC = _db.GetAddress(oldest.AsPage());
+                        // 2. register the oldest page for reuse
+                        RegisterForFutureReuse(oldest.AsPage());
 
                         // 3. write its next in place of this page so that it's used as the pool
                         var indexInRoot = abandonedPages.IndexOf(oldestAddress);
