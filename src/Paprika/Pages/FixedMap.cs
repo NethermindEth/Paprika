@@ -157,6 +157,12 @@ public readonly ref struct FixedMap
         return (ushort)(key.Length + data.Length + ItemLengthLength);
     }
 
+    /// <summary>
+    /// Warning! This does not set any tombstone so the reader won't be informed about a delete,
+    /// just will miss the value.
+    /// </summary>
+    /// <param name="key"></param>
+    /// <returns></returns>
     public bool Delete(NibblePath key)
     {
         if (TryGetImpl(key, out _, out var index))
@@ -246,9 +252,13 @@ public readonly ref struct FixedMap
         }
     }
 
+    [OptimizationOpportunity(OptimizationType.DiskSpace,
+        "Use var-length encoding for prefix as it will be usually small. This may save 1 byte per entry.")]
     private static void WriteEntryLength(Span<byte> dest, ushort dataRequiredWithNoLength) =>
         BinaryPrimitives.WriteUInt16LittleEndian(dest, dataRequiredWithNoLength);
 
+    [OptimizationOpportunity(OptimizationType.DiskSpace,
+        "Use var-length encoding for prefix as it will be usually small. This may save 1 byte per entry.")]
     private static ushort ReadDataLength(Span<byte> source) => BinaryPrimitives.ReadUInt16LittleEndian(source);
 
     public bool TryGet(NibblePath key, out ReadOnlySpan<byte> data)
@@ -297,6 +307,73 @@ public readonly ref struct FixedMap
         data = default;
         slotIndex = default;
         return false;
+    }
+
+    /// <summary>Gets an enumerator for this span.</summary>
+    public Enumerator GetEnumerator() => new Enumerator(this);
+
+    /// <summary>Enumerates the elements of a <see cref="ReadOnlySpan{T}"/>.</summary>
+    public ref struct Enumerator
+    {
+        /// <summary>The map being enumerated.</summary>
+        private readonly FixedMap _map;
+
+        /// <summary>The slot index to yield.</summary>
+        private int _index;
+
+        /// <summary>Initialize the enumerator.</summary>
+        /// <param name="map">The map to enumerate.</param>
+        internal Enumerator(FixedMap map)
+        {
+            _map = map;
+            _index = -1;
+        }
+
+        /// <summary>Advances the enumerator to the next element of the span.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool MoveNext()
+        {
+            var to = _map._header.Low / Slot.Size;
+
+            var index = _index + 1;
+
+            // skip all deleted
+            while (_map._slots[index].IsDeleted && index < to)
+            {
+                index += 1;
+            }
+
+            if (index < to)
+            {
+                _index = index;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>Gets the element at the current position of the enumerator.</summary>
+        public readonly Item Current
+        {
+            get
+            {
+                var payload = _map.GetSlotPayload(_map._slots[_index]);
+                var data = NibblePath.ReadFrom(payload, out var path);
+                return new Item(path, data);
+            }
+        }
+
+        public readonly ref struct Item
+        {
+            public NibblePath Path { get; }
+            public ReadOnlySpan<byte> Data { get; }
+
+            public Item(NibblePath path, ReadOnlySpan<byte> data)
+            {
+                Path = path;
+                Data = data;
+            }
+        }
     }
 
     /// <summary>

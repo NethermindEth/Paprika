@@ -13,26 +13,25 @@ public class FixedMapTests
     private static NibblePath Key2 => NibblePath.FromKey(new byte[] { 19, 21, 23, 29 });
     private static ReadOnlySpan<byte> Data2 => new byte[] { 37, 39 };
 
-
     [Test]
     public void Set_Get_Delete_Get_AnotherSet()
     {
         Span<byte> span = stackalloc byte[FixedMap.MinSize];
-        var buffer = new FixedMap(span);
+        var map = new FixedMap(span);
 
-        buffer.TrySet(Key0, Data0).Should().BeTrue();
+        map.TrySet(Key0, Data0).Should().BeTrue();
 
-        buffer.TryGet(Key0, out var retrieved).Should().BeTrue();
+        map.TryGet(Key0, out var retrieved).Should().BeTrue();
         Data0.SequenceEqual(retrieved).Should().BeTrue();
 
-        buffer.Delete(Key0).Should().BeTrue("Should find and delete entry");
-        buffer.TryGet(Key0, out _).Should().BeFalse("The entry shall no longer exist");
+        map.Delete(Key0).Should().BeTrue("Should find and delete entry");
+        map.TryGet(Key0, out _).Should().BeFalse("The entry shall no longer exist");
 
         // should be ready to accept some data again
 
-        buffer.TrySet(Key1, Data1).Should().BeTrue("Should have memory after previous delete");
+        map.TrySet(Key1, Data1).Should().BeTrue("Should have memory after previous delete");
 
-        buffer.TryGet(Key1, out retrieved).Should().BeTrue();
+        map.TryGet(Key1, out retrieved).Should().BeTrue();
         Data1.SequenceEqual(retrieved).Should().BeTrue();
     }
 
@@ -41,22 +40,22 @@ public class FixedMapTests
     {
         // by trial and error, found the smallest value that will allow to put these two
         Span<byte> span = stackalloc byte[40];
-        var buffer = new FixedMap(span);
+        var map = new FixedMap(span);
 
-        buffer.TrySet(Key0, Data0).Should().BeTrue();
-        buffer.TrySet(Key1, Data1).Should().BeTrue();
+        map.TrySet(Key0, Data0).Should().BeTrue();
+        map.TrySet(Key1, Data1).Should().BeTrue();
 
-        buffer.Delete(Key0).Should().BeTrue();
+        map.Delete(Key0).Should().BeTrue();
 
-        buffer.TrySet(Key2, Data2).Should().BeTrue("Should retrieve space by running internally the defragmentation");
+        map.TrySet(Key2, Data2).Should().BeTrue("Should retrieve space by running internally the defragmentation");
 
         // should contains no key0, key1 and key2 now
-        buffer.TryGet(Key0, out var retrieved).Should().BeFalse();
+        map.TryGet(Key0, out var retrieved).Should().BeFalse();
 
-        buffer.TryGet(Key1, out retrieved).Should().BeTrue();
+        map.TryGet(Key1, out retrieved).Should().BeTrue();
         Data1.SequenceEqual(retrieved).Should().BeTrue();
 
-        buffer.TryGet(Key2, out retrieved).Should().BeTrue();
+        map.TryGet(Key2, out retrieved).Should().BeTrue();
         Data2.SequenceEqual(retrieved).Should().BeTrue();
     }
 
@@ -65,12 +64,12 @@ public class FixedMapTests
     {
         // by trial and error, found the smallest value that will allow to put these two
         Span<byte> span = stackalloc byte[24];
-        var buffer = new FixedMap(span);
+        var map = new FixedMap(span);
 
-        buffer.TrySet(Key1, Data1).Should().BeTrue();
-        buffer.TrySet(Key1, Data2).Should().BeTrue();
+        map.TrySet(Key1, Data1).Should().BeTrue();
+        map.TrySet(Key1, Data2).Should().BeTrue();
 
-        buffer.TryGet(Key1, out var retrieved).Should().BeTrue();
+        map.TryGet(Key1, out var retrieved).Should().BeTrue();
         Data2.SequenceEqual(retrieved).Should().BeTrue();
     }
 
@@ -79,12 +78,40 @@ public class FixedMapTests
     {
         // by trial and error, found the smallest value that will allow to put these two
         Span<byte> span = stackalloc byte[24];
-        var buffer = new FixedMap(span);
+        var map = new FixedMap(span);
 
-        buffer.TrySet(Key0, Data0).Should().BeTrue();
-        buffer.TrySet(Key0, Data2).Should().BeTrue();
+        map.TrySet(Key0, Data0).Should().BeTrue();
+        map.TrySet(Key0, Data2).Should().BeTrue();
 
-        buffer.TryGet(Key0, out var retrieved).Should().BeTrue();
+        map.TryGet(Key0, out var retrieved).Should().BeTrue();
         Data2.SequenceEqual(retrieved).Should().BeTrue();
+    }
+
+
+    [Test]
+    public void Enumerator()
+    {
+        Span<byte> span = stackalloc byte[256];
+        var map = new FixedMap(span);
+
+        map.TrySet(Key0, Data0);
+        map.TrySet(Key1, Data1);
+        map.TrySet(Key2, Data2);
+
+        map.Delete(Key1); // delete K1 to not observe it
+
+        var e = map.GetEnumerator();
+
+        Next(ref e, Key0, Data0);
+        Next(ref e, Key2, Data2);
+
+        e.MoveNext().Should().BeFalse();
+
+        static void Next(ref FixedMap.Enumerator e, NibblePath key, ReadOnlySpan<byte> data)
+        {
+            e.MoveNext().Should().BeTrue();
+            e.Current.Path.Equals(key).Should().BeTrue();
+            e.Current.Data.SequenceEqual(data).Should().BeTrue();
+        }
     }
 }
