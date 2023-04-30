@@ -8,16 +8,18 @@ namespace Paprika.Pages;
 /// </summary>
 public readonly ref struct SetContext
 {
-    public readonly Keccak Key;
+    public readonly NibblePath Path;
     public readonly IBatchContext Batch;
     public readonly UInt256 Balance;
     public readonly UInt256 Nonce;
 
-    public SetContext(in Keccak keccak, in UInt256 balance, in UInt256 nonce, IBatchContext batch)
+    public SetContext(in NibblePath path, in UInt256 balance, in UInt256 nonce, IBatchContext batch)
     {
-        Key = keccak;
+        Path = path;
         Batch = batch;
         Balance = balance;
         Nonce = nonce;
     }
+
+    public SetContext TrimPath(int nibbleCount) => new(Path.SliceFrom(nibbleCount), Balance, Nonce, Batch);
 }

@@ -8,8 +8,6 @@ namespace Paprika.Tests;
 
 public class DataPageTests : BasePageTests
 {
-    private const byte RootLevel = 0;
-
     const uint BatchId = 1;
 
     [Test]
@@ -20,11 +18,11 @@ public class DataPageTests : BasePageTests
 
         var batch = NewBatch(BatchId);
         var dataPage = new DataPage(page);
-        var ctx = new SetContext(Key0, Balance0, Nonce0, batch);
+        var ctx = new SetContext(NibblePath.FromKey(Key0), Balance0, Nonce0, batch);
 
-        var updated = dataPage.Set(ctx, RootLevel);
+        var updated = dataPage.Set(ctx);
 
-        new DataPage(updated).GetAccount(Key0, batch, out var account, RootLevel);
+        new DataPage(updated).GetAccount(NibblePath.FromKey(Key0), batch, out var account);
 
         Assert.AreEqual(Nonce0, account.Nonce);
         Assert.AreEqual(Balance0, account.Balance);
@@ -38,14 +36,16 @@ public class DataPageTests : BasePageTests
 
         var batch = NewBatch(BatchId);
 
+        var path0 = NibblePath.FromKey(Key0);
+
         var dataPage = new DataPage(page);
-        var ctx1 = new SetContext(Key0, Balance0, Nonce0, batch);
-        var ctx2 = new SetContext(Key0, Balance1, Nonce1, batch);
+        var ctx1 = new SetContext(path0, Balance0, Nonce0, batch);
+        var ctx2 = new SetContext(path0, Balance1, Nonce1, batch);
 
-        var updated = dataPage.Set(ctx1, RootLevel);
-        updated = new DataPage(updated).Set(ctx2, RootLevel);
+        var updated = dataPage.Set(ctx1);
+        updated = new DataPage(updated).Set(ctx2);
 
-        new DataPage(updated).GetAccount(Key0, batch, out var account, RootLevel);
+        new DataPage(updated).GetAccount(path0, batch, out var account);
         Assert.AreEqual(Nonce1, account.Nonce);
         Assert.AreEqual(Balance1, account.Balance);
     }
@@ -59,17 +59,19 @@ public class DataPageTests : BasePageTests
         var batch = NewBatch(BatchId);
 
         var dataPage = new DataPage(page);
-        var ctx1 = new SetContext(Key1a, Balance0, Nonce0, batch);
-        var ctx2 = new SetContext(Key1b, Balance1, Nonce1, batch);
+        var path1A = NibblePath.FromKey(Key1a);
+        var path1B = NibblePath.FromKey(Key1b);
+        var ctx1 = new SetContext(path1A, Balance0, Nonce0, batch);
+        var ctx2 = new SetContext(path1B, Balance1, Nonce1, batch);
 
-        var updated = dataPage.Set(ctx1, RootLevel);
-        updated = new DataPage(updated).Set(ctx2, RootLevel);
+        var updated = dataPage.Set(ctx1);
+        updated = new DataPage(updated).Set(ctx2);
 
-        new DataPage(updated).GetAccount(Key1a, batch, out var account, RootLevel);
+        new DataPage(updated).GetAccount(path1A, batch, out var account);
         Assert.AreEqual(Nonce0, account.Nonce);
         Assert.AreEqual(Balance0, account.Balance);
 
-        new DataPage(updated).GetAccount(Key1b, batch, out account, RootLevel);
+        new DataPage(updated).GetAccount(path1B, batch, out account);
         Assert.AreEqual(Nonce1, account.Nonce);
         Assert.AreEqual(Balance1, account.Balance);
     }
@@ -90,8 +92,8 @@ public class DataPageTests : BasePageTests
             var key = Key1a;
             BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i);
 
-            var ctx = new SetContext(key, i, i, batch);
-            dataPage = new DataPage(dataPage.Set(ctx, RootLevel));
+            var ctx = new SetContext(NibblePath.FromKey(key), i, i, batch);
+            dataPage = new DataPage(dataPage.Set(ctx));
         }
 
         for (uint i = 0; i < count; i++)
@@ -99,7 +101,7 @@ public class DataPageTests : BasePageTests
             var key = Key1a;
             BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i);
 
-            dataPage.GetAccount(key, batch, out var account, RootLevel);
+            dataPage.GetAccount(NibblePath.FromKey(key), batch, out var account);
             account.Should().Be(new Account(i, i));
         }
     }
@@ -126,9 +128,9 @@ public class DataPageTests : BasePageTests
                 batch = batch.Next();
             }
 
-            var ctx = new SetContext(key, i, i, batch);
+            var ctx = new SetContext(NibblePath.FromKey(key), i, i, batch);
 
-            dataPage = new DataPage(dataPage.Set(ctx, RootLevel));
+            dataPage = new DataPage(dataPage.Set(ctx));
         }
 
         for (uint i = 0; i < count; i++)
@@ -136,7 +138,7 @@ public class DataPageTests : BasePageTests
             var key = Key1a;
             BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i);
 
-            dataPage.GetAccount(key, batch, out var account, RootLevel);
+            dataPage.GetAccount(NibblePath.FromKey(key), batch, out var account);
             account.Should().Be(new Account(i, i));
         }
     }

@@ -1,7 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Paprika.Crypto;
 
 namespace Paprika.Pages;
 
@@ -64,7 +63,7 @@ public readonly unsafe struct DataPage : IAccountPage
     }
 
     /// <summary>
-    /// Sets values for the given <see cref="SetContext.Key"/>
+    /// Sets values for the given <see cref="SetContext.Path"/>
     /// </summary>
     /// <param name="ctx"></param>
     /// <param name="level">The nesting level of the call</param>
@@ -72,16 +71,16 @@ public readonly unsafe struct DataPage : IAccountPage
     /// The actual page which handled the set operation. Due to page being COWed, it may be a different page.
     /// 
     /// </returns>
-    public Page Set(in SetContext ctx, int level)
+    public Page Set(in SetContext ctx)
     {
         if (Header.BatchId != ctx.Batch.BatchId)
         {
             // the page is from another batch, meaning, it's readonly. Copy
             var writable = ctx.Batch.GetWritableCopy(_page);
-            return new DataPage(writable).Set(ctx, level);
+            return new DataPage(writable).Set(ctx);
         }
 
-        var path = NibblePath.FromKey(ctx.Key.BytesAsSpan, level);
+        var path = ctx.Path;
         var nibble = path.FirstNibble;
 
         var address = Data.Buckets[nibble];
@@ -90,7 +89,7 @@ public readonly unsafe struct DataPage : IAccountPage
         if (address.IsNull == false && address.IsValidPageAddress)
         {
             var page = ctx.Batch.GetAt(address);
-            var updated = new DataPage(page).Set(ctx, level + 1);
+            var updated = new DataPage(page).Set(ctx.TrimPath(1));
 
             // remember the updated
             Data.Buckets[nibble] = ctx.Batch.GetAddress(updated);
@@ -115,19 +114,18 @@ public readonly unsafe struct DataPage : IAccountPage
         Data.Buckets[selectedNibble] = childAddr;
 
         // The page has some of the values flushed down, try to add again.
-        return Set(ctx, level);
+        return Set(ctx);
     }
 
-    public void GetAccount(in Keccak key, IReadOnlyBatchContext batch, out Account result, int level)
+    public void GetAccount(in NibblePath path, IReadOnlyBatchContext batch, out Account result)
     {
-        var path = NibblePath.FromKey(key.BytesAsSpan, level);
         var nibble = path.FirstNibble;
         var bucket = Data.Buckets[nibble];
 
         // non-null page jump, follow it!
         if (bucket.IsNull == false && bucket.IsValidPageAddress)
         {
-            new DataPage(batch.GetAt(bucket)).GetAccount(key, batch, out result, level + 1);
+            new DataPage(batch.GetAt(bucket)).GetAccount(path, batch, out result);
             return;
         }
 

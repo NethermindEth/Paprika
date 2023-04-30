@@ -18,9 +18,9 @@ public interface IPage
 
 public interface IAccountPage : IPage
 {
-    void GetAccount(in Keccak key, IReadOnlyBatchContext batch, out Account result, int level);
+    void GetAccount(in NibblePath key, IReadOnlyBatchContext batch, out Account result);
 
-    Page Set(in SetContext ctx, int level);
+    Page Set(in SetContext ctx);
 }
 
 /// <summary>
