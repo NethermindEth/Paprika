@@ -13,7 +13,7 @@ public readonly ref struct SetContext
     public readonly UInt256 Balance;
     public readonly UInt256 Nonce;
 
-    public SetContext(in NibblePath path, in UInt256 balance, in UInt256 nonce, IBatchContext batch)
+    public SetContext(NibblePath path, UInt256 balance, UInt256 nonce, IBatchContext batch)
     {
         Path = path;
         Batch = batch;
