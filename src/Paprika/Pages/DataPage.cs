@@ -109,11 +109,22 @@ public readonly unsafe struct DataPage : IAccountPage
         }
 
         // not enough memory in this page, need to push some data one level deeper to a new page
-        var child = ctx.Batch.GetNewPage(out var childAddr, true);
+        var child = ctx.Batch.GetNewPage(out _, true);
         var dataPage = new DataPage(child);
 
-        var selectedNibble = map.PushOutBiggestBucketOneLevelDeeper(new FixedMap(dataPage.Data.FixedMapSpan));
-        Data.Buckets[selectedNibble] = childAddr;
+        var biggest = map.GetBiggestNibbleBucket();
+        foreach (var item in map.EnumerateNibble(biggest))
+        {
+            // TODO: consider writing data once, so that they don't need to be serialized and deserialized
+            Serializer.Account.ReadAccount(item.Data, out var balance, out var nonce);
+            var set = new SetContext(item.Path.SliceFrom(1), balance, nonce, ctx.Batch);
+            dataPage = new DataPage(dataPage.Set(set));
+
+            // delete the item, it's possible due to the internal construction of the map
+            map.Delete(item.Path);
+        }
+
+        Data.Buckets[biggest] = ctx.Batch.GetAddress(dataPage.AsPage());
 
         // The page has some of the values flushed down, try to add again.
         return Set(ctx);
