@@ -97,13 +97,84 @@ public readonly ref struct FixedMap
         return true;
     }
 
+    private int To => _header.Low / Slot.Size;
+
+    public NibbleEnumerator EnumerateNibble(byte nibble) => new(this, nibble);
+
+    public ref struct NibbleEnumerator
+    {
+        /// <summary>The map being enumerated.</summary>
+        private readonly FixedMap _map;
+
+        /// <summary>
+        /// The nibble being enumerated.
+        /// </summary>
+        private readonly byte _nibble;
+
+        /// <summary>The next index to yield.</summary>
+        private int _index;
+
+        internal NibbleEnumerator(FixedMap map, byte nibble)
+        {
+            _map = map;
+            _nibble = nibble;
+            _index = -1;
+        }
+
+        /// <summary>Advances the enumerator to the next element of the span.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool MoveNext()
+        {
+            int index = _index + 1;
+            var to = _map.To;
+
+            while (index < to &&
+                   (_map._slots[index].IsDeleted ||
+                    _map._slots[index].FirstNibbleOfPrefix != _nibble))
+            {
+                index += 1;
+            }
+
+            if (index < to)
+            {
+                _index = index;
+                return true;
+            }
+
+            return false;
+        }
+
+        public Item Current
+        {
+            get
+            {
+                var span = _map.GetSlotPayload(_map._slots[_index]);
+                var data = NibblePath.ReadFrom(span, out var path);
+                return new Item(path, data);
+            }
+        }
+
+        public readonly ref struct Item
+        {
+            public NibblePath Path { get; }
+            public ReadOnlySpan<byte> Data { get; }
+
+            public Item(NibblePath path, ReadOnlySpan<byte> data)
+            {
+                Path = path;
+                Data = data;
+            }
+        }
+
+        // a shortcut to not allocate, just copy the enumerator
+        public NibbleEnumerator GetEnumerator() => this;
+    }
+
     /// <summary>
-    /// Counts values according to specified buckets.
+    /// Gets the nibble representing the biggest bucket.
     /// </summary>
-    /// <returns>
-    /// The nibble that was selected to be pushed out.
-    /// </returns>
-    public byte PushOutBiggestBucketOneLevelDeeper(FixedMap oneLevelDeeper)
+    /// <returns></returns>
+    public byte GetBiggestNibbleBucket()
     {
         // TODO: weird dependency here. Remove later when there are multiple buckets present
         const int bucketCount = DataPage.Payload.BucketCount;
@@ -127,25 +198,6 @@ public readonly ref struct FixedMap
             if (buckets[i] > buckets[maxI])
             {
                 maxI = i;
-            }
-        }
-
-        // maxI represents the biggest by count bucket now, move through, push out, delete
-        for (var i = 0; i < to; i++)
-        {
-            ref var slot = ref _slots[i];
-            if (slot.IsDeleted == false && slot.FirstNibbleOfPrefix == maxI)
-            {
-                var payload = GetSlotPayload(slot);
-                var data = NibblePath.ReadFrom(payload, out var key);
-
-                // copy with slice one
-                if (oneLevelDeeper.TrySet(key.SliceFrom(DataPage.NibbleCount), data) == false)
-                {
-                    throw new Exception("There should always be space for in the nested map");
-                }
-
-                DeleteImpl(i);
             }
         }
 
@@ -231,7 +283,7 @@ public readonly ref struct FixedMap
     private void CollectTombstones()
     {
         // start with the last written and perform checks and cleanup till all the deleted are gone
-        var index = _header.Low / Slot.Size - 1;
+        var index = To - 1;
 
         while (index >= 0 && _slots[index].IsDeleted)
         {
@@ -310,7 +362,7 @@ public readonly ref struct FixedMap
     }
 
     /// <summary>Gets an enumerator for this span.</summary>
-    public Enumerator GetEnumerator() => new Enumerator(this);
+    public Enumerator GetEnumerator() => new(this);
 
     /// <summary>Enumerates the elements of a <see cref="ReadOnlySpan{T}"/>.</summary>
     public ref struct Enumerator
@@ -333,7 +385,7 @@ public readonly ref struct FixedMap
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool MoveNext()
         {
-            var to = _map._header.Low / Slot.Size;
+            var to = _map.To;
 
             var index = _index + 1;
 
