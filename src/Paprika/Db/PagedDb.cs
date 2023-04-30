@@ -251,7 +251,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             if (addr.IsNull)
                 return default;
 
-            var dataPage = new FanOut256Page(GetAt(addr));
+            var dataPage = new DataPage(GetAt(addr));
             dataPage.GetAccount(GetPath(key), this, out var account);
             return account;
         }
@@ -311,7 +311,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             }
 
             // treat as data page
-            var data = new FanOut256Page(_db.GetAt(addr));
+            var data = new DataPage(_db.GetAt(addr));
 
             data.GetAccount(GetPath(key), this, out var account);
             return account;
@@ -324,8 +324,8 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             ref var addr = ref RootPage.FindAccountPage(_root.Data.AccountPages, key);
             var page = addr.IsNull ? GetNewPage(out addr, true) : GetAt(addr);
 
-            // treat as fanout page
-            var data = new FanOut256Page(page);
+            // treat as data page
+            var data = new DataPage(page);
 
             var ctx = new SetContext(GetPath(key), account.Balance, account.Nonce, this);
 
