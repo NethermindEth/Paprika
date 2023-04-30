@@ -25,6 +25,8 @@ public readonly unsafe struct DataPage : IAccountPage
 
     public ref Payload Data => ref Unsafe.AsRef<Payload>(_page.Payload);
 
+    public const int NibbleCount = 1;
+
     /// <summary>
     /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
     /// These buckets is used to store up to <see cref="FixedMapSize"/> entries before flushing them down as other pages
@@ -89,7 +91,7 @@ public readonly unsafe struct DataPage : IAccountPage
         if (address.IsNull == false && address.IsValidPageAddress)
         {
             var page = ctx.Batch.GetAt(address);
-            var updated = new DataPage(page).Set(ctx.TrimPath(1));
+            var updated = new DataPage(page).Set(ctx.TrimPath(NibbleCount));
 
             // remember the updated
             Data.Buckets[nibble] = ctx.Batch.GetAddress(updated);
@@ -125,7 +127,7 @@ public readonly unsafe struct DataPage : IAccountPage
         // non-null page jump, follow it!
         if (bucket.IsNull == false && bucket.IsValidPageAddress)
         {
-            new DataPage(batch.GetAt(bucket)).GetAccount(path, batch, out result);
+            new DataPage(batch.GetAt(bucket)).GetAccount(path.SliceFrom(NibbleCount), batch, out result);
             return;
         }
 

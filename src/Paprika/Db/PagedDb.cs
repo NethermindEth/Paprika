@@ -247,7 +247,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             if (_disposed)
                 throw new ObjectDisposedException("The readonly batch has already been disposed");
 
-            var addr = RootPage.FindDataPage(_rootDataPages, key);
+            var addr = RootPage.FindAccountPage(_rootDataPages, key);
             if (addr.IsNull)
                 return default;
 
@@ -300,7 +300,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         {
             CheckDisposed();
 
-            var addr = RootPage.FindDataPage(_root.Data.AccountPages, key);
+            var addr = RootPage.FindAccountPage(_root.Data.AccountPages, key);
 
             if (addr.IsNull)
             {
@@ -318,7 +318,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         {
             CheckDisposed();
 
-            ref var addr = ref RootPage.FindDataPage(_root.Data.AccountPages, key);
+            ref var addr = ref RootPage.FindAccountPage(_root.Data.AccountPages, key);
             var page = addr.IsNull ? GetNewPage(out addr, true) : GetAt(addr);
 
             // treat as fanout page
@@ -618,7 +618,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
     // ReSharper disable once UnusedParameter.Global
     protected abstract void FlushRootPage(in Page rootPage);
 
-    private static NibblePath GetPath(Keccak key)
+    private static NibblePath GetPath(in Keccak key)
     {
         return NibblePath.FromKey(key).SliceFrom(RootPage.Payload.RootNibbleLevel);
     }

@@ -67,7 +67,7 @@ public readonly unsafe struct FanOut256Page : IAccountPage
         return _page;
     }
 
-    private static ushort FirstTwoNibbles(NibblePath path)
+    public static ushort FirstTwoNibbles(NibblePath path)
     {
         return (ushort)((path.GetAt(0) << NibblePath.NibbleShift * 0) +
                         (path.GetAt(1) << NibblePath.NibbleShift * 1));

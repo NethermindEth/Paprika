@@ -140,7 +140,7 @@ public readonly ref struct FixedMap
                 var data = NibblePath.ReadFrom(payload, out var key);
 
                 // copy with slice one
-                if (oneLevelDeeper.TrySet(key.SliceFrom(1), data) == false)
+                if (oneLevelDeeper.TrySet(key.SliceFrom(DataPage.NibbleCount), data) == false)
                 {
                     throw new Exception("There should always be space for in the nested map");
                 }
