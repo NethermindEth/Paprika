@@ -35,7 +35,7 @@ public readonly unsafe struct RootPage : IPage
         /// <summary>
         /// The number of nibbles that are "consumed" on the root level.
         /// </summary>
-        public const byte RootNibbleLevel = 2;
+        public const byte RootNibbleLevel = 1;
 
         private const int AbandonedPagesStart = sizeof(uint) + Keccak.Size + DbAddress.Size + DbAddress.Size * AccountPageFanOut;
 
