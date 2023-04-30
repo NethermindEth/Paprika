@@ -34,7 +34,15 @@ public readonly ref struct NibblePath
         return new NibblePath(key, nibbleFrom, count - nibbleFrom);
     }
 
-    public static NibblePath FromKey(Keccak key, int nibbleFrom = 0)
+    /// <summary>
+    /// </summary>
+    /// <param name="key"></param>
+    /// <param name="nibbleFrom"></param>
+    /// <returns>
+    /// The Keccak needs to be "in" here, as otherwise a copy would be create and the ref
+    /// would point to a garbage memory.
+    /// </returns>
+    public static NibblePath FromKey(in Keccak key, int nibbleFrom = 0)
     {
         var count = Keccak.Size * NibblePerByte;
         return new NibblePath(key.BytesAsSpan, nibbleFrom, count - nibbleFrom);

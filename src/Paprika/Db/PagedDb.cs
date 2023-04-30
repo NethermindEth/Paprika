@@ -247,12 +247,12 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             if (_disposed)
                 throw new ObjectDisposedException("The readonly batch has already been disposed");
 
-            var addr = RootPage.FindDataPage(_rootDataPages, key);
+            var addr = RootPage.FindAccountPage(_rootDataPages, key);
             if (addr.IsNull)
                 return default;
 
             var dataPage = new FanOut256Page(GetAt(addr));
-            dataPage.GetAccount(key, this, out var account, RootPage.Payload.RootNibbleLevel);
+            dataPage.GetAccount(GetPath(key), this, out var account);
             return account;
         }
 
@@ -300,7 +300,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         {
             CheckDisposed();
 
-            var addr = RootPage.FindDataPage(_root.Data.AccountPages, key);
+            var addr = RootPage.FindAccountPage(_root.Data.AccountPages, key);
 
             if (addr.IsNull)
             {
@@ -310,7 +310,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             // treat as data page
             var data = new FanOut256Page(_db.GetAt(addr));
 
-            data.GetAccount(key, this, out var account, RootPage.Payload.RootNibbleLevel);
+            data.GetAccount(GetPath(key), this, out var account);
             return account;
         }
 
@@ -318,15 +318,15 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         {
             CheckDisposed();
 
-            ref var addr = ref RootPage.FindDataPage(_root.Data.AccountPages, key);
+            ref var addr = ref RootPage.FindAccountPage(_root.Data.AccountPages, key);
             var page = addr.IsNull ? GetNewPage(out addr, true) : GetAt(addr);
 
-            // treat as data page
+            // treat as fanout page
             var data = new FanOut256Page(page);
 
-            var ctx = new SetContext(in key, account.Balance, account.Nonce, this);
+            var ctx = new SetContext(GetPath(key), account.Balance, account.Nonce, this);
 
-            var updated = data.Set(ctx, RootPage.Payload.RootNibbleLevel);
+            var updated = data.Set(ctx);
 
             addr = _db.GetAddress(updated);
         }
@@ -617,4 +617,9 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
 
     // ReSharper disable once UnusedParameter.Global
     protected abstract void FlushRootPage(in Page rootPage);
+
+    private static NibblePath GetPath(in Keccak key)
+    {
+        return NibblePath.FromKey(key).SliceFrom(RootPage.Payload.RootNibbleLevel);
+    }
 }

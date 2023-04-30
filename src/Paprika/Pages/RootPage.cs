@@ -94,7 +94,7 @@ public readonly unsafe struct RootPage : IPage
         }
     }
 
-    public static ref DbAddress FindDataPage(Span<DbAddress> dataPages, in Keccak key)
+    public static ref DbAddress FindAccountPage(Span<DbAddress> dataPages, in Keccak key)
     {
         var b = key.Span[0];
         return ref dataPages[b];

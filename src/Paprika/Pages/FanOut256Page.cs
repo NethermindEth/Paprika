@@ -37,17 +37,16 @@ public readonly unsafe struct FanOut256Page : IAccountPage
         public Span<DbAddress> Buckets => MemoryMarshal.CreateSpan(ref Bucket, BucketCount);
     }
 
-    public Page Set(in SetContext ctx, int level)
+    public Page Set(in SetContext ctx)
     {
         if (Header.BatchId != ctx.Batch.BatchId)
         {
             // the page is from another batch, meaning, it's readonly. Copy
             var writable = ctx.Batch.GetWritableCopy(_page);
-            return new FanOut256Page(writable).Set(ctx, level);
+            return new FanOut256Page(writable).Set(ctx);
         }
 
-        var path = NibblePath.FromKey(ctx.Key.BytesAsSpan, level);
-        var prefix = FirstTwoNibbles(path);
+        var prefix = FirstTwoNibbles(ctx.Path);
 
         var address = Data.Buckets[prefix];
 
@@ -55,20 +54,20 @@ public readonly unsafe struct FanOut256Page : IAccountPage
         {
             // no data page, allocate and set
             var page = ctx.Batch.GetNewPage(out address, true);
-            new DataPage(page).Set(ctx, level + NibbleCount);
+            new DataPage(page).Set(ctx.TrimPath(NibbleCount));
             Data.Buckets[prefix] = address;
         }
         else
         {
             var page = ctx.Batch.GetAt(address);
-            var updated = new DataPage(page).Set(ctx, level + NibbleCount);
+            var updated = new DataPage(page).Set(ctx.TrimPath(NibbleCount));
             Data.Buckets[prefix] = ctx.Batch.GetAddress(updated);
         }
 
         return _page;
     }
 
-    private static ushort FirstTwoNibbles(NibblePath path)
+    public static ushort FirstTwoNibbles(NibblePath path)
     {
         return (ushort)((path.GetAt(0) << NibblePath.NibbleShift * 0) +
                         (path.GetAt(1) << NibblePath.NibbleShift * 1));
@@ -76,9 +75,8 @@ public readonly unsafe struct FanOut256Page : IAccountPage
 
     private const int NibbleCount = 2;
 
-    public void GetAccount(in Keccak key, IReadOnlyBatchContext batch, out Account result, int level)
+    public void GetAccount(in NibblePath path, IReadOnlyBatchContext batch, out Account result)
     {
-        var path = NibblePath.FromKey(key.BytesAsSpan, level);
         var prefix = FirstTwoNibbles(path);
 
         var address = Data.Buckets[prefix];
@@ -90,7 +88,7 @@ public readonly unsafe struct FanOut256Page : IAccountPage
         else
         {
             var page = batch.GetAt(address);
-            new DataPage(page).GetAccount(key, batch, out result, level + NibbleCount);
+            new DataPage(page).GetAccount(path.SliceFrom(NibbleCount), batch, out result);
         }
     }
 }
