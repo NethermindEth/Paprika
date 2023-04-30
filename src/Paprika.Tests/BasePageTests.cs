@@ -17,13 +17,13 @@ public abstract class BasePageTests
     {
         private readonly Dictionary<DbAddress, Page> _address2Page = new();
         private readonly Dictionary<UIntPtr, DbAddress> _page2Address = new();
+        private readonly HashSet<DbAddress> _written = new();
 
         // data pages should start at non-null addresses
         // 0-N is take by metadata pages
         private uint _pageCount = 1U;
 
         public TestBatchContext(uint batchId) : base(batchId) { }
-
 
         public override Page GetAt(DbAddress address) => _address2Page[address];
 
@@ -42,8 +42,12 @@ public abstract class BasePageTests
             _address2Page[addr] = page;
             _page2Address[page.Raw] = addr;
 
+            _written.Add(addr);
+
             return page;
         }
+
+        public override bool WrittenThisBatch(DbAddress address) => _written.Contains(address);
 
         protected override void RegisterForFutureReuse(Page page)
         {

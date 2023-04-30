@@ -282,6 +282,8 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         /// </summary>
         private readonly Queue<DbAddress> _abandoned;
 
+        private readonly HashSet<DbAddress> _written;
+        
         private readonly BatchMetrics _metrics;
 
         public Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx) : base(root.Header.BatchId)
@@ -292,6 +294,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             _ctx = ctx;
             _unusedPool = ctx.Unused;
             _abandoned = ctx.Abandoned;
+            _written = ctx.Written;
 
             _metrics = new BatchMetrics();
         }
@@ -406,8 +409,13 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
                 page.Clear();
 
             AssignBatchId(page);
+            
+            _written.Add(addr);
+            
             return page;
         }
+
+        public override bool WrittenThisBatch(DbAddress address) => _written.Contains(address);
 
         private void MemoizeAbandoned()
         {
@@ -583,7 +591,10 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             Page = new Page((byte*)NativeMemory.AlignedAlloc((UIntPtr)Page.PageSize, (UIntPtr)UIntPtr.Size));
             Abandoned = new Queue<DbAddress>();
             Unused = new Queue<DbAddress>();
+            Written = new HashSet<DbAddress>();
         }
+
+        public HashSet<DbAddress> Written { get; }
 
         public Page Page { get; }
 
@@ -595,6 +606,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         {
             Unused.Clear();
             Abandoned.Clear();
+            Written.Clear();
 
             // no need to clear, it's always overwritten
             //Page.Clear();

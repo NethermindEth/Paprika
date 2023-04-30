@@ -20,6 +20,8 @@ abstract class BatchContextBase : IBatchContext
 
     public abstract Page GetNewPage(out DbAddress addr, bool clear);
 
+    public abstract bool WrittenThisBatch(DbAddress address);
+
     /// <summary>
     /// If <paramref name="page"/> is already writable in this batch,
     /// returns the same page. If it's not, it will copy the page and return a new one.

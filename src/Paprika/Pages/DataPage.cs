@@ -75,10 +75,12 @@ public readonly unsafe struct DataPage : IAccountPage
     /// </returns>
     public Page Set(in SetContext ctx)
     {
-        if (Header.BatchId != ctx.Batch.BatchId)
+        var batch = ctx.Batch;
+        
+        if (Header.BatchId != batch.BatchId)
         {
             // the page is from another batch, meaning, it's readonly. Copy
-            var writable = ctx.Batch.GetWritableCopy(_page);
+            var writable = batch.GetWritableCopy(_page);
             return new DataPage(writable).Set(ctx);
         }
 
@@ -87,14 +89,15 @@ public readonly unsafe struct DataPage : IAccountPage
 
         var address = Data.Buckets[nibble];
 
-        // the bucket is not null and represents a page jump, follow it
-        if (address.IsNull == false && address.IsValidPageAddress)
+        // The bucket is not null and represents a page jump and was written this batch.
+        // Only then move to the next level!
+        if (address.IsNull == false && address.IsValidPageAddress && batch.WrittenThisBatch(address))
         {
-            var page = ctx.Batch.GetAt(address);
+            var page = batch.GetAt(address);
             var updated = new DataPage(page).Set(ctx.TrimPath(NibbleCount));
 
             // remember the updated
-            Data.Buckets[nibble] = ctx.Batch.GetAddress(updated);
+            Data.Buckets[nibble] = batch.GetAddress(updated);
             return _page;
         }
 
@@ -108,12 +111,21 @@ public readonly unsafe struct DataPage : IAccountPage
             return _page;
         }
 
-        // not enough memory in this page, need to push some data one level deeper to a new page
-        var child = ctx.Batch.GetNewPage(out _, true);
-        var dataPage = new DataPage(child);
+        // Not enough memory in this page. Need to push some data one level deeper.
+        // First find the biggest bucket
+        var biggestNibble = map.GetBiggestNibbleBucket();
 
-        var biggest = map.GetBiggestNibbleBucket();
-        foreach (var item in map.EnumerateNibble(biggest))
+        ref var biggestBucket = ref Data.Buckets[biggestNibble]; 
+        
+        // If address null, create new. If it exists, use as is.
+        if (biggestBucket.IsNull)
+        {
+            batch.GetNewPage(out biggestBucket, true);
+        }
+        
+        var dataPage = new DataPage(batch.GetAt(biggestBucket));
+        
+        foreach (var item in map.EnumerateNibble(biggestNibble))
         {
             // TODO: consider writing data once, so that they don't need to be serialized and deserialized
             Serializer.Account.ReadAccount(item.Data, out var balance, out var nonce);
@@ -124,7 +136,7 @@ public readonly unsafe struct DataPage : IAccountPage
             map.Delete(item.Path);
         }
 
-        Data.Buckets[biggest] = ctx.Batch.GetAddress(dataPage.AsPage());
+        biggestBucket = ctx.Batch.GetAddress(dataPage.AsPage());
 
         // The page has some of the values flushed down, try to add again.
         return Set(ctx);
@@ -132,16 +144,6 @@ public readonly unsafe struct DataPage : IAccountPage
 
     public void GetAccount(in NibblePath path, IReadOnlyBatchContext batch, out Account result)
     {
-        var nibble = path.FirstNibble;
-        var bucket = Data.Buckets[nibble];
-
-        // non-null page jump, follow it!
-        if (bucket.IsNull == false && bucket.IsValidPageAddress)
-        {
-            new DataPage(batch.GetAt(bucket)).GetAccount(path.SliceFrom(NibbleCount), batch, out result);
-            return;
-        }
-
         // read in-page
         var map = new FixedMap(Data.FixedMapSpan);
 
@@ -149,6 +151,14 @@ public readonly unsafe struct DataPage : IAccountPage
         {
             Serializer.Account.ReadAccount(data, out var balance, out var nonce);
             result = new Account(balance, nonce);
+            return;
+        }
+
+        // non-null page jump, follow it!
+        var bucket = Data.Buckets[path.FirstNibble];
+        if (bucket.IsNull == false && bucket.IsValidPageAddress)
+        {
+            new DataPage(batch.GetAt(bucket)).GetAccount(path.SliceFrom(NibbleCount), batch, out result);
             return;
         }
 
