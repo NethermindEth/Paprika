@@ -46,7 +46,6 @@ public static class Program
             allocated = new IntHistogram(short.MaxValue, 3),
             reused = new IntHistogram(short.MaxValue, 3),
             total = new IntHistogram(short.MaxValue, 3),
-            abandonedSlots = new IntHistogram(short.MaxValue, 3)
         };
 
         var db = new MemoryMappedPagedDb(DbFileSize, 64, dataPath, metrics =>
@@ -54,7 +53,6 @@ public static class Program
             histograms.allocated.RecordValue(metrics.PagesAllocated);
             histograms.reused.RecordValue(metrics.PagesReused);
             histograms.total.RecordValue(metrics.TotalPagesWritten);
-            histograms.abandonedSlots.RecordValue(metrics.AbandonedPagesSlotsCount);
         });
 
         var accountsBytes = PrepareAccounts();
@@ -87,7 +85,6 @@ public static class Program
                 Write90Th(histograms.allocated, "new pages allocated");
                 Write90Th(histograms.reused, "pages reused allocated");
                 Write90Th(histograms.total, "total pages written");
-                Write90Th(histograms.abandonedSlots, "abandoned slots in the root");
 
                 writing.Restart();
 
