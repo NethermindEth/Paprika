@@ -283,7 +283,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         private readonly Queue<DbAddress> _abandoned;
 
         private readonly HashSet<DbAddress> _written;
-        
+
         private readonly BatchMetrics _metrics;
 
         public Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx) : base(root.Header.BatchId)
@@ -409,9 +409,9 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
                 page.Clear();
 
             AssignBatchId(page);
-            
+
             _written.Add(addr);
-            
+
             return page;
         }
 

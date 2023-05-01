@@ -76,7 +76,7 @@ public readonly unsafe struct DataPage : IAccountPage
     public Page Set(in SetContext ctx)
     {
         var batch = ctx.Batch;
-        
+
         if (Header.BatchId != batch.BatchId)
         {
             // the page is from another batch, meaning, it's readonly. Copy
@@ -115,16 +115,16 @@ public readonly unsafe struct DataPage : IAccountPage
         // First find the biggest bucket
         var biggestNibble = map.GetBiggestNibbleBucket();
 
-        ref var biggestBucket = ref Data.Buckets[biggestNibble]; 
-        
+        ref var biggestBucket = ref Data.Buckets[biggestNibble];
+
         // If address null, create new. If it exists, use as is.
         if (biggestBucket.IsNull)
         {
             batch.GetNewPage(out biggestBucket, true);
         }
-        
+
         var dataPage = new DataPage(batch.GetAt(biggestBucket));
-        
+
         foreach (var item in map.EnumerateNibble(biggestNibble))
         {
             // TODO: consider writing data once, so that they don't need to be serialized and deserialized
