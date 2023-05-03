@@ -1,8 +1,11 @@
-﻿namespace Paprika;
+﻿using System.Diagnostics.CodeAnalysis;
+
+namespace Paprika;
 
 /// <summary>
 /// Informs that in a given member there's an optimization opportunity.
 /// </summary>
+[ExcludeFromCodeCoverage]
 [AttributeUsage(AttributeTargets.All, AllowMultiple = true)]
 public class OptimizationOpportunityAttribute : Attribute
 {
