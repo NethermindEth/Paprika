@@ -7,12 +7,12 @@ namespace Paprika.Tests;
 
 public class FixedMapTests
 {
-    private static NibblePath Key0 => NibblePath.FromKey(new byte[] { 1, 2, 3, 5 });
+    private static NibblePath Key0 => NibblePath.FromKey(new byte[] { 1, 2, 3, 5, 6 });
 
     private static ReadOnlySpan<byte> Data0 => new byte[] { 23 };
-    private static NibblePath Key1 => NibblePath.FromKey(new byte[] { 7, 11, 13, 17 });
+    private static NibblePath Key1 => NibblePath.FromKey(new byte[] { 1, 2, 3, 5, 7});
     private static ReadOnlySpan<byte> Data1 => new byte[] { 29, 31 };
-    private static NibblePath Key2 => NibblePath.FromKey(new byte[] { 19, 21, 23, 29 });
+    private static NibblePath Key2 => NibblePath.FromKey(new byte[] { 19, 21, 23, 29, 23 });
     private static ReadOnlySpan<byte> Data2 => new byte[] { 37, 39 };
     private static ReadOnlySpan<byte> Data3 => new byte[] { 39, 41, 43 };
 
