@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paprika.Crypto;
 
 namespace Paprika.Pages;
 
@@ -63,6 +64,9 @@ public readonly ref struct FixedMap
         StorageCell = 3
     }
 
+    /// <summary>
+    /// Represents the key of the map.
+    /// </summary>
     public readonly ref struct Key
     {
         public readonly NibblePath Path;
@@ -77,9 +81,29 @@ public readonly ref struct FixedMap
         }
 
         /// <summary>
-        /// Builds the key for the account entry.
+        /// Builds the key for <see cref="DataType.Account"/>.
         /// </summary>
         public static Key Account(NibblePath path) => new(path, DataType.Account, ReadOnlySpan<byte>.Empty);
+
+        /// <summary>
+        /// Builds the key for <see cref="DataType.CodeHash"/>.
+        /// </summary>
+        public static Key CodeHash(NibblePath path) => new(path, DataType.CodeHash, ReadOnlySpan<byte>.Empty);
+
+        /// <summary>
+        /// Builds the key for <see cref="DataType.StorageRootHash"/>.
+        /// </summary>
+        public static Key StorageRootHash(NibblePath path) =>
+            new(path, DataType.StorageRootHash, ReadOnlySpan<byte>.Empty);
+
+        /// <summary>
+        /// Builds the key for <see cref="DataType.StorageCell"/>.
+        /// </summary>
+        /// <remarks>
+        /// <paramref name="keccak"/> must be passed by ref, otherwise it will blow up the span!
+        /// </remarks>
+        public static Key StorageCell(NibblePath path, in Keccak keccak) =>
+            new(path, DataType.StorageRootHash, keccak.Span);
     }
 
     public bool TrySet(in Key key, ReadOnlySpan<byte> data)
