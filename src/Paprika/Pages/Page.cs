@@ -1,5 +1,6 @@
 ﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Nethermind.Int256;
 using Paprika.Crypto;
 
 namespace Paprika.Pages;
@@ -30,7 +31,7 @@ public static class DataPageExtensions
     {
         if (page.TryGet(FixedMap.Key.Account(path), ctx, out var result))
         {
-            Serializer.Account.ReadAccount(result, out var balance, out var nonce);
+            Serializer.ReadAccount(result, out var balance, out var nonce);
             return new Account(balance, nonce);
         }
 
@@ -40,9 +41,33 @@ public static class DataPageExtensions
     public static Page SetAccount<TPage>(this TPage page, NibblePath key, in Account account, IBatchContext batch)
         where TPage : IDataPage
     {
-        Span<byte> payload = stackalloc byte[Serializer.Account.EOAMaxByteCount];
-        payload = Serializer.Account.WriteEOATo(payload, account.Balance, account.Nonce);
+        Span<byte> payload = stackalloc byte[Serializer.BalanceNonceMaxByteCount];
+        payload = Serializer.WriteAccount(payload, account.Balance, account.Nonce);
         var ctx = new SetContext(FixedMap.Key.Account(key), payload, batch);
+        return page.Set(ctx);
+    }
+
+    public static UInt256 GetStorage<TPage>(this TPage page, NibblePath path, in Keccak address,
+        IReadOnlyBatchContext ctx)
+        where TPage : IDataPage
+    {
+        if (page.TryGet(FixedMap.Key.StorageCell(path, address), ctx, out var result))
+        {
+            Serializer.ReadStorageValue(result, out var value);
+            return value;
+        }
+
+        return default;
+    }
+
+    public static Page SetStorage<TPage>(this TPage page, NibblePath path, in Keccak address, in UInt256 value,
+        IBatchContext batch)
+        where TPage : IDataPage
+    {
+        Span<byte> payload = stackalloc byte[Serializer.StorageValueMaxByteCount];
+        payload = Serializer.WriteStorageValue(payload, value);
+
+        var ctx = new SetContext(FixedMap.Key.StorageCell(path, address), payload, batch);
         return page.Set(ctx);
     }
 }

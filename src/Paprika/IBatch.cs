@@ -1,4 +1,5 @@
-﻿using Paprika.Crypto;
+﻿using Nethermind.Int256;
+using Paprika.Crypto;
 
 namespace Paprika;
 
@@ -10,6 +11,11 @@ public interface IBatch : IReadOnlyBatch
     /// <param name="key"></param>
     /// <param name="account"></param>
     void Set(in Keccak key, in Account account);
+
+    /// <summary>
+    /// Sets storage.
+    /// </summary>
+    void SetStorage(in Keccak key, in Keccak address, UInt256 value);
 
     /// <summary>
     /// Commits the block returning its root hash.
@@ -27,4 +33,9 @@ public interface IReadOnlyBatch : IDisposable
     /// <param name="key">The key to looked up.</param>
     /// <returns>The account or default on non-existence.</returns>
     Account GetAccount(in Keccak key);
+
+    /// <summary>
+    /// Gets the storage value.
+    /// </summary>
+    UInt256 GetStorage(in Keccak key, in Keccak address);
 }

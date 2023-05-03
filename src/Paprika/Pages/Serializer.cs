@@ -11,7 +11,7 @@ public static class Serializer
     private const bool BigEndian = true;
     private const int MaxNibblePathLength = Keccak.Size + 1;
 
-    private static Span<byte> WriteToWithLeftover(Span<byte> destination, UInt256 value)
+    private static Span<byte> WriteToWithLeftover(Span<byte> destination, in UInt256 value)
     {
         var uint256 = destination.Slice(1, Uint256Size);
         value.ToBigEndian(uint256);
@@ -44,29 +44,47 @@ public static class Serializer
         return source.Slice(nonZeroBytes + Uint256PrefixSize);
     }
 
-    public static class Account
+    public const int StorageValueMaxByteCount = MaxUint256SizeWithPrefix;
+
+
+    /// <summary>
+    /// Writes the storage value.
+    /// </summary>
+    public static Span<byte> WriteStorageValue(Span<byte> destination, in UInt256 value)
     {
-        // TODO: provide header differentiating type of the account and the codeHash and storage
-        public const int EOAMaxByteCount = MaxUint256SizeWithPrefix + // balance
-                                           MaxUint256SizeWithPrefix; // nonce
+        return destination.Slice(0, destination.Length - WriteToWithLeftover(destination, value).Length);
+    }
 
-        /// <summary>
-        /// Serializes the account.
-        /// </summary>
-        /// <returns>The actual payload written.</returns>
-        public static Span<byte> WriteEOATo(Span<byte> destination, UInt256 balance, UInt256 nonce)
-        {
-            var leftover = WriteToWithLeftover(destination, balance);
-            leftover = WriteToWithLeftover(leftover, nonce);
+    /// <summary>
+    /// Writes the storage value.
+    /// </summary>
+    public static void ReadStorageValue(ReadOnlySpan<byte> source, out UInt256 value)
+    {
+        ReadFrom(source, out value);
+    }
 
-            return destination.Slice(0, destination.Length - leftover.Length);
-        }
+    public const int BalanceNonceMaxByteCount = MaxUint256SizeWithPrefix + // balance
+                                                MaxUint256SizeWithPrefix; // nonce
 
-        public static void ReadAccount(ReadOnlySpan<byte> source, out UInt256 balance,
-            out UInt256 nonce)
-        {
-            var span = ReadFrom(source, out balance);
-            span = ReadFrom(span, out nonce);
-        }
+    /// <summary>
+    /// Serializes the account balance and nonce.
+    /// </summary>
+    /// <returns>The actual payload written.</returns>
+    public static Span<byte> WriteAccount(Span<byte> destination, UInt256 balance, UInt256 nonce)
+    {
+        var leftover = WriteToWithLeftover(destination, balance);
+        leftover = WriteToWithLeftover(leftover, nonce);
+
+        return destination.Slice(0, destination.Length - leftover.Length);
+    }
+
+    /// <summary>
+    /// Reads the account balance and nonce.
+    /// </summary>
+    public static void ReadAccount(ReadOnlySpan<byte> source, out UInt256 balance,
+        out UInt256 nonce)
+    {
+        var span = ReadFrom(source, out balance);
+        ReadFrom(span, out nonce);
     }
 }

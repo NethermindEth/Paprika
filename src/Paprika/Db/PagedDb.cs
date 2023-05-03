@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Pages;
 
@@ -244,15 +245,28 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
 
         public Account GetAccount(in Keccak key)
         {
+            return TryGetPage(key, out var page) ? page.GetAccount(GetPath(key), this) : default;
+        }
+
+        public UInt256 GetStorage(in Keccak key, in Keccak address)
+        {
+            return TryGetPage(key, out var page) ? page.GetStorage(GetPath(key), address, this) : default;
+        }
+
+        private bool TryGetPage(Keccak key, out FanOut256Page page)
+        {
             if (_disposed)
                 throw new ObjectDisposedException("The readonly batch has already been disposed");
 
             var addr = RootPage.FindAccountPage(_rootDataPages, key);
             if (addr.IsNull)
-                return default;
+            {
+                page = default;
+                return false;
+            }
 
-            var page = new FanOut256Page(GetAt(addr));
-            return page.GetAccount(GetPath(key), this);
+            page = new FanOut256Page(GetAt(addr));
+            return true;
         }
 
         public uint BatchId { get; }
@@ -297,17 +311,28 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
 
         public Account GetAccount(in Keccak key)
         {
+            return TryGetPage(key, out var page) ? page.GetAccount(GetPath(key), this) : default;
+        }
+
+        private bool TryGetPage(in Keccak key, out FanOut256Page page)
+        {
             CheckDisposed();
 
             var addr = RootPage.FindAccountPage(_root.Data.AccountPages, key);
 
             if (addr.IsNull)
             {
-                return default;
+                page = default;
+                return false;
             }
 
-            var page = new FanOut256Page(_db.GetAt(addr));
-            return page.GetAccount(GetPath(key), this);
+            page = new FanOut256Page(_db.GetAt(addr));
+            return true;
+        }
+
+        public UInt256 GetStorage(in Keccak key, in Keccak address)
+        {
+            return TryGetPage(key, out var page) ? page.GetStorage(GetPath(key), address, this) : default;
         }
 
         public void Set(in Keccak key, in Account account)
@@ -316,11 +341,23 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
 
             ref var addr = ref RootPage.FindAccountPage(_root.Data.AccountPages, key);
             var page = addr.IsNull ? GetNewPage(out addr, true) : GetAt(addr);
-
-            // treat as fanout page
             var data = new FanOut256Page(page);
 
             var updated = data.SetAccount(GetPath(key), account, this);
+
+            addr = _db.GetAddress(updated);
+        }
+
+        // TODO: extract method  from Set account and this
+        public void SetStorage(in Keccak key, in Keccak address, UInt256 value)
+        {
+            CheckDisposed();
+
+            ref var addr = ref RootPage.FindAccountPage(_root.Data.AccountPages, key);
+            var page = addr.IsNull ? GetNewPage(out addr, true) : GetAt(addr);
+            var data = new FanOut256Page(page);
+
+            var updated = data.SetStorage(GetPath(key), address, value, this);
 
             addr = _db.GetAddress(updated);
         }
