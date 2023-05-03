@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using HdrHistogram;
+using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Db;
 
@@ -13,7 +14,7 @@ namespace Paprika.Runner;
 public static class Program
 {
     private const int BlockCount = 2_000;
-    private const int AccountCount = 260_000_000;
+    private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
 
     private const int RandomSeed = 17;
@@ -55,7 +56,7 @@ public static class Program
             histograms.total.RecordValue(metrics.TotalPagesWritten);
         });
 
-        var accountsBytes = PrepareAccounts();
+        var random = PrepareStableRandomSource();
 
         var counter = 0;
 
@@ -68,9 +69,10 @@ public static class Program
 
             for (var account = 0; account < AccountsPerBlock; account++)
             {
-                var key = GetAccountKey(accountsBytes, counter);
+                var key = GetAccountKey(random, counter);
 
                 batch.Set(key, new Account(block, block));
+                batch.SetStorage(key, GetStorageAddress(random, counter), (UInt256)counter);
                 counter++;
             }
 
@@ -94,7 +96,7 @@ public static class Program
             batch.Commit(Commit);
         }
 
-        Console.WriteLine("Writing state of {0} accounts per block through {1} blocks, generated {2} accounts, used {3:F2}GB",
+        Console.WriteLine("Writing state of {0} accounts per block, each with 1 storage, through {1} blocks, generated {2} accounts, used {3:F2}GB",
             AccountsPerBlock, BlockCount, counter, db.ActualMegabytesOnDisk / 1024);
 
         // reading
@@ -103,8 +105,10 @@ public static class Program
 
         for (var account = 0; account < counter; account++)
         {
-            var key = GetAccountKey(accountsBytes, counter);
+            var key = GetAccountKey(random, counter);
+            var storage = GetStorageAddress(random, counter);
             read.GetAccount(key);
+            read.GetStorage(key, storage);
         }
 
         Console.WriteLine("Reading state of all of {0} accounts from the last block took {1}",
@@ -132,10 +136,22 @@ public static class Program
         return key;
     }
 
-    private static unsafe Span<byte> PrepareAccounts()
+    private static Keccak GetStorageAddress(Span<byte> random, int counter)
+    {
+        // do the rolling over account bytes, so each is different but they don't occupy that much memory
+        // it's not de Bruijn, but it's as best as possible.
+        Keccak key = default;
+
+        // go from the end
+        var address = RandomSampleSize - counter - Keccak.Size;
+        random.Slice(address, Keccak.Size).CopyTo(key.BytesAsSpan);
+        return key;
+    }
+
+    private static unsafe Span<byte> PrepareStableRandomSource()
     {
         Console.WriteLine("Preparing random accounts addresses...");
-        var accounts = new Span<byte>(NativeMemory.Alloc((UIntPtr)AccountCount), AccountCount);
+        var accounts = new Span<byte>(NativeMemory.Alloc((UIntPtr)RandomSampleSize), RandomSampleSize);
         new Random(RandomSeed).NextBytes(accounts);
         Console.WriteLine("Accounts prepared");
         return accounts;
