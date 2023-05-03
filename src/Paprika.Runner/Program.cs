@@ -13,9 +13,9 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = 2_000;
+    private const int BlockCount = 10;
     private const int RandomSampleSize = 260_000_000;
-    private const int AccountsPerBlock = 1000;
+    private const int AccountsPerBlock = 1;
 
     private const int RandomSeed = 17;
 
@@ -71,8 +71,8 @@ public static class Program
             {
                 var key = GetAccountKey(random, counter);
 
-                batch.Set(key, new Account(block, block));
-                batch.SetStorage(key, GetStorageAddress(random, counter), (UInt256)counter);
+                batch.Set(key, GetAccountValue(counter));
+                batch.SetStorage(key, GetStorageAddress(random, counter), GetStorageValue(counter));
                 counter++;
             }
 
@@ -106,9 +106,20 @@ public static class Program
         for (var account = 0; account < counter; account++)
         {
             var key = GetAccountKey(random, counter);
+            var a = read.GetAccount(key);
+
+            if (a != GetAccountValue(account))
+            {
+                throw new InvalidOperationException("Invalid account!");
+            }
+
             var storage = GetStorageAddress(random, counter);
-            read.GetAccount(key);
-            read.GetStorage(key, storage);
+            var actualStorage = read.GetStorage(key, storage);
+            var expectedStorage = GetStorageValue(account);
+            if (actualStorage != expectedStorage)
+            {
+                throw new InvalidOperationException("Invalid storage!");
+            }
         }
 
         Console.WriteLine("Reading state of all of {0} accounts from the last block took {1}",
@@ -119,6 +130,13 @@ public static class Program
         Write90Th(histograms.reused, "pages reused allocated");
         Write90Th(histograms.total, "total pages written");
     }
+
+    private static Account GetAccountValue(int counter)
+    {
+        return new Account((UInt256)counter, (UInt256)counter);
+    }
+
+    private static UInt256 GetStorageValue(int counter) => (UInt256)counter + 100000;
 
     private static void Write90Th(HistogramBase histogram, string name)
     {

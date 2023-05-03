@@ -1,7 +1,4 @@
-﻿using Nethermind.Int256;
-using Paprika.Crypto;
-
-namespace Paprika.Pages;
+﻿namespace Paprika.Pages;
 
 /// <summary>
 /// Represents an intent to set the account data.

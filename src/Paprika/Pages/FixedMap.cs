@@ -121,6 +121,13 @@ public readonly ref struct FixedMap
             new(path, DataType.StorageCell, keccak);
 
         public Key SliceFrom(int nibbles) => new(Path.SliceFrom(nibbles), Type, AdditionalKey);
+
+        public override string ToString()
+        {
+            return $"{nameof(Path)}: {Path.ToString()}, " +
+                   $"{nameof(Type)}: {Type}, " +
+                   $"{nameof(AdditionalKey)}: {AdditionalKey.Length} bytes";
+        }
     }
 
     public bool TrySet(in Key key, ReadOnlySpan<byte> data)
@@ -302,7 +309,8 @@ public readonly ref struct FixedMap
         return (byte)maxI;
     }
 
-    private static ushort GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> additionalKey, ReadOnlySpan<byte> data)
+    private static ushort GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> additionalKey,
+        ReadOnlySpan<byte> data)
     {
         return (ushort)(key.Length + data.Length + additionalKey.Length + ItemLengthLength);
     }
@@ -608,9 +616,9 @@ public readonly ref struct FixedMap
         public static ushort ExtractPrefix(NibblePath key)
         {
             var prefix = (key.GetAt(0) << NibblePath.NibbleShift * 0) +
-                (key.GetAt(1) << NibblePath.NibbleShift * 1) +
-                (key.GetAt(2) << NibblePath.NibbleShift * 2) +
-                (key.GetAt(3) << NibblePath.NibbleShift * 3);
+                         (key.GetAt(1) << NibblePath.NibbleShift * 1) +
+                         (key.GetAt(2) << NibblePath.NibbleShift * 2) +
+                         (key.GetAt(3) << NibblePath.NibbleShift * 3);
 
             // optimization           
             //rest = key.SliceFrom(4);
@@ -621,7 +629,8 @@ public readonly ref struct FixedMap
 
         public override string ToString()
         {
-            return $"{nameof(Prefix)}: {Prefix}, {nameof(ItemAddress)}: {ItemAddress}, {nameof(IsDeleted)}: {IsDeleted}";
+            return
+                $"{nameof(Prefix)}: {Prefix}, {nameof(ItemAddress)}: {ItemAddress}, {nameof(IsDeleted)}: {IsDeleted}";
         }
     }
 

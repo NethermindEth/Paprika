@@ -1,4 +1,5 @@
 ﻿using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
@@ -103,8 +104,13 @@ public readonly ref struct NibblePath
     /// <summary>
     /// Slices the beginning of the nibble path as <see cref="Span{T}.Slice(int)"/> does.
     /// </summary>
-    public NibblePath SliceFrom(int start) => new(ref Unsafe.Add(ref _span, (_odd + start) / 2),
-        (byte)((start & 1) ^ _odd), (byte)(Length - start));
+    public NibblePath SliceFrom(int start)
+    {
+        Debug.Assert(Length - start > 0, "Zero path generated");
+
+        return new(ref Unsafe.Add(ref _span, (_odd + start) / 2),
+            (byte)((start & 1) ^ _odd), (byte)(Length - start));
+    }
 
     /// <summary>
     /// Trims the end of the nibble path so that it gets to the specified length.

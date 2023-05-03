@@ -101,7 +101,7 @@ public readonly unsafe struct DataPage : IDataPage
 
         // in-page write
         var map = new FixedMap(Data.FixedMapSpan);
-        if (map.TrySet(FixedMap.Key.Account(path), ctx.Data))
+        if (map.TrySet(ctx.Key, ctx.Data))
         {
             return _page;
         }
@@ -113,7 +113,7 @@ public readonly unsafe struct DataPage : IDataPage
         var biggest = map.GetBiggestNibbleBucket();
         foreach (var item in map.EnumerateNibble(biggest))
         {
-            var set = new SetContext(item.Key.SliceFrom(1), item.RawData, ctx.Batch);
+            var set = new SetContext(item.Key.SliceFrom(NibbleCount), item.RawData, ctx.Batch);
             dataPage = new DataPage(dataPage.Set(set));
 
             // delete the item, it's possible due to the internal construction of the map

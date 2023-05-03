@@ -29,7 +29,9 @@ public static class DataPageExtensions
     public static Account GetAccount<TPage>(this TPage page, NibblePath path, IReadOnlyBatchContext ctx)
         where TPage : IDataPage
     {
-        if (page.TryGet(FixedMap.Key.Account(path), ctx, out var result))
+        var key = FixedMap.Key.Account(path);
+
+        if (page.TryGet(key, ctx, out var result))
         {
             Serializer.ReadAccount(result, out var balance, out var nonce);
             return new Account(balance, nonce);
@@ -38,12 +40,14 @@ public static class DataPageExtensions
         return default;
     }
 
-    public static Page SetAccount<TPage>(this TPage page, NibblePath key, in Account account, IBatchContext batch)
+    public static Page SetAccount<TPage>(this TPage page, NibblePath path, in Account account, IBatchContext batch)
         where TPage : IDataPage
     {
+        var key = FixedMap.Key.Account(path);
+
         Span<byte> payload = stackalloc byte[Serializer.BalanceNonceMaxByteCount];
         payload = Serializer.WriteAccount(payload, account.Balance, account.Nonce);
-        var ctx = new SetContext(FixedMap.Key.Account(key), payload, batch);
+        var ctx = new SetContext(key, payload, batch);
         return page.Set(ctx);
     }
 
@@ -51,7 +55,9 @@ public static class DataPageExtensions
         IReadOnlyBatchContext ctx)
         where TPage : IDataPage
     {
-        if (page.TryGet(FixedMap.Key.StorageCell(path, address), ctx, out var result))
+        var key = FixedMap.Key.StorageCell(path, address);
+
+        if (page.TryGet(key, ctx, out var result))
         {
             Serializer.ReadStorageValue(result, out var value);
             return value;
@@ -64,10 +70,12 @@ public static class DataPageExtensions
         IBatchContext batch)
         where TPage : IDataPage
     {
+        var key = FixedMap.Key.StorageCell(path, address);
+
         Span<byte> payload = stackalloc byte[Serializer.StorageValueMaxByteCount];
         payload = Serializer.WriteStorageValue(payload, value);
 
-        var ctx = new SetContext(FixedMap.Key.StorageCell(path, address), payload, batch);
+        var ctx = new SetContext(key, payload, batch);
         return page.Set(ctx);
     }
 }

@@ -1,6 +1,7 @@
 ﻿using System.Buffers.Binary;
 using FluentAssertions;
 using NUnit.Framework;
+using Paprika.Crypto;
 using Paprika.Pages;
 using static Paprika.Tests.Values;
 
@@ -99,6 +100,40 @@ public class DataPageTests : BasePageTests
 
             var account = dataPage.GetAccount(NibblePath.FromKey(key), batch);
             account.Should().Be(new Account(i, i));
+        }
+    }
+
+    [Test]
+    public void Page_overflows_storage()
+    {
+        var page = AllocPage();
+        page.Clear();
+
+        var batch = NewBatch(BatchId);
+        var dataPage = new DataPage(page);
+
+        const int count = 56;
+
+        for (uint i = 0; i < count; i++)
+        {
+            var address = GetStorageAddress(i);
+
+            dataPage = new DataPage(dataPage.SetStorage(NibblePath.FromKey(Key1a), address, i, batch));
+        }
+
+        for (uint i = 0; i < count; i++)
+        {
+            var address = GetStorageAddress(i);
+
+            var value = dataPage.GetStorage(NibblePath.FromKey(Key1a), address, batch);
+            value.Should().Be(i);
+        }
+
+        static Keccak GetStorageAddress(uint i)
+        {
+            var address = Key1a;
+            BinaryPrimitives.WriteUInt32LittleEndian(address.BytesAsSpan, i);
+            return address;
         }
     }
 
