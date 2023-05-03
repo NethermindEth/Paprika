@@ -19,19 +19,19 @@ public class FixedMapTests
         Span<byte> span = stackalloc byte[FixedMap.MinSize];
         var map = new FixedMap(span);
 
-        map.TrySet(Key0, Data0).Should().BeTrue();
+        map.TrySet(FixedMap.Key.Account(Key0), Data0).Should().BeTrue();
 
-        map.TryGet(Key0, out var retrieved).Should().BeTrue();
+        map.TryGet(FixedMap.Key.Account(Key0), out var retrieved).Should().BeTrue();
         Data0.SequenceEqual(retrieved).Should().BeTrue();
 
-        map.Delete(Key0).Should().BeTrue("Should find and delete entry");
-        map.TryGet(Key0, out _).Should().BeFalse("The entry shall no longer exist");
+        map.Delete(FixedMap.Key.Account(Key0)).Should().BeTrue("Should find and delete entry");
+        map.TryGet(FixedMap.Key.Account(Key0), out _).Should().BeFalse("The entry shall no longer exist");
 
         // should be ready to accept some data again
 
-        map.TrySet(Key1, Data1).Should().BeTrue("Should have memory after previous delete");
+        map.TrySet(FixedMap.Key.Account(Key1), Data1).Should().BeTrue("Should have memory after previous delete");
 
-        map.TryGet(Key1, out retrieved).Should().BeTrue();
+        map.TryGet(FixedMap.Key.Account(Key1), out retrieved).Should().BeTrue();
         Data1.SequenceEqual(retrieved).Should().BeTrue();
     }
 
@@ -42,20 +42,20 @@ public class FixedMapTests
         Span<byte> span = stackalloc byte[40];
         var map = new FixedMap(span);
 
-        map.TrySet(Key0, Data0).Should().BeTrue();
-        map.TrySet(Key1, Data1).Should().BeTrue();
+        map.TrySet(FixedMap.Key.Account(Key0), Data0).Should().BeTrue();
+        map.TrySet(FixedMap.Key.Account(Key1), Data1).Should().BeTrue();
 
-        map.Delete(Key0).Should().BeTrue();
+        map.Delete(FixedMap.Key.Account(Key0)).Should().BeTrue();
 
-        map.TrySet(Key2, Data2).Should().BeTrue("Should retrieve space by running internally the defragmentation");
+        map.TrySet(FixedMap.Key.Account(Key2), Data2).Should().BeTrue("Should retrieve space by running internally the defragmentation");
 
         // should contains no key0, key1 and key2 now
-        map.TryGet(Key0, out var retrieved).Should().BeFalse();
+        map.TryGet(FixedMap.Key.Account(Key0), out var retrieved).Should().BeFalse();
 
-        map.TryGet(Key1, out retrieved).Should().BeTrue();
+        map.TryGet(FixedMap.Key.Account(Key1), out retrieved).Should().BeTrue();
         Data1.SequenceEqual(retrieved).Should().BeTrue();
 
-        map.TryGet(Key2, out retrieved).Should().BeTrue();
+        map.TryGet(FixedMap.Key.Account(Key2), out retrieved).Should().BeTrue();
         Data2.SequenceEqual(retrieved).Should().BeTrue();
     }
 
@@ -66,10 +66,10 @@ public class FixedMapTests
         Span<byte> span = stackalloc byte[24];
         var map = new FixedMap(span);
 
-        map.TrySet(Key1, Data1).Should().BeTrue();
-        map.TrySet(Key1, Data2).Should().BeTrue();
+        map.TrySet(FixedMap.Key.Account(Key1), Data1).Should().BeTrue();
+        map.TrySet(FixedMap.Key.Account(Key1), Data2).Should().BeTrue();
 
-        map.TryGet(Key1, out var retrieved).Should().BeTrue();
+        map.TryGet(FixedMap.Key.Account(Key1), out var retrieved).Should().BeTrue();
         Data2.SequenceEqual(retrieved).Should().BeTrue();
     }
 
@@ -80,10 +80,10 @@ public class FixedMapTests
         Span<byte> span = stackalloc byte[24];
         var map = new FixedMap(span);
 
-        map.TrySet(Key0, Data0).Should().BeTrue();
-        map.TrySet(Key0, Data2).Should().BeTrue();
+        map.TrySet(FixedMap.Key.Account(Key0), Data0).Should().BeTrue();
+        map.TrySet(FixedMap.Key.Account(Key0), Data2).Should().BeTrue();
 
-        map.TryGet(Key0, out var retrieved).Should().BeTrue();
+        map.TryGet(FixedMap.Key.Account(Key0), out var retrieved).Should().BeTrue();
         Data2.SequenceEqual(retrieved).Should().BeTrue();
     }
 
@@ -94,11 +94,11 @@ public class FixedMapTests
         Span<byte> span = stackalloc byte[256];
         var map = new FixedMap(span);
 
-        map.TrySet(Key0, Data0);
-        map.TrySet(Key1, Data1);
-        map.TrySet(Key2, Data2);
+        map.TrySet(FixedMap.Key.Account(Key0), Data0);
+        map.TrySet(FixedMap.Key.Account(Key1), Data1);
+        map.TrySet(FixedMap.Key.Account(Key2), Data2);
 
-        map.Delete(Key1); // delete K1 to not observe it
+        map.Delete(FixedMap.Key.Account(Key1)); // delete K1 to not observe it
 
         var e = map.GetEnumerator();
 

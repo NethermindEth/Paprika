@@ -3,7 +3,7 @@
 /// <summary>
 /// Informs that in a given member there's an optimization opportunity.
 /// </summary>
-[AttributeUsage(AttributeTargets.All)]
+[AttributeUsage(AttributeTargets.All, AllowMultiple = true)]
 public class OptimizationOpportunityAttribute : Attribute
 {
     public OptimizationType Type { get; }

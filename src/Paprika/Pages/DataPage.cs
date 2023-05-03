@@ -44,6 +44,7 @@ public readonly unsafe struct DataPage : IAccountPage
         /// The size of the <see cref="FixedMap"/> held in this page. Must be long aligned.
         /// </summary>
         private const int FixedMapSize = Size - BucketCount * DbAddress.Size;
+
         private const int FixedMapOffset = Size - FixedMapSize;
 
         /// <summary>
@@ -103,7 +104,7 @@ public readonly unsafe struct DataPage : IAccountPage
             ctx.Balance, ctx.Nonce);
 
         var map = new FixedMap(Data.FixedMapSpan);
-        if (map.TrySet(path, data))
+        if (map.TrySet(FixedMap.Key.Account(path), data))
         {
             return _page;
         }
@@ -121,7 +122,7 @@ public readonly unsafe struct DataPage : IAccountPage
             dataPage = new DataPage(dataPage.Set(set));
 
             // delete the item, it's possible due to the internal construction of the map
-            map.Delete(item.Path);
+            map.Delete(FixedMap.Key.Account(item.Path));
         }
 
         Data.Buckets[biggest] = ctx.Batch.GetAddress(dataPage.AsPage());
@@ -145,7 +146,7 @@ public readonly unsafe struct DataPage : IAccountPage
         // read in-page
         var map = new FixedMap(Data.FixedMapSpan);
 
-        if (map.TryGet(path, out var data))
+        if (map.TryGet(FixedMap.Key.Account(path), out var data))
         {
             Serializer.Account.ReadAccount(data, out var balance, out var nonce);
             result = new Account(balance, nonce);
