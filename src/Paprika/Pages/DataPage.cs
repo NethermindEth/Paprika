@@ -14,7 +14,7 @@ namespace Paprika.Pages;
 /// The page preserves locality of the data though. It's either all the children with a given nibble stored
 /// in the parent page, or they are flushed underneath. 
 /// </remarks>
-public readonly unsafe struct DataPage : IAccountPage
+public readonly unsafe struct DataPage : IDataPage
 {
     private readonly Page _page;
 
@@ -83,7 +83,7 @@ public readonly unsafe struct DataPage : IAccountPage
             return new DataPage(writable).Set(ctx);
         }
 
-        var path = ctx.Path;
+        var path = ctx.Key.Path;
         var nibble = path.FirstNibble;
 
         var address = Data.Buckets[nibble];
@@ -92,7 +92,7 @@ public readonly unsafe struct DataPage : IAccountPage
         if (address.IsNull == false && address.IsValidPageAddress)
         {
             var page = ctx.Batch.GetAt(address);
-            var updated = new DataPage(page).Set(ctx.TrimPath(NibbleCount));
+            var updated = new DataPage(page).Set(ctx.SliceFrom(NibbleCount));
 
             // remember the updated
             Data.Buckets[nibble] = ctx.Batch.GetAddress(updated);
@@ -100,11 +100,8 @@ public readonly unsafe struct DataPage : IAccountPage
         }
 
         // in-page write
-        var data = Serializer.Account.WriteEOATo(stackalloc byte[Serializer.Account.EOAMaxByteCount],
-            ctx.Balance, ctx.Nonce);
-
         var map = new FixedMap(Data.FixedMapSpan);
-        if (map.TrySet(FixedMap.Key.Account(path), data))
+        if (map.TrySet(FixedMap.Key.Account(path), ctx.Data))
         {
             return _page;
         }
@@ -116,13 +113,11 @@ public readonly unsafe struct DataPage : IAccountPage
         var biggest = map.GetBiggestNibbleBucket();
         foreach (var item in map.EnumerateNibble(biggest))
         {
-            // TODO: consider writing data once, so that they don't need to be serialized and deserialized
-            Serializer.Account.ReadAccount(item.Data, out var balance, out var nonce);
-            var set = new SetContext(item.Path.SliceFrom(1), balance, nonce, ctx.Batch);
+            var set = new SetContext(item.Key.SliceFrom(1), item.RawData, ctx.Batch);
             dataPage = new DataPage(dataPage.Set(set));
 
             // delete the item, it's possible due to the internal construction of the map
-            map.Delete(FixedMap.Key.Account(item.Path));
+            map.Delete(item.Key);
         }
 
         Data.Buckets[biggest] = ctx.Batch.GetAddress(dataPage.AsPage());
@@ -131,28 +126,26 @@ public readonly unsafe struct DataPage : IAccountPage
         return Set(ctx);
     }
 
-    public void GetAccount(in NibblePath path, IReadOnlyBatchContext batch, out Account result)
+    public bool TryGet(FixedMap.Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
-        var nibble = path.FirstNibble;
+        var nibble = key.Path.FirstNibble;
         var bucket = Data.Buckets[nibble];
 
         // non-null page jump, follow it!
         if (bucket.IsNull == false && bucket.IsValidPageAddress)
         {
-            new DataPage(batch.GetAt(bucket)).GetAccount(path.SliceFrom(NibbleCount), batch, out result);
-            return;
+            return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), batch, out result);
         }
 
         // read in-page
         var map = new FixedMap(Data.FixedMapSpan);
 
-        if (map.TryGet(FixedMap.Key.Account(path), out var data))
+        if (map.TryGet(key, out result))
         {
-            Serializer.Account.ReadAccount(data, out var balance, out var nonce);
-            result = new Account(balance, nonce);
-            return;
+            return true;
         }
 
         result = default;
+        return false;
     }
 }

@@ -18,11 +18,12 @@ public class DataPageTests : BasePageTests
 
         var batch = NewBatch(BatchId);
         var dataPage = new DataPage(page);
-        var ctx = new SetContext(NibblePath.FromKey(Key0), Balance0, Nonce0, batch);
+        var path = NibblePath.FromKey(Key0);
+        var set = new Account(Balance0, Nonce0);
 
-        var updated = dataPage.Set(ctx);
+        var updated = dataPage.SetAccount(path, set, batch);
 
-        new DataPage(updated).GetAccount(NibblePath.FromKey(Key0), batch, out var account);
+        var account = new DataPage(updated).GetAccount(path, batch);
 
         Assert.AreEqual(Nonce0, account.Nonce);
         Assert.AreEqual(Balance0, account.Balance);
@@ -39,13 +40,11 @@ public class DataPageTests : BasePageTests
         var path0 = NibblePath.FromKey(Key0);
 
         var dataPage = new DataPage(page);
-        var ctx1 = new SetContext(path0, Balance0, Nonce0, batch);
-        var ctx2 = new SetContext(path0, Balance1, Nonce1, batch);
 
-        var updated = dataPage.Set(ctx1);
-        updated = new DataPage(updated).Set(ctx2);
+        var updated = dataPage.SetAccount(path0, new Account(Balance0, Nonce0), batch);
+        updated = new DataPage(updated).SetAccount(path0, new Account(Balance1, Nonce1), batch);
 
-        new DataPage(updated).GetAccount(path0, batch, out var account);
+        var account = new DataPage(updated).GetAccount(path0, batch);
         Assert.AreEqual(Nonce1, account.Nonce);
         Assert.AreEqual(Balance1, account.Balance);
     }
@@ -61,17 +60,15 @@ public class DataPageTests : BasePageTests
         var dataPage = new DataPage(page);
         var path1A = NibblePath.FromKey(Key1a);
         var path1B = NibblePath.FromKey(Key1b);
-        var ctx1 = new SetContext(path1A, Balance0, Nonce0, batch);
-        var ctx2 = new SetContext(path1B, Balance1, Nonce1, batch);
 
-        var updated = dataPage.Set(ctx1);
-        updated = new DataPage(updated).Set(ctx2);
+        var updated = dataPage.SetAccount(path1A, new Account(Balance0, Nonce0), batch);
+        updated = new DataPage(updated).SetAccount(path1B, new Account(Balance1, Nonce1), batch);
 
-        new DataPage(updated).GetAccount(path1A, batch, out var account);
+        var account = new DataPage(updated).GetAccount(path1A, batch);
         Assert.AreEqual(Nonce0, account.Nonce);
         Assert.AreEqual(Balance0, account.Balance);
 
-        new DataPage(updated).GetAccount(path1B, batch, out account);
+        account = new DataPage(updated).GetAccount(path1B, batch);
         Assert.AreEqual(Nonce1, account.Nonce);
         Assert.AreEqual(Balance1, account.Balance);
     }
@@ -92,8 +89,7 @@ public class DataPageTests : BasePageTests
             var key = Key1a;
             BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i);
 
-            var ctx = new SetContext(NibblePath.FromKey(key), i, i, batch);
-            dataPage = new DataPage(dataPage.Set(ctx));
+            dataPage = new DataPage(dataPage.SetAccount(NibblePath.FromKey(key), new Account(i, i), batch));
         }
 
         for (uint i = 0; i < count; i++)
@@ -101,7 +97,7 @@ public class DataPageTests : BasePageTests
             var key = Key1a;
             BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i);
 
-            dataPage.GetAccount(NibblePath.FromKey(key), batch, out var account);
+            var account = dataPage.GetAccount(NibblePath.FromKey(key), batch);
             account.Should().Be(new Account(i, i));
         }
     }
@@ -128,9 +124,7 @@ public class DataPageTests : BasePageTests
                 batch = batch.Next();
             }
 
-            var ctx = new SetContext(NibblePath.FromKey(key), i, i, batch);
-
-            dataPage = new DataPage(dataPage.Set(ctx));
+            dataPage = new DataPage(dataPage.SetAccount(NibblePath.FromKey(key), new Account(i, i), batch));
         }
 
         for (uint i = 0; i < count; i++)
@@ -138,7 +132,7 @@ public class DataPageTests : BasePageTests
             var key = Key1a;
             BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i);
 
-            dataPage.GetAccount(NibblePath.FromKey(key), batch, out var account);
+            var account = dataPage.GetAccount(NibblePath.FromKey(key), batch);
             account.Should().Be(new Account(i, i));
         }
     }

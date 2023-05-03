@@ -1,14 +1,13 @@
 ﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Paprika.Crypto;
 
 namespace Paprika.Pages;
 
 /// <summary>
 /// Represents the page with the fan out of 256 to maximally flatten the tree.
 /// </summary>
-public readonly unsafe struct FanOut256Page : IAccountPage
+public readonly unsafe struct FanOut256Page : IDataPage
 {
     private readonly Page _page;
 
@@ -46,7 +45,7 @@ public readonly unsafe struct FanOut256Page : IAccountPage
             return new FanOut256Page(writable).Set(ctx);
         }
 
-        var prefix = FirstTwoNibbles(ctx.Path);
+        var prefix = FirstTwoNibbles(ctx.Key.Path);
 
         var address = Data.Buckets[prefix];
 
@@ -54,13 +53,13 @@ public readonly unsafe struct FanOut256Page : IAccountPage
         {
             // no data page, allocate and set
             var page = ctx.Batch.GetNewPage(out address, true);
-            new DataPage(page).Set(ctx.TrimPath(NibbleCount));
+            new DataPage(page).Set(ctx.SliceFrom(NibbleCount));
             Data.Buckets[prefix] = address;
         }
         else
         {
             var page = ctx.Batch.GetAt(address);
-            var updated = new DataPage(page).Set(ctx.TrimPath(NibbleCount));
+            var updated = new DataPage(page).Set(ctx.SliceFrom(NibbleCount));
             Data.Buckets[prefix] = ctx.Batch.GetAddress(updated);
         }
 
@@ -75,20 +74,18 @@ public readonly unsafe struct FanOut256Page : IAccountPage
 
     private const int NibbleCount = 2;
 
-    public void GetAccount(in NibblePath path, IReadOnlyBatchContext batch, out Account result)
+    public bool TryGet(FixedMap.Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
-        var prefix = FirstTwoNibbles(path);
+        var prefix = FirstTwoNibbles(key.Path);
 
         var address = Data.Buckets[prefix];
 
         if (address.IsNull)
         {
             result = default;
+            return false;
         }
-        else
-        {
-            var page = batch.GetAt(address);
-            new DataPage(page).GetAccount(path.SliceFrom(NibbleCount), batch, out result);
-        }
+
+        return new DataPage(batch.GetAt(address)).TryGet(key.SliceFrom(NibbleCount), batch, out result);
     }
 }

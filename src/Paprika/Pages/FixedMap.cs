@@ -81,6 +81,12 @@ public readonly ref struct FixedMap
         }
 
         /// <summary>
+        /// To be used only by FixedMap internally. Builds the raw key
+        /// </summary>
+        public static Key Raw(NibblePath path, DataType type) =>
+            new(path, type, ReadOnlySpan<byte>.Empty);
+
+        /// <summary>
         /// Builds the key for <see cref="DataType.Account"/>.
         /// </summary>
         public static Key Account(NibblePath path) => new(path, DataType.Account, ReadOnlySpan<byte>.Empty);
@@ -104,6 +110,17 @@ public readonly ref struct FixedMap
         /// </remarks>
         public static Key StorageCell(NibblePath path, in Keccak keccak) =>
             new(path, DataType.StorageCell, keccak.Span);
+
+        /// <summary>
+        /// Builds the key for <see cref="DataType.StorageCell"/>.
+        /// </summary>
+        /// <remarks>
+        /// <paramref name="keccak"/> must be passed by ref, otherwise it will blow up the span!
+        /// </remarks>
+        public static Key StorageCell(NibblePath path, ReadOnlySpan<byte> keccak) =>
+            new(path, DataType.StorageCell, keccak);
+
+        public Key SliceFrom(int nibbles) => new(Path.SliceFrom(nibbles), Type, AdditionalKey);
     }
 
     public bool TrySet(in Key key, ReadOnlySpan<byte> data)
@@ -220,21 +237,30 @@ public readonly ref struct FixedMap
         {
             get
             {
-                var span = _map.GetSlotPayload(_map._slots[_index]);
+                var slot = _map._slots[_index];
+                var span = _map.GetSlotPayload(slot);
                 var data = NibblePath.ReadFrom(span, out var path);
-                return new Item(path, data);
+
+                if (slot.Type == DataType.StorageCell)
+                {
+                    const int size = Keccak.Size;
+                    var additionalKey = data.Slice(0, size);
+                    return new Item(Key.StorageCell(path, additionalKey), data.Slice(size));
+                }
+
+                return new Item(Key.Raw(path, slot.Type), data);
             }
         }
 
         public readonly ref struct Item
         {
-            public NibblePath Path { get; }
-            public ReadOnlySpan<byte> Data { get; }
+            public Key Key { get; }
+            public ReadOnlySpan<byte> RawData { get; }
 
-            public Item(NibblePath path, ReadOnlySpan<byte> data)
+            public Item(Key key, ReadOnlySpan<byte> rawData)
             {
-                Path = path;
-                Data = data;
+                Key = key;
+                RawData = rawData;
             }
         }
 

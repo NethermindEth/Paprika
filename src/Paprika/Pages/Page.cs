@@ -16,11 +16,35 @@ public interface IPage
 {
 }
 
-public interface IAccountPage : IPage
+public interface IDataPage : IPage
 {
-    void GetAccount(in NibblePath key, IReadOnlyBatchContext batch, out Account result);
+    bool TryGet(FixedMap.Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result);
 
     Page Set(in SetContext ctx);
+}
+
+public static class DataPageExtensions
+{
+    public static Account GetAccount<TPage>(this TPage page, NibblePath path, IReadOnlyBatchContext ctx)
+        where TPage : IDataPage
+    {
+        if (page.TryGet(FixedMap.Key.Account(path), ctx, out var result))
+        {
+            Serializer.Account.ReadAccount(result, out var balance, out var nonce);
+            return new Account(balance, nonce);
+        }
+
+        return default;
+    }
+
+    public static Page SetAccount<TPage>(this TPage page, NibblePath key, in Account account, IBatchContext batch)
+        where TPage : IDataPage
+    {
+        Span<byte> payload = stackalloc byte[Serializer.Account.EOAMaxByteCount];
+        payload = Serializer.Account.WriteEOATo(payload, account.Balance, account.Nonce);
+        var ctx = new SetContext(FixedMap.Key.Account(key), payload, batch);
+        return page.Set(ctx);
+    }
 }
 
 /// <summary>
@@ -34,13 +58,10 @@ public struct PageHeader
     /// <summary>
     /// The id of the last batch that wrote to this page.
     /// </summary>
-    [FieldOffset(0)]
-    public uint BatchId;
+    [FieldOffset(0)] public uint BatchId;
 
-    [FieldOffset(4)]
-    public uint Reserved; // for not it's just alignment
+    [FieldOffset(4)] public uint Reserved; // for not it's just alignment
 }
-
 
 /// <summary>
 /// Struct representing data oriented page types.

@@ -251,9 +251,8 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             if (addr.IsNull)
                 return default;
 
-            var dataPage = new FanOut256Page(GetAt(addr));
-            dataPage.GetAccount(GetPath(key), this, out var account);
-            return account;
+            var page = new FanOut256Page(GetAt(addr));
+            return page.GetAccount(GetPath(key), this);
         }
 
         public uint BatchId { get; }
@@ -307,11 +306,8 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
                 return default;
             }
 
-            // treat as data page
-            var data = new FanOut256Page(_db.GetAt(addr));
-
-            data.GetAccount(GetPath(key), this, out var account);
-            return account;
+            var page = new FanOut256Page(_db.GetAt(addr));
+            return page.GetAccount(GetPath(key), this);
         }
 
         public void Set(in Keccak key, in Account account)
@@ -324,9 +320,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             // treat as fanout page
             var data = new FanOut256Page(page);
 
-            var ctx = new SetContext(GetPath(key), account.Balance, account.Nonce, this);
-
-            var updated = data.Set(ctx);
+            var updated = data.SetAccount(GetPath(key), account, this);
 
             addr = _db.GetAddress(updated);
         }
