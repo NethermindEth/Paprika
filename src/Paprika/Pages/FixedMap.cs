@@ -103,7 +103,7 @@ public readonly ref struct FixedMap
         /// <paramref name="keccak"/> must be passed by ref, otherwise it will blow up the span!
         /// </remarks>
         public static Key StorageCell(NibblePath path, in Keccak keccak) =>
-            new(path, DataType.StorageRootHash, keccak.Span);
+            new(path, DataType.StorageCell, keccak.Span);
     }
 
     public bool TrySet(in Key key, ReadOnlySpan<byte> data)
@@ -157,7 +157,7 @@ public readonly ref struct FixedMap
         // write item: length, key, additionalKey, data
         var dest = _data.Slice(slot.ItemAddress, total);
 
-        WriteEntryLength(dest, (ushort)(encodedKey.Length + data.Length));
+        WriteEntryLength(dest, (ushort)(total - ItemLengthLength));
 
         encodedKey.CopyTo(dest.Slice(ItemLengthLength));
         key.AdditionalKey.CopyTo(dest.Slice(ItemLengthLength + encodedKey.Length));
