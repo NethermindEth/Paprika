@@ -8,12 +8,13 @@ namespace Paprika.Tests;
 public class FixedMapTests
 {
     private static NibblePath Key0 => NibblePath.FromKey(new byte[] { 1, 2, 3, 5 });
+
     private static ReadOnlySpan<byte> Data0 => new byte[] { 23 };
     private static NibblePath Key1 => NibblePath.FromKey(new byte[] { 7, 11, 13, 17 });
     private static ReadOnlySpan<byte> Data1 => new byte[] { 29, 31 };
     private static NibblePath Key2 => NibblePath.FromKey(new byte[] { 19, 21, 23, 29 });
     private static ReadOnlySpan<byte> Data2 => new byte[] { 37, 39 };
-    private static ReadOnlySpan<byte> Data3 => new byte[] { 37, 39, 41, 43 };
+    private static ReadOnlySpan<byte> Data3 => new byte[] { 39, 41, 43 };
 
     private static readonly Keccak StorageCell0 = Keccak.Compute(new byte[] { 2, 43, 4, 5, 34 });
     private static readonly Keccak StorageCell1 = Keccak.Compute(new byte[] { 2, 43, 4, });
@@ -131,6 +132,19 @@ public class FixedMapTests
         map.GetAssert(FixedMap.Key.StorageCell(Key0, StorageCell0), Data1);
         map.GetAssert(FixedMap.Key.StorageCell(Key0, StorageCell1), Data2);
         map.GetAssert(FixedMap.Key.StorageCell(Key0, StorageCell2), Data3);
+    }
+
+    [Test]
+    public void Different_accounts_same_cells()
+    {
+        Span<byte> span = stackalloc byte[512];
+        var map = new FixedMap(span);
+
+        map.SetAssert(FixedMap.Key.StorageCell(Key0, StorageCell0), Data1);
+        map.SetAssert(FixedMap.Key.StorageCell(Key1, StorageCell0), Data2);
+
+        map.GetAssert(FixedMap.Key.StorageCell(Key0, StorageCell0), Data1);
+        map.GetAssert(FixedMap.Key.StorageCell(Key1, StorageCell0), Data2);
     }
 }
 
