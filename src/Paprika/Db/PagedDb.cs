@@ -309,12 +309,10 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             _metrics = new BatchMetrics();
         }
 
-        public Account GetAccount(in Keccak key)
-        {
-            return TryGetPage(key, out var page) ? page.GetAccount(GetPath(key), this) : default;
-        }
+        public Account GetAccount(in Keccak key) =>
+            TryGetPageNoAlloc(key, out var page) ? page.GetAccount(GetPath(key), this) : default;
 
-        private bool TryGetPage(in Keccak key, out FanOut256Page page)
+        private bool TryGetPageNoAlloc(in Keccak key, out FanOut256Page page)
         {
             CheckDisposed();
 
@@ -330,36 +328,32 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             return true;
         }
 
-        public UInt256 GetStorage(in Keccak key, in Keccak address)
-        {
-            return TryGetPage(key, out var page) ? page.GetStorage(GetPath(key), address, this) : default;
-        }
+        public UInt256 GetStorage(in Keccak key, in Keccak address) =>
+            TryGetPageNoAlloc(key, out var page) ? page.GetStorage(GetPath(key), address, this) : default;
 
         public void Set(in Keccak key, in Account account)
         {
-            CheckDisposed();
-
-            ref var addr = ref RootPage.FindAccountPage(_root.Data.AccountPages, key);
-            var page = addr.IsNull ? GetNewPage(out addr, true) : GetAt(addr);
-            var data = new FanOut256Page(page);
-
-            var updated = data.SetAccount(GetPath(key), account, this);
-
+            ref var addr = ref TryGetPageAlloc(key, out var page);
+            var updated = page.SetAccount(GetPath(key), account, this);
             addr = _db.GetAddress(updated);
         }
 
-        // TODO: extract method  from Set account and this
         public void SetStorage(in Keccak key, in Keccak address, UInt256 value)
+        {
+            ref var addr = ref TryGetPageAlloc(key, out var page);
+            var updated = page.SetStorage(GetPath(key), address, value, this);
+            addr = _db.GetAddress(updated);
+        }
+
+        private ref DbAddress TryGetPageAlloc(in Keccak key, out FanOut256Page page)
         {
             CheckDisposed();
 
             ref var addr = ref RootPage.FindAccountPage(_root.Data.AccountPages, key);
-            var page = addr.IsNull ? GetNewPage(out addr, true) : GetAt(addr);
-            var data = new FanOut256Page(page);
+            var p = addr.IsNull ? GetNewPage(out addr, true) : GetAt(addr);
+            page = new FanOut256Page(p);
 
-            var updated = data.SetStorage(GetPath(key), address, value, this);
-
-            addr = _db.GetAddress(updated);
+            return ref addr;
         }
 
         private void CheckDisposed()
