@@ -12,7 +12,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = 100;
+    private const int BlockCount = 1000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
 
@@ -59,6 +59,17 @@ public static class Program
 
         var counter = 0;
 
+        Console.WriteLine();
+        Console.WriteLine("(P) - 90th percentile of the value");
+        Console.WriteLine();
+        
+        PrintHeader("At Block", 
+            "Total avg. speed", 
+            "Disk space used", 
+            "New pages (P)",
+            "Pages reused (P)",
+            "Total pages (P)");
+        
         // writing
         var writing = Stopwatch.StartNew();
 
@@ -77,24 +88,21 @@ public static class Program
 
             if (block > 0 & block % LogEvery == 0)
             {
-                // log
-                Console.WriteLine("At block: {0,4}", block);
-                Console.WriteLine("- total avg. speed {0}/block", TimeSpan.FromTicks(writing.ElapsedTicks / LogEvery));
-                Console.WriteLine("- disk space used {0:F2}GB", db.ActualMegabytesOnDisk / 1024);
-
-                Console.WriteLine("- 90th percentiles:");
-                Write90Th(histograms.allocated, "new pages allocated");
-                Write90Th(histograms.reused, "pages reused allocated");
-                Write90Th(histograms.total, "total pages written");
-
+                PrintRow(
+                    block.ToString(),
+                    $"{TimeSpan.FromTicks(writing.ElapsedTicks / LogEvery).TotalSeconds:F3} sec/block",
+                    $"{db.ActualMegabytesOnDisk / 1024:F2}GB",
+                    $"{histograms.reused.GetValueAtPercentile(90)}",
+                    $"{histograms.allocated.GetValueAtPercentile(90)}",
+                    $"{histograms.total.GetValueAtPercentile(90)}");
+                
                 writing.Restart();
-
-                Console.WriteLine();
             }
 
             batch.Commit(Commit);
         }
 
+        Console.WriteLine();
         Console.WriteLine("Writing state of {0} accounts per block, each with 1 storage, through {1} blocks, generated {2} accounts, used {3:F2}GB",
             AccountsPerBlock, BlockCount, counter, db.ActualMegabytesOnDisk / 1024);
 
@@ -128,6 +136,18 @@ public static class Program
         Write90Th(histograms.allocated, "new pages allocated");
         Write90Th(histograms.reused, "pages reused allocated");
         Write90Th(histograms.total, "total pages written");
+    }
+
+
+    private const string Separator = " | ";
+    private const int Padding = 16;
+    private static void PrintHeader(params string[] values)
+    {
+        Console.Out.WriteLine(string.Join(Separator, values.Select(v => v.PadRight(Padding))));
+    }
+    private static void PrintRow(params string[] values)
+    {
+        Console.Out.WriteLine(string.Join(Separator, values.Select(v => v.PadLeft(Padding))));
     }
 
     private static Account GetAccountValue(int counter)
