@@ -64,11 +64,11 @@ public static class Program
         Console.WriteLine();
         
         PrintHeader("At Block", 
-            "Total avg. speed", 
+            "Avg. speed", 
             "Disk space used", 
-            "New pages (P)",
-            "Pages reused (P)",
-            "Total pages (P)");
+            "New pages(P)",
+            "Pages reused(P)",
+            "Total pages(P)");
         
         // writing
         var writing = Stopwatch.StartNew();
@@ -86,6 +86,8 @@ public static class Program
                 counter++;
             }
 
+            batch.Commit(Commit);
+
             if (block > 0 & block % LogEvery == 0)
             {
                 PrintRow(
@@ -98,8 +100,6 @@ public static class Program
                 
                 writing.Restart();
             }
-
-            batch.Commit(Commit);
         }
 
         Console.WriteLine();
@@ -140,7 +140,7 @@ public static class Program
 
 
     private const string Separator = " | ";
-    private const int Padding = 16;
+    private const int Padding = 15;
     private static void PrintHeader(params string[] values)
     {
         Console.Out.WriteLine(string.Join(Separator, values.Select(v => v.PadRight(Padding))));
