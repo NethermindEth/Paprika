@@ -292,12 +292,11 @@ public readonly ref struct FixedMap
     /// Gets the nibble representing the biggest bucket.
     /// </summary>
     /// <returns></returns>
-    public (byte nibble, ushort accountCount) GetBiggestNibbleBucket()
+    public byte GetBiggestNibbleBucket()
     {
         const int bucketCount = 16;
 
         Span<ushort> buckets = stackalloc ushort[bucketCount];
-        Span<ushort> accountCount = stackalloc ushort[bucketCount];
 
         var to = _header.Low / Slot.Size;
         for (var i = 0; i < to; i++)
@@ -307,10 +306,6 @@ public readonly ref struct FixedMap
             {
                 var index = slot.FirstNibbleOfPrefix % bucketCount;
                 buckets[index]++;
-                if (slot.Type == DataType.Account)
-                {
-                    accountCount[index]++;
-                }
             }
         }
 
@@ -324,7 +319,7 @@ public readonly ref struct FixedMap
             }
         }
 
-        return ((byte)maxI, accountCount[maxI]);
+        return (byte)maxI;
     }
 
     private static ushort GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> additionalKey,

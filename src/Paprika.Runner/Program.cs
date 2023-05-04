@@ -12,7 +12,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = 1000;
+    private const int BlockCount = 5000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
 
@@ -25,21 +25,29 @@ public static class Program
     private const CommitOptions Commit = CommitOptions.FlushDataOnly;
     private const int LogEvery = BlockCount / NumberOfLogs;
 
+    /// <summary>
+    /// Whether just read the database
+    /// </summary>
+    private const bool OnlyReadExisting = false;
+
     public static void Main(String[] args)
     {
         var dir = Directory.GetCurrentDirectory();
         var dataPath = Path.Combine(dir, "db");
 
-        if (Directory.Exists(dataPath))
+        if (OnlyReadExisting == false)
         {
-            Console.WriteLine("Deleting previous db...");
-            Directory.Delete(dataPath, true);
+            if (Directory.Exists(dataPath))
+            {
+                Console.WriteLine("Deleting previous db...");
+                Directory.Delete(dataPath, true);
+            }
+
+            Directory.CreateDirectory(dataPath);
+
+            Console.WriteLine("Initializing db of size {0}GB", DbFileSize / Gb);
+            Console.WriteLine("Starting benchmark with commit level {0}", Commit);
         }
-
-        Directory.CreateDirectory(dataPath);
-
-        Console.WriteLine("Initializing db of size {0}GB", DbFileSize / Gb);
-        Console.WriteLine("Starting benchmark with commit level {0}", Commit);
 
         var histograms = new
         {
@@ -59,52 +67,61 @@ public static class Program
 
         var counter = 0;
 
-        Console.WriteLine();
-        Console.WriteLine("(P) - 90th percentile of the value");
-        Console.WriteLine();
-        
-        PrintHeader("At Block", 
-            "Avg. speed", 
-            "Disk space used", 
-            "New pages(P)",
-            "Pages reused(P)",
-            "Total pages(P)");
-        
-        // writing
-        var writing = Stopwatch.StartNew();
-
-        for (uint block = 0; block < BlockCount; block++)
+        if (OnlyReadExisting == false)
         {
-            using var batch = db.BeginNextBlock();
+            Console.WriteLine();
+            Console.WriteLine("(P) - 90th percentile of the value");
+            Console.WriteLine();
 
-            for (var account = 0; account < AccountsPerBlock; account++)
+            PrintHeader("At Block",
+                "Avg. speed",
+                "Disk space used",
+                "New pages(P)",
+                "Pages reused(P)",
+                "Total pages(P)");
+
+
+            // writing
+            var writing = Stopwatch.StartNew();
+
+            for (uint block = 0; block < BlockCount; block++)
             {
-                var key = GetAccountKey(random, counter);
+                using var batch = db.BeginNextBlock();
 
-                batch.Set(key, GetAccountValue(counter));
-                batch.SetStorage(key, GetStorageAddress(random, counter), GetStorageValue(counter));
-                counter++;
+                for (var account = 0; account < AccountsPerBlock; account++)
+                {
+                    var key = GetAccountKey(random, counter);
+
+                    batch.Set(key, GetAccountValue(counter));
+                    batch.SetStorage(key, GetStorageAddress(random, counter), GetStorageValue(counter));
+                    counter++;
+                }
+
+                batch.Commit(Commit);
+
+                if (block > 0 & block % LogEvery == 0)
+                {
+                    PrintRow(
+                        block.ToString(),
+                        $"{TimeSpan.FromTicks(writing.ElapsedTicks / LogEvery).TotalSeconds:F3} sec/block",
+                        $"{db.ActualMegabytesOnDisk / 1024:F2}GB",
+                        $"{histograms.reused.GetValueAtPercentile(90)}",
+                        $"{histograms.allocated.GetValueAtPercentile(90)}",
+                        $"{histograms.total.GetValueAtPercentile(90)}");
+
+                    writing.Restart();
+                }
             }
 
-            batch.Commit(Commit);
-
-            if (block > 0 & block % LogEvery == 0)
-            {
-                PrintRow(
-                    block.ToString(),
-                    $"{TimeSpan.FromTicks(writing.ElapsedTicks / LogEvery).TotalSeconds:F3} sec/block",
-                    $"{db.ActualMegabytesOnDisk / 1024:F2}GB",
-                    $"{histograms.reused.GetValueAtPercentile(90)}",
-                    $"{histograms.allocated.GetValueAtPercentile(90)}",
-                    $"{histograms.total.GetValueAtPercentile(90)}");
-                
-                writing.Restart();
-            }
+            Console.WriteLine();
+            Console.WriteLine(
+                "Writing state of {0} accounts per block, each with 1 storage, through {1} blocks, generated {2} accounts, used {3:F2}GB",
+                AccountsPerBlock, BlockCount, counter, db.ActualMegabytesOnDisk / 1024);
         }
-
-        Console.WriteLine();
-        Console.WriteLine("Writing state of {0} accounts per block, each with 1 storage, through {1} blocks, generated {2} accounts, used {3:F2}GB",
-            AccountsPerBlock, BlockCount, counter, db.ActualMegabytesOnDisk / 1024);
+        else
+        {
+            counter = BlockCount * AccountsPerBlock;
+        }
 
         // reading
         var reading = Stopwatch.StartNew();
@@ -117,7 +134,7 @@ public static class Program
 
             if (a != GetAccountValue(i))
             {
-                throw new InvalidOperationException("Invalid account!");
+                throw new InvalidOperationException($"Invalid account state for account {i}!");
             }
 
             var storage = GetStorageAddress(random, i);
@@ -125,26 +142,30 @@ public static class Program
             var expectedStorage = GetStorageValue(i);
             if (actualStorage != expectedStorage)
             {
-                throw new InvalidOperationException("Invalid storage!");
+                throw new InvalidOperationException($"Invalid storage for account number {i}!");
             }
         }
 
         Console.WriteLine("Reading state of all of {0} accounts from the last block took {1}",
             counter, reading.Elapsed);
 
-        Console.WriteLine("90th percentiles:");
-        Write90Th(histograms.allocated, "new pages allocated");
-        Write90Th(histograms.reused, "pages reused allocated");
-        Write90Th(histograms.total, "total pages written");
+        if (OnlyReadExisting == false)
+        {
+            Console.WriteLine("90th percentiles:");
+            Write90Th(histograms.allocated, "new pages allocated");
+            Write90Th(histograms.reused, "pages reused allocated");
+            Write90Th(histograms.total, "total pages written");
+        }
     }
-
 
     private const string Separator = " | ";
     private const int Padding = 15;
+
     private static void PrintHeader(params string[] values)
     {
         Console.Out.WriteLine(string.Join(Separator, values.Select(v => v.PadRight(Padding))));
     }
+
     private static void PrintRow(params string[] values)
     {
         Console.Out.WriteLine(string.Join(Separator, values.Select(v => v.PadLeft(Padding))));

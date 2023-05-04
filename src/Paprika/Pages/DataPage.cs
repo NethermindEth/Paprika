@@ -110,15 +110,19 @@ public readonly unsafe struct DataPage : IDataPage
         var child = ctx.Batch.GetNewPage(out _, true);
         var dataPage = new DataPage(child);
 
-        var (biggest, accountCount) = map.GetBiggestNibbleBucket();
-        if (accountCount == 1)
-        {
-            // one account slot is a prerequisite for the heavy prefix extraction
-            // assert that all of them have the same prefix
-            // if yes, then proceed with a trie creation
-        }
+        var biggestNibble = map.GetBiggestNibbleBucket();
+        // if (accountCount == 1)
+        // {
+        //     // one account slot is a prerequisite for the heavy prefix extraction based on the storage
+        //     foreach (var item in map.EnumerateNibble(biggestNibble))
+        //     {
+        //     }
+        //
+        //     // assert that all of them have the same prefix
+        //     // if yes, then proceed with a trie creation
+        // }
 
-        foreach (var item in map.EnumerateNibble(biggest))
+        foreach (var item in map.EnumerateNibble(biggestNibble))
         {
             var set = new SetContext(item.Key.SliceFrom(NibbleCount), item.RawData, ctx.Batch);
             dataPage = new DataPage(dataPage.Set(set));
@@ -127,7 +131,7 @@ public readonly unsafe struct DataPage : IDataPage
             map.Delete(item.Key);
         }
 
-        Data.Buckets[biggest] = ctx.Batch.GetAddress(dataPage.AsPage());
+        Data.Buckets[biggestNibble] = ctx.Batch.GetAddress(dataPage.AsPage());
 
         // The page has some of the values flushed down, try to add again.
         return Set(ctx);
