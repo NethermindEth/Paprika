@@ -1,5 +1,4 @@
-﻿using System.Buffers.Binary;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using HdrHistogram;
@@ -13,9 +12,9 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = 10;
+    private const int BlockCount = 100;
     private const int RandomSampleSize = 260_000_000;
-    private const int AccountsPerBlock = 1;
+    private const int AccountsPerBlock = 1000;
 
     private const int RandomSeed = 17;
 
@@ -103,19 +102,19 @@ public static class Program
         var reading = Stopwatch.StartNew();
         using var read = db.BeginReadOnlyBatch();
 
-        for (var account = 0; account < counter; account++)
+        for (var i = 0; i < counter; i++)
         {
-            var key = GetAccountKey(random, counter);
+            var key = GetAccountKey(random, i);
             var a = read.GetAccount(key);
 
-            if (a != GetAccountValue(account))
+            if (a != GetAccountValue(i))
             {
                 throw new InvalidOperationException("Invalid account!");
             }
 
-            var storage = GetStorageAddress(random, counter);
+            var storage = GetStorageAddress(random, i);
             var actualStorage = read.GetStorage(key, storage);
-            var expectedStorage = GetStorageValue(account);
+            var expectedStorage = GetStorageValue(i);
             if (actualStorage != expectedStorage)
             {
                 throw new InvalidOperationException("Invalid storage!");
