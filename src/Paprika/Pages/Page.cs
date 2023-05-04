@@ -17,6 +17,9 @@ public interface IPage
 {
 }
 
+/// <summary>
+/// An interface for a page holding data, capable to <see cref="TryGet"/> and <see cref="Set"/> values.
+/// </summary>
 public interface IDataPage : IPage
 {
     bool TryGet(FixedMap.Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result);
@@ -24,10 +27,13 @@ public interface IDataPage : IPage
     Page Set(in SetContext ctx);
 }
 
+/// <summary>
+/// Extension methods used as a poor man derivation across structs implementing <see cref="IDataPage"/>.
+/// </summary>
 public static class DataPageExtensions
 {
     public static Account GetAccount<TPage>(this TPage page, NibblePath path, IReadOnlyBatchContext ctx)
-        where TPage : IDataPage
+        where TPage : struct, IDataPage
     {
         var key = FixedMap.Key.Account(path);
 
@@ -41,7 +47,7 @@ public static class DataPageExtensions
     }
 
     public static Page SetAccount<TPage>(this TPage page, NibblePath path, in Account account, IBatchContext batch)
-        where TPage : IDataPage
+        where TPage : struct, IDataPage
     {
         var key = FixedMap.Key.Account(path);
 
@@ -53,7 +59,7 @@ public static class DataPageExtensions
 
     public static UInt256 GetStorage<TPage>(this TPage page, NibblePath path, in Keccak address,
         IReadOnlyBatchContext ctx)
-        where TPage : IDataPage
+        where TPage : struct, IDataPage
     {
         var key = FixedMap.Key.StorageCell(path, address);
 
@@ -68,7 +74,7 @@ public static class DataPageExtensions
 
     public static Page SetStorage<TPage>(this TPage page, NibblePath path, in Keccak address, in UInt256 value,
         IBatchContext batch)
-        where TPage : IDataPage
+        where TPage : struct, IDataPage
     {
         var key = FixedMap.Key.StorageCell(path, address);
 
