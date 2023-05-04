@@ -1,4 +1,5 @@
 ﻿// #define PERSISTENT_DB
+// #define STORAGE
 
 using System.Buffers.Binary;
 using System.Diagnostics;
@@ -15,7 +16,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = 5000;
+    private const int BlockCount = 20_000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
 
@@ -93,12 +94,11 @@ public static class Program
                 var key = GetAccountKey(random, counter);
 
                 batch.Set(key, GetAccountValue(counter));
-                var storage = GetStorageAddress(random, counter);
+#if STORAGE               
+                var storage = GetStorageAddress(counter);
                 var storageValue = GetStorageValue(counter);
-
                 batch.SetStorage(key, storage, storageValue);
-                var value = batch.GetStorage(key, storage);
-
+#endif
                 counter++;
             }
 
@@ -136,14 +136,15 @@ public static class Program
             {
                 throw new InvalidOperationException($"Invalid account state for account {i}!");
             }
-
-            var storage = GetStorageAddress(random, i);
+#if STORAGE 
+            var storage = GetStorageAddress(i);
             var actualStorage = read.GetStorage(key, storage);
             var expectedStorage = GetStorageValue(i);
             if (actualStorage != expectedStorage)
             {
                 throw new InvalidOperationException($"Invalid storage for account number {i}!");
             }
+#endif
         }
 
         Console.WriteLine("Reading state of all of {0} accounts from the last block took {1}",
@@ -191,7 +192,7 @@ public static class Program
         return key;
     }
 
-    private static Keccak GetStorageAddress(Span<byte> random, int counter)
+    private static Keccak GetStorageAddress(int counter)
     {
 
         // do the rolling over account bytes, so each is different but they don't occupy that much memory
@@ -200,11 +201,6 @@ public static class Program
 
         BinaryPrimitives.WriteInt32LittleEndian(key.BytesAsSpan, counter);
         return key;
-
-        // go from the end
-        // var address = RandomSampleSize - counter - Keccak.Size;
-        // random.Slice(address, Keccak.Size).CopyTo(key.BytesAsSpan);
-        // return key;
     }
 
     private static unsafe Span<byte> PrepareStableRandomSource()
