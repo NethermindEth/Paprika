@@ -99,7 +99,7 @@ public readonly unsafe struct DataPage : IDataPage
             return _page;
         }
 
-        // in-page write
+        // try in-page write
         var map = new FixedMap(Data.FixedMapSpan);
         if (map.TrySet(ctx.Key, ctx.Data))
         {
@@ -110,7 +110,14 @@ public readonly unsafe struct DataPage : IDataPage
         var child = ctx.Batch.GetNewPage(out _, true);
         var dataPage = new DataPage(child);
 
-        var biggest = map.GetBiggestNibbleBucket();
+        var (biggest, accountCount) = map.GetBiggestNibbleBucket();
+        if (accountCount == 1)
+        {
+            // one account slot is a prerequisite for the heavy prefix extraction
+            // assert that all of them have the same prefix
+            // if yes, then proceed with a trie creation
+        }
+
         foreach (var item in map.EnumerateNibble(biggest))
         {
             var set = new SetContext(item.Key.SliceFrom(NibbleCount), item.RawData, ctx.Batch);

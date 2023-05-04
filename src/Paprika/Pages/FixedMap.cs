@@ -43,7 +43,7 @@ public readonly ref struct FixedMap
     public enum DataType : byte
     {
         /// <summary>
-        /// [key, 0]-> account (balanace, nonce)
+        /// [key, 0]-> account (balance, nonce)
         /// </summary>
         Account = 0,
 
@@ -58,10 +58,23 @@ public readonly ref struct FixedMap
         StorageRootHash = 2,
 
         /// <summary>
-        /// [key, 3]-> [index][cell],
+        /// [key, 3]-> [index][value],
         /// add to the key and use first 32 bytes of data as key
         /// </summary>
-        StorageCell = 3
+        StorageCell = 3,
+
+        /// <summary>
+        /// [key, 4]-> the DbAddress of the root page of the storage trie,
+        /// </summary>
+        StorageTreeRootPageAddress = 4,
+
+        /// <summary>
+        /// [storageCellIndex, 5]-> the StorageCell index, without the prefix of the account
+        /// </summary>
+        StorageTreeStorageCell = 5,
+
+        // Unused3 = 6,
+        // Unused4 = 7
     }
 
     /// <summary>
@@ -279,12 +292,12 @@ public readonly ref struct FixedMap
     /// Gets the nibble representing the biggest bucket.
     /// </summary>
     /// <returns></returns>
-    public byte GetBiggestNibbleBucket()
+    public (byte nibble, ushort accountCount) GetBiggestNibbleBucket()
     {
-        // TODO: weird dependency here. Remove later when there are multiple buckets present
-        const int bucketCount = DataPage.Payload.BucketCount;
+        const int bucketCount = 16;
 
-        Span<ushort> buckets = stackalloc ushort[DataPage.Payload.BucketCount];
+        Span<ushort> buckets = stackalloc ushort[bucketCount];
+        Span<ushort> accountCount = stackalloc ushort[bucketCount];
 
         var to = _header.Low / Slot.Size;
         for (var i = 0; i < to; i++)
@@ -292,7 +305,12 @@ public readonly ref struct FixedMap
             ref readonly var slot = ref _slots[i];
             if (slot.IsDeleted == false)
             {
-                buckets[slot.FirstNibbleOfPrefix % bucketCount]++;
+                var index = slot.FirstNibbleOfPrefix % bucketCount;
+                buckets[index]++;
+                if (slot.Type == DataType.Account)
+                {
+                    accountCount[index]++;
+                }
             }
         }
 
@@ -306,7 +324,7 @@ public readonly ref struct FixedMap
             }
         }
 
-        return (byte)maxI;
+        return ((byte)maxI, accountCount[maxI]);
     }
 
     private static ushort GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> additionalKey,
@@ -563,7 +581,7 @@ public readonly ref struct FixedMap
     {
         public const int Size = 4;
 
-        // ItemAddress
+        // ItemAddress, requires 12 bits [0-11] to address whole page 
         private const ushort AddressMask = Page.PageSize - 1;
 
         /// <summary>
@@ -588,8 +606,8 @@ public readonly ref struct FixedMap
             set => Raw = (ushort)((Raw & ~DeletedBit) | (value ? DeletedBit : 0));
         }
 
-        private const int DataTypeShift = 13;
-        private const ushort DataTypeMask = unchecked((ushort)(11 << DataTypeShift));
+        private const int DataTypeShift = 12;
+        private const ushort DataTypeMask = unchecked((ushort)(111 << DataTypeShift));
 
         /// <summary>
         /// The data type contained in this slot.
