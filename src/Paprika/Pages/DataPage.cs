@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -124,7 +125,18 @@ public readonly unsafe struct DataPage : IDataPage
 
         foreach (var item in map.EnumerateNibble(biggestNibble))
         {
-            var set = new SetContext(item.Key.SliceFrom(NibbleCount), item.RawData, ctx.Batch);
+            var key = item.Key.SliceFrom(NibbleCount);
+
+            var value = (item.Key.Type == FixedMap.DataType.StorageCell)
+                ? BinaryPrimitives.ReadInt32LittleEndian(key.AdditionalKey)
+                : 0;
+
+            if (value == 2)
+                Debugger.Break();
+
+            var set = new SetContext(key, item.RawData, ctx.Batch);
+
+
             dataPage = new DataPage(dataPage.Set(set));
 
             // delete the item, it's possible due to the internal construction of the map

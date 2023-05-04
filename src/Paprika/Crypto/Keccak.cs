@@ -106,7 +106,7 @@ public readonly struct Keccak : IEquatable<Keccak>
 
     public override string ToString() => ToString(true);
 
-    public string ToString(bool withZeroX) => BytesAsSpan.ToHexString(withZeroX);
+    public string ToString(bool withZeroX) => Span.ToHexString(withZeroX);
 
     public static bool operator ==(Keccak left, Keccak right) => left.Equals(right);
 

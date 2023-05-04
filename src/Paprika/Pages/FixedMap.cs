@@ -139,7 +139,7 @@ public readonly ref struct FixedMap
         {
             return $"{nameof(Path)}: {Path.ToString()}, " +
                    $"{nameof(Type)}: {Type}, " +
-                   $"{nameof(AdditionalKey)}: {AdditionalKey.Length} bytes";
+                   $"{nameof(AdditionalKey)}: {AdditionalKey.ToHexString(false)}";
         }
     }
 
@@ -643,7 +643,7 @@ public readonly ref struct FixedMap
         public override string ToString()
         {
             return
-                $"{nameof(Prefix)}: {Prefix}, {nameof(ItemAddress)}: {ItemAddress}, {nameof(IsDeleted)}: {IsDeleted}";
+                $"{nameof(Type)}: {Type}, {nameof(Prefix)}: {Prefix}, {nameof(ItemAddress)}: {ItemAddress}, {nameof(IsDeleted)}: {IsDeleted}";
         }
     }
 

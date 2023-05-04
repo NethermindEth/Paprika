@@ -1,4 +1,7 @@
-﻿using System.Diagnostics;
+﻿// #define PERSISTENT_DB
+
+using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using HdrHistogram;
@@ -25,29 +28,24 @@ public static class Program
     private const CommitOptions Commit = CommitOptions.FlushDataOnly;
     private const int LogEvery = BlockCount / NumberOfLogs;
 
-    /// <summary>
-    /// Whether just read the database
-    /// </summary>
-    private const bool OnlyReadExisting = false;
-
     public static void Main(String[] args)
     {
+#if PERSISTENT_DB
         var dir = Directory.GetCurrentDirectory();
         var dataPath = Path.Combine(dir, "db");
 
-        if (OnlyReadExisting == false)
+        if (Directory.Exists(dataPath))
         {
-            if (Directory.Exists(dataPath))
-            {
-                Console.WriteLine("Deleting previous db...");
-                Directory.Delete(dataPath, true);
-            }
-
-            Directory.CreateDirectory(dataPath);
-
-            Console.WriteLine("Initializing db of size {0}GB", DbFileSize / Gb);
-            Console.WriteLine("Starting benchmark with commit level {0}", Commit);
+            Console.WriteLine("Deleting previous db...");
+            Directory.Delete(dataPath, true);
         }
+
+        Directory.CreateDirectory(dataPath);
+
+#endif
+
+        Console.WriteLine("Initializing db of size {0}GB", DbFileSize / Gb);
+        Console.WriteLine("Starting benchmark with commit level {0}", Commit);
 
         var histograms = new
         {
@@ -56,7 +54,11 @@ public static class Program
             total = new IntHistogram(short.MaxValue, 3),
         };
 
+#if PERSISTENT_DB
         var db = new MemoryMappedPagedDb(DbFileSize, 64, dataPath, metrics =>
+#else
+        var db = new NativeMemoryPagedDb(DbFileSize, 64, metrics =>
+#endif
         {
             histograms.allocated.RecordValue(metrics.PagesAllocated);
             histograms.reused.RecordValue(metrics.PagesReused);
@@ -67,61 +69,59 @@ public static class Program
 
         var counter = 0;
 
-        if (OnlyReadExisting == false)
+        Console.WriteLine();
+        Console.WriteLine("(P) - 90th percentile of the value");
+        Console.WriteLine();
+
+        PrintHeader("At Block",
+            "Avg. speed",
+            "Disk space used",
+            "New pages(P)",
+            "Pages reused(P)",
+            "Total pages(P)");
+
+
+        // writing
+        var writing = Stopwatch.StartNew();
+
+        for (uint block = 0; block < BlockCount; block++)
         {
-            Console.WriteLine();
-            Console.WriteLine("(P) - 90th percentile of the value");
-            Console.WriteLine();
+            using var batch = db.BeginNextBlock();
 
-            PrintHeader("At Block",
-                "Avg. speed",
-                "Disk space used",
-                "New pages(P)",
-                "Pages reused(P)",
-                "Total pages(P)");
-
-
-            // writing
-            var writing = Stopwatch.StartNew();
-
-            for (uint block = 0; block < BlockCount; block++)
+            for (var account = 0; account < AccountsPerBlock; account++)
             {
-                using var batch = db.BeginNextBlock();
+                var key = GetAccountKey(random, counter);
 
-                for (var account = 0; account < AccountsPerBlock; account++)
-                {
-                    var key = GetAccountKey(random, counter);
+                batch.Set(key, GetAccountValue(counter));
+                var storage = GetStorageAddress(random, counter);
+                var storageValue = GetStorageValue(counter);
 
-                    batch.Set(key, GetAccountValue(counter));
-                    batch.SetStorage(key, GetStorageAddress(random, counter), GetStorageValue(counter));
-                    counter++;
-                }
+                batch.SetStorage(key, storage, storageValue);
+                var value = batch.GetStorage(key, storage);
 
-                batch.Commit(Commit);
-
-                if (block > 0 & block % LogEvery == 0)
-                {
-                    PrintRow(
-                        block.ToString(),
-                        $"{TimeSpan.FromTicks(writing.ElapsedTicks / LogEvery).TotalSeconds:F3} sec/block",
-                        $"{db.ActualMegabytesOnDisk / 1024:F2}GB",
-                        $"{histograms.reused.GetValueAtPercentile(90)}",
-                        $"{histograms.allocated.GetValueAtPercentile(90)}",
-                        $"{histograms.total.GetValueAtPercentile(90)}");
-
-                    writing.Restart();
-                }
+                counter++;
             }
 
-            Console.WriteLine();
-            Console.WriteLine(
-                "Writing state of {0} accounts per block, each with 1 storage, through {1} blocks, generated {2} accounts, used {3:F2}GB",
-                AccountsPerBlock, BlockCount, counter, db.ActualMegabytesOnDisk / 1024);
+            batch.Commit(Commit);
+
+            if (block > 0 & block % LogEvery == 0)
+            {
+                PrintRow(
+                    block.ToString(),
+                    $"{TimeSpan.FromTicks(writing.ElapsedTicks / LogEvery).TotalSeconds:F3} sec/block",
+                    $"{db.ActualMegabytesOnDisk / 1024:F2}GB",
+                    $"{histograms.reused.GetValueAtPercentile(90)}",
+                    $"{histograms.allocated.GetValueAtPercentile(90)}",
+                    $"{histograms.total.GetValueAtPercentile(90)}");
+
+                writing.Restart();
+            }
         }
-        else
-        {
-            counter = BlockCount * AccountsPerBlock;
-        }
+
+        Console.WriteLine();
+        Console.WriteLine(
+            "Writing state of {0} accounts per block, each with 1 storage, through {1} blocks, generated {2} accounts, used {3:F2}GB",
+            AccountsPerBlock, BlockCount, counter, db.ActualMegabytesOnDisk / 1024);
 
         // reading
         var reading = Stopwatch.StartNew();
@@ -149,13 +149,10 @@ public static class Program
         Console.WriteLine("Reading state of all of {0} accounts from the last block took {1}",
             counter, reading.Elapsed);
 
-        if (OnlyReadExisting == false)
-        {
-            Console.WriteLine("90th percentiles:");
-            Write90Th(histograms.allocated, "new pages allocated");
-            Write90Th(histograms.reused, "pages reused allocated");
-            Write90Th(histograms.total, "total pages written");
-        }
+        Console.WriteLine("90th percentiles:");
+        Write90Th(histograms.allocated, "new pages allocated");
+        Write90Th(histograms.reused, "pages reused allocated");
+        Write90Th(histograms.total, "total pages written");
     }
 
     private const string Separator = " | ";
@@ -196,14 +193,18 @@ public static class Program
 
     private static Keccak GetStorageAddress(Span<byte> random, int counter)
     {
+
         // do the rolling over account bytes, so each is different but they don't occupy that much memory
         // it's not de Bruijn, but it's as best as possible.
         Keccak key = default;
 
-        // go from the end
-        var address = RandomSampleSize - counter - Keccak.Size;
-        random.Slice(address, Keccak.Size).CopyTo(key.BytesAsSpan);
+        BinaryPrimitives.WriteInt32LittleEndian(key.BytesAsSpan, counter);
         return key;
+
+        // go from the end
+        // var address = RandomSampleSize - counter - Keccak.Size;
+        // random.Slice(address, Keccak.Size).CopyTo(key.BytesAsSpan);
+        // return key;
     }
 
     private static unsafe Span<byte> PrepareStableRandomSource()

@@ -7,18 +7,18 @@ namespace Paprika.Crypto;
 
 public static class SpanExtensions
 {
-    public static string ToHexString(this in Span<byte> span, bool withZeroX)
+    public static string ToHexString(this in ReadOnlySpan<byte> span, bool withZeroX)
     {
         return ToHexString(span, withZeroX, false, false);
     }
 
-    private static string ToHexString(this in Span<byte> span, bool withZeroX, bool noLeadingZeros, bool withEip55Checksum)
+    private static string ToHexString(this in ReadOnlySpan<byte> span, bool withZeroX, bool noLeadingZeros, bool withEip55Checksum)
     {
         return ToHexViaLookup(span, withZeroX, noLeadingZeros);
     }
 
     [DebuggerStepThrough]
-    private static string ToHexViaLookup(in Span<byte> span, bool withZeroX, bool skipLeadingZeros)
+    private static string ToHexViaLookup(in ReadOnlySpan<byte> span, bool withZeroX, bool skipLeadingZeros)
     {
         int leadingZeros = skipLeadingZeros ? CountLeadingZeros(span) : 0;
         char[] result = new char[span.Length * 2 + (withZeroX ? 2 : 0) - leadingZeros];
@@ -68,7 +68,7 @@ public static class SpanExtensions
         return result;
     }
 
-    private static int CountLeadingZeros(in Span<byte> span)
+    private static int CountLeadingZeros(in ReadOnlySpan<byte> span)
     {
         int leadingZeros = 0;
         for (int i = 0; i < span.Length; i++)
