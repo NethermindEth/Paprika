@@ -223,7 +223,10 @@ public readonly ref struct FixedMap
         return true;
     }
 
-    private int To => _header.Low / Slot.Size;
+    /// <summary>
+    /// Gets how many slots are used in the map.
+    /// </summary>
+    public int Count => _header.Low / Slot.Size;
 
     public NibbleEnumerator EnumerateNibble(byte nibble) => new(this, nibble);
 
@@ -255,7 +258,7 @@ public readonly ref struct FixedMap
         public bool MoveNext()
         {
             int index = _index + 1;
-            var to = _map.To;
+            var to = _map.Count;
 
             while (index < to &&
                    (_map._slots[index].IsDeleted ||
@@ -471,7 +474,7 @@ public readonly ref struct FixedMap
     private void CollectTombstones()
     {
         // start with the last written and perform checks and cleanup till all the deleted are gone
-        var index = To - 1;
+        var index = Count - 1;
 
         while (index >= 0 && _slots[index].IsDeleted)
         {

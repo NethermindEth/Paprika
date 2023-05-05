@@ -28,6 +28,8 @@ public readonly ref struct NibblePath
     private readonly ref byte _span;
     private readonly byte _odd;
 
+    public static NibblePath Empty => default;
+
     public static NibblePath FromKey(ReadOnlySpan<byte> key, int nibbleFrom = 0)
     {
         var count = key.Length * NibblePerByte;

@@ -112,16 +112,11 @@ public readonly unsafe struct DataPage : IDataPage
         var dataPage = new DataPage(child);
 
         var biggestNibble = map.GetBiggestNibbleBucket();
-        // if (accountCount == 1)
-        // {
-        //     // one account slot is a prerequisite for the heavy prefix extraction based on the storage
-        //     foreach (var item in map.EnumerateNibble(biggestNibble))
-        //     {
-        //     }
-        //
-        //     // assert that all of them have the same prefix
-        //     // if yes, then proceed with a trie creation
-        // }
+
+        if (IsBucketMostlyStorageOfOneAccount(map, biggestNibble))
+        {
+            throw new Exception("plant a storage tree");
+        }
 
         int i = 0;
         foreach (var item in map.EnumerateNibble(biggestNibble))
@@ -139,6 +134,36 @@ public readonly unsafe struct DataPage : IDataPage
 
         // The page has some of the values flushed down, try to add again.
         return Set(ctx);
+    }
+
+    private static bool IsBucketMostlyStorageOfOneAccount(FixedMap map, byte biggestNibble)
+    {
+        NibblePath storagePath = NibblePath.Empty;
+        bool allStoragePathEqual = true;
+        int storagePathCount = 0;
+
+        foreach (var item in map.EnumerateNibble(biggestNibble))
+        {
+            if (item.Key.Type == FixedMap.DataType.StorageCell)
+            {
+                if (storagePath.Length == 0)
+                {
+                    // empty, memoize
+                    storagePath = item.Key.Path;
+                }
+                else if (storagePath.Equals(item.Key.Path))
+                {
+                    // the same path, count it up
+                    storagePathCount++;
+                }
+                else
+                {
+                    allStoragePathEqual = false;
+                }
+            }
+        }
+
+        return allStoragePathEqual && storagePathCount > 0.9 * map.Count;
     }
 
     public bool TryGet(FixedMap.Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
