@@ -313,7 +313,9 @@ public readonly ref struct FixedMap
 
         for (int i = 1; i < bucketCount; i++)
         {
-            if (buckets[i] > buckets[maxI])
+            var currentCount = buckets[i];
+            var maxCount = buckets[maxI];
+            if (currentCount > maxCount)
             {
                 maxI = i;
             }
@@ -381,6 +383,7 @@ public readonly ref struct FixedMap
 
                 copyTo.Prefix = copyFrom.Prefix;
                 copyTo.ItemAddress = high;
+                copyTo.Type = copyFrom.Type;
 
                 copy._header.Low += Slot.Size;
                 copy._header.High = (ushort)(copy._header.High + fromSpan.Length);

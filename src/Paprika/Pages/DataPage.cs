@@ -108,7 +108,7 @@ public readonly unsafe struct DataPage : IDataPage
         }
 
         // not enough memory in this page, need to push some data one level deeper to a new page
-        var child = ctx.Batch.GetNewPage(out _, true);
+        var child = ctx.Batch.GetNewPage(out var childAddr, true);
         var dataPage = new DataPage(child);
 
         var biggestNibble = map.GetBiggestNibbleBucket();
@@ -123,6 +123,7 @@ public readonly unsafe struct DataPage : IDataPage
         //     // if yes, then proceed with a trie creation
         // }
 
+        int i = 0;
         foreach (var item in map.EnumerateNibble(biggestNibble))
         {
             var key = item.Key.SliceFrom(NibbleCount);
@@ -134,7 +135,7 @@ public readonly unsafe struct DataPage : IDataPage
             map.Delete(item.Key);
         }
 
-        Data.Buckets[biggestNibble] = ctx.Batch.GetAddress(dataPage.AsPage());
+        Data.Buckets[biggestNibble] = childAddr;
 
         // The page has some of the values flushed down, try to add again.
         return Set(ctx);

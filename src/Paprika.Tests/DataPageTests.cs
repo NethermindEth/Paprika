@@ -1,5 +1,6 @@
 ﻿using System.Buffers.Binary;
 using FluentAssertions;
+using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Pages;
@@ -103,8 +104,8 @@ public class DataPageTests : BasePageTests
         }
     }
 
-    [Test]
-    public void Page_overflows_storage()
+    [Test(Description = "The test for a page that has some accounts and their storages with 50-50 ratio")]
+    public void Page_overflows_with_some_storage_and_some_accounts()
     {
         var page = AllocPage();
         page.Clear();
@@ -112,21 +113,29 @@ public class DataPageTests : BasePageTests
         var batch = NewBatch(BatchId);
         var dataPage = new DataPage(page);
 
-        const int count = 56;
+        const int count = 35;
 
         for (uint i = 0; i < count; i++)
         {
+            var key = GetKey(i);
             var address = GetStorageAddress(i);
+            var path = NibblePath.FromKey(key);
 
-            dataPage = new DataPage(dataPage.SetStorage(NibblePath.FromKey(Key1a), address, i, batch));
+            dataPage = dataPage
+                .SetAccount(path, GetAccount(i), batch)
+                .Cast<DataPage>()
+                .SetStorage(path, address, GetStorageValue(i), batch)
+                .Cast<DataPage>();
         }
 
         for (uint i = 0; i < count; i++)
         {
+            var key = GetKey(i);
             var address = GetStorageAddress(i);
+            var path = NibblePath.FromKey(key);
 
-            var value = dataPage.GetStorage(NibblePath.FromKey(Key1a), address, batch);
-            value.Should().Be(i);
+            dataPage.GetAccount(path, batch).Should().Be(GetAccount(i));
+            dataPage.GetStorage(path, address, batch).Should().Be(GetStorageValue(i));
         }
 
         static Keccak GetStorageAddress(uint i)
@@ -135,6 +144,17 @@ public class DataPageTests : BasePageTests
             BinaryPrimitives.WriteUInt32LittleEndian(address.BytesAsSpan, i);
             return address;
         }
+
+        Keccak GetKey(uint i)
+        {
+            Keccak key = default;
+            BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i);
+            return key;
+        }
+
+        Account GetAccount(uint i) => new(i, i);
+
+        UInt256 GetStorageValue(uint i) => i;
     }
 
     [Test(Description = "The scenario to test handling updates over multiple batches so that the pages are properly linked and used.")]

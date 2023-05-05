@@ -1,5 +1,5 @@
 ﻿// #define PERSISTENT_DB
-// #define STORAGE
+#define STORAGE
 
 using System.Buffers.Binary;
 using System.Diagnostics;
@@ -16,7 +16,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = 20_000;
+    private const int BlockCount = 30_000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
 
@@ -42,7 +42,9 @@ public static class Program
         }
 
         Directory.CreateDirectory(dataPath);
-
+        Console.WriteLine("Using persistent DB");
+#else
+        Console.WriteLine("Using in-memory DB for greater speed.");
 #endif
 
         Console.WriteLine("Initializing db of size {0}GB", DbFileSize / Gb);
@@ -76,7 +78,7 @@ public static class Program
 
         PrintHeader("At Block",
             "Avg. speed",
-            "Disk space used",
+            "Space used",
             "New pages(P)",
             "Pages reused(P)",
             "Total pages(P)");
@@ -106,9 +108,12 @@ public static class Program
 
             if (block > 0 & block % LogEvery == 0)
             {
+                var secondsPerBlock = TimeSpan.FromTicks(writing.ElapsedTicks / LogEvery).TotalSeconds;
+                var blocksPerSecond = 1 / secondsPerBlock;
+
                 PrintRow(
                     block.ToString(),
-                    $"{TimeSpan.FromTicks(writing.ElapsedTicks / LogEvery).TotalSeconds:F3} sec/block",
+                    $"{blocksPerSecond:F1} blocks/s",
                     $"{db.ActualMegabytesOnDisk / 1024:F2}GB",
                     $"{histograms.reused.GetValueAtPercentile(90)}",
                     $"{histograms.allocated.GetValueAtPercentile(90)}",
@@ -124,6 +129,9 @@ public static class Program
             AccountsPerBlock, BlockCount, counter, db.ActualMegabytesOnDisk / 1024);
 
         // reading
+        Console.WriteLine();
+        Console.WriteLine("Reading and asserting values...");
+
         var reading = Stopwatch.StartNew();
         using var read = db.BeginReadOnlyBatch();
 
