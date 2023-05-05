@@ -108,20 +108,12 @@ public static class Program
 
             if (block > 0 & block % LogEvery == 0)
             {
-                var secondsPerBlock = TimeSpan.FromTicks(writing.ElapsedTicks / LogEvery).TotalSeconds;
-                var blocksPerSecond = 1 / secondsPerBlock;
-
-                PrintRow(
-                    block.ToString(),
-                    $"{blocksPerSecond:F1} blocks/s",
-                    $"{db.ActualMegabytesOnDisk / 1024:F2}GB",
-                    $"{histograms.reused.GetValueAtPercentile(90)}",
-                    $"{histograms.allocated.GetValueAtPercentile(90)}",
-                    $"{histograms.total.GetValueAtPercentile(90)}");
-
+                ReportProgress(block, writing);
                 writing.Restart();
             }
         }
+
+        ReportProgress(BlockCount - 1, writing);
 
         Console.WriteLine();
         Console.WriteLine(
@@ -162,6 +154,20 @@ public static class Program
         Write90Th(histograms.allocated, "new pages allocated");
         Write90Th(histograms.reused, "pages reused allocated");
         Write90Th(histograms.total, "total pages written");
+
+        void ReportProgress(uint block, Stopwatch sw)
+        {
+            var secondsPerBlock = TimeSpan.FromTicks(sw.ElapsedTicks / LogEvery).TotalSeconds;
+            var blocksPerSecond = 1 / secondsPerBlock;
+
+            PrintRow(
+                block.ToString(),
+                $"{blocksPerSecond:F1} blocks/s",
+                $"{db.ActualMegabytesOnDisk / 1024:F2}GB",
+                $"{histograms.reused.GetValueAtPercentile(90)}",
+                $"{histograms.allocated.GetValueAtPercentile(90)}",
+                $"{histograms.total.GetValueAtPercentile(90)}");
+        }
     }
 
     private const string Separator = " | ";
