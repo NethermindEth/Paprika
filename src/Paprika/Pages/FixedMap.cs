@@ -460,36 +460,58 @@ public readonly ref struct FixedMap
         // cast.IndexOf(hash);
 
         var to = _header.Low / Slot.Size;
-        for (int i = 0; i < to; i++)
+
+        // uses vectorized search, treating slots as ushorts
+        // if the found index is odd -> found a slot
+
+        const int notFound = -1;
+        var ushorts = MemoryMarshal.Cast<Slot, ushort>(_slots.Slice(0, to));
+
+        var offset = 0;
+        int index;
+
+        while ((index = ushorts.IndexOf(hash)) != notFound)
         {
-            ref readonly var slot = ref _slots[i];
-            if (slot.IsDeleted == false &&
-                slot.Prefix == hash &&
-                slot.Type == key.Type)
+            // move offset to the given position
+            offset += index;
+
+            if ((offset & Slot.PrefixUshortMask) == Slot.PrefixUshortMask)
             {
-                var actual = GetSlotPayload(slot);
+                var i = offset / 2;
 
-                // The StartsWith check assumes that all the keys have the same length.
-                if (actual.StartsWith(encodedKey))
+                ref readonly var slot = ref _slots[i];
+                if (slot.IsDeleted == false &&
+                    slot.Type == key.Type)
                 {
-                    if (key.AdditionalKey.IsEmpty)
-                    {
-                        // no additional key, just assert encoded
-                        data = actual.Slice(encodedKey.Length);
-                        slotIndex = i;
-                        return true;
-                    }
+                    var actual = GetSlotPayload(slot);
 
-                    // there's the additional key, assert it
-                    // do it by slicing off first the encoded and then check the additional
-                    if (actual.Slice(encodedKey.Length).StartsWith(key.AdditionalKey))
+                    // The StartsWith check assumes that all the keys have the same length.
+                    if (actual.StartsWith(encodedKey))
                     {
-                        data = actual.Slice(encodedKey.Length + key.AdditionalKey.Length);
-                        slotIndex = i;
-                        return true;
+                        if (key.AdditionalKey.IsEmpty)
+                        {
+                            // no additional key, just assert encoded
+                            data = actual.Slice(encodedKey.Length);
+                            slotIndex = i;
+                            return true;
+                        }
+
+                        // there's the additional key, assert it
+                        // do it by slicing off first the encoded and then check the additional
+                        if (actual.Slice(encodedKey.Length).StartsWith(key.AdditionalKey))
+                        {
+                            data = actual.Slice(encodedKey.Length + key.AdditionalKey.Length);
+                            slotIndex = i;
+                            return true;
+                        }
                     }
                 }
             }
+
+            // move next: ushorts sliced to the next
+            // offset moved by 1 to align
+            ushorts = ushorts.Slice(index + 1);
+            offset += 1;
         }
 
         data = default;
@@ -617,6 +639,11 @@ public readonly ref struct FixedMap
         }
 
         [FieldOffset(0)] private ushort Raw;
+
+        /// <summary>
+        /// Used for vectorized search
+        /// </summary>
+        public const int PrefixUshortMask = 1;
 
         /// <summary>
         /// The memorized result of <see cref="ExtractPrefix"/> of this item.
