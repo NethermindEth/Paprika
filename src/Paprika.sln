@@ -6,6 +6,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Paprika.Tests", "Paprika.Te
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Paprika.Runner", "Paprika.Runner\Paprika.Runner.csproj", "{BFF87BF1-D687-4EBF-B60C-3B67184A8A7D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Paprika.Benchmarks", "Paprika.Benchmarks\Paprika.Benchmarks.csproj", "{FFAD2237-381A-4FC5-ACB9-14658C6ADCE9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -24,5 +26,9 @@ Global
 		{BFF87BF1-D687-4EBF-B60C-3B67184A8A7D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{BFF87BF1-D687-4EBF-B60C-3B67184A8A7D}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{BFF87BF1-D687-4EBF-B60C-3B67184A8A7D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FFAD2237-381A-4FC5-ACB9-14658C6ADCE9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FFAD2237-381A-4FC5-ACB9-14658C6ADCE9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FFAD2237-381A-4FC5-ACB9-14658C6ADCE9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FFAD2237-381A-4FC5-ACB9-14658C6ADCE9}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
