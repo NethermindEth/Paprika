@@ -206,7 +206,7 @@ public struct PageHeader
 }
 ```
 
-### FixedMap component
+### FixedMap
 
 The `FixedMap` component is responsible for storing data in-page. It does it by using path-based addressing based on the functionality provided by `NibblePath`. The path is not the only discriminator for the values though. The other part required to create a `FixedMap.Key` is the `type` of entry. This is an implementation of [Entity-Attribute-Value](https://en.wikipedia.org/wiki/Entity%E2%80%93attribute%E2%80%93value_model). Currently, the following types of entries:
 
