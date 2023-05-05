@@ -1,5 +1,6 @@
 ﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Nethermind.Int256;
 using Paprika.Crypto;
 
 namespace Paprika.Pages;
@@ -16,11 +17,73 @@ public interface IPage
 {
 }
 
-public interface IAccountPage : IPage
+/// <summary>
+/// An interface for a page holding data, capable to <see cref="TryGet"/> and <see cref="Set"/> values.
+/// </summary>
+public interface IDataPage : IPage
 {
-    void GetAccount(in NibblePath key, IReadOnlyBatchContext batch, out Account result);
+    bool TryGet(FixedMap.Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result);
 
     Page Set(in SetContext ctx);
+}
+
+/// <summary>
+/// Extension methods used as a poor man derivation across structs implementing <see cref="IDataPage"/>.
+/// </summary>
+public static class DataPageExtensions
+{
+    public static Account GetAccount<TPage>(this TPage page, NibblePath path, IReadOnlyBatchContext ctx)
+        where TPage : struct, IDataPage
+    {
+        var key = FixedMap.Key.Account(path);
+
+        if (page.TryGet(key, ctx, out var result))
+        {
+            Serializer.ReadAccount(result, out var balance, out var nonce);
+            return new Account(balance, nonce);
+        }
+
+        return default;
+    }
+
+    public static Page SetAccount<TPage>(this TPage page, NibblePath path, in Account account, IBatchContext batch)
+        where TPage : struct, IDataPage
+    {
+        var key = FixedMap.Key.Account(path);
+
+        Span<byte> payload = stackalloc byte[Serializer.BalanceNonceMaxByteCount];
+        payload = Serializer.WriteAccount(payload, account.Balance, account.Nonce);
+        var ctx = new SetContext(key, payload, batch);
+        return page.Set(ctx);
+    }
+
+    public static UInt256 GetStorage<TPage>(this TPage page, NibblePath path, in Keccak address,
+        IReadOnlyBatchContext ctx)
+        where TPage : struct, IDataPage
+    {
+        var key = FixedMap.Key.StorageCell(path, address);
+
+        if (page.TryGet(key, ctx, out var result))
+        {
+            Serializer.ReadStorageValue(result, out var value);
+            return value;
+        }
+
+        return default;
+    }
+
+    public static Page SetStorage<TPage>(this TPage page, NibblePath path, in Keccak address, in UInt256 value,
+        IBatchContext batch)
+        where TPage : struct, IDataPage
+    {
+        var key = FixedMap.Key.StorageCell(path, address);
+
+        Span<byte> payload = stackalloc byte[Serializer.StorageValueMaxByteCount];
+        payload = Serializer.WriteStorageValue(payload, value);
+
+        var ctx = new SetContext(key, payload, batch);
+        return page.Set(ctx);
+    }
 }
 
 /// <summary>
@@ -34,13 +97,10 @@ public struct PageHeader
     /// <summary>
     /// The id of the last batch that wrote to this page.
     /// </summary>
-    [FieldOffset(0)]
-    public uint BatchId;
+    [FieldOffset(0)] public uint BatchId;
 
-    [FieldOffset(4)]
-    public uint Reserved; // for not it's just alignment
+    [FieldOffset(4)] public uint Reserved; // for not it's just alignment
 }
-
 
 /// <summary>
 /// Struct representing data oriented page types.

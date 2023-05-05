@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -14,7 +15,7 @@ namespace Paprika.Pages;
 /// The page preserves locality of the data though. It's either all the children with a given nibble stored
 /// in the parent page, or they are flushed underneath. 
 /// </remarks>
-public readonly unsafe struct DataPage : IAccountPage
+public readonly unsafe struct DataPage : IDataPage
 {
     private readonly Page _page;
 
@@ -44,6 +45,7 @@ public readonly unsafe struct DataPage : IAccountPage
         /// The size of the <see cref="FixedMap"/> held in this page. Must be long aligned.
         /// </summary>
         private const int FixedMapSize = Size - BucketCount * DbAddress.Size;
+
         private const int FixedMapOffset = Size - FixedMapSize;
 
         /// <summary>
@@ -82,7 +84,7 @@ public readonly unsafe struct DataPage : IAccountPage
             return new DataPage(writable).Set(ctx);
         }
 
-        var path = ctx.Path;
+        var path = ctx.Key.Path;
         var nibble = path.FirstNibble;
 
         var address = Data.Buckets[nibble];
@@ -91,67 +93,74 @@ public readonly unsafe struct DataPage : IAccountPage
         if (address.IsNull == false && address.IsValidPageAddress)
         {
             var page = ctx.Batch.GetAt(address);
-            var updated = new DataPage(page).Set(ctx.TrimPath(NibbleCount));
+            var updated = new DataPage(page).Set(ctx.SliceFrom(NibbleCount));
 
             // remember the updated
             Data.Buckets[nibble] = ctx.Batch.GetAddress(updated);
             return _page;
         }
 
-        // in-page write
-        var data = Serializer.Account.WriteEOATo(stackalloc byte[Serializer.Account.EOAMaxByteCount],
-            ctx.Balance, ctx.Nonce);
-
+        // try in-page write
         var map = new FixedMap(Data.FixedMapSpan);
-        if (map.TrySet(path, data))
+        if (map.TrySet(ctx.Key, ctx.Data))
         {
             return _page;
         }
 
         // not enough memory in this page, need to push some data one level deeper to a new page
-        var child = ctx.Batch.GetNewPage(out _, true);
+        var child = ctx.Batch.GetNewPage(out var childAddr, true);
         var dataPage = new DataPage(child);
 
-        var biggest = map.GetBiggestNibbleBucket();
-        foreach (var item in map.EnumerateNibble(biggest))
+        var biggestNibble = map.GetBiggestNibbleBucket();
+        // if (accountCount == 1)
+        // {
+        //     // one account slot is a prerequisite for the heavy prefix extraction based on the storage
+        //     foreach (var item in map.EnumerateNibble(biggestNibble))
+        //     {
+        //     }
+        //
+        //     // assert that all of them have the same prefix
+        //     // if yes, then proceed with a trie creation
+        // }
+
+        int i = 0;
+        foreach (var item in map.EnumerateNibble(biggestNibble))
         {
-            // TODO: consider writing data once, so that they don't need to be serialized and deserialized
-            Serializer.Account.ReadAccount(item.Data, out var balance, out var nonce);
-            var set = new SetContext(item.Path.SliceFrom(1), balance, nonce, ctx.Batch);
+            var key = item.Key.SliceFrom(NibbleCount);
+            var set = new SetContext(key, item.RawData, ctx.Batch);
+
             dataPage = new DataPage(dataPage.Set(set));
 
             // delete the item, it's possible due to the internal construction of the map
-            map.Delete(item.Path);
+            map.Delete(item.Key);
         }
 
-        Data.Buckets[biggest] = ctx.Batch.GetAddress(dataPage.AsPage());
+        Data.Buckets[biggestNibble] = childAddr;
 
         // The page has some of the values flushed down, try to add again.
         return Set(ctx);
     }
 
-    public void GetAccount(in NibblePath path, IReadOnlyBatchContext batch, out Account result)
+    public bool TryGet(FixedMap.Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
-        var nibble = path.FirstNibble;
+        var nibble = key.Path.FirstNibble;
         var bucket = Data.Buckets[nibble];
 
         // non-null page jump, follow it!
         if (bucket.IsNull == false && bucket.IsValidPageAddress)
         {
-            new DataPage(batch.GetAt(bucket)).GetAccount(path.SliceFrom(NibbleCount), batch, out result);
-            return;
+            return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), batch, out result);
         }
 
         // read in-page
         var map = new FixedMap(Data.FixedMapSpan);
 
-        if (map.TryGet(path, out var data))
+        if (map.TryGet(key, out result))
         {
-            Serializer.Account.ReadAccount(data, out var balance, out var nonce);
-            result = new Account(balance, nonce);
-            return;
+            return true;
         }
 
         result = default;
+        return false;
     }
 }

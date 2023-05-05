@@ -16,11 +16,11 @@ public class SerializerTests
     [TestCaseSource(nameof(GetEOAData))]
     public void EOA(UInt256 balance, UInt256 nonce)
     {
-        Span<byte> destination = stackalloc byte[Serializer.Account.EOAMaxByteCount];
+        Span<byte> destination = stackalloc byte[Serializer.BalanceNonceMaxByteCount];
 
-        var actual = Serializer.Account.WriteEOATo(destination, balance, nonce);
+        var actual = Serializer.WriteAccount(destination, balance, nonce);
 
-        Serializer.Account.ReadAccount(actual, out var balanceRead, out var nonceRead);
+        Serializer.ReadAccount(actual, out var balanceRead, out var nonceRead);
 
         balanceRead.Should().Be(balance);
         nonceRead.Should().Be(nonce);

@@ -22,7 +22,7 @@ public class DbTests
     {
         const int max = 2;
 
-        using var db = new NativeMemoryPagedDb(1024 * 1024UL, 2);
+        using var db = new NativeMemoryPagedDb(MB, 2);
 
         Span<byte> span = stackalloc byte[Keccak.Size];
 
@@ -38,6 +38,7 @@ public class DbTests
 
             using var batch = db.BeginNextBlock();
             batch.Set(key, new Account(i, i));
+            batch.SetStorage(key, key, i);
             batch.Commit(CommitOptions.FlushDataAndRoot);
         }
 
@@ -48,9 +49,12 @@ public class DbTests
             span[0] = (byte)(i << NibblePath.NibbleShift);
             var key = new Keccak(span);
 
+            var expected = (UInt256)i;
             var account = read.GetAccount(key);
+            Assert.AreEqual(expected, account.Nonce);
 
-            Assert.AreEqual((UInt256)i, account.Nonce);
+            var actual = read.GetStorage(key, key);
+            actual.Should().Be(expected);
         }
 
         Console.WriteLine($"Used memory {db.TotalUsedPages:P}");
@@ -214,5 +218,44 @@ public class DbTests
         db.TotalUsedPages.Should().Be(snapshot, "Database should not grow without read transaction active.");
 
         Console.WriteLine($"Uses {db.TotalUsedPages:P} pages out of pre-allocated {size / MB}MB od disk. This gives the actual {db.ActualMegabytesOnDisk:F2}MB on disk ");
+    }
+
+    [Test]
+    [Ignore("Will be fixed in a separate PR")]
+    public void State_and_storage()
+    {
+        const int size = MB16;
+        using var db = new NativeMemoryPagedDb(size, 2);
+
+        const int count = 100;
+
+        using (var batch = db.BeginNextBlock())
+        {
+            for (uint i = 0; i < count; i++)
+            {
+                var address = GetStorageAddress(i);
+
+                batch.Set(Key0, new Account(1, 1));
+                batch.SetStorage(Key0, address, i);
+            }
+
+            batch.Commit(CommitOptions.FlushDataOnly);
+        }
+
+        using (var read = db.BeginReadOnlyBatch())
+        {
+            for (uint i = 0; i < count; i++)
+            {
+                var address = GetStorageAddress(i);
+                read.GetStorage(Key0, address).Should().Be(i);
+            }
+        }
+
+        static Keccak GetStorageAddress(uint i)
+        {
+            var address = Key1a;
+            BinaryPrimitives.WriteUInt32LittleEndian(address.BytesAsSpan, i);
+            return address;
+        }
     }
 }

@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paprika.Crypto;
 
 namespace Paprika.Pages;
 
@@ -36,7 +37,113 @@ public readonly ref struct FixedMap
         _slots = MemoryMarshal.Cast<byte, Slot>(_data);
     }
 
-    public bool TrySet(NibblePath key, ReadOnlySpan<byte> data)
+    /// <summary>
+    /// Represents the type of data stored in the map.
+    /// </summary>
+    public enum DataType : byte
+    {
+        /// <summary>
+        /// [key, 0]-> account (balance, nonce)
+        /// </summary>
+        Account = 0,
+
+        /// <summary>
+        /// [key, 1]-> codeHash
+        /// </summary>
+        CodeHash = 1,
+
+        /// <summary>
+        /// [key, 2]-> storageRootHash
+        /// </summary>
+        StorageRootHash = 2,
+
+        /// <summary>
+        /// [key, 3]-> [index][value],
+        /// add to the key and use first 32 bytes of data as key
+        /// </summary>
+        StorageCell = 3,
+
+        /// <summary>
+        /// [key, 4]-> the DbAddress of the root page of the storage trie,
+        /// </summary>
+        StorageTreeRootPageAddress = 4,
+
+        /// <summary>
+        /// [storageCellIndex, 5]-> the StorageCell index, without the prefix of the account
+        /// </summary>
+        StorageTreeStorageCell = 5,
+
+        // Unused3 = 6,
+        // Unused4 = 7
+    }
+
+    /// <summary>
+    /// Represents the key of the map.
+    /// </summary>
+    public readonly ref struct Key
+    {
+        public readonly NibblePath Path;
+        public readonly DataType Type;
+        public readonly ReadOnlySpan<byte> AdditionalKey;
+
+        private Key(NibblePath path, DataType type, ReadOnlySpan<byte> additionalKey)
+        {
+            Path = path;
+            Type = type;
+            AdditionalKey = additionalKey;
+        }
+
+        /// <summary>
+        /// To be used only by FixedMap internally. Builds the raw key
+        /// </summary>
+        public static Key Raw(NibblePath path, DataType type) =>
+            new(path, type, ReadOnlySpan<byte>.Empty);
+
+        /// <summary>
+        /// Builds the key for <see cref="DataType.Account"/>.
+        /// </summary>
+        public static Key Account(NibblePath path) => new(path, DataType.Account, ReadOnlySpan<byte>.Empty);
+
+        /// <summary>
+        /// Builds the key for <see cref="DataType.CodeHash"/>.
+        /// </summary>
+        public static Key CodeHash(NibblePath path) => new(path, DataType.CodeHash, ReadOnlySpan<byte>.Empty);
+
+        /// <summary>
+        /// Builds the key for <see cref="DataType.StorageRootHash"/>.
+        /// </summary>
+        public static Key StorageRootHash(NibblePath path) =>
+            new(path, DataType.StorageRootHash, ReadOnlySpan<byte>.Empty);
+
+        /// <summary>
+        /// Builds the key for <see cref="DataType.StorageCell"/>.
+        /// </summary>
+        /// <remarks>
+        /// <paramref name="keccak"/> must be passed by ref, otherwise it will blow up the span!
+        /// </remarks>
+        public static Key StorageCell(NibblePath path, in Keccak keccak) =>
+            new(path, DataType.StorageCell, keccak.Span);
+
+        /// <summary>
+        /// Builds the key for <see cref="DataType.StorageCell"/>.
+        /// </summary>
+        /// <remarks>
+        /// <paramref name="keccak"/> must be passed by ref, otherwise it will blow up the span!
+        /// </remarks>
+        public static Key StorageCell(NibblePath path, ReadOnlySpan<byte> keccak) =>
+            new(path, DataType.StorageCell, keccak);
+
+        public Key SliceFrom(int nibbles) => new(Path.SliceFrom(nibbles), Type, AdditionalKey);
+
+        public override string ToString()
+        {
+            return $"{nameof(Path)}: {Path.ToString()}, " +
+                   $"{nameof(Type)}: {Type}, " +
+                   $"{nameof(AdditionalKey)}: {AdditionalKey.ToHexString(false)}";
+        }
+    }
+
+    public bool TrySet(in Key key, ReadOnlySpan<byte> data)
     {
         if (TryGetImpl(key, out var existingData, out var index))
         {
@@ -51,11 +158,11 @@ public readonly ref struct FixedMap
             DeleteImpl(index);
         }
 
-        var hash = Slot.ExtractPrefix(key, out key);
-        var encodedKey = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+        var hash = Slot.ExtractPrefix(key.Path);
+        var encodedKey = key.Path.WriteTo(stackalloc byte[key.Path.MaxByteLength]);
 
         // does not exist yet, calculate total memory needed
-        var total = GetTotalSpaceRequired(encodedKey, data);
+        var total = GetTotalSpaceRequired(encodedKey, key.AdditionalKey, data);
 
         if (_header.Taken + total + Slot.Size > _data.Length)
         {
@@ -77,19 +184,21 @@ public readonly ref struct FixedMap
         }
 
         var at = _header.Low;
-        ref var id = ref _slots[at / Slot.Size];
+        ref var slot = ref _slots[at / Slot.Size];
 
         // write slot
-        id.Prefix = hash;
-        id.ItemAddress = (ushort)(_data.Length - _header.High - total);
+        slot.Prefix = hash;
+        slot.ItemAddress = (ushort)(_data.Length - _header.High - total);
+        slot.Type = key.Type;
 
-        // write item, first length, then key, then data
-        var dest = _data.Slice(id.ItemAddress, total);
+        // write item: length, key, additionalKey, data
+        var dest = _data.Slice(slot.ItemAddress, total);
 
-        WriteEntryLength(dest, (ushort)(encodedKey.Length + data.Length));
+        WriteEntryLength(dest, (ushort)(total - ItemLengthLength));
 
         encodedKey.CopyTo(dest.Slice(ItemLengthLength));
-        data.CopyTo(dest.Slice(ItemLengthLength + encodedKey.Length));
+        key.AdditionalKey.CopyTo(dest.Slice(ItemLengthLength + encodedKey.Length));
+        data.CopyTo(dest.Slice(ItemLengthLength + encodedKey.Length + key.AdditionalKey.Length));
 
         // commit low and high
         _header.Low += Slot.Size;
@@ -148,21 +257,30 @@ public readonly ref struct FixedMap
         {
             get
             {
-                var span = _map.GetSlotPayload(_map._slots[_index]);
+                var slot = _map._slots[_index];
+                var span = _map.GetSlotPayload(slot);
                 var data = NibblePath.ReadFrom(span, out var path);
-                return new Item(path, data);
+
+                if (slot.Type == DataType.StorageCell)
+                {
+                    const int size = Keccak.Size;
+                    var additionalKey = data.Slice(0, size);
+                    return new Item(Key.StorageCell(path, additionalKey), data.Slice(size));
+                }
+
+                return new Item(Key.Raw(path, slot.Type), data);
             }
         }
 
         public readonly ref struct Item
         {
-            public NibblePath Path { get; }
-            public ReadOnlySpan<byte> Data { get; }
+            public Key Key { get; }
+            public ReadOnlySpan<byte> RawData { get; }
 
-            public Item(NibblePath path, ReadOnlySpan<byte> data)
+            public Item(Key key, ReadOnlySpan<byte> rawData)
             {
-                Path = path;
-                Data = data;
+                Key = key;
+                RawData = rawData;
             }
         }
 
@@ -176,10 +294,9 @@ public readonly ref struct FixedMap
     /// <returns></returns>
     public byte GetBiggestNibbleBucket()
     {
-        // TODO: weird dependency here. Remove later when there are multiple buckets present
-        const int bucketCount = DataPage.Payload.BucketCount;
+        const int bucketCount = 16;
 
-        Span<ushort> buckets = stackalloc ushort[DataPage.Payload.BucketCount];
+        Span<ushort> buckets = stackalloc ushort[bucketCount];
 
         var to = _header.Low / Slot.Size;
         for (var i = 0; i < to; i++)
@@ -187,7 +304,8 @@ public readonly ref struct FixedMap
             ref readonly var slot = ref _slots[i];
             if (slot.IsDeleted == false)
             {
-                buckets[slot.FirstNibbleOfPrefix % bucketCount]++;
+                var index = slot.FirstNibbleOfPrefix % bucketCount;
+                buckets[index]++;
             }
         }
 
@@ -195,7 +313,9 @@ public readonly ref struct FixedMap
 
         for (int i = 1; i < bucketCount; i++)
         {
-            if (buckets[i] > buckets[maxI])
+            var currentCount = buckets[i];
+            var maxCount = buckets[maxI];
+            if (currentCount > maxCount)
             {
                 maxI = i;
             }
@@ -204,18 +324,17 @@ public readonly ref struct FixedMap
         return (byte)maxI;
     }
 
-    private static ushort GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> data)
+    private static ushort GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> additionalKey,
+        ReadOnlySpan<byte> data)
     {
-        return (ushort)(key.Length + data.Length + ItemLengthLength);
+        return (ushort)(key.Length + data.Length + additionalKey.Length + ItemLengthLength);
     }
 
     /// <summary>
     /// Warning! This does not set any tombstone so the reader won't be informed about a delete,
     /// just will miss the value.
     /// </summary>
-    /// <param name="key"></param>
-    /// <returns></returns>
-    public bool Delete(NibblePath key)
+    public bool Delete(in Key key)
     {
         if (TryGetImpl(key, out _, out var index))
         {
@@ -264,6 +383,7 @@ public readonly ref struct FixedMap
 
                 copyTo.Prefix = copyFrom.Prefix;
                 copyTo.ItemAddress = high;
+                copyTo.Type = copyFrom.Type;
 
                 copy._header.Low += Slot.Size;
                 copy._header.High = (ushort)(copy._header.High + fromSpan.Length);
@@ -313,7 +433,7 @@ public readonly ref struct FixedMap
         "Use var-length encoding for prefix as it will be usually small. This may save 1 byte per entry.")]
     private static ushort ReadDataLength(Span<byte> source) => BinaryPrimitives.ReadUInt16LittleEndian(source);
 
-    public bool TryGet(NibblePath key, out ReadOnlySpan<byte> data)
+    public bool TryGet(in Key key, out ReadOnlySpan<byte> data)
     {
         if (TryGetImpl(key, out var span, out _))
         {
@@ -328,10 +448,12 @@ public readonly ref struct FixedMap
     [OptimizationOpportunity(OptimizationType.CPU,
         "Scanning through slots could be done with MemoryMarshal.Cast<Slot, ushort> and IndexOf? " +
         "When index is odd, this means prefix is hit.")]
-    private bool TryGetImpl(NibblePath key, out Span<byte> data, out int slotIndex)
+    [OptimizationOpportunity(OptimizationType.CPU,
+        "key.Write to might be called twice, here and in TrySet")]
+    private bool TryGetImpl(in Key key, out Span<byte> data, out int slotIndex)
     {
-        var hash = Slot.ExtractPrefix(key, out key);
-        var encodedKey = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+        var hash = Slot.ExtractPrefix(key.Path);
+        var encodedKey = key.Path.WriteTo(stackalloc byte[key.Path.MaxByteLength]);
 
         // optimization opportunity
         // var cast = MemoryMarshal.Cast<Slot, ushort>(_slots.Slice(_header.Low));
@@ -342,16 +464,30 @@ public readonly ref struct FixedMap
         {
             ref readonly var slot = ref _slots[i];
             if (slot.IsDeleted == false &&
-                slot.Prefix == hash)
+                slot.Prefix == hash &&
+                slot.Type == key.Type)
             {
                 var actual = GetSlotPayload(slot);
 
                 // The StartsWith check assumes that all the keys have the same length.
                 if (actual.StartsWith(encodedKey))
                 {
-                    data = actual.Slice(encodedKey.Length);
-                    slotIndex = i;
-                    return true;
+                    if (key.AdditionalKey.IsEmpty)
+                    {
+                        // no additional key, just assert encoded
+                        data = actual.Slice(encodedKey.Length);
+                        slotIndex = i;
+                        return true;
+                    }
+
+                    // there's the additional key, assert it
+                    // do it by slicing off first the encoded and then check the additional
+                    if (actual.Slice(encodedKey.Length).StartsWith(key.AdditionalKey))
+                    {
+                        data = actual.Slice(encodedKey.Length + key.AdditionalKey.Length);
+                        slotIndex = i;
+                        return true;
+                    }
                 }
             }
         }
@@ -443,12 +579,8 @@ public readonly ref struct FixedMap
     {
         public const int Size = 4;
 
-        // ItemAddress
+        // ItemAddress, requires 12 bits [0-11] to address whole page 
         private const ushort AddressMask = Page.PageSize - 1;
-
-        // IsDeleted
-        private const int DeletedShift = 15;
-        private const ushort DeletedBit = 1 << DeletedShift;
 
         /// <summary>
         /// The address of this item.
@@ -459,13 +591,29 @@ public readonly ref struct FixedMap
             set => Raw = (ushort)((Raw & ~AddressMask) | value);
         }
 
+        // IsDeleted
+        private const int DeletedShift = 15;
+        private const ushort DeletedBit = 1 << DeletedShift;
+
         /// <summary>
-        /// Whether it's deleted
+        /// Whether it's deleted.
         /// </summary>
         public bool IsDeleted
         {
             get => (Raw & DeletedBit) == DeletedBit;
             set => Raw = (ushort)((Raw & ~DeletedBit) | (value ? DeletedBit : 0));
+        }
+
+        private const int DataTypeShift = 12;
+        private const ushort DataTypeMask = unchecked((ushort)(111 << DataTypeShift));
+
+        /// <summary>
+        /// The data type contained in this slot.
+        /// </summary>
+        public DataType Type
+        {
+            get => (DataType)((Raw & DataTypeMask) >> DataTypeShift);
+            set => Raw = (ushort)((Raw & ~DataTypeMask) | (ushort)((byte)value << DataTypeShift));
         }
 
         [FieldOffset(0)] private ushort Raw;
@@ -481,16 +629,15 @@ public readonly ref struct FixedMap
         [OptimizationOpportunity(OptimizationType.DiskSpace,
             "NibblePath provides no support for concat so no easy way to reintroduce the prefix here. " +
             "If it provided one, 2 bytes to save per key")]
-        public static ushort ExtractPrefix(NibblePath key, out NibblePath rest)
+        public static ushort ExtractPrefix(NibblePath key)
         {
             var prefix = (key.GetAt(0) << NibblePath.NibbleShift * 0) +
-                (key.GetAt(1) << NibblePath.NibbleShift * 1) +
-                (key.GetAt(2) << NibblePath.NibbleShift * 2) +
-                (key.GetAt(3) << NibblePath.NibbleShift * 3);
+                         (key.GetAt(1) << NibblePath.NibbleShift * 1) +
+                         (key.GetAt(2) << NibblePath.NibbleShift * 2) +
+                         (key.GetAt(3) << NibblePath.NibbleShift * 3);
 
             // optimization           
             //rest = key.SliceFrom(4);
-            rest = key;
             return (ushort)prefix;
         }
 
@@ -498,7 +645,8 @@ public readonly ref struct FixedMap
 
         public override string ToString()
         {
-            return $"{nameof(Prefix)}: {Prefix}, {nameof(ItemAddress)}: {ItemAddress}, {nameof(IsDeleted)}: {IsDeleted}";
+            return
+                $"{nameof(Type)}: {Type}, {nameof(Prefix)}: {Prefix}, {nameof(ItemAddress)}: {ItemAddress}, {nameof(IsDeleted)}: {IsDeleted}";
         }
     }
 

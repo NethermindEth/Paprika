@@ -12,4 +12,7 @@ public static class PageExtensions
 
     public static Page AsPage<TPage>(this TPage page) where TPage : unmanaged, IPage =>
         Unsafe.As<TPage, Page>(ref page);
+
+    public static TPage Cast<TPage>(this Page page) where TPage : unmanaged, IPage =>
+        Unsafe.As<Page, TPage>(ref page);
 }

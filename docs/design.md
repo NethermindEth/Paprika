@@ -14,7 +14,7 @@ In Paprika, it's handled by specifying the _history depth_ that keeps the block 
 
 ### Merkle construct
 
-Paprika focuses on delivering fast reads and writes, keeping the information about `Merkle` construct in separate pages. This allows to load and access of pages with data in a fast manner, leaving the update of the root hash (and other nodes) for the transaction commit. It also allows choosing which Keccaks are memoized. For example, the implementor may choose to store every other level of Keccaks.
+Paprika focuses on delivering fast reads and writes by using path-based addressing. The hashes of intermediate nodes, needed for the efficient calculation of the root hash of the `Merkle` tree, are stored by using path-based addressing in pages as well (see: [FixedMap](#fixedmap)). This approach allows to load and access of pages with data in a fast manner, leaving the update of the root hash (and other nodes) for the transaction commit. It also allows choosing which Keccaks are memoized. For example, the implementor may choose to store every other level of Keccaks.
 
 ### ACID
 
@@ -77,13 +77,14 @@ The `RootPage` is a page responsible for holding all the metadata information ne
 
 1. batch id - a monotonically increasing number, identifying each batch write to the database that happened
 1. block information including its number and the hash
+1. an initial fanout of pages (currently set to `256`) - this allows to remove N nibbles from the path (currently: `2`)
 1. abandoned pages
 
 The last one is a collection of `DbAddress` pointing to the `Abandoned Pages`. As the amount of metadata is not big, one root page can store over 1 thousand addresses of the abandoned pages.
 
 #### Abandoned Page
 
-An abandoned page is a page storing information about pages that were abandoned during a given batch. Let's describe what abandonment means. When a page is COWed, the original copy should be maintained for the readers. After a given period of time, defined by the reorganization max depth, the page should be reused to not blow up the database. That is why `AbandonedPage` memoizes the batch at which it was created. Whenever a new page is requested, the allocator checks the list of unused pages (pages that were abandoned that passed the threshold of max reorg depth. If there are some, the page can be reused.
+An abandoned page is a page storing information about pages that were abandoned during a given batch. Let's describe what abandonment means. When a page is COWed, the original copy should be maintained for the readers. After a given period, defined by the reorganization max depth, the page should be reused to not blow up the database. That is why `AbandonedPage` memoizes the batch at which it was created. Whenever a new page is requested, the allocator checks the list of unused pages (pages that were abandoned that passed the threshold of max reorg depth. If there are some, the page can be reused.
 
 As each `AbandonedPage` can store ~1,000 pages, in cases of big updates, several pages are required to store the addresses of all the abandoned pages. As they share the batch number in which they are abandoned, a linked list is used to occupy only a single slot in the `AbandonedPages` of the `RootPage`. The unlinking and proper management of the list is left up to the allocator that updates slots in the `RootPage` accordingly.
 
@@ -91,7 +92,7 @@ The biggest caveat is where to store the `AbandonedPage`. The same mechanism is 
 
 #### Data Page
 
-A data page is responsible for storing data, meaning a map from the `Keccak`->`Account`. The data page tries to store as much data as possible inline. If there's no more space, left, it selects a bucket, defined by a nibble. The one with the highest count of items is flushed as a separate page and a pointer to that page is stored in the bucket of the original `DataPage`. This is a bit different approach from using page splits. Instead of splitting the page and updating the parent, the page can flush down some of its data, leaving more space for the new. A single `PageData` can hold roughly 31-60 accounts. This divided by the count of nibbles 16 gives a rough minimal estimate of how much flushing down can save memory (at least 2 frames).
+A data page is responsible for both storing data in-page and providing a fanout for lower levels of the tree. The data page tries to store as much data as possible inline using the [FixedMap component](#FixedMap). If there's no more space, left, it selects a bucket, defined by a nibble. The one with the highest count of items is flushed as a separate page and a pointer to that page is stored in the bucket of the original `DataPage`. This is a bit different approach from using page splits. Instead of splitting the page and updating the parent, the page can flush down some of its data, leaving more space for the new. A single `PageData` can hold roughly 50-100 entries. An entry, again, is described in a `FixedMap`.
 
 ### Page design in C\#
 
@@ -205,9 +206,28 @@ public struct PageHeader
 }
 ```
 
-#### FixedMap
+### FixedMap component
 
-Values stored in Paprika fall into one of several categories, like EOA or contract data. On top of that, as different values are encoded with different lengths, it was proved that a fixed frame approach does not work well. What Paprika uses is a modified pattern of the slot array, used by major players in the world of B+ oriented databases (see: [PostgreSQL page layout](https://www.postgresql.org/docs/current/storage-page-layout.html#STORAGE-PAGE-LAYOUT-FIGURE)). How it works then?
+The `FixedMap` component is responsible for storing data in-page. It does it by using path-based addressing based on the functionality provided by `NibblePath`. The path is not the only discriminator for the values though. The other part required to create a `FixedMap.Key` is the `type` of entry. This is an implementation of [Entity-Attribute-Value](https://en.wikipedia.org/wiki/Entity%E2%80%93attribute%E2%80%93value_model). Currently, the following types of entries:
+
+1. `Account` - identifies `(balance, nonce)` of a given account
+1. `CodeHash` - identifies `CodeHash` of a contract
+1. `StorageRootHash` - the root hash of the storage tree of a contract
+1. `StorageCell` - identifies that the given entry is a storage cell, and its first 32 bytes of its raw data should be additionally used to check the `index` of the storage cell
+
+For example:
+
+> To store an update of a `nonce` of a given contract, `[address, Type.Account]` pair is used as a `Key` to store the serialized `(balance, nonce)` pair.
+
+and
+
+> To store a storage cell with the given `index` for the given `address`, `[address, Type.StorageCell]` is used as a `Key` with addition of additional bytes of `index`.
+
+The addition of additional bytes breaks the uniform addressing that is based on the path only. It allows at the same time for auto optimization of the tree and much more dense packaging of pages.
+
+#### FixedMap layout
+
+`FixedMap` needs to store values with variant lengths over a fixed `Span<byte>` provided by the page. To make it work, Paprika uses a modified pattern of the slot array, used by major players in the world of B+ oriented databases (see: [PostgreSQL page layout](https://www.postgresql.org/docs/current/storage-page-layout.html#STORAGE-PAGE-LAYOUT-FIGURE)). How it works then?
 
 The slot array pattern uses a fixed-size buffer that is provided within the page. It allocates chunks of it from two directions:
 
@@ -230,6 +250,9 @@ private struct Slot
     // Whether the slot is deleted
     public bool IsDeleted { /* bitwise magic */ }
 
+    // the type of the entry
+    public DataType Type { /* bitwise magic */ }
+
     [FieldOffset(0)] private ushort Raw;
 
     // First 4 nibbles extracted as ushort.
@@ -237,7 +260,7 @@ private struct Slot
 }
 ```
 
-The slot is 4 bytes long. It extracts 4 first nibbles as a prefix for fast comparisons. It has a pointer to the item. The length of the item is included in the encoded part. The drawback of this design is a linear search across all the slots when an item must be found. At the same time, usually, there will be no more than 100 items, which gives 400 bytes, which should be ok-ish with modern processors. The code is marked with an optimization opportunity.
+The slot is 4 bytes long. It extracts 4 first nibbles as a prefix for fast comparisons. It has a pointer to the item. The length of the item is included in the encoded part. The drawback of this design is a linear search across all the slots when an item must be found. With the expected number of items per page, which should be no bigger than 100, it gives 400 bytes of slots to search through. This should be ok-ish with modern processors. The code is marked with an optimization opportunity.
 
 With this, the `FixedMap` memory representation looks like the following.
 
