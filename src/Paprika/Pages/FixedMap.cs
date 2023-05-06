@@ -22,7 +22,16 @@ public readonly ref struct FixedMap
     public const int MinSize = AllocationGranularity * 3;
 
     private const int AllocationGranularity = 8;
-    private const int ItemLengthLength = 2;
+
+    /// <summary>
+    /// Number of bytes used to write length prefix.
+    /// </summary>
+    private const byte ItemLengthLength = 1;
+
+    /// <summary>
+    /// The maximum length value handled properly.
+    /// </summary>
+    private const int MaxLength = byte.MaxValue;
 
     private readonly ref Header _header;
     private readonly Span<byte> _data;
@@ -162,7 +171,15 @@ public readonly ref struct FixedMap
         var encodedKey = key.Path.WriteTo(stackalloc byte[key.Path.MaxByteLength]);
 
         // does not exist yet, calculate total memory needed
-        var total = GetTotalSpaceRequired(encodedKey, key.AdditionalKey, data);
+        var totalRequired = GetTotalSpaceRequired(encodedKey, key.AdditionalKey, data);
+
+        if (totalRequired > MaxLength)
+        {
+            throw new Exception($"Total entry length breaches the limit of {MaxLength} bytes");
+        }
+
+        // cast down
+        var total = (byte)totalRequired;
 
         if (_header.Taken + total + Slot.Size > _data.Length)
         {
@@ -194,7 +211,7 @@ public readonly ref struct FixedMap
         // write item: length, key, additionalKey, data
         var dest = _data.Slice(slot.ItemAddress, total);
 
-        WriteEntryLength(dest, (ushort)(total - ItemLengthLength));
+        WriteEntryLength(dest, (byte)(total - ItemLengthLength));
 
         encodedKey.CopyTo(dest.Slice(ItemLengthLength));
         key.AdditionalKey.CopyTo(dest.Slice(ItemLengthLength + encodedKey.Length));
@@ -324,10 +341,10 @@ public readonly ref struct FixedMap
         return (byte)maxI;
     }
 
-    private static ushort GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> additionalKey,
+    private static int GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> additionalKey,
         ReadOnlySpan<byte> data)
     {
-        return (ushort)(key.Length + data.Length + additionalKey.Length + ItemLengthLength);
+        return key.Length + data.Length + additionalKey.Length + ItemLengthLength;
     }
 
     /// <summary>
@@ -424,14 +441,10 @@ public readonly ref struct FixedMap
         }
     }
 
-    [OptimizationOpportunity(OptimizationType.DiskSpace,
-        "Use var-length encoding for prefix as it will be usually small. This may save 1 byte per entry.")]
-    private static void WriteEntryLength(Span<byte> dest, ushort dataRequiredWithNoLength) =>
-        BinaryPrimitives.WriteUInt16LittleEndian(dest, dataRequiredWithNoLength);
+    private static void WriteEntryLength(Span<byte> dest, byte dataRequiredWithNoLength) =>
+        dest[0] = dataRequiredWithNoLength;
 
-    [OptimizationOpportunity(OptimizationType.DiskSpace,
-        "Use var-length encoding for prefix as it will be usually small. This may save 1 byte per entry.")]
-    private static ushort ReadDataLength(Span<byte> source) => BinaryPrimitives.ReadUInt16LittleEndian(source);
+    private static byte ReadDataLength(Span<byte> source) => source[0];
 
     public bool TryGet(in Key key, out ReadOnlySpan<byte> data)
     {
