@@ -138,12 +138,10 @@ public readonly ref struct NibblePath
     /// <summary>
     /// Moves into arbitrary direction. 
     /// </summary>
-    /// <param name="nibble"></param>
-    /// <param name="value"></param>
-    public void UnsafeSetAt(int nibble, byte value)
+    public void UnsafeSetAt(int nibble, byte countOdd, byte value)
     {
         ref var b = ref Unsafe.Add(ref _span, (nibble + _odd) / 2);
-        var shift = GetShift(nibble);
+        var shift = GetShift(nibble + countOdd);
         var mask = NibbleMask << shift;
 
         b = (byte)((b & ~mask) | (value << shift));

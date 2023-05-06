@@ -309,9 +309,10 @@ public readonly ref struct FixedMap
                     bytes[0] = 0xFE;
                     bytes[1] = 0xFF;
 
+                    var countOdd = (byte)(count & 1);
                     for (var i = 0; i < count; i++)
                     {
-                        path.UnsafeSetAt(i - count - 1, nibbles[i]);
+                        path.UnsafeSetAt(i - count - 1, countOdd, nibbles[i]);
                     }
 
                     path = path.CopyWithUnsafePointerMoveBack(count);
