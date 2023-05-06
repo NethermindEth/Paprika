@@ -295,32 +295,26 @@ public readonly ref struct FixedMap
                 {
                     // there's at least one nibble extracted
                     var raw = NibblePath.RawExtract(span, out var odd);
+
                     const int space = 2;
-                    const int preamble = 1;
 
-                    var bytes = _bytes.AsSpan(0, raw.Length + space - preamble); //big enough to handle all cases
+                    var bytes = _bytes.AsSpan(0, raw.Length + space); //big enough to handle all cases
 
-                    // omit preamble
-                    raw.Slice(preamble).CopyTo(bytes.Slice(space));
+                    // copy forward enough to allow negative pointer arithmetics
+                    var pathDestination = bytes.Slice(space);
+                    raw.CopyTo(pathDestination);
 
-                    // setup the initial offset
-                    var countOdd = count % 2 == 1;
-                    var offset = odd ? countOdd ? 1 : 0 : countOdd ? 0 : 1;
+                    data = NibblePath.ReadFrom(pathDestination, out path);
+
+                    bytes[0] = 0xFE;
+                    bytes[1] = 0xFF;
 
                     for (var i = 0; i < count; i++)
                     {
-                        ref var b = ref bytes[(i + offset) / 2];
-                        var shift = (i + offset) % 2 * NibblePath.NibbleShift;
-
-                        var mask = 0xF << shift;
-
-                        // zero nibble and put it
-                        b = (byte)((b & ~mask) + (nibbles[i] << shift));
+                        path.UnsafeSetAt(i - count - 1, nibbles[i]);
                     }
 
-                    // slice bytes and make sure oddity is right
-                    path = NibblePath.FromKey(bytes.Slice(0), 0);
-                    data = span.Slice(raw.Length);
+                    path = path.CopyWithUnsafePointerMoveBack(count);
                 }
 
                 if (slot.Type == DataType.StorageCell)

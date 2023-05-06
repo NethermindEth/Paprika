@@ -54,6 +54,14 @@ public readonly ref struct NibblePath
         _odd = (byte)(nibbleFrom & OddBit);
         Length = (byte)length;
     }
+    
+    private NibblePath(ref byte span, byte odd, int length)
+    {
+        _span = ref span;
+        _odd = odd;
+        Length = (byte)length;
+    }
+    
 
     private NibblePath(ref byte span, byte odd, byte length)
     {
@@ -119,7 +127,12 @@ public readonly ref struct NibblePath
     public byte GetAt(int nibble)
     {
         ref var b = ref Unsafe.Add(ref _span, (nibble + _odd) / 2);
-        return (byte)((b >> ((1 - ((nibble + _odd) & OddBit)) * NibbleShift)) & NibbleMask);
+        return (byte)((b >> GetShift(nibble)) & NibbleMask);
+    }
+
+    private int GetShift(int nibble)
+    {
+        return (1 - ((nibble + _odd) & OddBit)) * NibbleShift;
     }
 
     /// <summary>
@@ -130,7 +143,18 @@ public readonly ref struct NibblePath
     public void UnsafeSetAt(int nibble, byte value)
     {
         ref var b = ref Unsafe.Add(ref _span, (nibble + _odd) / 2);
-        //return (byte)((b >> ((1 - ((nibble + _odd) & OddBit)) * NibbleShift)) & NibbleMask);
+        var shift = GetShift(nibble);
+        var mask = NibbleMask << shift;
+
+        b = (byte)((b & ~mask) | (value << shift));
+    }
+
+    public NibblePath CopyWithUnsafePointerMoveBack(int nibbleCount)
+    {
+        var shiftBack = _odd + -nibbleCount;
+        var count = shiftBack / 2;
+
+        return new NibblePath(ref Unsafe.Add(ref _span, count), 0, (byte)(Length + nibbleCount));
     }
 
     public byte FirstNibble => (byte)((_span >> ((1 - _odd) * NibbleShift)) & NibbleMask);
