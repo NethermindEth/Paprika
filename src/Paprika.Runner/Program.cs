@@ -16,7 +16,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = 30_000;
+    private const int BlockCount = 50_000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
 
@@ -24,7 +24,7 @@ public static class Program
 
     private const int NumberOfLogs = 10;
 
-    private const long DbFileSize = 8 * Gb;
+    private const long DbFileSize = 18 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
     private const CommitOptions Commit = CommitOptions.FlushDataOnly;
     private const int LogEvery = BlockCount / NumberOfLogs;
