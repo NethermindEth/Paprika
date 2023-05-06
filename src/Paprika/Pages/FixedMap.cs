@@ -142,6 +142,18 @@ public readonly ref struct FixedMap
         public static Key StorageCell(NibblePath path, ReadOnlySpan<byte> keccak) =>
             new(path, DataType.StorageCell, keccak);
 
+        public static Key StorageTreeRootPageAddress(NibblePath path) =>
+            new(path, DataType.StorageTreeRootPageAddress, ReadOnlySpan<byte>.Empty);
+
+        /// <summary>
+        /// Treat the additional key as the key and drop the additional notion.
+        /// </summary>
+        /// <param name="originalKey"></param>
+        /// <returns></returns>
+        public static Key StorageTreeStorageCell(Key originalKey) =>
+            new(NibblePath.FromKey(originalKey.AdditionalKey), DataType.StorageTreeStorageCell,
+                ReadOnlySpan<byte>.Empty);
+
         public Key SliceFrom(int nibbles) => new(Path.SliceFrom(nibbles), Type, AdditionalKey);
 
         public override string ToString()
@@ -521,16 +533,16 @@ public readonly ref struct FixedMap
 
         var to = _header.Low / Slot.Size;
 
-        // uses vectorized search, treating slots as ushorts
-        // if the found index is odd -> found a slot
+        // uses vectorized search, treating slots as a Span<ushort>
+        // if the found index is odd -> found a slot to be queried
 
         const int notFound = -1;
-        var ushorts = MemoryMarshal.Cast<Slot, ushort>(_slots.Slice(0, to));
+        var span = MemoryMarshal.Cast<Slot, ushort>(_slots.Slice(0, to));
 
         var offset = 0;
         int index;
 
-        while ((index = ushorts.IndexOf(hash)) != notFound)
+        while ((index = span.IndexOf(hash)) != notFound)
         {
             // move offset to the given position
             offset += index;
@@ -570,7 +582,7 @@ public readonly ref struct FixedMap
 
             // move next: ushorts sliced to the next
             // offset moved by 1 to align
-            ushorts = ushorts.Slice(index + 1);
+            span = span.Slice(index + 1);
             offset += 1;
         }
 

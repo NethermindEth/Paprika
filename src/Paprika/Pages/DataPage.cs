@@ -102,6 +102,34 @@ public readonly unsafe struct DataPage : IDataPage
 
         // try in-page write
         var map = new FixedMap(Data.FixedMapSpan);
+
+        // if written value is a storage cell, try to find the storage tree first
+        if (ctx.Key.Type == FixedMap.DataType.StorageCell)
+        {
+            var rootKey = FixedMap.Key.StorageTreeRootPageAddress(ctx.Key.Path);
+            
+            if (map.TryGet(rootKey, out var rawPageAddress))
+            {
+                var storageTreeRootPageAddress = DbAddress.Read(rawPageAddress);
+                var storageTree = ctx.Batch.GetAt(storageTreeRootPageAddress);
+                var inTreeAddress = FixedMap.Key.StorageTreeStorageCell(ctx.Key);
+
+                var updatedStorageTree =
+                    new DataPage(storageTree).Set(new SetContext(inTreeAddress, ctx.Data, ctx.Batch));
+
+                if (updatedStorageTree.Raw != storageTree.Raw)
+                {
+                    // the tree was COWed, need to write back in place
+                    Span<byte> update = stackalloc byte[4];
+                    ctx.Batch.GetAddress(updatedStorageTree).Write(update);
+                    map.TrySet(rootKey, update);
+                }
+
+                // write delegated to the storage tree, return
+                return _page;
+            }
+        }
+        
         if (map.TrySet(ctx.Key, ctx.Data))
         {
             return _page;

@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Buffers.Binary;
+using System.Diagnostics;
 
 namespace Paprika.Pages;
 
@@ -85,4 +86,8 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     public override bool Equals(object? obj) => obj is DbAddress other && Equals(other);
 
     public override int GetHashCode() => (int)_value;
+
+    public static DbAddress Read(ReadOnlySpan<byte> data) => new(BinaryPrimitives.ReadUInt32LittleEndian(data));
+
+    public void Write(Span<byte> destination) => BinaryPrimitives.WriteUInt32LittleEndian(destination, _value);
 }
