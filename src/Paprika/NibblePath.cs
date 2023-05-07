@@ -54,14 +54,14 @@ public readonly ref struct NibblePath
         _odd = (byte)(nibbleFrom & OddBit);
         Length = (byte)length;
     }
-    
+
     private NibblePath(ref byte span, byte odd, int length)
     {
         _span = ref span;
         _odd = odd;
         Length = (byte)length;
     }
-    
+
 
     private NibblePath(ref byte span, byte odd, byte length)
     {
@@ -149,10 +149,11 @@ public readonly ref struct NibblePath
 
     public NibblePath CopyWithUnsafePointerMoveBack(int nibbleCount)
     {
-        var shiftBack = _odd + -nibbleCount;
+        var odd = (byte)((_odd ^ nibbleCount) & 1);
+        var shiftBack = _odd + -nibbleCount - odd;
         var count = shiftBack / 2;
 
-        return new NibblePath(ref Unsafe.Add(ref _span, count), 0, (byte)(Length + nibbleCount));
+        return new NibblePath(ref Unsafe.Add(ref _span, count), odd, (byte)(Length + nibbleCount));
     }
 
     public byte FirstNibble => (byte)((_span >> ((1 - _odd) * NibbleShift)) & NibbleMask);
@@ -162,12 +163,13 @@ public readonly ref struct NibblePath
     /// <summary>
     /// Extracts raw span that can be read as the nibble path from the source.
     /// </summary>
-    public static ReadOnlySpan<byte> RawExtract(ReadOnlySpan<byte> source, out bool odd)
+    public static ReadOnlySpan<byte> RawExtract(ReadOnlySpan<byte> source)
     {
         var b = source[0];
         var length = (byte)(b >> LengthShift);
-        odd = (OddBit & b) == OddBit;
-        return source.Slice(0, (length + 1) / 2 + PreambleLength);
+        var odd = b & OddBit;
+
+        return source.Slice(0, GetSpanLength(length, odd) + PreambleLength);
     }
 
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out NibblePath nibblePath)

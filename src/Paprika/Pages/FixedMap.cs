@@ -289,12 +289,13 @@ public readonly ref struct FixedMap
 
                 if (count == 0)
                 {
+                    // no nibbles stored in the slot, read as is.
                     data = NibblePath.ReadFrom(span, out path);
                 }
                 else
                 {
                     // there's at least one nibble extracted
-                    var raw = NibblePath.RawExtract(span, out var odd);
+                    var raw = NibblePath.RawExtract(span);
 
                     const int space = 2;
 
@@ -305,9 +306,6 @@ public readonly ref struct FixedMap
                     raw.CopyTo(pathDestination);
 
                     data = NibblePath.ReadFrom(pathDestination, out path);
-
-                    bytes[0] = 0xFE;
-                    bytes[1] = 0xFF;
 
                     var countOdd = (byte)(count & 1);
                     for (var i = 0; i < count; i++)

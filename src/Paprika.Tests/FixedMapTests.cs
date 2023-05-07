@@ -39,26 +39,37 @@ public class FixedMapTests
 
         map.GetAssert(FixedMap.Key.Account(Key1), Data1);
     }
-    
-    [Test]
-    public void Enumerate_nibble()
+
+    [TestCase(0, 10)]
+    [TestCase(0, 9)]
+    [TestCase(1, 9)]
+    [TestCase(1, 8)]
+    public void Enumerate_nibble(int from, int length)
     {
         Span<byte> span = stackalloc byte[256];
         var map = new FixedMap(span);
 
-        var key0 = FixedMap.Key.Account(Key0);
-        var key1 = FixedMap.Key.Account(Key1);
-        
+        var path0 = Key0.SliceFrom(from).SliceTo(length);
+        var path1 = Key1.SliceFrom(from).SliceTo(length);
+
+        var key0 = FixedMap.Key.Account(path0);
+        var key1 = FixedMap.Key.Account(path1);
+
         map.SetAssert(key0, Data0);
         map.SetAssert(key1, Data1);
 
         Console.WriteLine($"Expected keys: {key0.Path.ToString()} and {key1.Path.ToString()}");
         Console.WriteLine("Actual: ");
-        
-        foreach (var item in map.EnumerateNibble(key0.Path.FirstNibble))
-        {
-            Console.WriteLine(item.Key.Path.ToString());
-        }
+
+        using var e = map.EnumerateNibble(key0.Path.FirstNibble);
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Path.ToString().Should().Be(path0.ToString());
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Path.ToString().Should().Be(path1.ToString());
+
+        e.MoveNext().Should().BeFalse();
     }
 
     [Test]
@@ -73,7 +84,8 @@ public class FixedMapTests
 
         map.Delete(FixedMap.Key.Account(Key0)).Should().BeTrue();
 
-        map.TrySet(FixedMap.Key.Account(Key2), Data2).Should().BeTrue("Should retrieve space by running internally the defragmentation");
+        map.TrySet(FixedMap.Key.Account(Key2), Data2).Should()
+            .BeTrue("Should retrieve space by running internally the defragmentation");
 
         // should contains no key0, key1 and key2 now
         map.TryGet(FixedMap.Key.Account(Key0), out var retrieved).Should().BeFalse();
