@@ -296,6 +296,7 @@ public readonly ref struct FixedMap
                 {
                     // there's at least one nibble extracted
                     var raw = NibblePath.RawExtract(span);
+                    data = span.Slice(raw.Length);
 
                     const int space = 2;
 
@@ -305,7 +306,9 @@ public readonly ref struct FixedMap
                     var pathDestination = bytes.Slice(space);
                     raw.CopyTo(pathDestination);
 
-                    data = NibblePath.ReadFrom(span, out path);
+                    // Terribly unsafe region!
+                    // Operate on the copy, pathDestination, as it will be overwritten with unsafe ref.
+                    NibblePath.ReadFrom(pathDestination, out path);
 
                     var countOdd = (byte)(count & 1);
                     for (var i = 0; i < count; i++)
