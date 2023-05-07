@@ -131,8 +131,8 @@ public readonly unsafe struct DataPage : IDataPage
 
             dataPage = new DataPage(dataPage.Set(set));
 
-            // delete the item, it's possible due to the internal construction of the map
-            map.Delete(item.Key);
+            // use the special delete for the item that is much faster than map.Delete(item.Key);
+            map.Delete(item);
         }
 
         Data.Buckets[biggestNibble] = childAddr;
