@@ -22,7 +22,16 @@ public readonly ref struct FixedMap
     public const int MinSize = AllocationGranularity * 3;
 
     private const int AllocationGranularity = 8;
-    private const int ItemLengthLength = 2;
+
+    /// <summary>
+    /// Number of bytes used to write length prefix.
+    /// </summary>
+    private const byte ItemLengthLength = 1;
+
+    /// <summary>
+    /// The maximum length value handled properly.
+    /// </summary>
+    private const int MaxLength = byte.MaxValue;
 
     private readonly ref Header _header;
     private readonly Span<byte> _data;
@@ -158,11 +167,19 @@ public readonly ref struct FixedMap
             DeleteImpl(index);
         }
 
-        var hash = Slot.ExtractPrefix(key.Path);
-        var encodedKey = key.Path.WriteTo(stackalloc byte[key.Path.MaxByteLength]);
+        var hash = Slot.ExtractPrefix(key.Path, out var path);
+        var encodedKey = path.WriteTo(stackalloc byte[path.MaxByteLength]);
 
         // does not exist yet, calculate total memory needed
-        var total = GetTotalSpaceRequired(encodedKey, key.AdditionalKey, data);
+        var totalRequired = GetTotalSpaceRequired(encodedKey, key.AdditionalKey, data);
+
+        if (totalRequired > MaxLength)
+        {
+            throw new Exception($"Total entry length breaches the limit of {MaxLength} bytes");
+        }
+
+        // cast down
+        var total = (byte)totalRequired;
 
         if (_header.Taken + total + Slot.Size > _data.Length)
         {
@@ -194,7 +211,7 @@ public readonly ref struct FixedMap
         // write item: length, key, additionalKey, data
         var dest = _data.Slice(slot.ItemAddress, total);
 
-        WriteEntryLength(dest, (ushort)(total - ItemLengthLength));
+        WriteEntryLength(dest, (byte)(total - ItemLengthLength));
 
         encodedKey.CopyTo(dest.Slice(ItemLengthLength));
         key.AdditionalKey.CopyTo(dest.Slice(ItemLengthLength + encodedKey.Length));
@@ -223,11 +240,14 @@ public readonly ref struct FixedMap
         /// <summary>The next index to yield.</summary>
         private int _index;
 
+        private readonly byte[] _bytes;
+
         internal NibbleEnumerator(FixedMap map, byte nibble)
         {
             _map = map;
             _nibble = nibble;
             _index = -1;
+            _bytes = ArrayPool<byte>.Shared.Rent(128);
         }
 
         /// <summary>Advances the enumerator to the next element of the span.</summary>
@@ -259,7 +279,45 @@ public readonly ref struct FixedMap
             {
                 var slot = _map._slots[_index];
                 var span = _map.GetSlotPayload(slot);
-                var data = NibblePath.ReadFrom(span, out var path);
+
+                ReadOnlySpan<byte> data;
+                NibblePath path;
+
+                // path rebuilding
+                Span<byte> nibbles = stackalloc byte[3];
+                var count = slot.DecodeNibblesFromPrefix(nibbles);
+
+                if (count == 0)
+                {
+                    // no nibbles stored in the slot, read as is.
+                    data = NibblePath.ReadFrom(span, out path);
+                }
+                else
+                {
+                    // there's at least one nibble extracted
+                    var raw = NibblePath.RawExtract(span);
+                    data = span.Slice(raw.Length);
+
+                    const int space = 2;
+
+                    var bytes = _bytes.AsSpan(0, raw.Length + space); //big enough to handle all cases
+
+                    // copy forward enough to allow negative pointer arithmetics
+                    var pathDestination = bytes.Slice(space);
+                    raw.CopyTo(pathDestination);
+
+                    // Terribly unsafe region!
+                    // Operate on the copy, pathDestination, as it will be overwritten with unsafe ref.
+                    NibblePath.ReadFrom(pathDestination, out path);
+
+                    var countOdd = (byte)(count & 1);
+                    for (var i = 0; i < count; i++)
+                    {
+                        path.UnsafeSetAt(i - count - 1, countOdd, nibbles[i]);
+                    }
+
+                    path = path.CopyWithUnsafePointerMoveBack(count);
+                }
 
                 if (slot.Type == DataType.StorageCell)
                 {
@@ -270,6 +328,12 @@ public readonly ref struct FixedMap
 
                 return new Item(Key.Raw(path, slot.Type), data);
             }
+        }
+
+        public void Dispose()
+        {
+            if (_bytes != null)
+                ArrayPool<byte>.Shared.Return(_bytes);
         }
 
         public readonly ref struct Item
@@ -324,10 +388,10 @@ public readonly ref struct FixedMap
         return (byte)maxI;
     }
 
-    private static ushort GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> additionalKey,
+    private static int GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> additionalKey,
         ReadOnlySpan<byte> data)
     {
-        return (ushort)(key.Length + data.Length + additionalKey.Length + ItemLengthLength);
+        return key.Length + data.Length + additionalKey.Length + ItemLengthLength;
     }
 
     /// <summary>
@@ -424,14 +488,10 @@ public readonly ref struct FixedMap
         }
     }
 
-    [OptimizationOpportunity(OptimizationType.DiskSpace,
-        "Use var-length encoding for prefix as it will be usually small. This may save 1 byte per entry.")]
-    private static void WriteEntryLength(Span<byte> dest, ushort dataRequiredWithNoLength) =>
-        BinaryPrimitives.WriteUInt16LittleEndian(dest, dataRequiredWithNoLength);
+    private static void WriteEntryLength(Span<byte> dest, byte dataRequiredWithNoLength) =>
+        dest[0] = dataRequiredWithNoLength;
 
-    [OptimizationOpportunity(OptimizationType.DiskSpace,
-        "Use var-length encoding for prefix as it will be usually small. This may save 1 byte per entry.")]
-    private static ushort ReadDataLength(Span<byte> source) => BinaryPrimitives.ReadUInt16LittleEndian(source);
+    private static byte ReadDataLength(Span<byte> source) => source[0];
 
     public bool TryGet(in Key key, out ReadOnlySpan<byte> data)
     {
@@ -446,18 +506,11 @@ public readonly ref struct FixedMap
     }
 
     [OptimizationOpportunity(OptimizationType.CPU,
-        "Scanning through slots could be done with MemoryMarshal.Cast<Slot, ushort> and IndexOf? " +
-        "When index is odd, this means prefix is hit.")]
-    [OptimizationOpportunity(OptimizationType.CPU,
         "key.Write to might be called twice, here and in TrySet")]
     private bool TryGetImpl(in Key key, out Span<byte> data, out int slotIndex)
     {
-        var hash = Slot.ExtractPrefix(key.Path);
-        var encodedKey = key.Path.WriteTo(stackalloc byte[key.Path.MaxByteLength]);
-
-        // optimization opportunity
-        // var cast = MemoryMarshal.Cast<Slot, ushort>(_slots.Slice(_header.Low));
-        // cast.IndexOf(hash);
+        var hash = Slot.ExtractPrefix(key.Path, out var path);
+        var encodedKey = path.WriteTo(stackalloc byte[path.MaxByteLength]);
 
         var to = _header.Low / Slot.Size;
 
@@ -517,73 +570,6 @@ public readonly ref struct FixedMap
         data = default;
         slotIndex = default;
         return false;
-    }
-
-    /// <summary>Gets an enumerator for this span.</summary>
-    public Enumerator GetEnumerator() => new(this);
-
-    /// <summary>Enumerates the elements of a <see cref="ReadOnlySpan{T}"/>.</summary>
-    public ref struct Enumerator
-    {
-        /// <summary>The map being enumerated.</summary>
-        private readonly FixedMap _map;
-
-        /// <summary>The slot index to yield.</summary>
-        private int _index;
-
-        /// <summary>Initialize the enumerator.</summary>
-        /// <param name="map">The map to enumerate.</param>
-        internal Enumerator(FixedMap map)
-        {
-            _map = map;
-            _index = -1;
-        }
-
-        /// <summary>Advances the enumerator to the next element of the span.</summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool MoveNext()
-        {
-            var to = _map.To;
-
-            var index = _index + 1;
-
-            // skip all deleted
-            while (_map._slots[index].IsDeleted && index < to)
-            {
-                index += 1;
-            }
-
-            if (index < to)
-            {
-                _index = index;
-                return true;
-            }
-
-            return false;
-        }
-
-        /// <summary>Gets the element at the current position of the enumerator.</summary>
-        public readonly Item Current
-        {
-            get
-            {
-                var payload = _map.GetSlotPayload(_map._slots[_index]);
-                var data = NibblePath.ReadFrom(payload, out var path);
-                return new Item(path, data);
-            }
-        }
-
-        public readonly ref struct Item
-        {
-            public NibblePath Path { get; }
-            public ReadOnlySpan<byte> Data { get; }
-
-            public Item(NibblePath path, ReadOnlySpan<byte> data)
-            {
-                Path = path;
-                Data = data;
-            }
-        }
     }
 
     /// <summary>
@@ -650,22 +636,71 @@ public readonly ref struct FixedMap
         /// </summary>
         [FieldOffset(2)] public ushort Prefix;
 
+        // encode length trimmed as highest nibble
+        private const int NibbleCountShift = NibblePath.NibbleShift * 3;
+
         /// <summary>
         /// Builds the hash for the key.
         /// </summary>
-        [OptimizationOpportunity(OptimizationType.DiskSpace,
-            "NibblePath provides no support for concat so no easy way to reintroduce the prefix here. " +
-            "If it provided one, 2 bytes to save per key")]
-        public static ushort ExtractPrefix(NibblePath key)
+        public static ushort ExtractPrefix(NibblePath key, out NibblePath result)
         {
-            var prefix = (key.GetAt(0) << NibblePath.NibbleShift * 0) +
-                         (key.GetAt(1) << NibblePath.NibbleShift * 1) +
-                         (key.GetAt(2) << NibblePath.NibbleShift * 2) +
-                         (key.GetAt(3) << NibblePath.NibbleShift * 3);
+            switch (key.Length)
+            {
+                case 0:
+                    result = key;
+                    return 0;
+                case 1:
+                    result = key.SliceFrom(1);
+                    return (ushort)(
+                        (1 << NibbleCountShift) +
+                        (key.GetAt(0) << (NibblePath.NibbleShift * 0))
+                    );
+                case 2:
+                    result = key.SliceFrom(2);
+                    return (ushort)(
+                        (2 << NibbleCountShift) +
+                        (key.GetAt(0) << (NibblePath.NibbleShift * 0)) +
+                        (key.GetAt(1) << (NibblePath.NibbleShift * 1))
+                    );
+                default:
+                    // 3 or more
+                    result = key.SliceFrom(3);
+                    return (ushort)(
+                        (3 << NibbleCountShift) +
+                        (key.GetAt(0) << (NibblePath.NibbleShift * 0)) +
+                        (key.GetAt(1) << (NibblePath.NibbleShift * 1)) +
+                        (key.GetAt(2) << (NibblePath.NibbleShift * 2))
+                    );
+            }
+        }
 
-            // optimization           
-            //rest = key.SliceFrom(4);
-            return (ushort)prefix;
+        public int DecodeNibblesFromPrefix(Span<byte> nibbles)
+        {
+            const int mask0 = (1 << NibblePath.NibbleShift * 1) - 1;
+            const int mask1 = (1 << NibblePath.NibbleShift * 2) - 1 - mask0;
+            const int mask2 = (1 << NibblePath.NibbleShift * 3) - 1 - mask1 - mask0;
+
+            var count = Prefix >> NibbleCountShift;
+            switch (count)
+            {
+                case 0:
+                    return 0;
+                case 1:
+                    nibbles[0] = (byte)(Prefix & mask0);
+                    return 1;
+                case 2:
+                    nibbles[0] = (byte)(Prefix & mask0);
+                    nibbles[1] = (byte)((Prefix & mask1) >> NibblePath.NibbleShift * 1);
+                    return 2;
+                case 3:
+                    nibbles[0] = (byte)(Prefix & mask0);
+                    nibbles[1] = (byte)((Prefix & mask1) >> NibblePath.NibbleShift * 1);
+                    nibbles[2] = (byte)((Prefix & mask2) >> NibblePath.NibbleShift * 2);
+                    return 3;
+            }
+
+            Debug.Fail("Should not happen");
+            return 0;
         }
 
         public byte FirstNibbleOfPrefix => (byte)(Prefix & 0x0F);

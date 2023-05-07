@@ -44,10 +44,6 @@ public sealed class KeccakHash
         0x8000000000008080UL, 0x0000000080000001UL, 0x8000000080008008UL
     };
 
-    private byte[]? _hash;
-    private int _remainderLength;
-    private int _roundSize;
-
     private static int GetRoundSize(int hashSize) => checked(STATE_SIZE - 2 * hashSize);
 
     // update the state with given number of rounds

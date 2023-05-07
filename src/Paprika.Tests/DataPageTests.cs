@@ -86,10 +86,12 @@ public class DataPageTests : BasePageTests
 
         const int count = 1 * 1024 * 1024;
 
+        const int offset = 0x12345678;
+
         for (uint i = 0; i < count; i++)
         {
             var key = Key1a;
-            BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i);
+            BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i + offset);
 
             dataPage = new DataPage(dataPage.SetAccount(NibblePath.FromKey(key), new Account(i, i), batch));
         }
@@ -97,7 +99,7 @@ public class DataPageTests : BasePageTests
         for (uint i = 0; i < count; i++)
         {
             var key = Key1a;
-            BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i);
+            BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i + offset);
 
             var account = dataPage.GetAccount(NibblePath.FromKey(key), batch);
             account.Should().Be(new Account(i, i));

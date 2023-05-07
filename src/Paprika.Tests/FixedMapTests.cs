@@ -7,10 +7,10 @@ namespace Paprika.Tests;
 
 public class FixedMapTests
 {
-    private static NibblePath Key0 => NibblePath.FromKey(new byte[] { 1, 2, 3, 5, 6 });
+    private static NibblePath Key0 => NibblePath.FromKey(new byte[] { 0x12, 0x34, 0x56, 0x78, 0x90 });
 
     private static ReadOnlySpan<byte> Data0 => new byte[] { 23 };
-    private static NibblePath Key1 => NibblePath.FromKey(new byte[] { 1, 2, 3, 5, 7 });
+    private static NibblePath Key1 => NibblePath.FromKey(new byte[] { 0x12, 0x34, 0x56, 0x78, 0x99 });
     private static ReadOnlySpan<byte> Data1 => new byte[] { 29, 31 };
     private static NibblePath Key2 => NibblePath.FromKey(new byte[] { 19, 21, 23, 29, 23 });
     private static ReadOnlySpan<byte> Data2 => new byte[] { 37, 39 };
@@ -40,6 +40,40 @@ public class FixedMapTests
         map.GetAssert(FixedMap.Key.Account(Key1), Data1);
     }
 
+    [TestCase(0, 10)]
+    [TestCase(0, 9)]
+    [TestCase(1, 9)]
+    [TestCase(1, 8)]
+    public void Enumerate_nibble(int from, int length)
+    {
+        Span<byte> span = stackalloc byte[256];
+        var map = new FixedMap(span);
+
+        var path0 = Key0.SliceFrom(from).SliceTo(length);
+        var path1 = Key1.SliceFrom(from).SliceTo(length);
+
+        var key0 = FixedMap.Key.Account(path0);
+        var key1 = FixedMap.Key.Account(path1);
+
+        map.SetAssert(key0, Data0);
+        map.SetAssert(key1, Data1);
+
+        Console.WriteLine($"Expected keys: {key0.Path.ToString()} and {key1.Path.ToString()}");
+        Console.WriteLine("Actual: ");
+
+        using var e = map.EnumerateNibble(key0.Path.FirstNibble);
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Path.ToString().Should().Be(path0.ToString());
+        e.Current.RawData.SequenceEqual(Data0).Should().BeTrue();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Path.ToString().Should().Be(path1.ToString());
+        e.Current.RawData.SequenceEqual(Data1).Should().BeTrue();
+
+        e.MoveNext().Should().BeFalse();
+    }
+
     [Test]
     public void Defragment_when_no_more_space()
     {
@@ -52,7 +86,8 @@ public class FixedMapTests
 
         map.Delete(FixedMap.Key.Account(Key0)).Should().BeTrue();
 
-        map.TrySet(FixedMap.Key.Account(Key2), Data2).Should().BeTrue("Should retrieve space by running internally the defragmentation");
+        map.TrySet(FixedMap.Key.Account(Key2), Data2).Should()
+            .BeTrue("Should retrieve space by running internally the defragmentation");
 
         // should contains no key0, key1 and key2 now
         map.TryGet(FixedMap.Key.Account(Key0), out var retrieved).Should().BeFalse();
@@ -88,33 +123,6 @@ public class FixedMapTests
         map.SetAssert(FixedMap.Key.Account(Key0), Data2);
 
         map.GetAssert(FixedMap.Key.Account(Key0), Data2);
-    }
-
-    [Test]
-    public void Enumerator()
-    {
-        Span<byte> span = stackalloc byte[256];
-        var map = new FixedMap(span);
-
-        map.SetAssert(FixedMap.Key.Account(Key0), Data0);
-        map.SetAssert(FixedMap.Key.Account(Key1), Data1);
-        map.SetAssert(FixedMap.Key.Account(Key2), Data2);
-
-        map.Delete(FixedMap.Key.Account(Key1)); // delete K1 to not observe it during the iteration
-
-        var e = map.GetEnumerator();
-
-        Next(ref e, Key0, Data0);
-        Next(ref e, Key2, Data2);
-
-        e.MoveNext().Should().BeFalse();
-
-        static void Next(ref FixedMap.Enumerator e, NibblePath key, ReadOnlySpan<byte> data)
-        {
-            e.MoveNext().Should().BeTrue();
-            e.Current.Path.Equals(key).Should().BeTrue();
-            e.Current.Data.SequenceEqual(data).Should().BeTrue();
-        }
     }
 
     [Test]

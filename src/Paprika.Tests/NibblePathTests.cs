@@ -194,4 +194,27 @@ public class NibblePathTests
         var path = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56 }, odd ? 1 : 0);
         Assert.AreEqual(result, path.GetAt(at));
     }
+
+    [TestCase(0, 4)]
+    [TestCase(0, 3)]
+    [TestCase(1, 3)]
+    [TestCase(1, 2)]
+    public void Write_and_read(int from, int length)
+    {
+        const byte data = 253;
+        var raw = new byte[] { 0x12, 0x34 };
+        var path = NibblePath.FromKey(raw).SliceFrom(from).SliceTo(length);
+
+        Span<byte> span = stackalloc byte[path.MaxByteLength + 1];
+        var written = path.WriteTo(span);
+        span[written.Length] = data;
+
+        var left = NibblePath.ReadFrom(span.Slice(0, written.Length + 1), out var actual);
+
+        // assert
+        actual.ToString().Should().Be(path.ToString());
+
+        left.Length.Should().Be(1);
+        left[0].Should().Be(data);
+    }
 }

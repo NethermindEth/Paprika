@@ -16,8 +16,7 @@ namespace Paprika;
 /// </remarks>
 public readonly ref struct NibblePath
 {
-    private const int NibbleBitSize = 4;
-    private const int NibblePerByte = 2;
+    public const int NibblePerByte = 2;
     public const int NibbleShift = 8 / NibblePerByte;
     public const int NibbleMask = 15;
 
@@ -55,6 +54,14 @@ public readonly ref struct NibblePath
         _odd = (byte)(nibbleFrom & OddBit);
         Length = (byte)length;
     }
+
+    private NibblePath(ref byte span, byte odd, int length)
+    {
+        _span = ref span;
+        _odd = odd;
+        Length = (byte)length;
+    }
+
 
     private NibblePath(ref byte span, byte odd, byte length)
     {
@@ -120,12 +127,50 @@ public readonly ref struct NibblePath
     public byte GetAt(int nibble)
     {
         ref var b = ref Unsafe.Add(ref _span, (nibble + _odd) / 2);
-        return (byte)((b >> ((1 - ((nibble + _odd) & OddBit)) * NibbleShift)) & NibbleMask);
+        return (byte)((b >> GetShift(nibble)) & NibbleMask);
+    }
+
+    private int GetShift(int nibble)
+    {
+        return (1 - ((nibble + _odd) & OddBit)) * NibbleShift;
+    }
+
+    /// <summary>
+    /// Moves into arbitrary direction. 
+    /// </summary>
+    public void UnsafeSetAt(int nibble, byte countOdd, byte value)
+    {
+        ref var b = ref Unsafe.Add(ref _span, (nibble + _odd) / 2);
+        var shift = GetShift(nibble + countOdd);
+        var mask = NibbleMask << shift;
+
+        b = (byte)((b & ~mask) | (value << shift));
+    }
+
+    public NibblePath CopyWithUnsafePointerMoveBack(int nibbleCount)
+    {
+        var odd = (byte)((_odd ^ nibbleCount) & 1);
+        var shiftBack = _odd + -nibbleCount - odd;
+        var count = shiftBack / 2;
+
+        return new NibblePath(ref Unsafe.Add(ref _span, count), odd, (byte)(Length + nibbleCount));
     }
 
     public byte FirstNibble => (byte)((_span >> ((1 - _odd) * NibbleShift)) & NibbleMask);
 
     private static int GetSpanLength(byte length, int odd) => (length + 1 + odd) / 2;
+
+    /// <summary>
+    /// Extracts raw span that can be read as the nibble path from the source.
+    /// </summary>
+    public static ReadOnlySpan<byte> RawExtract(ReadOnlySpan<byte> source)
+    {
+        var b = source[0];
+        var length = (byte)(b >> LengthShift);
+        var odd = b & OddBit;
+
+        return source.Slice(0, GetSpanLength(length, odd) + PreambleLength);
+    }
 
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out NibblePath nibblePath)
     {
@@ -138,6 +183,11 @@ public readonly ref struct NibblePath
 
         return source.Slice(PreambleLength + GetSpanLength(length, odd));
     }
+
+    /// <summary>
+    /// Reports whether path has start at odd bit. Useful for low-level bit mangling.
+    /// </summary>
+    public bool OddStart => (_odd & OddBit) == OddBit;
 
     public int RawByteLength => PreambleLength + GetSpanLength(Length, _odd & OddBit);
 
