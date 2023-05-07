@@ -225,7 +225,7 @@ public readonly ref struct FixedMap
 
     private int To => _header.Low / Slot.Size;
 
-    public NibbleEnumerator EnumerateNibble(byte nibble) => new(in this, nibble);
+    public NibbleEnumerator EnumerateNibble(byte nibble) => new(this, nibble);
 
     public ref struct NibbleEnumerator
     {
@@ -242,7 +242,7 @@ public readonly ref struct FixedMap
 
         private readonly byte[] _bytes;
 
-        internal NibbleEnumerator(in FixedMap map, byte nibble)
+        internal NibbleEnumerator(FixedMap map, byte nibble)
         {
             _map = map;
             _nibble = nibble;
