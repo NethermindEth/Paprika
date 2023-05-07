@@ -1,44 +1,46 @@
 # Benchmarks
 
-The following benchmarks were run on previous version of Paprika. The new version should be not worse than these results. A follow up measurements are required.
+The benchmarks below are a result of running `Paprika.Runner`. The runner is a simple console application that tries its best to provide meaningful, reasonably good scenarios for testing, both in-memory (to check the size and speed with no IO overhead) and with a regular disk-based persistence.
 
 ## Benchmark cases
 
-1. [160 million pairs](#160-millions-of-pairs), written in a single transaction, which shall simulate the initial population/sync
+### 50 million accounts
 
-In each case, the key is 32 bytes long. The value is 32 bytes long as well.
+The test writes the following:
 
-### General considerations
+- 1000 accounts per block
+- 1000 storage slots (one for each created account)
+- 50.000 blocks
 
-#### Memory Profiling
-
-Almost no managed memory is used
-
-![image](https://user-images.githubusercontent.com/519707/204166299-81c05582-7e0d-4401-b2cf-91a3c1b7153b.png)
-
-### 160 million pairs
-
-Writing 160 million 32bytes -> 32bytes mappings
+This gives 50 million accounts in total. Each with one storage slot written.
 
 ```
-Wrote 10,000,000 items, DB usage is at 5.01% which gives 1.00GB out of allocated 20GB
-Wrote 20,000,000 items, DB usage is at 9.85% which gives 1.97GB out of allocated 20GB
-Wrote 30,000,000 items, DB usage is at 11.41% which gives 2.28GB out of allocated 20GB
-Wrote 40,000,000 items, DB usage is at 15.05% which gives 3.01GB out of allocated 20GB
-Wrote 50,000,000 items, DB usage is at 18.85% which gives 3.77GB out of allocated 20GB
-Wrote 60,000,000 items, DB usage is at 21.10% which gives 4.22GB out of allocated 20GB
-Wrote 70,000,000 items, DB usage is at 24.86% which gives 4.97GB out of allocated 20GB
-Wrote 80,000,000 items, DB usage is at 28.02% which gives 5.60GB out of allocated 20GB
-Wrote 90,000,000 items, DB usage is at 30.84% which gives 6.17GB out of allocated 20GB
-Wrote 100,000,000 items, DB usage is at 34.42% which gives 6.88GB out of allocated 20GB
-Wrote 110,000,000 items, DB usage is at 37.41% which gives 7.48GB out of allocated 20GB
-Wrote 120,000,000 items, DB usage is at 40.52% which gives 8.10GB out of allocated 20GB
-Wrote 130,000,000 items, DB usage is at 43.89% which gives 8.78GB out of allocated 20GB
-Wrote 140,000,000 items, DB usage is at 46.91% which gives 9.38GB out of allocated 20GB
-Wrote 150,000,000 items, DB usage is at 50.14% which gives 10.03GB out of allocated 20GB
-Writing of 160,000,000.00 items took 00:08:19.8204173 giving a throughput 320,114.00 items/s
+Using in-memory DB for greater speed.
+Initializing db of size 18GB
+Starting benchmark with commit level FlushDataOnly
+Preparing random accounts addresses...
+Accounts prepared
 
-Committing to disk took 00:00:10.4085680
+(P) - 90th percentile of the value
 
-Reading of 160,000,000.00 items took 00:08:24.8362414 giving a throughput 316,934.00 items/s
+At Block        | Avg. speed      | Space used      | New pages(P)    | Pages reused(P) | Total pages(P)
+           5000 |  771.9 blocks/s |          2.30GB |            1593 |             185 |            1720
+          10000 |  672.3 blocks/s |          3.55GB |            1909 |             169 |            1954
+          15000 |  634.6 blocks/s |          4.03GB |            2036 |             154 |            2057
+          20000 |  581.8 blocks/s |          4.28GB |            2103 |             141 |            2115
+          25000 |  610.8 blocks/s |          4.51GB |            2143 |             128 |            2155
+          30000 |  595.9 blocks/s |          5.01GB |            2175 |             115 |            2199
+          35000 |  535.0 blocks/s |          6.42GB |            2195 |             110 |            2257
+          40000 |  503.5 blocks/s |          8.98GB |            2223 |             140 |            2341
+          45000 |  471.7 blocks/s |         12.18GB |            2273 |             165 |            2433
+          49999 |  464.2 blocks/s |         15.48GB |            2337 |             175 |            2509
+
+Writing state of 1000 accounts per block, each with 1 storage, through 50000 blocks, generated 50000000 accounts, used 15.48GB
+
+Reading and asserting values...
+Reading state of all of 50000000 accounts from the last block took 00:00:33.6083939
+90th percentiles:
+   - new pages allocated per block: 0
+   - pages reused allocated per block: 1239
+   - total pages written per block: 1244
 ```
