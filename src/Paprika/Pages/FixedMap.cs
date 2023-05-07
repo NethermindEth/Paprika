@@ -305,7 +305,7 @@ public readonly ref struct FixedMap
                     var pathDestination = bytes.Slice(space);
                     raw.CopyTo(pathDestination);
 
-                    data = NibblePath.ReadFrom(pathDestination, out path);
+                    data = NibblePath.ReadFrom(span, out path);
 
                     var countOdd = (byte)(count & 1);
                     for (var i = 0; i < count; i++)

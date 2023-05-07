@@ -65,9 +65,11 @@ public class FixedMapTests
 
         e.MoveNext().Should().BeTrue();
         e.Current.Key.Path.ToString().Should().Be(path0.ToString());
+        e.Current.RawData.SequenceEqual(Data0).Should().BeTrue();
 
         e.MoveNext().Should().BeTrue();
         e.Current.Key.Path.ToString().Should().Be(path1.ToString());
+        e.Current.RawData.SequenceEqual(Data1).Should().BeTrue();
 
         e.MoveNext().Should().BeFalse();
     }
