@@ -225,7 +225,7 @@ public readonly ref struct FixedMap
 
     private int To => _header.Low / Slot.Size;
 
-    public NibbleEnumerator EnumerateNibble(byte nibble) => new(this, nibble);
+    public NibbleEnumerator EnumerateNibble(byte nibble) => new(in this, nibble);
 
     public ref struct NibbleEnumerator
     {
@@ -242,7 +242,7 @@ public readonly ref struct FixedMap
 
         private readonly byte[] _bytes;
 
-        internal NibbleEnumerator(FixedMap map, byte nibble)
+        internal NibbleEnumerator(in FixedMap map, byte nibble)
         {
             _map = map;
             _nibble = nibble;
@@ -277,7 +277,7 @@ public readonly ref struct FixedMap
         {
             get
             {
-                var slot = _map._slots[_index];
+                ref var slot = ref _map._slots[_index];
                 var span = _map.GetSlotPayload(slot);
 
                 ReadOnlySpan<byte> data;
@@ -323,10 +323,10 @@ public readonly ref struct FixedMap
                 {
                     const int size = Keccak.Size;
                     var additionalKey = data.Slice(0, size);
-                    return new Item(Key.StorageCell(path, additionalKey), data.Slice(size));
+                    return new Item(Key.StorageCell(path, additionalKey), data.Slice(size), _index);
                 }
 
-                return new Item(Key.Raw(path, slot.Type), data);
+                return new Item(Key.Raw(path, slot.Type), data, _index);
             }
         }
 
@@ -338,11 +338,13 @@ public readonly ref struct FixedMap
 
         public readonly ref struct Item
         {
+            public int Index { get; }
             public Key Key { get; }
             public ReadOnlySpan<byte> RawData { get; }
 
-            public Item(Key key, ReadOnlySpan<byte> rawData)
+            public Item(Key key, ReadOnlySpan<byte> rawData, int index)
             {
+                Index = index;
                 Key = key;
                 RawData = rawData;
             }
@@ -408,6 +410,8 @@ public readonly ref struct FixedMap
 
         return false;
     }
+
+    public void Delete(in NibbleEnumerator.Item item) => DeleteImpl(item.Index);
 
     private void DeleteImpl(int index)
     {
@@ -583,7 +587,7 @@ public readonly ref struct FixedMap
     }
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
-    private struct Slot
+    public struct Slot
     {
         public const int Size = 4;
 
