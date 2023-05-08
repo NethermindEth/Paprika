@@ -223,7 +223,7 @@ public class DbTests
     [Test]
     public void State_and_storage()
     {
-        const int size = MB16;
+        const int size = MB64;
         using var db = new NativeMemoryPagedDb(size, 2);
 
         const int count = 100000;

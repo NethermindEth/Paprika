@@ -242,6 +242,8 @@ public readonly unsafe struct DataPage : IDataPage
                 // it's ok to use item.Key, the enumerator does not changes the additional key bytes
                 var key = FixedMap.Key.StorageTreeStorageCell(item.Key);
 
+                Serializer.ReadStorageValue(item.RawData, out var value);
+
                 dataPage = new DataPage(dataPage.Set(new SetContext(key, item.RawData, ctx.Batch)));
 
                 // fast delete by enumerator item

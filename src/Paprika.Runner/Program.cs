@@ -15,7 +15,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = 20_000;
+    private const int BlockCount = 50_000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
 
@@ -23,7 +23,7 @@ public static class Program
 
     private const int NumberOfLogs = 10;
 
-    private const long DbFileSize = 8 * Gb;
+    private const long DbFileSize = 20 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
     private const CommitOptions Commit = CommitOptions.FlushDataOnly;
     private const int LogEvery = BlockCount / NumberOfLogs;
@@ -31,6 +31,7 @@ public static class Program
     private const bool UseStorage = true;
     private const bool UseBigStorageAccount = true;
     private const int BigStorageAccountSlotCount = 1_000_000;
+    private static readonly UInt256[] BigStorageAccountValues = new UInt256[BigStorageAccountSlotCount];
 
     public static void Main(String[] args)
     {
@@ -116,10 +117,14 @@ public static class Program
                     if (bigStorageAccountCreated == false)
                     {
                         batch.Set(bigStorageAccount, new Account(100, 100));
+                        bigStorageAccountCreated = true;
                     }
 
-                    var storageAddress = GetStorageAddress(counter % BigStorageAccountSlotCount);
-                    var storageValue = GetStorageValue(counter);
+                    var index = counter % BigStorageAccountSlotCount;
+                    var storageAddress = GetStorageAddress(index);
+                    var storageValue = GetBigAccountStorageValue(counter);
+                    BigStorageAccountValues[index] = storageValue;
+
                     batch.SetStorage(bigStorageAccount, storageAddress, storageValue);
                 }
 
@@ -142,7 +147,12 @@ public static class Program
         Console.WriteLine("- {0} accounts per block", AccountsPerBlock);
         if (UseStorage)
         {
-            Console.WriteLine("- each with 1 storage slot");
+            Console.WriteLine("- each account with 1 storage slot written");
+        }
+
+        if (UseBigStorageAccount)
+        {
+            Console.WriteLine("- each account amends 1 slot in Big Storage account");
         }
 
         Console.WriteLine("- through {0} blocks ", BlockCount);
@@ -178,17 +188,18 @@ public static class Program
                 }
             }
 
-            // if (UseBigStorageAccount)
-            // {
-            //     var storageAddress = GetStorageAddress(i % BigStorageAccountSlotCount);
-            //     var expectedStorageValue = GetStorageValue(i);
-            //     var actualStorage = read.GetStorage(bigStorageAccount, storageAddress);
-            //     
-            //     if (actualStorage != expectedStorageValue)
-            //     {
-            //         throw new InvalidOperationException($"Invalid storage for big storage account at index {i}!");
-            //     }
-            // }
+            if (UseBigStorageAccount)
+            {
+                var index = i % BigStorageAccountSlotCount;
+                var storageAddress = GetStorageAddress(index);
+                var expectedStorageValue = BigStorageAccountValues[index];
+                var actualStorage = read.GetStorage(bigStorageAccount, storageAddress);
+
+                if (actualStorage != expectedStorageValue)
+                {
+                    throw new InvalidOperationException($"Invalid storage for big storage account at index {i}!");
+                }
+            }
         }
 
         Console.WriteLine("Reading state of all of {0} accounts from the last block took {1}",
@@ -233,6 +244,8 @@ public static class Program
     }
 
     private static UInt256 GetStorageValue(int counter) => (UInt256)counter + 100000;
+
+    private static UInt256 GetBigAccountStorageValue(int counter) => (UInt256)counter + 123456;
 
     private static void Write90Th(HistogramBase histogram, string name)
     {
