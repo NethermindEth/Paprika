@@ -142,6 +142,18 @@ public readonly ref struct FixedMap
         public static Key StorageCell(NibblePath path, ReadOnlySpan<byte> keccak) =>
             new(path, DataType.StorageCell, keccak);
 
+        public static Key StorageTreeRootPageAddress(NibblePath path) =>
+            new(path, DataType.StorageTreeRootPageAddress, ReadOnlySpan<byte>.Empty);
+
+        /// <summary>
+        /// Treat the additional key as the key and drop the additional notion.
+        /// </summary>
+        /// <param name="originalKey"></param>
+        /// <returns></returns>
+        public static Key StorageTreeStorageCell(Key originalKey) =>
+            new(NibblePath.FromKey(originalKey.AdditionalKey), DataType.StorageTreeStorageCell,
+                ReadOnlySpan<byte>.Empty);
+
         public Key SliceFrom(int nibbles) => new(Path.SliceFrom(nibbles), Type, AdditionalKey);
 
         public override string ToString()
@@ -223,7 +235,10 @@ public readonly ref struct FixedMap
         return true;
     }
 
-    private int To => _header.Low / Slot.Size;
+    /// <summary>
+    /// Gets how many slots are used in the map.
+    /// </summary>
+    public int Count => _header.Low / Slot.Size;
 
     public NibbleEnumerator EnumerateNibble(byte nibble) => new(this, nibble);
 
@@ -255,7 +270,7 @@ public readonly ref struct FixedMap
         public bool MoveNext()
         {
             int index = _index + 1;
-            var to = _map.To;
+            var to = _map.Count;
 
             while (index < to &&
                    (_map._slots[index].IsDeleted ||
@@ -323,10 +338,10 @@ public readonly ref struct FixedMap
                 {
                     const int size = Keccak.Size;
                     var additionalKey = data.Slice(0, size);
-                    return new Item(Key.StorageCell(path, additionalKey), data.Slice(size), _index);
+                    return new Item(Key.StorageCell(path, additionalKey), data.Slice(size), _index, slot.Type);
                 }
 
-                return new Item(Key.Raw(path, slot.Type), data, _index);
+                return new Item(Key.Raw(path, slot.Type), data, _index, slot.Type);
             }
         }
 
@@ -339,12 +354,14 @@ public readonly ref struct FixedMap
         public readonly ref struct Item
         {
             public int Index { get; }
+            public DataType Type { get; }
             public Key Key { get; }
             public ReadOnlySpan<byte> RawData { get; }
 
-            public Item(Key key, ReadOnlySpan<byte> rawData, int index)
+            public Item(Key key, ReadOnlySpan<byte> rawData, int index, DataType type)
             {
                 Index = index;
+                Type = type;
                 Key = key;
                 RawData = rawData;
             }
@@ -355,14 +372,16 @@ public readonly ref struct FixedMap
     }
 
     /// <summary>
-    /// Gets the nibble representing the biggest bucket.
+    /// Gets the nibble representing the biggest bucket and provides stats to the caller.
     /// </summary>
     /// <returns></returns>
-    public byte GetBiggestNibbleBucket()
+    public (byte nibble, byte accountsCount, double percentage) GetBiggestNibbleStats()
     {
         const int bucketCount = 16;
 
+        byte slotCount = 0;
         Span<ushort> buckets = stackalloc ushort[bucketCount];
+        Span<byte> accountsCount = stackalloc byte[bucketCount];
 
         var to = _header.Low / Slot.Size;
         for (var i = 0; i < to; i++)
@@ -370,7 +389,15 @@ public readonly ref struct FixedMap
             ref readonly var slot = ref _slots[i];
             if (slot.IsDeleted == false)
             {
+                slotCount++;
+
                 var index = slot.FirstNibbleOfPrefix % bucketCount;
+
+                if (slot.Type == DataType.Account)
+                {
+                    accountsCount[index]++;
+                }
+
                 buckets[index]++;
             }
         }
@@ -387,7 +414,9 @@ public readonly ref struct FixedMap
             }
         }
 
-        return (byte)maxI;
+        var percentage = (double)buckets[maxI] / slotCount;
+
+        return ((byte)maxI, accountsCount[maxI], percentage);
     }
 
     private static int GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> additionalKey,
@@ -471,7 +500,7 @@ public readonly ref struct FixedMap
     private void CollectTombstones()
     {
         // start with the last written and perform checks and cleanup till all the deleted are gone
-        var index = To - 1;
+        var index = Count - 1;
 
         while (index >= 0 && _slots[index].IsDeleted)
         {
@@ -518,16 +547,16 @@ public readonly ref struct FixedMap
 
         var to = _header.Low / Slot.Size;
 
-        // uses vectorized search, treating slots as ushorts
-        // if the found index is odd -> found a slot
+        // uses vectorized search, treating slots as a Span<ushort>
+        // if the found index is odd -> found a slot to be queried
 
         const int notFound = -1;
-        var ushorts = MemoryMarshal.Cast<Slot, ushort>(_slots.Slice(0, to));
+        var span = MemoryMarshal.Cast<Slot, ushort>(_slots.Slice(0, to));
 
         var offset = 0;
         int index;
 
-        while ((index = ushorts.IndexOf(hash)) != notFound)
+        while ((index = span.IndexOf(hash)) != notFound)
         {
             // move offset to the given position
             offset += index;
@@ -567,7 +596,7 @@ public readonly ref struct FixedMap
 
             // move next: ushorts sliced to the next
             // offset moved by 1 to align
-            ushorts = ushorts.Slice(index + 1);
+            span = span.Slice(index + 1);
             offset += 1;
         }
 

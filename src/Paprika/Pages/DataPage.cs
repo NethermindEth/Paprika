@@ -102,28 +102,35 @@ public readonly unsafe struct DataPage : IDataPage
 
         // try in-page write
         var map = new FixedMap(Data.FixedMapSpan);
+
+        // if written value is a storage cell, try to find the storage tree first
+        if (TryFindExistingStorageTreeForCellOf(map, ctx.Key, out var storageTreeAddress))
+        {
+            // tree exists, write in it
+            WriteStorageCellInStorageTrie(ctx, storageTreeAddress, map);
+            return _page;
+        }
+
+        // try write in map
         if (map.TrySet(ctx.Key, ctx.Data))
         {
             return _page;
         }
 
-        // not enough memory in this page, need to push some data one level deeper to a new page
+        // the map is full, extraction must follow
+        var biggestNibbleStats = map.GetBiggestNibbleStats();
+        var biggestNibble = biggestNibbleStats.nibble;
+
+        if (TryExtractAsStorageTree(biggestNibbleStats, ctx, map))
+        {
+            // storage cells extracted, set the value now
+            return Set(ctx);
+        }
+
+        // standard nibble extraction followed by the child creation
         var child = ctx.Batch.GetNewPage(out var childAddr, true);
         var dataPage = new DataPage(child);
 
-        var biggestNibble = map.GetBiggestNibbleBucket();
-        // if (accountCount == 1)
-        // {
-        //     // one account slot is a prerequisite for the heavy prefix extraction based on the storage
-        //     foreach (var item in map.EnumerateNibble(biggestNibble))
-        //     {
-        //     }
-        //
-        //     // assert that all of them have the same prefix
-        //     // if yes, then proceed with a trie creation
-        // }
-
-        int i = 0;
         foreach (var item in map.EnumerateNibble(biggestNibble))
         {
             var key = item.Key.SliceFrom(NibbleCount);
@@ -155,6 +162,16 @@ public readonly unsafe struct DataPage : IDataPage
         // read in-page
         var map = new FixedMap(Data.FixedMapSpan);
 
+        // try first storage tree
+        if (TryFindExistingStorageTreeForCellOf(map, key, out var storageTreeAddress))
+        {
+            var storageTree = new DataPage(batch.GetAt(storageTreeAddress));
+            var inTreeAddress = FixedMap.Key.StorageTreeStorageCell(key);
+
+            return storageTree.TryGet(inTreeAddress, batch, out result);
+        }
+
+        // try regular map
         if (map.TryGet(key, out result))
         {
             return true;
@@ -162,5 +179,111 @@ public readonly unsafe struct DataPage : IDataPage
 
         result = default;
         return false;
+    }
+
+    private static bool TryFindExistingStorageTreeForCellOf(in FixedMap map, in FixedMap.Key key,
+        out DbAddress storageTreeAddress)
+    {
+        if (key.Type != FixedMap.DataType.StorageCell)
+        {
+            storageTreeAddress = default;
+            return false;
+        }
+
+        var storageTreeRootKey = FixedMap.Key.StorageTreeRootPageAddress(key.Path);
+        if (map.TryGet(storageTreeRootKey, out var rawPageAddress))
+        {
+            storageTreeAddress = DbAddress.Read(rawPageAddress);
+            return true;
+        }
+
+        storageTreeAddress = default;
+        return false;
+    }
+
+    private static bool TryExtractAsStorageTree((byte nibble, byte accountsCount, double percentage) biggestNibbleStats,
+        in SetContext ctx, in FixedMap map)
+    {
+        // a prerequisite to plant a tree is a single account in the biggest nibble
+        // if there are 2 or more then the accounts should be split first
+        // also, create only if the nibble occupies more than 0.9 of the page
+        // otherwise it's just a nibble extraction
+        var shouldPlant = biggestNibbleStats.accountsCount == 1 &&
+                          biggestNibbleStats.percentage > 0.9;
+
+        if (shouldPlant == false)
+            return false;
+
+        var nibble = biggestNibbleStats.nibble;
+
+        // required as enumerator destroys paths when enumeration moves to the next value
+        Span<byte> accountPathBytes = stackalloc byte[ctx.Key.Path.MaxByteLength];
+
+        // find account first
+        foreach (var item in map.EnumerateNibble(nibble))
+        {
+            if (item.Type == FixedMap.DataType.Account)
+            {
+                accountPathBytes = item.Key.Path.WriteTo(accountPathBytes);
+                break;
+            }
+        }
+
+        // parse the account
+        NibblePath.ReadFrom(accountPathBytes, out var accountPath);
+
+        var storage = ctx.Batch.GetNewPage(out _, true);
+        var dataPage = new DataPage(storage);
+
+        foreach (var item in map.EnumerateNibble(nibble))
+        {
+            if (item.Type == FixedMap.DataType.StorageCell && item.Key.Path.Equals(accountPath))
+            {
+                // it's ok to use item.Key, the enumerator does not changes the additional key bytes
+                var key = FixedMap.Key.StorageTreeStorageCell(item.Key);
+
+                Serializer.ReadStorageValue(item.RawData, out var value);
+
+                dataPage = new DataPage(dataPage.Set(new SetContext(key, item.RawData, ctx.Batch)));
+
+                // fast delete by enumerator item
+                map.Delete(item);
+            }
+        }
+
+        // storage cells moved, plant the trie
+        var storageTreeAddress = ctx.Batch.GetAddress(dataPage.AsPage());
+        Span<byte> span = stackalloc byte[4];
+        storageTreeAddress.Write(span);
+        if (map.TrySet(FixedMap.Key.StorageTreeRootPageAddress(accountPath), span) == false)
+        {
+            throw new Exception("Critical error. Map should have been cleaned and ready to accept the write");
+        }
+
+        return true;
+    }
+
+    private static void WriteStorageCellInStorageTrie(SetContext ctx,
+        DbAddress storageTreeRootPageAddress, in FixedMap map)
+    {
+        var storageTree = ctx.Batch.GetAt(storageTreeRootPageAddress);
+
+        // build a new key, based just on the storage key as the root is addressed by the account address
+        var inTreeAddress = FixedMap.Key.StorageTreeStorageCell(ctx.Key);
+
+        var updatedStorageTree =
+            new DataPage(storageTree).Set(new SetContext(inTreeAddress, ctx.Data, ctx.Batch));
+
+        if (updatedStorageTree.Raw != storageTree.Raw)
+        {
+            // the tree was COWed, need to write back in place
+            Span<byte> update = stackalloc byte[4];
+            ctx.Batch.GetAddress(updatedStorageTree).Write(update);
+            if (map.TrySet(FixedMap.Key.StorageTreeRootPageAddress(ctx.Key.Path), update) == false)
+            {
+                throw new Exception("Could not update the storage root. " +
+                                    "It should always be possible as tge previous one is existing");
+            }
+        }
     }
 }

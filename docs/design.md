@@ -208,12 +208,14 @@ public struct PageHeader
 
 ### FixedMap
 
-The `FixedMap` component is responsible for storing data in-page. It does it by using path-based addressing based on the functionality provided by `NibblePath`. The path is not the only discriminator for the values though. The other part required to create a `FixedMap.Key` is the `type` of entry. This is an implementation of [Entity-Attribute-Value](https://en.wikipedia.org/wiki/Entity%E2%80%93attribute%E2%80%93value_model). Currently, the following types of entries:
+The `FixedMap` component is responsible for storing data in-page. It does it by using path-based addressing based on the functionality provided by `NibblePath`. The path is not the only discriminator for the values though. The other part required to create a `FixedMap.Key` is the `type` of entry. This is an implementation of [Entity-Attribute-Value](https://en.wikipedia.org/wiki/Entity%E2%80%93attribute%E2%80%93value_model). Currently, there are the following types of entries:
 
 1. `Account` - identifies `(balance, nonce)` of a given account
 1. `CodeHash` - identifies `CodeHash` of a contract
 1. `StorageRootHash` - the root hash of the storage tree of a contract
-1. `StorageCell` - identifies that the given entry is a storage cell, and its first 32 bytes of its raw data should be additionally used to check the `index` of the storage cell
+1. `StorageCell` - identifies that the given entry is a storage cell that is kept in-page, alongside other account attributes. To make it unique, the storage cell address is stored as the first 32 bytes of its raw data. It is used for comparisons whenever needed.
+1. `StorageTreeRootPageAddress` - the address of the page that holds the root page of the storage tree. It's optional as for accounts with a small number of storage slots occupied, they will be held in-page. Only if account storage becomes really large (currently, occupies 90% of the page), it is flushed as a separate subtree.
+1. `StorageTreeStorageCell` - the storage cell that is kept under a tree with the root of `StorageTreeRootPageAddress`. As the storage cell belongs to a single account (it's in its storage tree), no need to prefix it with the account address.
 
 For example:
 

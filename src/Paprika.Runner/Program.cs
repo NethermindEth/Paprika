@@ -1,5 +1,4 @@
 ﻿// #define PERSISTENT_DB
-#define STORAGE
 
 using System.Buffers.Binary;
 using System.Diagnostics;
@@ -24,10 +23,15 @@ public static class Program
 
     private const int NumberOfLogs = 10;
 
-    private const long DbFileSize = 18 * Gb;
+    private const long DbFileSize = 20 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
     private const CommitOptions Commit = CommitOptions.FlushDataOnly;
     private const int LogEvery = BlockCount / NumberOfLogs;
+
+    private const bool UseStorage = true;
+    private const bool UseBigStorageAccount = true;
+    private const int BigStorageAccountSlotCount = 1_000_000;
+    private static readonly UInt256[] BigStorageAccountValues = new UInt256[BigStorageAccountSlotCount];
 
     public static void Main(String[] args)
     {
@@ -84,6 +88,10 @@ public static class Program
             "Total pages(P)");
 
 
+        var bigStorageAccount = GetAccountKey(random, RandomSampleSize - Keccak.Size);
+
+        bool bigStorageAccountCreated = false;
+
         // writing
         var writing = Stopwatch.StartNew();
 
@@ -96,11 +104,30 @@ public static class Program
                 var key = GetAccountKey(random, counter);
 
                 batch.Set(key, GetAccountValue(counter));
-#if STORAGE               
-                var storage = GetStorageAddress(counter);
-                var storageValue = GetStorageValue(counter);
-                batch.SetStorage(key, storage, storageValue);
-#endif
+
+                if (UseStorage)
+                {
+                    var storageAddress = GetStorageAddress(counter);
+                    var storageValue = GetStorageValue(counter);
+                    batch.SetStorage(key, storageAddress, storageValue);
+                }
+
+                if (UseBigStorageAccount)
+                {
+                    if (bigStorageAccountCreated == false)
+                    {
+                        batch.Set(bigStorageAccount, new Account(100, 100));
+                        bigStorageAccountCreated = true;
+                    }
+
+                    var index = counter % BigStorageAccountSlotCount;
+                    var storageAddress = GetStorageAddress(index);
+                    var storageValue = GetBigAccountStorageValue(counter);
+                    BigStorageAccountValues[index] = storageValue;
+
+                    batch.SetStorage(bigStorageAccount, storageAddress, storageValue);
+                }
+
                 counter++;
             }
 
@@ -116,9 +143,21 @@ public static class Program
         ReportProgress(BlockCount - 1, writing);
 
         Console.WriteLine();
-        Console.WriteLine(
-            "Writing state of {0} accounts per block, each with 1 storage, through {1} blocks, generated {2} accounts, used {3:F2}GB",
-            AccountsPerBlock, BlockCount, counter, db.ActualMegabytesOnDisk / 1024);
+        Console.WriteLine("Writing in numbers:");
+        Console.WriteLine("- {0} accounts per block", AccountsPerBlock);
+        if (UseStorage)
+        {
+            Console.WriteLine("- each account with 1 storage slot written");
+        }
+
+        if (UseBigStorageAccount)
+        {
+            Console.WriteLine("- each account amends 1 slot in Big Storage account");
+        }
+
+        Console.WriteLine("- through {0} blocks ", BlockCount);
+        Console.WriteLine("- generated accounts total number: {0} ", counter);
+        Console.WriteLine("- space used: {0:F2}GB ", db.ActualMegabytesOnDisk / 1024);
 
         // reading
         Console.WriteLine();
@@ -136,15 +175,31 @@ public static class Program
             {
                 throw new InvalidOperationException($"Invalid account state for account {i}!");
             }
-#if STORAGE 
-            var storage = GetStorageAddress(i);
-            var actualStorage = read.GetStorage(key, storage);
-            var expectedStorage = GetStorageValue(i);
-            if (actualStorage != expectedStorage)
+
+            if (UseStorage)
             {
-                throw new InvalidOperationException($"Invalid storage for account number {i}!");
+                var storageAddress = GetStorageAddress(i);
+                var expectedStorageValue = GetStorageValue(i);
+                var actualStorage = read.GetStorage(key, storageAddress);
+
+                if (actualStorage != expectedStorageValue)
+                {
+                    throw new InvalidOperationException($"Invalid storage for account number {i}!");
+                }
             }
-#endif
+
+            if (UseBigStorageAccount)
+            {
+                var index = i % BigStorageAccountSlotCount;
+                var storageAddress = GetStorageAddress(index);
+                var expectedStorageValue = BigStorageAccountValues[index];
+                var actualStorage = read.GetStorage(bigStorageAccount, storageAddress);
+
+                if (actualStorage != expectedStorageValue)
+                {
+                    throw new InvalidOperationException($"Invalid storage for big storage account at index {i}!");
+                }
+            }
         }
 
         Console.WriteLine("Reading state of all of {0} accounts from the last block took {1}",
@@ -190,6 +245,8 @@ public static class Program
 
     private static UInt256 GetStorageValue(int counter) => (UInt256)counter + 100000;
 
+    private static UInt256 GetBigAccountStorageValue(int counter) => (UInt256)counter + 123456;
+
     private static void Write90Th(HistogramBase histogram, string name)
     {
         Console.WriteLine($"   - {name} per block: {histogram.GetValueAtPercentile(0.9)}");
@@ -208,7 +265,6 @@ public static class Program
 
     private static Keccak GetStorageAddress(int counter)
     {
-
         // do the rolling over account bytes, so each is different but they don't occupy that much memory
         // it's not de Bruijn, but it's as best as possible.
         Keccak key = default;
