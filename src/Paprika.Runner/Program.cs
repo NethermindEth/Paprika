@@ -1,5 +1,4 @@
 ﻿// #define PERSISTENT_DB
-#define STORAGE
 
 using System.Buffers.Binary;
 using System.Diagnostics;
@@ -29,8 +28,11 @@ public static class Program
     private const CommitOptions Commit = CommitOptions.FlushDataOnly;
     private const int LogEvery = BlockCount / NumberOfLogs;
 
+    private const bool UseStorage = true;
+
     public static void Main(String[] args)
     {
+
 #if PERSISTENT_DB
         var dir = Directory.GetCurrentDirectory();
         var dataPath = Path.Combine(dir, "db");
@@ -96,11 +98,14 @@ public static class Program
                 var key = GetAccountKey(random, counter);
 
                 batch.Set(key, GetAccountValue(counter));
-#if STORAGE               
-                var storage = GetStorageAddress(counter);
-                var storageValue = GetStorageValue(counter);
-                batch.SetStorage(key, storage, storageValue);
-#endif
+
+                if (UseStorage)
+                {
+                    var storage = GetStorageAddress(counter);
+                    var storageValue = GetStorageValue(counter);
+                    batch.SetStorage(key, storage, storageValue);
+                }
+
                 counter++;
             }
 
@@ -116,9 +121,15 @@ public static class Program
         ReportProgress(BlockCount - 1, writing);
 
         Console.WriteLine();
-        Console.WriteLine(
-            "Writing state of {0} accounts per block, each with 1 storage, through {1} blocks, generated {2} accounts, used {3:F2}GB",
-            AccountsPerBlock, BlockCount, counter, db.ActualMegabytesOnDisk / 1024);
+        Console.WriteLine("Writing in numbers:");
+        Console.WriteLine("- {0} accounts per block", AccountsPerBlock);
+        if (UseStorage)
+        {
+            Console.WriteLine("- each with 1 storage slot");
+        }
+        Console.WriteLine("- through {0} blocks ", BlockCount);
+        Console.WriteLine("- generated accounts total number: {0} ", counter);
+        Console.WriteLine("- space used: {0:F2}GB ", db.ActualMegabytesOnDisk / 1024);
 
         // reading
         Console.WriteLine();
