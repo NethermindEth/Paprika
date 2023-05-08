@@ -338,10 +338,10 @@ public readonly ref struct FixedMap
                 {
                     const int size = Keccak.Size;
                     var additionalKey = data.Slice(0, size);
-                    return new Item(Key.StorageCell(path, additionalKey), data.Slice(size), _index);
+                    return new Item(Key.StorageCell(path, additionalKey), data.Slice(size), _index, slot.Type);
                 }
 
-                return new Item(Key.Raw(path, slot.Type), data, _index);
+                return new Item(Key.Raw(path, slot.Type), data, _index, slot.Type);
             }
         }
 
@@ -354,12 +354,14 @@ public readonly ref struct FixedMap
         public readonly ref struct Item
         {
             public int Index { get; }
+            public DataType Type { get; }
             public Key Key { get; }
             public ReadOnlySpan<byte> RawData { get; }
 
-            public Item(Key key, ReadOnlySpan<byte> rawData, int index)
+            public Item(Key key, ReadOnlySpan<byte> rawData, int index, DataType type)
             {
                 Index = index;
+                Type = type;
                 Key = key;
                 RawData = rawData;
             }
@@ -370,14 +372,16 @@ public readonly ref struct FixedMap
     }
 
     /// <summary>
-    /// Gets the nibble representing the biggest bucket.
+    /// Gets the nibble representing the biggest bucket and provides stats to the caller.
     /// </summary>
     /// <returns></returns>
-    public byte GetBiggestNibbleBucket()
+    public (byte nibble, byte accountsCount, double percentage) GetBiggestNibbleStats()
     {
         const int bucketCount = 16;
 
+        byte slotCount = 0;
         Span<ushort> buckets = stackalloc ushort[bucketCount];
+        Span<byte> accountsCount = stackalloc byte[bucketCount];
 
         var to = _header.Low / Slot.Size;
         for (var i = 0; i < to; i++)
@@ -385,7 +389,15 @@ public readonly ref struct FixedMap
             ref readonly var slot = ref _slots[i];
             if (slot.IsDeleted == false)
             {
+                slotCount++;
+
                 var index = slot.FirstNibbleOfPrefix % bucketCount;
+
+                if (slot.Type == DataType.Account)
+                {
+                    accountsCount[index]++;
+                }
+
                 buckets[index]++;
             }
         }
@@ -402,7 +414,9 @@ public readonly ref struct FixedMap
             }
         }
 
-        return (byte)maxI;
+        var percentage = (double)buckets[maxI] / slotCount;
+
+        return ((byte)maxI, accountsCount[maxI], percentage);
     }
 
     private static int GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> additionalKey,
