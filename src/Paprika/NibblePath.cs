@@ -115,7 +115,10 @@ public readonly ref struct NibblePath
     /// </summary>
     public NibblePath SliceFrom(int start)
     {
-        Debug.Assert(Length - start > 0, "Zero path generated");
+        Debug.Assert(Length - start >= 0, "Path out of boundary");
+
+        if (Length - start == 0)
+            return Empty;
 
         return new(ref Unsafe.Add(ref _span, (_odd + start) / 2),
             (byte)((start & 1) ^ _odd), (byte)(Length - start));

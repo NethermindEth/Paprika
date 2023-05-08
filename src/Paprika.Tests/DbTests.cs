@@ -226,7 +226,7 @@ public class DbTests
         const int size = MB16;
         using var db = new NativeMemoryPagedDb(size, 2);
 
-        const int count = 100;
+        const int count = 100000;
 
         using (var batch = db.BeginNextBlock())
         {
