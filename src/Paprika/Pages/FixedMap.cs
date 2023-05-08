@@ -82,8 +82,14 @@ public readonly ref struct FixedMap
         /// </summary>
         StorageTreeStorageCell = 5,
 
-        // Unused3 = 6,
-        // Unused4 = 7
+        /// <summary>
+        /// [pathToNode, 6]-> the node hash. Please, mind the fact that storage trie can use this internally as well,
+        /// with no need of the path.
+        /// </summary>
+        // Keccak = 6,
+
+        Deleted = 7,
+        // one bit more is possible as delete is now a data type
     }
 
     /// <summary>
@@ -273,7 +279,7 @@ public readonly ref struct FixedMap
             var to = _map.Count;
 
             while (index < to &&
-                   (_map._slots[index].IsDeleted ||
+                   (_map._slots[index].Type == DataType.Deleted ||
                     _map._slots[index].FirstNibbleOfPrefix != _nibble))
             {
                 index += 1;
@@ -387,7 +393,7 @@ public readonly ref struct FixedMap
         for (var i = 0; i < to; i++)
         {
             ref readonly var slot = ref _slots[i];
-            if (slot.IsDeleted == false)
+            if (slot.Type != DataType.Deleted)
             {
                 slotCount++;
 
@@ -445,7 +451,7 @@ public readonly ref struct FixedMap
     private void DeleteImpl(int index)
     {
         // mark as deleted first
-        _slots[index].IsDeleted = true;
+        _slots[index].Type = DataType.Deleted;
         _header.Deleted++;
 
         // always try to compact after delete
@@ -466,7 +472,7 @@ public readonly ref struct FixedMap
         for (int i = 0; i < count; i++)
         {
             var copyFrom = _slots[i];
-            if (copyFrom.IsDeleted == false)
+            if (copyFrom.Type != DataType.Deleted)
             {
                 var source = _data.Slice(copyFrom.ItemAddress);
                 var length = ReadDataLength(source);
@@ -502,7 +508,7 @@ public readonly ref struct FixedMap
         // start with the last written and perform checks and cleanup till all the deleted are gone
         var index = Count - 1;
 
-        while (index >= 0 && _slots[index].IsDeleted)
+        while (index >= 0 && _slots[index].Type == DataType.Deleted)
         {
             // undo writing low
             _header.Low -= Slot.Size;
@@ -566,8 +572,7 @@ public readonly ref struct FixedMap
                 var i = offset / 2;
 
                 ref readonly var slot = ref _slots[i];
-                if (slot.IsDeleted == false &&
-                    slot.Type == key.Type)
+                if (slot.Type == key.Type)
                 {
                     var actual = GetSlotPayload(slot);
 
@@ -632,21 +637,8 @@ public readonly ref struct FixedMap
             set => Raw = (ushort)((Raw & ~AddressMask) | value);
         }
 
-        // IsDeleted
-        private const int DeletedShift = 15;
-        private const ushort DeletedBit = 1 << DeletedShift;
-
-        /// <summary>
-        /// Whether it's deleted.
-        /// </summary>
-        public bool IsDeleted
-        {
-            get => (Raw & DeletedBit) == DeletedBit;
-            set => Raw = (ushort)((Raw & ~DeletedBit) | (value ? DeletedBit : 0));
-        }
-
         private const int DataTypeShift = 12;
-        private const ushort DataTypeMask = unchecked((ushort)(111 << DataTypeShift));
+        private const ushort DataTypeMask = unchecked((ushort)(1111 << DataTypeShift));
 
         /// <summary>
         /// The data type contained in this slot.
@@ -741,7 +733,7 @@ public readonly ref struct FixedMap
         public override string ToString()
         {
             return
-                $"{nameof(Type)}: {Type}, {nameof(Prefix)}: {Prefix}, {nameof(ItemAddress)}: {ItemAddress}, {nameof(IsDeleted)}: {IsDeleted}";
+                $"{nameof(Type)}: {Type}, {nameof(Prefix)}: {Prefix}, {nameof(ItemAddress)}: {ItemAddress}";
         }
     }
 
