@@ -1,6 +1,7 @@
 ﻿using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Crypto;
+using Paprika.Db;
 using Paprika.Pages;
 
 namespace Paprika.Tests;

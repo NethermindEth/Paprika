@@ -16,4 +16,10 @@ public interface IDb
     /// <param name="stateRootHash">The block hash to reorganize to.</param>
     /// <returns>The new batch.</returns>
     IBatch ReorganizeBackToAndStartNew(Keccak stateRootHash);
+
+    /// <summary>
+    /// Starts a readonly batch that preserves a snapshot of the database as in the moment of its creation.
+    /// </summary>
+    /// <returns></returns>
+    IReadOnlyBatch BeginReadOnlyBatch();
 }

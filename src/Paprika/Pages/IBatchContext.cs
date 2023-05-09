@@ -1,4 +1,6 @@
-﻿namespace Paprika.Pages;
+﻿using Paprika.Db;
+
+namespace Paprika.Pages;
 
 public interface IBatchContext : IReadOnlyBatchContext
 {
@@ -29,6 +31,9 @@ public interface IReadOnlyBatchContext : IPageResolver
     uint BatchId { get; }
 }
 
+/// <summary>
+/// Provides a capability to resolve a page by its page address.
+/// </summary>
 public interface IPageResolver
 {
     /// <summary>

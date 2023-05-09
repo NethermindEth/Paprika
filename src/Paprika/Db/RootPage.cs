@@ -1,8 +1,9 @@
 ﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
+using Paprika.Pages;
 
-namespace Paprika.Pages;
+namespace Paprika.Db;
 
 /// <summary>
 /// Root page is a page that contains all the needed metadata from the point of view of the database.

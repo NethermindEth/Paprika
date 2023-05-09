@@ -1,8 +1,9 @@
 ﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paprika.Pages;
 
-namespace Paprika.Pages;
+namespace Paprika.Db;
 
 /// <summary>
 /// Represents a set of pages abandoned during the batch with the same <see cref="IBatchContext.BatchId"/>

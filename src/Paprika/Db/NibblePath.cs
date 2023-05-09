@@ -1,10 +1,9 @@
-﻿using System.Buffers.Binary;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
 
-namespace Paprika;
+namespace Paprika.Db;
 
 /// <summary>
 /// Represents a nibble path in a way that makes it efficient for comparisons.

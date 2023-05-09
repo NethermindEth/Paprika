@@ -1,6 +1,7 @@
 ﻿using System.Buffers.Binary;
 using FluentAssertions;
 using NUnit.Framework;
+using Paprika.Db;
 
 // ReSharper disable HeapView.BoxingAllocation
 

@@ -25,17 +25,20 @@ public interface IBatch : IReadOnlyBatch
     Keccak Commit(CommitOptions options);
 }
 
-public interface IReadOnlyBatch : IDisposable
+public enum CommitOptions
 {
     /// <summary>
-    /// Gets the account information
+    /// Flushes db only once, ensuring that the data are stored properly.
+    /// The root is stored ephemerally, waiting for the next commit to be truly stored.
+    ///
+    /// This guarantees ATOMIC (from ACID) but not DURABLE.  
     /// </summary>
-    /// <param name="key">The key to looked up.</param>
-    /// <returns>The account or default on non-existence.</returns>
-    Account GetAccount(in Keccak key);
+    FlushDataOnly,
 
     /// <summary>
-    /// Gets the storage value.
+    /// Flush data, then the root.
+    ///
+    /// This guarantees ATOMIC and DURABLE (from ACID).
     /// </summary>
-    UInt256 GetStorage(in Keccak key, in Keccak address);
+    FlushDataAndRoot
 }
