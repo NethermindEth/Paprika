@@ -664,6 +664,12 @@ public readonly ref struct FixedMap
 
         // encode length trimmed as highest nibble
         private const int NibbleCountShift = NibblePath.NibbleShift * 3;
+        private const int Mask0 = (1 << Shift1) - 1;
+        private const int Mask1 = (1 << Shift2) - 1 - Mask0;
+        private const int Mask2 = (1 << NibblePath.NibbleShift * 3) - 1 - Mask1 - Mask0;
+        private const int Shift0 = NibblePath.NibbleShift * 0;
+        private const int Shift1 = NibblePath.NibbleShift * 1;
+        private const int Shift2 = NibblePath.NibbleShift * 2;
 
         /// <summary>
         /// Builds the hash for the key.
@@ -679,54 +685,47 @@ public readonly ref struct FixedMap
                     result = key.SliceFrom(1);
                     return (ushort)(
                         (1 << NibbleCountShift) +
-                        (key.GetAt(0) << (NibblePath.NibbleShift * 0))
+                        (key.GetAt(0) << Shift0)
                     );
                 case 2:
                     result = key.SliceFrom(2);
                     return (ushort)(
                         (2 << NibbleCountShift) +
-                        (key.GetAt(0) << (NibblePath.NibbleShift * 0)) +
-                        (key.GetAt(1) << (NibblePath.NibbleShift * 1))
+                        (key.GetAt(0) << Shift0) +
+                        (key.GetAt(1) << Shift1)
                     );
                 default:
                     // 3 or more
                     result = key.SliceFrom(3);
                     return (ushort)(
                         (3 << NibbleCountShift) +
-                        (key.GetAt(0) << (NibblePath.NibbleShift * 0)) +
-                        (key.GetAt(1) << (NibblePath.NibbleShift * 1)) +
-                        (key.GetAt(2) << (NibblePath.NibbleShift * 2))
+                        (key.GetAt(0) << Shift0) +
+                        (key.GetAt(1) << Shift1) +
+                        (key.GetAt(2) << Shift2)
                     );
             }
         }
 
         public int DecodeNibblesFromPrefix(Span<byte> nibbles)
         {
-            const int mask0 = (1 << NibblePath.NibbleShift * 1) - 1;
-            const int mask1 = (1 << NibblePath.NibbleShift * 2) - 1 - mask0;
-            const int mask2 = (1 << NibblePath.NibbleShift * 3) - 1 - mask1 - mask0;
-
             var count = Prefix >> NibbleCountShift;
             switch (count)
             {
                 case 0:
                     return 0;
                 case 1:
-                    nibbles[0] = (byte)(Prefix & mask0);
+                    nibbles[0] = (byte)(Prefix & Mask0);
                     return 1;
                 case 2:
-                    nibbles[0] = (byte)(Prefix & mask0);
-                    nibbles[1] = (byte)((Prefix & mask1) >> NibblePath.NibbleShift * 1);
+                    nibbles[0] = (byte)(Prefix & Mask0);
+                    nibbles[1] = (byte)((Prefix & Mask1) >> Shift1);
                     return 2;
-                case 3:
-                    nibbles[0] = (byte)(Prefix & mask0);
-                    nibbles[1] = (byte)((Prefix & mask1) >> NibblePath.NibbleShift * 1);
-                    nibbles[2] = (byte)((Prefix & mask2) >> NibblePath.NibbleShift * 2);
+                default:
+                    nibbles[0] = (byte)(Prefix & Mask0);
+                    nibbles[1] = (byte)((Prefix & Mask1) >> Shift1);
+                    nibbles[2] = (byte)((Prefix & Mask2) >> Shift2);
                     return 3;
             }
-
-            Debug.Fail("Should not happen");
-            return 0;
         }
 
         public byte FirstNibbleOfPrefix => (byte)(Prefix & 0x0F);
