@@ -87,7 +87,7 @@ public readonly ref struct FixedMap
         /// [pathToNode, 6]-> the node hash. Please, mind the fact that storage trie can use this internally as well,
         /// with no need of the path.
         /// </summary>
-        // Keccak = 6,
+        KeccakOrRlp = 6,
 
         Deleted = 7,
         // one bit more is possible as delete is now a data type
@@ -149,17 +149,25 @@ public readonly ref struct FixedMap
         public static Key StorageCell(NibblePath path, ReadOnlySpan<byte> keccak) =>
             new(path, DataType.StorageCell, keccak);
 
+        /// <summary>
+        /// Builds the key identifying the value of the <see cref="DbAddress"/> for the root of the storage tree.
+        /// </summary>
         public static Key StorageTreeRootPageAddress(NibblePath path) =>
             new(path, DataType.StorageTreeRootPageAddress, ReadOnlySpan<byte>.Empty);
 
         /// <summary>
         /// Treat the additional key as the key and drop the additional notion.
         /// </summary>
-        /// <param name="originalKey"></param>
-        /// <returns></returns>
         public static Key StorageTreeStorageCell(Key originalKey) =>
             new(NibblePath.FromKey(originalKey.AdditionalKey), DataType.StorageTreeStorageCell,
                 ReadOnlySpan<byte>.Empty);
+
+        /// <summary>
+        /// Builds the key responsible for storing the encoded RLP or Keccak (if len(RLP) >= 32) for
+        /// a node with the given <see cref="NibblePath"/>.
+        /// </summary>
+        public static Key KeccakOrRlp(NibblePath path) =>
+            new(path, DataType.KeccakOrRlp, ReadOnlySpan<byte>.Empty);
 
         public Key SliceFrom(int nibbles) => new(Path.SliceFrom(nibbles), Type, AdditionalKey);
 
