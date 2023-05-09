@@ -1,6 +1,9 @@
 ﻿// See https://aka.ms/new-console-template for more information
 
+using System.Diagnostics.CodeAnalysis;
 using BenchmarkDotNet.Running;
+
+[assembly: ExcludeFromCodeCoverage]
 
 public class Program
 {

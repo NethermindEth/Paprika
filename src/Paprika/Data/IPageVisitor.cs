@@ -1,4 +1,6 @@
-﻿namespace Paprika.Pages;
+﻿using Paprika.Db;
+
+namespace Paprika.Pages;
 
 public interface IPageVisitor
 {

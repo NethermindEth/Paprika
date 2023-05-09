@@ -1,7 +1,7 @@
 ﻿using System.Buffers.Binary;
 using System.Diagnostics;
 
-namespace Paprika.Pages;
+namespace Paprika.Db;
 
 /// <summary>
 /// Represents an address in the database. It can be one of the following:
