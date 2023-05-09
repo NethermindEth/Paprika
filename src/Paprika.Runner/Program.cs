@@ -23,7 +23,7 @@ public static class Program
 
     private const int NumberOfLogs = 10;
 
-    private const long DbFileSize = 10 * Gb;
+    private const long DbFileSize = 6 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
     private const CommitOptions Commit = CommitOptions.FlushDataOnly;
     private const int LogEvery = BlockCount / NumberOfLogs;
