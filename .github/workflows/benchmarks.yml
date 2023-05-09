@@ -17,7 +17,7 @@ jobs:
           KEY: ${{ secrets.SSHKEY }}
         with:
           source: "."
-          target: "/home/paprika/benchmarks
+          target: "/home/paprika/benchmarks"
 
       - name: Executing remote command
         uses: appleboy/ssh-action@master
@@ -26,4 +26,4 @@ jobs:
           USERNAME: ${{ secrets.USERNAME }}
           PORT: ${{ secrets.PORT }}
           KEY: ${{ secrets.SSHKEY }}
-          script: cd /home/paprika/benchmarks && ls -la && echo testing
+          script: cd /home/paprika/benchmarks && ls -la && echo "sample testing test"
