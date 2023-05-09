@@ -205,11 +205,11 @@ public class DataPageTests : BasePageTests
         var dataPage = new DataPage(page);
 
         // big enough to fill the page
-        const int count = 100;
+        const int count = 200;
 
         // set the empty path which may happen on var-length scenarios
         var keccakKey = FixedMap.Key.KeccakOrRlp(NibblePath.Empty);
-        dataPage.Set(new SetContext(keccakKey, Span<byte>.Empty, batch));
+        dataPage = dataPage.Set(new SetContext(keccakKey, Span<byte>.Empty, batch)).Cast<DataPage>();
 
         for (uint i = 0; i < count; i++)
         {
@@ -221,31 +221,26 @@ public class DataPageTests : BasePageTests
                 .Cast<DataPage>();
         }
 
+        // assert
+        dataPage.TryGet(keccakKey, batch, out var value).Should().BeTrue();
+        value.Length.Should().Be(0);
+
         for (uint i = 0; i < count; i++)
         {
             var key = GetKey(i);
-            var address = GetStorageAddress(i);
             var path = NibblePath.FromKey(key);
 
             dataPage.GetAccount(path, batch).Should().Be(GetAccount(i));
         }
 
-        static Keccak GetStorageAddress(uint i)
-        {
-            var address = Key1a;
-            BinaryPrimitives.WriteUInt32LittleEndian(address.BytesAsSpan, i);
-            return address;
-        }
-
         Keccak GetKey(uint i)
         {
             Keccak key = default;
-            BinaryPrimitives.WriteUInt32LittleEndian(key.BytesAsSpan, i);
+            // big endian so that zeroes go first
+            BinaryPrimitives.WriteUInt32BigEndian(key.BytesAsSpan, i);
             return key;
         }
 
         Account GetAccount(uint i) => new(i, i);
-
-        UInt256 GetStorageValue(uint i) => i;
     }
 }

@@ -85,19 +85,23 @@ public readonly unsafe struct DataPage : IDataPage
         }
 
         var path = ctx.Key.Path;
-        var nibble = path.FirstNibble;
 
-        var address = Data.Buckets[nibble];
-
-        // the bucket is not null and represents a page jump, follow it
-        if (address.IsNull == false && address.IsValidPageAddress)
+        if (path.Length > 0)
         {
-            var page = ctx.Batch.GetAt(address);
-            var updated = new DataPage(page).Set(ctx.SliceFrom(NibbleCount));
+            // try to go deeper only if the path is long enough
+            var nibble = path.FirstNibble;
+            var address = Data.Buckets[nibble];
 
-            // remember the updated
-            Data.Buckets[nibble] = ctx.Batch.GetAddress(updated);
-            return _page;
+            // the bucket is not null and represents a page jump, follow it
+            if (address.IsNull == false && address.IsValidPageAddress)
+            {
+                var page = ctx.Batch.GetAt(address);
+                var updated = new DataPage(page).Set(ctx.SliceFrom(NibbleCount));
+
+                // remember the updated
+                Data.Buckets[nibble] = ctx.Batch.GetAddress(updated);
+                return _page;
+            }
         }
 
         // try in-page write
@@ -150,13 +154,17 @@ public readonly unsafe struct DataPage : IDataPage
 
     public bool TryGet(FixedMap.Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
-        var nibble = key.Path.FirstNibble;
-        var bucket = Data.Buckets[nibble];
-
-        // non-null page jump, follow it!
-        if (bucket.IsNull == false && bucket.IsValidPageAddress)
+        if (key.Path.Length > 0)
         {
-            return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), batch, out result);
+            // try to go deeper only if the path is long enough
+            var nibble = key.Path.FirstNibble;
+            var bucket = Data.Buckets[nibble];
+
+            // non-null page jump, follow it!
+            if (bucket.IsNull == false && bucket.IsValidPageAddress)
+            {
+                return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), batch, out result);
+            }
         }
 
         // read in-page

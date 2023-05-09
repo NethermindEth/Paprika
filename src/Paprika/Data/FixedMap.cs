@@ -289,6 +289,7 @@ public readonly ref struct FixedMap
 
             while (index < to &&
                    (_map._slots[index].Type == DataType.Deleted ||
+                    _map._slots[index].NibbleCount == 0 ||
                     _map._slots[index].FirstNibbleOfPrefix != _nibble))
             {
                 index += 1;
@@ -402,7 +403,9 @@ public readonly ref struct FixedMap
         for (var i = 0; i < to; i++)
         {
             ref readonly var slot = ref _slots[i];
-            if (slot.Type != DataType.Deleted)
+
+            // extract only not deleted and these which have at least one nibble
+            if (slot.Type != DataType.Deleted && slot.NibbleCount > 0)
             {
                 slotCount++;
 
@@ -736,7 +739,12 @@ public readonly ref struct FixedMap
             }
         }
 
-        public byte FirstNibbleOfPrefix => (byte)(Prefix & 0x0F);
+        public byte FirstNibbleOfPrefix => (byte)(Prefix & Mask0);
+
+        /// <summary>
+        /// Gets the nibble count encoded in the prefix
+        /// </summary>
+        public int NibbleCount => Prefix >> NibbleCountShift;
 
         public override string ToString()
         {
