@@ -1,5 +1,6 @@
 ﻿using System.Buffers.Binary;
 using System.Diagnostics;
+using Paprika.Data;
 
 namespace Paprika.Db;
 
@@ -19,7 +20,7 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     public const int Size = sizeof(uint);
 
     /// <summary>
-    /// This value is bigger <see cref="Pages.Page.PageCount"/> so that regular pages don't overflow.
+    /// This value is bigger <see cref="Data.Page.PageCount"/> so that regular pages don't overflow.
     /// </summary>
     private const uint SamePage = 0x8000_0000;
 
@@ -38,13 +39,13 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     public uint Raw => _value;
 
     /// <summary>
-    /// Creates a database address that represents a jump to another database <see cref="Pages.Page"/>.
+    /// Creates a database address that represents a jump to another database <see cref="Data.Page"/>.
     /// </summary>
     /// <param name="page">The page to go to.</param>
     /// <returns></returns>
     public static DbAddress Page(uint page)
     {
-        Debug.Assert(page < Pages.Page.PageCount, "The page number breached the PageCount maximum");
+        Debug.Assert(page < Data.Page.PageCount, "The page number breached the PageCount maximum");
         return new(page);
     }
 
@@ -73,7 +74,7 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     public bool IsSamePage => (_value & SamePage) == SamePage;
 
     // ReSharper disable once MergeIntoPattern
-    public bool IsValidPageAddress => _value < Pages.Page.PageCount;
+    public bool IsValidPageAddress => _value < Data.Page.PageCount;
 
     public static implicit operator uint(DbAddress address) => address._value;
     public static implicit operator int(DbAddress address) => (int)address._value;

@@ -2,7 +2,7 @@
 using Paprika.Crypto;
 using Paprika.Db;
 
-namespace Paprika.Pages;
+namespace Paprika.Data;
 
 /// <summary>
 /// An interface for a page holding data, capable to <see cref="TryGet"/> and <see cref="Set"/> values.

@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Db;
 
-namespace Paprika.Pages;
+namespace Paprika.Data;
 
 /// <summary>
 /// Represents a data page storing account data.

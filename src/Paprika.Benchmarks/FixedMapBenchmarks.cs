@@ -1,8 +1,8 @@
 ﻿using System.Buffers.Binary;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Disassemblers;
+using Paprika.Data;
 using Paprika.Db;
-using Paprika.Pages;
 
 namespace Paprika.Benchmarks;
 

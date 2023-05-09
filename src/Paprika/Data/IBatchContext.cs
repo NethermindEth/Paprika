@@ -1,6 +1,6 @@
 ﻿using Paprika.Db;
 
-namespace Paprika.Pages;
+namespace Paprika.Data;
 
 public interface IBatchContext : IReadOnlyBatchContext
 {

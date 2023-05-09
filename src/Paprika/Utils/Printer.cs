@@ -1,9 +1,9 @@
 ﻿using System.Text;
 using Paprika.Crypto;
+using Paprika.Data;
 using Paprika.Db;
-using Paprika.Pages;
 
-namespace Paprika.Development;
+namespace Paprika.Utils;
 
 public class Printer : IPageVisitor
 {

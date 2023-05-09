@@ -1,13 +1,12 @@
 ﻿using System.Buffers;
-using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
 using Paprika.Db;
-using Paprika.Development;
+using Paprika.Utils;
 
-namespace Paprika.Pages;
+namespace Paprika.Data;
 
 /// <summary>
 /// Represents an in-page map, responsible for storing items and information related to them.

@@ -3,8 +3,8 @@ using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Crypto;
+using Paprika.Data;
 using Paprika.Db;
-using Paprika.Pages;
 using static Paprika.Tests.Values;
 
 namespace Paprika.Tests;

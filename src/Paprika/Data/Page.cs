@@ -2,7 +2,7 @@
 using System.Runtime.InteropServices;
 using Paprika.Db;
 
-namespace Paprika.Pages;
+namespace Paprika.Data;
 
 /// <summary>
 /// A markup interface for pages.

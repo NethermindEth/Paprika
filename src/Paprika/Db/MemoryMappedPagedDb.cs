@@ -1,5 +1,5 @@
 ﻿using System.IO.MemoryMappedFiles;
-using Paprika.Pages;
+using Paprika.Data;
 
 namespace Paprika.Db;
 

@@ -1,4 +1,4 @@
-﻿namespace Paprika.Pages;
+﻿namespace Paprika.Data;
 
 /// <summary>
 /// Represents an intent to set the account data.

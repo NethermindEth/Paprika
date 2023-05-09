@@ -1,7 +1,7 @@
 ﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
-using Paprika.Pages;
+using Paprika.Data;
 
 namespace Paprika.Db;
 

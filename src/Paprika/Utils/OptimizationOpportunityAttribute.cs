@@ -1,6 +1,6 @@
 ﻿using System.Diagnostics.CodeAnalysis;
 
-namespace Paprika.Development;
+namespace Paprika.Utils;
 
 /// <summary>
 /// Informs that in a given member there's an optimization opportunity.

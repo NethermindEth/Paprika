@@ -1,5 +1,5 @@
 ﻿using System.Runtime.InteropServices;
-using Paprika.Pages;
+using Paprika.Data;
 
 namespace Paprika.Db;
 

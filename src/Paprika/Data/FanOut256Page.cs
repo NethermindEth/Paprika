@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Db;
 
-namespace Paprika.Pages;
+namespace Paprika.Data;
 
 /// <summary>
 /// Represents the page with the fan out of 256 to maximally flatten the tree.
