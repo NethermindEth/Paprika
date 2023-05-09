@@ -194,4 +194,53 @@ public class DataPageTests : BasePageTests
             account.Should().Be(new Account(i, i));
         }
     }
+
+    [Test(Description = "Ensures that tree can hold entries with NibblePaths of various lengths")]
+    public void Var_length_NibblePaths()
+    {
+        var page = AllocPage();
+        page.Clear();
+
+        var batch = NewBatch(BatchId);
+        var dataPage = new DataPage(page);
+
+        // big enough to fill the page
+        const int count = 200;
+
+        // set the empty path which may happen on var-length scenarios
+        var keccakKey = FixedMap.Key.KeccakOrRlp(NibblePath.Empty);
+        dataPage = dataPage.Set(new SetContext(keccakKey, Span<byte>.Empty, batch)).Cast<DataPage>();
+
+        for (uint i = 0; i < count; i++)
+        {
+            var key = GetKey(i);
+            var path = NibblePath.FromKey(key);
+
+            dataPage = dataPage
+                .SetAccount(path, GetAccount(i), batch)
+                .Cast<DataPage>();
+        }
+
+        // assert
+        dataPage.TryGet(keccakKey, batch, out var value).Should().BeTrue();
+        value.Length.Should().Be(0);
+
+        for (uint i = 0; i < count; i++)
+        {
+            var key = GetKey(i);
+            var path = NibblePath.FromKey(key);
+
+            dataPage.GetAccount(path, batch).Should().Be(GetAccount(i));
+        }
+
+        Keccak GetKey(uint i)
+        {
+            Keccak key = default;
+            // big endian so that zeroes go first
+            BinaryPrimitives.WriteUInt32BigEndian(key.BytesAsSpan, i);
+            return key;
+        }
+
+        Account GetAccount(uint i) => new(i, i);
+    }
 }
