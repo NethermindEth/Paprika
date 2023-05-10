@@ -378,7 +378,10 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
                 Debug.Assert(ReferenceEquals(this, _db._batchCurrent));
                 _db._batchCurrent = null;
 
-                _db.FlushAllPages();
+                if (options != CommitOptions.DangerNoFlush)
+                {
+                    _db.FlushAllPages();
+                }
 
                 var newRootPage = _db.SetNewRoot(_root);
 
