@@ -20,7 +20,7 @@ public class FixedMapBenchmarks
         // fill 
         while (true)
         {
-            BinaryPrimitives.WriteInt32BigEndian(key, _to);
+            BinaryPrimitives.WriteInt32LittleEndian(key, _to);
             var path = NibblePath.FromKey(key);
             if (map.TrySet(FixedMap.Key.Account(path), key) == false)
             {
@@ -45,7 +45,7 @@ public class FixedMapBenchmarks
         // fill 
         for (int i = 0; i < _to; i++)
         {
-            BinaryPrimitives.WriteInt32BigEndian(key, i);
+            BinaryPrimitives.WriteInt32LittleEndian(key, i);
             var path = NibblePath.FromKey(key);
             if (map.TrySet(FixedMap.Key.Account(path), key))
             {
@@ -67,7 +67,7 @@ public class FixedMapBenchmarks
         // find all values
         for (var i = 0; i < _to; i++)
         {
-            BinaryPrimitives.WriteInt32BigEndian(key, i);
+            BinaryPrimitives.WriteInt32LittleEndian(key, i);
             var path = NibblePath.FromKey(key);
             if (map.TryGet(FixedMap.Key.Account(path), out var data))
             {
@@ -89,7 +89,7 @@ public class FixedMapBenchmarks
         // miss all the next
         for (int i = _to; i < _to * 2; i++)
         {
-            BinaryPrimitives.WriteInt32BigEndian(key, i);
+            BinaryPrimitives.WriteInt32LittleEndian(key, i);
             var path = NibblePath.FromKey(key);
             if (map.TryGet(FixedMap.Key.Account(path), out _) == false)
             {

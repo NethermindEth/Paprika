@@ -11,6 +11,7 @@ public class Program
 {
     public static void Main(string[] args)
     {
+        //new FixedMapBenchmarks().Read_nonexistent_keys();
         var summary = BenchmarkRunner.Run(typeof(Program).Assembly);
     }
 }
