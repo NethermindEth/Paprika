@@ -40,5 +40,10 @@ public enum CommitOptions
     ///
     /// This guarantees ATOMIC and DURABLE (from ACID).
     /// </summary>
-    FlushDataAndRoot
+    FlushDataAndRoot,
+
+    /// <summary>
+    /// No actual flush happens and the database may become corrupted when the program is interrupted.
+    /// </summary>
+    DangerNoFlush,
 }

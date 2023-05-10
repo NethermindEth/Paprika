@@ -1,6 +1,4 @@
-﻿// #define PERSISTENT_DB
-
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
@@ -15,19 +13,23 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = 20_000;
+    private const int BlockCount = PersistentDb ? 50_000 : 20_000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
+    private const int MaxReorgDepth = 64;
 
     private const int RandomSeed = 17;
 
-    private const int NumberOfLogs = 10;
+    private const int NumberOfLogs = PersistentDb ? 20 : 10;
 
-    private const long DbFileSize = 6 * Gb;
+    private const long DbFileSize = PersistentDb ? 64 * Gb : 10 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
-    private const CommitOptions Commit = CommitOptions.FlushDataOnly;
+
+    private const CommitOptions Commit = CommitOptions.DangerNoFlush;
+
     private const int LogEvery = BlockCount / NumberOfLogs;
 
+    private const bool PersistentDb = true;
     private const bool UseStorage = true;
     private const bool UseBigStorageAccount = true;
     private const int BigStorageAccountSlotCount = 1_000_000;
@@ -35,21 +37,24 @@ public static class Program
 
     public static void Main(String[] args)
     {
-#if PERSISTENT_DB
         var dir = Directory.GetCurrentDirectory();
         var dataPath = Path.Combine(dir, "db");
 
-        if (Directory.Exists(dataPath))
+        if (PersistentDb)
         {
-            Console.WriteLine("Deleting previous db...");
-            Directory.Delete(dataPath, true);
-        }
+            if (Directory.Exists(dataPath))
+            {
+                Console.WriteLine("Deleting previous db...");
+                Directory.Delete(dataPath, true);
+            }
 
-        Directory.CreateDirectory(dataPath);
-        Console.WriteLine("Using persistent DB");
-#else
-        Console.WriteLine("Using in-memory DB for greater speed.");
-#endif
+            Directory.CreateDirectory(dataPath);
+            Console.WriteLine($"Using persistent DB on disk, located: {dataPath}");
+        }
+        else
+        {
+            Console.WriteLine("Using in-memory DB for greater speed.");
+        }
 
         Console.WriteLine("Initializing db of size {0}GB", DbFileSize / Gb);
         Console.WriteLine("Starting benchmark with commit level {0}", Commit);
@@ -61,16 +66,16 @@ public static class Program
             total = new IntHistogram(short.MaxValue, 3),
         };
 
-#if PERSISTENT_DB
-        var db = new MemoryMappedPagedDb(DbFileSize, 64, dataPath, metrics =>
-#else
-        var db = new NativeMemoryPagedDb(DbFileSize, 64, metrics =>
-#endif
+        void OnMetrics(IBatchMetrics metrics)
         {
             histograms.allocated.RecordValue(metrics.PagesAllocated);
             histograms.reused.RecordValue(metrics.PagesReused);
             histograms.total.RecordValue(metrics.TotalPagesWritten);
-        });
+        }
+
+        PagedDb db = PersistentDb
+            ? new MemoryMappedPagedDb(DbFileSize, MaxReorgDepth, dataPath, OnMetrics)
+            : new NativeMemoryPagedDb(DbFileSize, MaxReorgDepth, OnMetrics);
 
         var random = PrepareStableRandomSource();
 
