@@ -40,6 +40,8 @@ abstract class BatchContextBase : IBatchContext
         return @new;
     }
 
+    public abstract bool WasWritten(DbAddress addr);
+
     /// <summary>
     /// Registers the given page for future GC.
     /// </summary>
