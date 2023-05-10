@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
@@ -55,14 +56,6 @@ public readonly ref struct NibblePath
         _odd = (byte)(nibbleFrom & OddBit);
         Length = (byte)length;
     }
-
-    private NibblePath(ref byte span, byte odd, int length)
-    {
-        _span = ref span;
-        _odd = odd;
-        Length = (byte)length;
-    }
-
 
     private NibblePath(ref byte span, byte odd, byte length)
     {
@@ -187,13 +180,6 @@ public readonly ref struct NibblePath
 
         return source.Slice(PreambleLength + GetSpanLength(length, odd));
     }
-
-    /// <summary>
-    /// Reports whether path has start at odd bit. Useful for low-level bit mangling.
-    /// </summary>
-    public bool OddStart => (_odd & OddBit) == OddBit;
-
-    public int RawByteLength => PreambleLength + GetSpanLength(Length, _odd & OddBit);
 
     public int FindFirstDifferentNibble(in NibblePath other)
     {
