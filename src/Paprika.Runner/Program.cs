@@ -13,7 +13,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 50_000 : 20_000;
+    private const int BlockCount = PersistentDb ? 100_000 : 20_000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
@@ -171,6 +171,7 @@ public static class Program
         var reading = Stopwatch.StartNew();
         using var read = db.BeginReadOnlyBatch();
 
+        var logReadEvery = counter / NumberOfLogs;
         for (var i = 0; i < counter; i++)
         {
             var key = GetAccountKey(random, i);
@@ -204,6 +205,15 @@ public static class Program
                 {
                     throw new InvalidOperationException($"Invalid storage for big storage account at index {i}!");
                 }
+            }
+
+            if (i > 0 & i % logReadEvery == 0)
+            {
+                var secondsPerRead = TimeSpan.FromTicks(reading.ElapsedTicks / logReadEvery).TotalSeconds;
+                var readsPerSeconds = 1 / secondsPerRead;
+
+                Console.WriteLine($"Reading at {i,9} out of {counter} accounts. Current speed: {readsPerSeconds:F1} reads/s");
+                writing.Restart();
             }
         }
 
