@@ -21,6 +21,11 @@ public interface IBatchContext : IReadOnlyBatchContext
     /// <param name="page"></param>
     /// <returns></returns>
     Page GetWritableCopy(Page page);
+
+    /// <summary>
+    /// Checks whether the page was written during this batch.
+    /// </summary>
+    bool WasWritten(DbAddress addr);
 }
 
 public interface IReadOnlyBatchContext : IPageResolver

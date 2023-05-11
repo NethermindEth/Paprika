@@ -295,6 +295,11 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         /// </summary>
         private readonly Queue<DbAddress> _abandoned;
 
+        /// <summary>
+        /// The set of pages written during this batch.
+        /// </summary>
+        private readonly HashSet<DbAddress> _written;
+
         private readonly BatchMetrics _metrics;
 
         public Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx) : base(root.Header.BatchId)
@@ -305,6 +310,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             _ctx = ctx;
             _unusedPool = ctx.Unused;
             _abandoned = ctx.Abandoned;
+            _written = ctx.Written;
 
             _metrics = new BatchMetrics();
         }
@@ -432,6 +438,9 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             var page = _db.GetAt(addr);
             if (clear)
                 page.Clear();
+
+
+            _written.Add(addr);
 
             AssignBatchId(page);
             return page;
@@ -577,6 +586,8 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             return currentOldest != null;
         }
 
+        public override bool WasWritten(DbAddress addr) => _written.Contains(addr);
+
         protected override void RegisterForFutureReuse(Page page)
         {
             var addr = _db.GetAddress(page);
@@ -611,6 +622,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             Page = new Page((byte*)NativeMemory.AlignedAlloc((UIntPtr)Page.PageSize, (UIntPtr)UIntPtr.Size));
             Abandoned = new Queue<DbAddress>();
             Unused = new Queue<DbAddress>();
+            Written = new HashSet<DbAddress>();
         }
 
         public Page Page { get; }
@@ -618,11 +630,13 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         public Queue<DbAddress> Unused { get; }
 
         public Queue<DbAddress> Abandoned { get; }
+        public HashSet<DbAddress> Written { get; }
 
         public void Clear()
         {
             Unused.Clear();
             Abandoned.Clear();
+            Written.Clear();
 
             // no need to clear, it's always overwritten
             //Page.Clear();

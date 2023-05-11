@@ -45,6 +45,9 @@ public abstract class BasePageTests
             return page;
         }
 
+        // for now
+        public override bool WasWritten(DbAddress addr) => true;
+
         protected override void RegisterForFutureReuse(Page page)
         {
             // NOOP
