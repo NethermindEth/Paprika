@@ -6,6 +6,7 @@ using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Db;
+using Paprika.Db.Memory;
 using static Paprika.Tests.Values;
 
 namespace Paprika.Tests;

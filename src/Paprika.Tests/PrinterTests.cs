@@ -1,6 +1,7 @@
 ﻿using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Db;
+using Paprika.Db.Memory;
 using Paprika.Utils;
 using static Paprika.Tests.Values;
 

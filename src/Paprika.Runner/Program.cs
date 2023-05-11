@@ -6,6 +6,7 @@ using HdrHistogram;
 using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Db;
+using Paprika.Db.Memory;
 
 [assembly: ExcludeFromCodeCoverage]
 

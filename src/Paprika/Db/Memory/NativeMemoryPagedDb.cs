@@ -1,9 +1,9 @@
 ﻿using System.Runtime.InteropServices;
 using Paprika.Data;
 
-namespace Paprika.Db;
+namespace Paprika.Db.Memory;
 
-public unsafe class NativeMemoryPagedDb : PagedDb
+public unsafe class NativeMemoryPagedDb : PointerPagedDb
 {
     private readonly void* _ptr;
 

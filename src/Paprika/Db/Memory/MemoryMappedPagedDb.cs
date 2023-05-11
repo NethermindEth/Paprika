@@ -1,9 +1,9 @@
 ﻿using System.IO.MemoryMappedFiles;
 using Paprika.Data;
 
-namespace Paprika.Db;
+namespace Paprika.Db.Memory;
 
-public unsafe class MemoryMappedPagedDb : PagedDb
+public unsafe class MemoryMappedPagedDb : PointerPagedDb
 {
     /// <summary>
     /// The only option is random access. As Paprika jumps over the file, any prefetching is futile.

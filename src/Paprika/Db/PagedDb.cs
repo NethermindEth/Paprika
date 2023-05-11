@@ -1,6 +1,5 @@
 ﻿using System.Buffers.Binary;
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Nethermind.Int256;
 using Paprika.Crypto;
@@ -85,7 +84,6 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
-    protected abstract void* Ptr { get; }
 
     public double TotalUsedPages => ((double)(int)Root.Data.NextFreePage) / _maxPage;
 
@@ -93,29 +91,16 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
 
     private RootPage Root => _roots[_lastRoot % _historyDepth];
 
-    public Page GetAt(DbAddress address)
-    {
-        Debug.Assert(address.IsValidPageAddress, "The address page is invalid and breaches max page count");
-
-        // Long here is required! Otherwise int overflow will turn it to negative value!
-        // ReSharper disable once SuggestVarOrType_BuiltInTypes
-        long offset = ((long)(int)address) * Page.PageSize;
-        return new Page((byte*)Ptr + offset);
-    }
-
-    private DbAddress GetAddress(in Page page)
-    {
-        return DbAddress.Page((uint)(Unsafe
-            .ByteOffset(ref Unsafe.AsRef<byte>(Ptr), ref Unsafe.AsRef<byte>(page.Raw.ToPointer()))
-            .ToInt64() / Page.PageSize));
-    }
-
     public abstract void Dispose();
 
     /// <summary>
     /// Flushes all the mapped pages.
     /// </summary>
     protected abstract void FlushAllPages();
+
+    public abstract Page GetAt(DbAddress address);
+
+    protected abstract DbAddress GetAddress(in Page page);
 
     /// <summary>
     /// Begins a batch representing the next block.
@@ -302,7 +287,8 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
 
         private readonly BatchMetrics _metrics;
 
-        public Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx) : base(root.Header.BatchId)
+        public Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx) : base(
+            root.Header.BatchId)
         {
             _db = db;
             _root = root;
