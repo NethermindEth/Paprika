@@ -41,7 +41,7 @@ public class FixedMapBenchmarks
         Span<byte> key = stackalloc byte[4];
 
         int count = 0;
-        
+
         // fill 
         for (int i = 0; i < _to; i++)
         {
@@ -77,7 +77,7 @@ public class FixedMapBenchmarks
 
         return result;
     }
-    
+
     [Benchmark]
     public int Read_nonexistent_keys()
     {
