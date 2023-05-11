@@ -31,7 +31,7 @@ public readonly unsafe struct RootPage : IPage
         /// <summary>
         /// How big is the fan out for the root.
         /// </summary>
-        private const int AccountPageFanOut = 256;
+        private const int AccountPageFanOut = 16;
 
         /// <summary>
         /// The number of nibbles that are "consumed" on the root level.
@@ -97,8 +97,7 @@ public readonly unsafe struct RootPage : IPage
 
     public static ref DbAddress FindAccountPage(Span<DbAddress> accountPages, in Keccak key)
     {
-        var index = FanOut256Page.FirstTwoNibbles(NibblePath.FromKey(key));
-        return ref accountPages[index];
+        return ref accountPages[NibblePath.FromKey(key).FirstNibble];
     }
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver)
@@ -107,7 +106,7 @@ public readonly unsafe struct RootPage : IPage
         {
             if (dataAddr.IsNull == false)
             {
-                var data = new FanOut256Page(resolver.GetAt(dataAddr));
+                var data = new DataPage(resolver.GetAt(dataAddr));
                 visitor.On(data, dataAddr);
             }
         }

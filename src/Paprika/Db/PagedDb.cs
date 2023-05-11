@@ -253,7 +253,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             return TryGetPage(key, out var page) ? page.GetStorage(GetPath(key), address, this) : default;
         }
 
-        private bool TryGetPage(Keccak key, out FanOut256Page page)
+        private bool TryGetPage(Keccak key, out DataPage page)
         {
             if (_disposed)
                 throw new ObjectDisposedException("The readonly batch has already been disposed");
@@ -265,7 +265,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
                 return false;
             }
 
-            page = new FanOut256Page(GetAt(addr));
+            page = new DataPage(GetAt(addr));
             return true;
         }
 
@@ -318,7 +318,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         public Account GetAccount(in Keccak key) =>
             TryGetPageNoAlloc(key, out var page) ? page.GetAccount(GetPath(key), this) : default;
 
-        private bool TryGetPageNoAlloc(in Keccak key, out FanOut256Page page)
+        private bool TryGetPageNoAlloc(in Keccak key, out DataPage page)
         {
             CheckDisposed();
 
@@ -330,7 +330,7 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
                 return false;
             }
 
-            page = new FanOut256Page(_db.GetAt(addr));
+            page = new DataPage(_db.GetAt(addr));
             return true;
         }
 
@@ -351,13 +351,13 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             addr = _db.GetAddress(updated);
         }
 
-        private ref DbAddress TryGetPageAlloc(in Keccak key, out FanOut256Page page)
+        private ref DbAddress TryGetPageAlloc(in Keccak key, out DataPage page)
         {
             CheckDisposed();
 
             ref var addr = ref RootPage.FindAccountPage(_root.Data.AccountPages, key);
             var p = addr.IsNull ? GetNewPage(out addr, true) : GetAt(addr);
-            page = new FanOut256Page(p);
+            page = new DataPage(p);
 
             return ref addr;
         }
