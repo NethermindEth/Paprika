@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Db.PageManagers;
 
 namespace Paprika.Db;
 
@@ -47,7 +48,7 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
     /// <param name="historyDepth">The depth history represent how many blocks should be able to be restored from the past. Effectively,
     ///     a reorg depth. At least 2 are required</param>
     /// <param name="reporter"></param>
-    public PagedDb(IPageManager manager, byte historyDepth, Action<IBatchMetrics>? reporter)
+    private PagedDb(IPageManager manager, byte historyDepth, Action<IBatchMetrics>? reporter)
     {
         if (historyDepth < MinHistoryDepth)
             throw new ArgumentException($"{nameof(historyDepth)} should be bigger than {MinHistoryDepth}");
@@ -62,7 +63,14 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
         RootInit();
     }
 
-    void RootInit()
+    public static PagedDb NativeMemoryDb(ulong size, byte historyDepth = 2, Action<IBatchMetrics>? reporter = null) =>
+        new(new NativeMemoryPageManager(size), historyDepth, reporter);
+
+    public static PagedDb MemoryMappedDb(ulong size, byte historyDepth, string directory,
+        Action<IBatchMetrics>? reporter = null) =>
+        new(new MemoryMappedPageManager(size, historyDepth, directory), historyDepth, reporter);
+
+    private void RootInit()
     {
         // create all root pages for the history depth
         for (uint i = 0; i < _historyDepth; i++)
@@ -86,7 +94,7 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
-    public double ActualMegabytesOnDisk => (double)(int)Root.Data.NextFreePage * Page.PageSize / 1024 / 1024;
+    public double Megabytes => (double)(int)Root.Data.NextFreePage * Page.PageSize / 1024 / 1024;
 
     private RootPage Root => _roots[_lastRoot % _historyDepth];
 

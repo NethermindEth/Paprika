@@ -1,7 +1,6 @@
 ﻿using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Db;
-using Paprika.Db.Memory;
 using Paprika.Utils;
 using static Paprika.Tests.Values;
 
@@ -12,11 +11,11 @@ public class PrinterTests : BasePageTests
     [Test]
     public void Test()
     {
-        const int size = 1 * 1024 * 1024;
+        const ulong size = 1 * 1024 * 1024;
         const int blocks = 3;
-        const int maxReorgDepth = 2;
+        const byte maxReorgDepth = 2;
 
-        using var db = new NativeMemoryPageManager(size);
+        using var db = PagedDb.NativeMemoryDb(size, maxReorgDepth);
 
         for (int i = 0; i < blocks; i++)
         {

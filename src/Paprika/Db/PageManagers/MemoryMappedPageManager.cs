@@ -1,7 +1,7 @@
 ﻿using System.IO.MemoryMappedFiles;
 using Paprika.Data;
 
-namespace Paprika.Db.Memory;
+namespace Paprika.Db.PageManagers;
 
 public unsafe class MemoryMappedPageManager : PointerPageManager
 {

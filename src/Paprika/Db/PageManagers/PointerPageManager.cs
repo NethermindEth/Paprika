@@ -2,7 +2,7 @@
 using System.Runtime.CompilerServices;
 using Paprika.Data;
 
-namespace Paprika.Db.Memory;
+namespace Paprika.Db.PageManagers;
 
 public abstract unsafe class PointerPageManager : IPageManager
 {
