@@ -1,5 +1,4 @@
 ﻿using System.Buffers.Binary;
-using System.Diagnostics;
 using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
@@ -23,7 +22,7 @@ public class DbTests
     {
         const int max = 2;
 
-        using var db = new NativeMemoryPagedDb(MB, 2);
+        using var db = new NativeMemoryPageManager(MB);
 
         Span<byte> span = stackalloc byte[Keccak.Size];
 
@@ -64,7 +63,7 @@ public class DbTests
     [Test]
     public void Reorganization_jump_to_given_block_hash()
     {
-        using var db = new NativeMemoryPagedDb(SmallDb, 2);
+        using var db = new NativeMemoryPageManager(SmallDb);
 
         var account0 = new Account(Balance0, Nonce0);
         var account1 = new Account(Balance1, Nonce1);
@@ -109,7 +108,7 @@ public class DbTests
     [Test]
     public void Reorganization_block_not_found()
     {
-        using var db = new NativeMemoryPagedDb(SmallDb, 2);
+        using var db = new NativeMemoryPageManager(SmallDb);
 
         var account0 = new Account(Balance0, Nonce0);
 
@@ -135,10 +134,7 @@ public class DbTests
     {
         const int size = MB64;
 
-        using var db = new NativeMemoryPagedDb(size, 2, metrics =>
-        {
-            Debugger.Break();
-        });
+        using var db = new NativeMemoryPageManager(size);
 
         for (var i = 0; i < blockCount; i++)
         {
@@ -169,7 +165,7 @@ public class DbTests
         const int blocksPostRead = 10_000;
         UInt256 start = 13;
 
-        using var db = new NativeMemoryPagedDb(size, 2);
+        using var db = new NativeMemoryPageManager(size);
 
         // write first value
         using (var block = db.BeginNextBlock())
@@ -225,7 +221,7 @@ public class DbTests
     public void State_and_storage()
     {
         const int size = MB64;
-        using var db = new NativeMemoryPagedDb(size, 2);
+        using var db = new NativeMemoryPageManager(size);
 
         const int count = 100000;
 

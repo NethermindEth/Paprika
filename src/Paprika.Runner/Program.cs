@@ -75,8 +75,8 @@ public static class Program
         }
 
         PagedDb db = PersistentDb
-            ? new MemoryMappedPagedDb(DbFileSize, MaxReorgDepth, dataPath, OnMetrics)
-            : new NativeMemoryPagedDb(DbFileSize, MaxReorgDepth, OnMetrics);
+            ? new MemoryMappedPageManager(DbFileSize, MaxReorgDepth, dataPath)
+            : new NativeMemoryPageManager(DbFileSize);
 
         var random = PrepareStableRandomSource();
 

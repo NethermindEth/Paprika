@@ -4,17 +4,21 @@ using Paprika.Data;
 
 namespace Paprika.Db.Memory;
 
-public abstract unsafe class PointerPagedDb : PagedDb
+public abstract unsafe class PointerPageManager : IPageManager
 {
-    protected PointerPagedDb(ulong size, byte historyDepth, Action<IBatchMetrics>? reporter)
-        : base(size, historyDepth, reporter)
-    {
-    }
+    public int MaxPage { get; }
+
+    protected PointerPageManager(ulong size) => MaxPage = (int)(size / Page.PageSize);
 
     protected abstract void* Ptr { get; }
 
-    public override Page GetAt(DbAddress address)
+    public Page GetAt(DbAddress address)
     {
+        if (address.Raw >= MaxPage)
+        {
+            throw new IndexOutOfRangeException("The database breached its size! The returned page is invalid");
+        }
+
         Debug.Assert(address.IsValidPageAddress, "The address page is invalid and breaches max page count");
 
         // Long here is required! Otherwise int overflow will turn it to negative value!
@@ -23,10 +27,15 @@ public abstract unsafe class PointerPagedDb : PagedDb
         return new Page((byte*)Ptr + offset);
     }
 
-    protected override DbAddress GetAddress(in Page page)
+    public DbAddress GetAddress(in Page page)
     {
         return DbAddress.Page((uint)(Unsafe
             .ByteOffset(ref Unsafe.AsRef<byte>(Ptr), ref Unsafe.AsRef<byte>(page.Raw.ToPointer()))
             .ToInt64() / Page.PageSize));
     }
+
+    public abstract void FlushAllPages();
+    public abstract void FlushRootPage(in Page rootPage);
+
+    public abstract void Dispose();
 }

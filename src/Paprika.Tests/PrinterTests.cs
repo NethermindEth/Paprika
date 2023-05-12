@@ -16,7 +16,7 @@ public class PrinterTests : BasePageTests
         const int blocks = 3;
         const int maxReorgDepth = 2;
 
-        using var db = new NativeMemoryPagedDb(size, maxReorgDepth);
+        using var db = new NativeMemoryPageManager(size);
 
         for (int i = 0; i < blocks; i++)
         {
