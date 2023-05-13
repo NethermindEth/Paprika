@@ -2,6 +2,7 @@
 using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Data.Map;
 using Paprika.Db;
 
 namespace Paprika.Tests;
@@ -27,18 +28,18 @@ public class FixedMapTests
         Span<byte> span = stackalloc byte[FixedMap.MinSize];
         var map = new FixedMap(span);
 
-        map.SetAssert(FixedMap.Key.Account(Key0), Data0);
+        map.SetAssert(Key.Account(Key0), Data0);
 
-        map.GetAssert(FixedMap.Key.Account(Key0), Data0);
+        map.GetAssert(Key.Account(Key0), Data0);
 
-        map.Delete(FixedMap.Key.Account(Key0)).Should().BeTrue("Should find and delete entry");
-        map.TryGet(FixedMap.Key.Account(Key0), out _).Should().BeFalse("The entry shall no longer exist");
+        map.Delete(Key.Account(Key0)).Should().BeTrue("Should find and delete entry");
+        map.TryGet(Key.Account(Key0), out _).Should().BeFalse("The entry shall no longer exist");
 
         // should be ready to accept some data again
 
-        map.TrySet(FixedMap.Key.Account(Key1), Data1).Should().BeTrue("Should have memory after previous delete");
+        map.TrySet(Key.Account(Key1), Data1).Should().BeTrue("Should have memory after previous delete");
 
-        map.GetAssert(FixedMap.Key.Account(Key1), Data1);
+        map.GetAssert(Key.Account(Key1), Data1);
     }
 
     [TestCase(0, 10)]
@@ -53,8 +54,8 @@ public class FixedMapTests
         var path0 = Key0.SliceFrom(from).SliceTo(length);
         var path1 = Key1.SliceFrom(from).SliceTo(length);
 
-        var key0 = FixedMap.Key.Account(path0);
-        var key1 = FixedMap.Key.Account(path1);
+        var key0 = Key.Account(path0);
+        var key1 = Key.Account(path1);
 
         map.SetAssert(key0, Data0);
         map.SetAssert(key1, Data1);
@@ -82,21 +83,21 @@ public class FixedMapTests
         Span<byte> span = stackalloc byte[40];
         var map = new FixedMap(span);
 
-        map.TrySet(FixedMap.Key.Account(Key0), Data0).Should().BeTrue();
-        map.TrySet(FixedMap.Key.Account(Key1), Data1).Should().BeTrue();
+        map.TrySet(Key.Account(Key0), Data0).Should().BeTrue();
+        map.TrySet(Key.Account(Key1), Data1).Should().BeTrue();
 
-        map.Delete(FixedMap.Key.Account(Key0)).Should().BeTrue();
+        map.Delete(Key.Account(Key0)).Should().BeTrue();
 
-        map.TrySet(FixedMap.Key.Account(Key2), Data2).Should()
+        map.TrySet(Key.Account(Key2), Data2).Should()
             .BeTrue("Should retrieve space by running internally the defragmentation");
 
         // should contains no key0, key1 and key2 now
-        map.TryGet(FixedMap.Key.Account(Key0), out var retrieved).Should().BeFalse();
+        map.TryGet(Key.Account(Key0), out var retrieved).Should().BeFalse();
 
-        map.TryGet(FixedMap.Key.Account(Key1), out retrieved).Should().BeTrue();
+        map.TryGet(Key.Account(Key1), out retrieved).Should().BeTrue();
         Data1.SequenceEqual(retrieved).Should().BeTrue();
 
-        map.TryGet(FixedMap.Key.Account(Key2), out retrieved).Should().BeTrue();
+        map.TryGet(Key.Account(Key2), out retrieved).Should().BeTrue();
         Data2.SequenceEqual(retrieved).Should().BeTrue();
     }
 
@@ -107,10 +108,10 @@ public class FixedMapTests
         Span<byte> span = stackalloc byte[24];
         var map = new FixedMap(span);
 
-        map.SetAssert(FixedMap.Key.Account(Key1), Data1);
-        map.SetAssert(FixedMap.Key.Account(Key1), Data2);
+        map.SetAssert(Key.Account(Key1), Data1);
+        map.SetAssert(Key.Account(Key1), Data2);
 
-        map.GetAssert(FixedMap.Key.Account(Key1), Data2);
+        map.GetAssert(Key.Account(Key1), Data2);
     }
 
     [Test]
@@ -120,10 +121,10 @@ public class FixedMapTests
         Span<byte> span = stackalloc byte[24];
         var map = new FixedMap(span);
 
-        map.SetAssert(FixedMap.Key.Account(Key0), Data0);
-        map.SetAssert(FixedMap.Key.Account(Key0), Data2);
+        map.SetAssert(Key.Account(Key0), Data0);
+        map.SetAssert(Key.Account(Key0), Data2);
 
-        map.GetAssert(FixedMap.Key.Account(Key0), Data2);
+        map.GetAssert(Key.Account(Key0), Data2);
     }
 
     [Test]
@@ -132,15 +133,15 @@ public class FixedMapTests
         Span<byte> span = stackalloc byte[512];
         var map = new FixedMap(span);
 
-        map.SetAssert(FixedMap.Key.Account(Key0), Data0);
-        map.SetAssert(FixedMap.Key.StorageCell(Key0, StorageCell0), Data1);
-        map.SetAssert(FixedMap.Key.StorageCell(Key0, StorageCell1), Data2);
-        map.SetAssert(FixedMap.Key.StorageCell(Key0, StorageCell2), Data3);
+        map.SetAssert(Key.Account(Key0), Data0);
+        map.SetAssert(Key.StorageCell(Key0, StorageCell0), Data1);
+        map.SetAssert(Key.StorageCell(Key0, StorageCell1), Data2);
+        map.SetAssert(Key.StorageCell(Key0, StorageCell2), Data3);
 
-        map.GetAssert(FixedMap.Key.Account(Key0), Data0);
-        map.GetAssert(FixedMap.Key.StorageCell(Key0, StorageCell0), Data1);
-        map.GetAssert(FixedMap.Key.StorageCell(Key0, StorageCell1), Data2);
-        map.GetAssert(FixedMap.Key.StorageCell(Key0, StorageCell2), Data3);
+        map.GetAssert(Key.Account(Key0), Data0);
+        map.GetAssert(Key.StorageCell(Key0, StorageCell0), Data1);
+        map.GetAssert(Key.StorageCell(Key0, StorageCell1), Data2);
+        map.GetAssert(Key.StorageCell(Key0, StorageCell2), Data3);
     }
 
     [Test]
@@ -149,22 +150,22 @@ public class FixedMapTests
         Span<byte> span = stackalloc byte[512];
         var map = new FixedMap(span);
 
-        map.SetAssert(FixedMap.Key.StorageCell(Key0, StorageCell0), Data1);
-        map.SetAssert(FixedMap.Key.StorageCell(Key1, StorageCell0), Data2);
+        map.SetAssert(Key.StorageCell(Key0, StorageCell0), Data1);
+        map.SetAssert(Key.StorageCell(Key1, StorageCell0), Data2);
 
-        map.GetAssert(FixedMap.Key.StorageCell(Key0, StorageCell0), Data1);
-        map.GetAssert(FixedMap.Key.StorageCell(Key1, StorageCell0), Data2);
+        map.GetAssert(Key.StorageCell(Key0, StorageCell0), Data1);
+        map.GetAssert(Key.StorageCell(Key1, StorageCell0), Data2);
     }
 }
 
 file static class FixedMapTestExtensions
 {
-    public static void SetAssert(this FixedMap map, in FixedMap.Key key, ReadOnlySpan<byte> data)
+    public static void SetAssert(this FixedMap map, in Key key, ReadOnlySpan<byte> data)
     {
         map.TrySet(key, data).Should().BeTrue("TrySet should succeed");
     }
 
-    public static void GetAssert(this FixedMap map, in FixedMap.Key key, ReadOnlySpan<byte> expected)
+    public static void GetAssert(this FixedMap map, in Key key, ReadOnlySpan<byte> expected)
     {
         map.TryGet(key, out var actual).Should().BeTrue();
         actual.SequenceEqual(expected).Should().BeTrue("Actual data should equal expected");

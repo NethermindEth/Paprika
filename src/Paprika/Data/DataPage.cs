@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paprika.Data.Map;
 using Paprika.Db;
 
 namespace Paprika.Data;
@@ -152,7 +153,7 @@ public readonly unsafe struct DataPage : IDataPage
         return Set(ctx);
     }
 
-    public bool TryGet(FixedMap.Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
+    public bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
         if (key.Path.Length > 0)
         {
@@ -174,7 +175,7 @@ public readonly unsafe struct DataPage : IDataPage
         if (TryFindExistingStorageTreeForCellOf(map, key, out var storageTreeAddress))
         {
             var storageTree = new DataPage(batch.GetAt(storageTreeAddress));
-            var inTreeAddress = FixedMap.Key.StorageTreeStorageCell(key);
+            var inTreeAddress = Key.StorageTreeStorageCell(key);
 
             return storageTree.TryGet(inTreeAddress, batch, out result);
         }
@@ -189,16 +190,16 @@ public readonly unsafe struct DataPage : IDataPage
         return false;
     }
 
-    private static bool TryFindExistingStorageTreeForCellOf(in FixedMap map, in FixedMap.Key key,
+    private static bool TryFindExistingStorageTreeForCellOf(in FixedMap map, in Key key,
         out DbAddress storageTreeAddress)
     {
-        if (key.Type != FixedMap.DataType.StorageCell)
+        if (key.Type != DataType.StorageCell)
         {
             storageTreeAddress = default;
             return false;
         }
 
-        var storageTreeRootKey = FixedMap.Key.StorageTreeRootPageAddress(key.Path);
+        var storageTreeRootKey = Key.StorageTreeRootPageAddress(key.Path);
         if (map.TryGet(storageTreeRootKey, out var rawPageAddress))
         {
             storageTreeAddress = DbAddress.Read(rawPageAddress);
@@ -230,7 +231,7 @@ public readonly unsafe struct DataPage : IDataPage
         // find account first
         foreach (var item in map.EnumerateNibble(nibble))
         {
-            if (item.Type == FixedMap.DataType.Account)
+            if (item.Type == DataType.Account)
             {
                 accountPathBytes = item.Key.Path.WriteTo(accountPathBytes);
                 break;
@@ -245,10 +246,10 @@ public readonly unsafe struct DataPage : IDataPage
 
         foreach (var item in map.EnumerateNibble(nibble))
         {
-            if (item.Type == FixedMap.DataType.StorageCell && item.Key.Path.Equals(accountPath))
+            if (item.Type == DataType.StorageCell && item.Key.Path.Equals(accountPath))
             {
                 // it's ok to use item.Key, the enumerator does not changes the additional key bytes
-                var key = FixedMap.Key.StorageTreeStorageCell(item.Key);
+                var key = Key.StorageTreeStorageCell(item.Key);
 
                 Serializer.ReadStorageValue(item.RawData, out var value);
 
@@ -263,7 +264,7 @@ public readonly unsafe struct DataPage : IDataPage
         var storageTreeAddress = ctx.Batch.GetAddress(dataPage.AsPage());
         Span<byte> span = stackalloc byte[4];
         storageTreeAddress.Write(span);
-        if (map.TrySet(FixedMap.Key.StorageTreeRootPageAddress(accountPath), span) == false)
+        if (map.TrySet(Key.StorageTreeRootPageAddress(accountPath), span) == false)
         {
             throw new Exception("Critical error. Map should have been cleaned and ready to accept the write");
         }
@@ -277,7 +278,7 @@ public readonly unsafe struct DataPage : IDataPage
         var storageTree = ctx.Batch.GetAt(storageTreeRootPageAddress);
 
         // build a new key, based just on the storage key as the root is addressed by the account address
-        var inTreeAddress = FixedMap.Key.StorageTreeStorageCell(ctx.Key);
+        var inTreeAddress = Key.StorageTreeStorageCell(ctx.Key);
 
         var updatedStorageTree =
             new DataPage(storageTree).Set(new SetContext(inTreeAddress, ctx.Data, ctx.Batch));
@@ -287,7 +288,7 @@ public readonly unsafe struct DataPage : IDataPage
             // the tree was COWed, need to write back in place
             Span<byte> update = stackalloc byte[4];
             ctx.Batch.GetAddress(updatedStorageTree).Write(update);
-            if (map.TrySet(FixedMap.Key.StorageTreeRootPageAddress(ctx.Key.Path), update) == false)
+            if (map.TrySet(Key.StorageTreeRootPageAddress(ctx.Key.Path), update) == false)
             {
                 throw new Exception("Could not update the storage root. " +
                                     "It should always be possible as tge previous one is existing");

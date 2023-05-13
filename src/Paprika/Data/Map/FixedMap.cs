@@ -6,7 +6,7 @@ using Paprika.Crypto;
 using Paprika.Db;
 using Paprika.Utils;
 
-namespace Paprika.Data;
+namespace Paprika.Data.Map;
 
 /// <summary>
 /// Represents an in-page map, responsible for storing items and information related to them.
@@ -45,138 +45,6 @@ public readonly ref struct FixedMap
         _header = ref Unsafe.As<byte, Header>(ref _raw[0]);
         _data = buffer.Slice(Header.Size);
         _slots = MemoryMarshal.Cast<byte, Slot>(_data);
-    }
-
-    /// <summary>
-    /// Represents the type of data stored in the map.
-    /// </summary>
-    public enum DataType : byte
-    {
-        /// <summary>
-        /// [key, 0]-> account (balance, nonce)
-        /// </summary>
-        Account = 0,
-
-        /// <summary>
-        /// [key, 1]-> codeHash
-        /// </summary>
-        CodeHash = 1,
-
-        /// <summary>
-        /// [key, 2]-> storageRootHash
-        /// </summary>
-        StorageRootHash = 2,
-
-        /// <summary>
-        /// [key, 3]-> [index][value],
-        /// add to the key and use first 32 bytes of data as key
-        /// </summary>
-        StorageCell = 3,
-
-        /// <summary>
-        /// [key, 4]-> the DbAddress of the root page of the storage trie,
-        /// </summary>
-        StorageTreeRootPageAddress = 4,
-
-        /// <summary>
-        /// [storageCellIndex, 5]-> the StorageCell index, without the prefix of the account
-        /// </summary>
-        StorageTreeStorageCell = 5,
-
-        /// <summary>
-        /// [pathToNode, 6]-> the node hash. Please, mind the fact that storage trie can use this internally as well,
-        /// with no need of the path.
-        /// </summary>
-        KeccakOrRlp = 6,
-
-        Deleted = 7,
-        // one bit more is possible as delete is now a data type
-    }
-
-    /// <summary>
-    /// Represents the key of the map.
-    /// </summary>
-    public readonly ref struct Key
-    {
-        public readonly NibblePath Path;
-        public readonly DataType Type;
-        public readonly ReadOnlySpan<byte> AdditionalKey;
-
-        private Key(NibblePath path, DataType type, ReadOnlySpan<byte> additionalKey)
-        {
-            Path = path;
-            Type = type;
-            AdditionalKey = additionalKey;
-        }
-
-        /// <summary>
-        /// To be used only by FixedMap internally. Builds the raw key
-        /// </summary>
-        public static Key Raw(NibblePath path, DataType type) =>
-            new(path, type, ReadOnlySpan<byte>.Empty);
-
-        /// <summary>
-        /// Builds the key for <see cref="DataType.Account"/>.
-        /// </summary>
-        public static Key Account(NibblePath path) => new(path, DataType.Account, ReadOnlySpan<byte>.Empty);
-
-        /// <summary>
-        /// Builds the key for <see cref="DataType.CodeHash"/>.
-        /// </summary>
-        public static Key CodeHash(NibblePath path) => new(path, DataType.CodeHash, ReadOnlySpan<byte>.Empty);
-
-        /// <summary>
-        /// Builds the key for <see cref="DataType.StorageRootHash"/>.
-        /// </summary>
-        public static Key StorageRootHash(NibblePath path) =>
-            new(path, DataType.StorageRootHash, ReadOnlySpan<byte>.Empty);
-
-        /// <summary>
-        /// Builds the key for <see cref="DataType.StorageCell"/>.
-        /// </summary>
-        /// <remarks>
-        /// <paramref name="keccak"/> must be passed by ref, otherwise it will blow up the span!
-        /// </remarks>
-        public static Key StorageCell(NibblePath path, in Keccak keccak) =>
-            new(path, DataType.StorageCell, keccak.Span);
-
-        /// <summary>
-        /// Builds the key for <see cref="DataType.StorageCell"/>.
-        /// </summary>
-        /// <remarks>
-        /// <paramref name="keccak"/> must be passed by ref, otherwise it will blow up the span!
-        /// </remarks>
-        public static Key StorageCell(NibblePath path, ReadOnlySpan<byte> keccak) =>
-            new(path, DataType.StorageCell, keccak);
-
-        /// <summary>
-        /// Builds the key identifying the value of the <see cref="DbAddress"/> for the root of the storage tree.
-        /// </summary>
-        public static Key StorageTreeRootPageAddress(NibblePath path) =>
-            new(path, DataType.StorageTreeRootPageAddress, ReadOnlySpan<byte>.Empty);
-
-        /// <summary>
-        /// Treat the additional key as the key and drop the additional notion.
-        /// </summary>
-        public static Key StorageTreeStorageCell(Key originalKey) =>
-            new(NibblePath.FromKey(originalKey.AdditionalKey), DataType.StorageTreeStorageCell,
-                ReadOnlySpan<byte>.Empty);
-
-        /// <summary>
-        /// Builds the key responsible for storing the encoded RLP or Keccak (if len(RLP) >= 32) for
-        /// a node with the given <see cref="NibblePath"/>.
-        /// </summary>
-        public static Key KeccakOrRlp(NibblePath path) =>
-            new(path, DataType.KeccakOrRlp, ReadOnlySpan<byte>.Empty);
-
-        public Key SliceFrom(int nibbles) => new(Path.SliceFrom(nibbles), Type, AdditionalKey);
-
-        public override string ToString()
-        {
-            return $"{nameof(Path)}: {Path.ToString()}, " +
-                   $"{nameof(Type)}: {Type}, " +
-                   $"{nameof(AdditionalKey)}: {AdditionalKey.ToHexString(false)}";
-        }
     }
 
     public bool TrySet(in Key key, ReadOnlySpan<byte> data)

@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paprika.Data.Map;
 using Paprika.Db;
 
 namespace Paprika.Data;
@@ -75,7 +76,7 @@ public readonly unsafe struct FanOut256Page : IDataPage
 
     private const int NibbleCount = 2;
 
-    public bool TryGet(FixedMap.Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
+    public bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
         var prefix = FirstTwoNibbles(key.Path);
 

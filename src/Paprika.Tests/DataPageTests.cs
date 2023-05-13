@@ -4,6 +4,7 @@ using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Data.Map;
 using Paprika.Db;
 using static Paprika.Tests.Values;
 
@@ -208,7 +209,7 @@ public class DataPageTests : BasePageTests
         const int count = 200;
 
         // set the empty path which may happen on var-length scenarios
-        var keccakKey = FixedMap.Key.KeccakOrRlp(NibblePath.Empty);
+        var keccakKey = Key.KeccakOrRlp(NibblePath.Empty);
         dataPage = dataPage.Set(new SetContext(keccakKey, Span<byte>.Empty, batch)).Cast<DataPage>();
 
         for (uint i = 0; i < count; i++)

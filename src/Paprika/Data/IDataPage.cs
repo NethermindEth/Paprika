@@ -1,5 +1,6 @@
 ﻿using Nethermind.Int256;
 using Paprika.Crypto;
+using Paprika.Data.Map;
 using Paprika.Db;
 
 namespace Paprika.Data;
@@ -9,7 +10,7 @@ namespace Paprika.Data;
 /// </summary>
 public interface IDataPage : IPage
 {
-    bool TryGet(FixedMap.Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result);
+    bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result);
 
     Page Set(in SetContext ctx);
 }
@@ -22,7 +23,7 @@ public static class DataPageExtensions
     public static Account GetAccount<TPage>(this TPage page, NibblePath path, IReadOnlyBatchContext ctx)
         where TPage : struct, IDataPage
     {
-        var key = FixedMap.Key.Account(path);
+        var key = Key.Account(path);
 
         if (page.TryGet(key, ctx, out var result))
         {
@@ -36,7 +37,7 @@ public static class DataPageExtensions
     public static Page SetAccount<TPage>(this TPage page, NibblePath path, in Account account, IBatchContext batch)
         where TPage : struct, IDataPage
     {
-        var key = FixedMap.Key.Account(path);
+        var key = Key.Account(path);
 
         Span<byte> payload = stackalloc byte[Serializer.BalanceNonceMaxByteCount];
         payload = Serializer.WriteAccount(payload, account.Balance, account.Nonce);
@@ -48,7 +49,7 @@ public static class DataPageExtensions
         IReadOnlyBatchContext ctx)
         where TPage : struct, IDataPage
     {
-        var key = FixedMap.Key.StorageCell(path, address);
+        var key = Key.StorageCell(path, address);
 
         if (page.TryGet(key, ctx, out var result))
         {
@@ -63,7 +64,7 @@ public static class DataPageExtensions
         IBatchContext batch)
         where TPage : struct, IDataPage
     {
-        var key = FixedMap.Key.StorageCell(path, address);
+        var key = Key.StorageCell(path, address);
 
         Span<byte> payload = stackalloc byte[Serializer.StorageValueMaxByteCount];
         payload = Serializer.WriteStorageValue(payload, value);
