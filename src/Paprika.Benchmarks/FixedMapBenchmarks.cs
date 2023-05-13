@@ -1,6 +1,7 @@
 ﻿using System.Buffers.Binary;
 using BenchmarkDotNet.Attributes;
 using Paprika.Data;
+using Paprika.Data.Map;
 using Paprika.Db;
 namespace Paprika.Benchmarks;
 
@@ -22,7 +23,7 @@ public class FixedMapBenchmarks
         {
             BinaryPrimitives.WriteInt32LittleEndian(key, _to);
             var path = NibblePath.FromKey(key);
-            if (map.TrySet(FixedMap.Key.Account(path), key) == false)
+            if (map.TrySet(Key.Account(path), key) == false)
             {
                 // filled
                 break;
@@ -47,7 +48,7 @@ public class FixedMapBenchmarks
         {
             BinaryPrimitives.WriteInt32LittleEndian(key, i);
             var path = NibblePath.FromKey(key);
-            if (map.TrySet(FixedMap.Key.Account(path), key))
+            if (map.TrySet(Key.Account(path), key))
             {
                 count++;
             }
@@ -69,7 +70,7 @@ public class FixedMapBenchmarks
         {
             BinaryPrimitives.WriteInt32LittleEndian(key, i);
             var path = NibblePath.FromKey(key);
-            if (map.TryGet(FixedMap.Key.Account(path), out var data))
+            if (map.TryGet(Key.Account(path), out var data))
             {
                 result += data.Length;
             }
@@ -91,7 +92,7 @@ public class FixedMapBenchmarks
         {
             BinaryPrimitives.WriteInt32LittleEndian(key, i);
             var path = NibblePath.FromKey(key);
-            if (map.TryGet(FixedMap.Key.Account(path), out _) == false)
+            if (map.TryGet(Key.Account(path), out _) == false)
             {
                 result += 1;
             }
