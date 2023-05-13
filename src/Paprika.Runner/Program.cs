@@ -13,7 +13,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 100_000 : 20_000;
+    private const int BlockCount = PersistentDb ? 50_000 : 20_000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
@@ -74,8 +74,8 @@ public static class Program
         }
 
         PagedDb db = PersistentDb
-            ? new MemoryMappedPagedDb(DbFileSize, MaxReorgDepth, dataPath, OnMetrics)
-            : new NativeMemoryPagedDb(DbFileSize, MaxReorgDepth, OnMetrics);
+            ? PagedDb.MemoryMappedDb(DbFileSize, MaxReorgDepth, dataPath, OnMetrics)
+            : PagedDb.NativeMemoryDb(DbFileSize, MaxReorgDepth, OnMetrics);
 
         var random = PrepareStableRandomSource();
 
@@ -162,7 +162,7 @@ public static class Program
 
         Console.WriteLine("- through {0} blocks ", BlockCount);
         Console.WriteLine("- generated accounts total number: {0} ", counter);
-        Console.WriteLine("- space used: {0:F2}GB ", db.ActualMegabytesOnDisk / 1024);
+        Console.WriteLine("- space used: {0:F2}GB ", db.Megabytes / 1024);
 
         // reading
         Console.WriteLine();
@@ -233,7 +233,7 @@ public static class Program
             PrintRow(
                 block.ToString(),
                 $"{blocksPerSecond:F1} blocks/s",
-                $"{db.ActualMegabytesOnDisk / 1024:F2}GB",
+                $"{db.Megabytes / 1024:F2}GB",
                 $"{histograms.reused.GetValueAtPercentile(90)}",
                 $"{histograms.allocated.GetValueAtPercentile(90)}",
                 $"{histograms.total.GetValueAtPercentile(90)}");

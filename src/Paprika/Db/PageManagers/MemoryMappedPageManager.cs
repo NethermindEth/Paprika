@@ -1,9 +1,9 @@
 ﻿using System.IO.MemoryMappedFiles;
 using Paprika.Data;
 
-namespace Paprika.Db;
+namespace Paprika.Db.PageManagers;
 
-public unsafe class MemoryMappedPagedDb : PagedDb
+public unsafe class MemoryMappedPageManager : PointerPageManager
 {
     /// <summary>
     /// The only option is random access. As Paprika jumps over the file, any prefetching is futile.
@@ -17,7 +17,7 @@ public unsafe class MemoryMappedPagedDb : PagedDb
     private readonly MemoryMappedViewAccessor _rootsOnly;
     private readonly byte* _ptr;
 
-    public MemoryMappedPagedDb(ulong size, byte historyDepth, string dir, Action<IBatchMetrics>? reporter = null) : base(size, historyDepth, reporter)
+    public MemoryMappedPageManager(ulong size, byte historyDepth, string dir) : base(size)
     {
         Path = System.IO.Path.Combine(dir, "paprika.db");
 
@@ -51,15 +51,13 @@ public unsafe class MemoryMappedPagedDb : PagedDb
         _whole.SafeMemoryMappedViewHandle.AcquirePointer(ref _ptr);
 
         _rootsOnly = _mapped.CreateViewAccessor(0, historyDepth * Page.PageSize);
-
-        RootInit();
     }
 
     public string Path { get; }
 
     protected override void* Ptr => _ptr;
 
-    protected override void FlushAllPages()
+    public override void FlushAllPages()
     {
         // On Windows LMDB does not use FlushViewOfFile + FlushFileBuffers due to some performance gains.
         // At the moment, simplicity of using it wins over a much more complicated than scheduling writes with WriteFile.
@@ -70,7 +68,7 @@ public unsafe class MemoryMappedPagedDb : PagedDb
         _file.Flush(true);
     }
 
-    protected override void FlushRootPage(in Page rootPage)
+    public override void FlushRootPage(in Page rootPage)
     {
         // for now, flush all root pages.
         // Adding LMDB-like flush that works with one page would require a lot of interop

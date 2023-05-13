@@ -1,5 +1,4 @@
 ﻿using System.Buffers.Binary;
-using System.Diagnostics;
 using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
@@ -22,7 +21,7 @@ public class DbTests
     {
         const int max = 2;
 
-        using var db = new NativeMemoryPagedDb(MB, 2);
+        using var db = PagedDb.NativeMemoryDb(MB);
 
         Span<byte> span = stackalloc byte[Keccak.Size];
 
@@ -57,13 +56,13 @@ public class DbTests
             actual.Should().Be(expected);
         }
 
-        Console.WriteLine($"Used memory {db.TotalUsedPages:P}");
+        Console.WriteLine($"Used memory {db.Megabytes:P}");
     }
 
     [Test]
     public void Reorganization_jump_to_given_block_hash()
     {
-        using var db = new NativeMemoryPagedDb(SmallDb, 2);
+        using var db = PagedDb.NativeMemoryDb(SmallDb);
 
         var account0 = new Account(Balance0, Nonce0);
         var account1 = new Account(Balance1, Nonce1);
@@ -108,7 +107,7 @@ public class DbTests
     [Test]
     public void Reorganization_block_not_found()
     {
-        using var db = new NativeMemoryPagedDb(SmallDb, 2);
+        using var db = PagedDb.NativeMemoryDb(SmallDb);
 
         var account0 = new Account(Balance0, Nonce0);
 
@@ -134,10 +133,7 @@ public class DbTests
     {
         const int size = MB64;
 
-        using var db = new NativeMemoryPagedDb(size, 2, metrics =>
-        {
-            Debugger.Break();
-        });
+        using var db = PagedDb.NativeMemoryDb(size);
 
         for (var i = 0; i < blockCount; i++)
         {
@@ -157,7 +153,7 @@ public class DbTests
             }
         }
 
-        Console.WriteLine($"Uses {db.TotalUsedPages:P} pages out of pre-allocated {size / MB}MB od disk. This gives the actual {db.ActualMegabytesOnDisk:F2}MB on disk ");
+        Console.WriteLine($"Uses {db.Megabytes:P}MB out of pre-allocated {size / MB}MB od disk.");
     }
 
     [Test]
@@ -168,7 +164,7 @@ public class DbTests
         const int blocksPostRead = 10_000;
         UInt256 start = 13;
 
-        using var db = new NativeMemoryPagedDb(size, 2);
+        using var db = PagedDb.NativeMemoryDb(size);
 
         // write first value
         using (var block = db.BeginNextBlock())
@@ -197,7 +193,7 @@ public class DbTests
             }
         }
 
-        var snapshot = db.TotalUsedPages;
+        var snapshot = db.Megabytes;
 
         // disable read
         readBatch.Dispose();
@@ -215,16 +211,16 @@ public class DbTests
             }
         }
 
-        db.TotalUsedPages.Should().Be(snapshot, "Database should not grow without read transaction active.");
+        db.Megabytes.Should().Be(snapshot, "Database should not grow without read transaction active.");
 
-        Console.WriteLine($"Uses {db.TotalUsedPages:P} pages out of pre-allocated {size / MB}MB od disk. This gives the actual {db.ActualMegabytesOnDisk:F2}MB on disk ");
+        Console.WriteLine($"Uses {db.Megabytes:P}MB out of pre-allocated {size / MB}MB od disk.");
     }
 
     [Test]
     public void State_and_storage()
     {
         const int size = MB64;
-        using var db = new NativeMemoryPagedDb(size, 2);
+        using var db = PagedDb.NativeMemoryDb(size);
 
         const int count = 100000;
 

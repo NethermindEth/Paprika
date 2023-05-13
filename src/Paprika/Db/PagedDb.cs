@@ -1,10 +1,10 @@
 ﻿using System.Buffers.Binary;
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Db.PageManagers;
 
 namespace Paprika.Db;
 
@@ -14,7 +14,7 @@ namespace Paprika.Db;
 /// <remarks>
 /// Assumes a continuous memory allocation as it provides addressing based on the pointers.
 /// </remarks>
-public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
+public unsafe class PagedDb : IPageResolver, IDb, IDisposable
 {
     /// <summary>
     /// The number of roots kept in the history.
@@ -27,9 +27,9 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
     /// </remarks>
     private const int MinHistoryDepth = 2;
 
+    private readonly IPageManager _manager;
     private readonly byte _historyDepth;
     private readonly Action<IBatchMetrics>? _reporter;
-    private readonly int _maxPage;
     private long _lastRoot;
     private readonly RootPage[] _roots;
 
@@ -44,29 +44,38 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
     /// <summary>
     /// Initializes the paged db.
     /// </summary>
-    /// <param name="size">The size of the database, should be a multiple of <see cref="Page.PageSize"/>.</param>
+    /// <param name="manager">The page manager.</param>
     /// <param name="historyDepth">The depth history represent how many blocks should be able to be restored from the past. Effectively,
     ///     a reorg depth. At least 2 are required</param>
     /// <param name="reporter"></param>
-    protected PagedDb(ulong size, byte historyDepth, Action<IBatchMetrics>? reporter)
+    private PagedDb(IPageManager manager, byte historyDepth, Action<IBatchMetrics>? reporter)
     {
         if (historyDepth < MinHistoryDepth)
             throw new ArgumentException($"{nameof(historyDepth)} should be bigger than {MinHistoryDepth}");
 
+        _manager = manager;
         _historyDepth = historyDepth;
         _reporter = reporter;
-        _maxPage = (int)(size / Page.PageSize);
         _roots = new RootPage[historyDepth];
         _batchCurrent = null;
         _ctx = new Context();
+
+        RootInit();
     }
 
-    protected void RootInit()
+    public static PagedDb NativeMemoryDb(ulong size, byte historyDepth = 2, Action<IBatchMetrics>? reporter = null) =>
+        new(new NativeMemoryPageManager(size), historyDepth, reporter);
+
+    public static PagedDb MemoryMappedDb(ulong size, byte historyDepth, string directory,
+        Action<IBatchMetrics>? reporter = null) =>
+        new(new MemoryMappedPageManager(size, historyDepth, directory), historyDepth, reporter);
+
+    private void RootInit()
     {
         // create all root pages for the history depth
         for (uint i = 0; i < _historyDepth; i++)
         {
-            _roots[i] = new RootPage(GetAt(DbAddress.Page(i)));
+            _roots[i] = new RootPage(_manager.GetAt(DbAddress.Page(i)));
         }
 
         if (_roots[0].Data.NextFreePage < _historyDepth)
@@ -85,37 +94,14 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
-    protected abstract void* Ptr { get; }
-
-    public double TotalUsedPages => ((double)(int)Root.Data.NextFreePage) / _maxPage;
-
-    public double ActualMegabytesOnDisk => (double)(int)Root.Data.NextFreePage * Page.PageSize / 1024 / 1024;
+    public double Megabytes => (double)(int)Root.Data.NextFreePage * Page.PageSize / 1024 / 1024;
 
     private RootPage Root => _roots[_lastRoot % _historyDepth];
 
-    public Page GetAt(DbAddress address)
+    public void Dispose()
     {
-        Debug.Assert(address.IsValidPageAddress, "The address page is invalid and breaches max page count");
-
-        // Long here is required! Otherwise int overflow will turn it to negative value!
-        // ReSharper disable once SuggestVarOrType_BuiltInTypes
-        long offset = ((long)(int)address) * Page.PageSize;
-        return new Page((byte*)Ptr + offset);
+        _manager.Dispose();
     }
-
-    private DbAddress GetAddress(in Page page)
-    {
-        return DbAddress.Page((uint)(Unsafe
-            .ByteOffset(ref Unsafe.AsRef<byte>(Ptr), ref Unsafe.AsRef<byte>(page.Raw.ToPointer()))
-            .ToInt64() / Page.PageSize));
-    }
-
-    public abstract void Dispose();
-
-    /// <summary>
-    /// Flushes all the mapped pages.
-    /// </summary>
-    protected abstract void FlushAllPages();
 
     /// <summary>
     /// Begins a batch representing the next block.
@@ -215,6 +201,10 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
+    private DbAddress GetAddress(in Page page) => _manager.GetAddress(page);
+
+    public Page GetAt(DbAddress address) => _manager.GetAt(address);
+
     private DbAddress SetNewRoot(RootPage root)
     {
         _lastRoot += 1;
@@ -270,7 +260,8 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
         }
 
         public uint BatchId { get; }
-        public Page GetAt(DbAddress address) => _db.GetAt(address);
+
+        public Page GetAt(DbAddress address) => _db._manager.GetAt(address);
     }
 
     class Batch : BatchContextBase, IBatch
@@ -302,7 +293,8 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
 
         private readonly BatchMetrics _metrics;
 
-        public Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx) : base(root.Header.BatchId)
+        public Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx) : base(
+            root.Header.BatchId)
         {
             _db = db;
             _root = root;
@@ -386,14 +378,14 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
 
                 if (options != CommitOptions.DangerNoFlush)
                 {
-                    _db.FlushAllPages();
+                    _db._manager.FlushAllPages();
                 }
 
                 var newRootPage = _db.SetNewRoot(_root);
 
                 if (options == CommitOptions.FlushDataAndRoot)
                 {
-                    _db.FlushRootPage(GetAt(newRootPage));
+                    _db._manager.FlushRootPage(GetAt(newRootPage));
                 }
 
                 // if reporter passed
@@ -430,15 +422,9 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
                 addr = _root.Data.GetNextFreePage();
             }
 
-            if (addr.Raw >= _db._maxPage)
-            {
-                throw new IndexOutOfRangeException("The database breached its size! The returned page is invalid");
-            }
-
             var page = _db.GetAt(addr);
             if (clear)
                 page.Clear();
-
 
             _written.Add(addr);
 
@@ -642,9 +628,6 @@ public abstract unsafe class PagedDb : IPageResolver, IDb, IDisposable
             //Page.Clear();
         }
     }
-
-    // ReSharper disable once UnusedParameter.Global
-    protected abstract void FlushRootPage(in Page rootPage);
 
     private static NibblePath GetPath(in Keccak key)
     {
