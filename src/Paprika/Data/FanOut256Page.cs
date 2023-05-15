@@ -55,6 +55,11 @@ public readonly unsafe struct FanOut256Page : IDataPage
         {
             // no data page, allocate and set
             var page = ctx.Batch.GetNewPage(out address, true);
+
+            page.Header.PageType = PageType.Standard;
+            page.Header.PaprikaVersion = PageHeader.CurrentVersion;
+            page.Header.TreeLevel = (byte)(Header.TreeLevel + 1);
+
             new DataPage(page).Set(ctx.SliceFrom(NibbleCount));
             Data.Buckets[prefix] = address;
         }

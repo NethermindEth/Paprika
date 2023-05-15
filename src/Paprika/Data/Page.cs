@@ -40,6 +40,8 @@ public static class PageExtensions
 [StructLayout(LayoutKind.Explicit, Pack = 1, Size = Size)]
 public struct PageHeader
 {
+    public const byte CurrentVersion = 1;
+
     public const int Size = sizeof(ulong);
 
     /// <summary>
@@ -47,7 +49,34 @@ public struct PageHeader
     /// </summary>
     [FieldOffset(0)] public uint BatchId;
 
-    [FieldOffset(4)] public uint Reserved; // for not it's just alignment
+    /// <summary>
+    /// The version of the Paprika the page was written by.
+    /// </summary>
+    [FieldOffset(4)] public byte PaprikaVersion;
+
+    /// <summary>
+    /// The level of the tree the page represents.
+    /// </summary>
+    [FieldOffset(5)] public byte TreeLevel;
+
+    /// <summary>
+    /// The type of the page.
+    /// </summary>
+    [FieldOffset(6)] public PageType PageType;
+}
+
+public enum PageType : byte
+{
+    None = 0,
+
+    Standard = 1,
+
+    /// <summary>
+    /// The page is a part of the tree use for massive storage accounts.
+    /// </summary>
+    MassiveStorageTree = 2,
+
+    Abandoned = 3
 }
 
 /// <summary>
