@@ -160,6 +160,18 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
+    /// <summary>
+    /// Allows to walk through the pages. No locks, no safety, use for dev purposes.
+    /// </summary>
+    /// <returns></returns>
+    public IEnumerable<Page> UnsafeEnumerateNonRoot()
+    {
+        for (uint i = _historyDepth; i < Root.Data.NextFreePage; i++)
+        {
+            yield return _manager.GetAt(DbAddress.Page(i));
+        }
+    }
+
     private void DisposeReadOnlyBatch(ReadOnlyBatch batch)
     {
         lock (_batchLock)
@@ -348,7 +360,19 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
             CheckDisposed();
 
             ref var addr = ref RootPage.FindAccountPage(_root.Data.AccountPages, key);
-            var p = addr.IsNull ? GetNewPage(out addr, true) : GetAt(addr);
+            Page p;
+            if (addr.IsNull)
+            {
+                p = GetNewPage(out addr, true);
+
+                p.Header.PageType = PageType.Standard;
+                p.Header.TreeLevel = 1; // the root is level 0, start with 1
+            }
+            else
+            {
+                p = GetAt(addr);
+            }
+
             page = new FanOut256Page(p);
 
             return ref addr;
@@ -450,7 +474,13 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
 
             // The pages are put in a linked list, when first -> ... -> last -> NULL
 
-            var first = new AbandonedPage(GetNewPage(out var firstAddr, true))
+            var newPage = GetNewPage(out var firstAddr, true);
+
+            newPage.Header.PageType = PageType.Abandoned;
+            newPage.Header.TreeLevel = 0;
+            newPage.Header.PaprikaVersion = 1;
+
+            var first = new AbandonedPage(newPage)
             {
                 AbandonedAtBatch = BatchId
             };

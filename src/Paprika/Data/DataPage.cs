@@ -134,6 +134,10 @@ public readonly unsafe struct DataPage : IDataPage
 
         // standard nibble extraction followed by the child creation
         var child = ctx.Batch.GetNewPage(out var childAddr, true);
+
+        child.Header.TreeLevel = (byte)(Header.TreeLevel + 1);
+        child.Header.PageType = Header.PageType;
+
         var dataPage = new DataPage(child);
 
         foreach (var item in map.EnumerateNibble(biggestNibble))
@@ -242,6 +246,11 @@ public readonly unsafe struct DataPage : IDataPage
         NibblePath.ReadFrom(accountPathBytes, out var accountPath);
 
         var storage = ctx.Batch.GetNewPage(out _, true);
+
+        // this is the top page of the massive storage tree
+        storage.Header.TreeLevel = 0;
+        storage.Header.PageType = PageType.MassiveStorageTree;
+
         var dataPage = new DataPage(storage);
 
         foreach (var item in map.EnumerateNibble(nibble))

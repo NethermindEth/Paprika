@@ -102,6 +102,8 @@ public class DbTests
             block1B.GetAccount(Key0).Should().Be(account2);
             block1B.GetAccount(Key1a).Should().Be(Account.Empty);
         }
+
+        AssertPageMetadataAssigned(db);
     }
 
     [Test]
@@ -125,6 +127,8 @@ public class DbTests
         var invalidBlock = Keccak.EmptyTreeHash;
 
         Assert.Throws<ArgumentException>(() => db.ReorganizeBackToAndStartNew(invalidBlock).Should());
+
+        AssertPageMetadataAssigned(db);
     }
 
     [TestCase(100_000, 1, TestName = "Long history, single account")]
@@ -154,6 +158,8 @@ public class DbTests
         }
 
         Console.WriteLine($"Uses {db.Megabytes:P}MB out of pre-allocated {size / MB}MB od disk.");
+
+        AssertPageMetadataAssigned(db);
     }
 
     [Test]
@@ -214,6 +220,8 @@ public class DbTests
         db.Megabytes.Should().Be(snapshot, "Database should not grow without read transaction active.");
 
         Console.WriteLine($"Uses {db.Megabytes:P}MB out of pre-allocated {size / MB}MB od disk.");
+
+        AssertPageMetadataAssigned(db);
     }
 
     [Test]
@@ -251,6 +259,30 @@ public class DbTests
             var address = Key1a;
             BinaryPrimitives.WriteUInt32LittleEndian(address.BytesAsSpan, i);
             return address;
+        }
+
+        AssertPageMetadataAssigned(db);
+    }
+
+    private static void AssertPageMetadataAssigned(PagedDb db)
+    {
+        foreach (var page in db.UnsafeEnumerateNonRoot())
+        {
+            var header = page.Header;
+
+            header.BatchId.Should().BeGreaterThan(0);
+            header.PageType.Should().BeOneOf(PageType.Abandoned, PageType.Standard, PageType.MassiveStorageTree);
+            if (header.PageType is PageType.MassiveStorageTree or PageType.Abandoned)
+            {
+                header.TreeLevel.Should().BeGreaterOrEqualTo(0);
+            }
+            else
+            {
+                // any non-root data should be bigger than 0
+                header.TreeLevel.Should().BeGreaterThan(0);
+            }
+
+            header.PaprikaVersion.Should().Be(1);
         }
     }
 }
