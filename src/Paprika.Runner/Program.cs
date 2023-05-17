@@ -13,7 +13,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 5_000 : 20_000;
+    private const int BlockCount = PersistentDb ? 10_000 : 20_000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
@@ -25,7 +25,7 @@ public static class Program
     private const long DbFileSize = PersistentDb ? 64 * Gb : 10 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
 
-    private const CommitOptions Commit = CommitOptions.FlushDataOnly;
+    private const CommitOptions Commit = CommitOptions.DangerNoFlush;
 
     private const int LogEvery = BlockCount / NumberOfLogs;
 

@@ -135,7 +135,7 @@ public readonly unsafe struct DataPage : IDataPage
         // and check above passed through. In this case, retrieve the child as is and it'll COW itself later
         var childAddr = Data.Buckets[biggestNibble];
         var child = childAddr.IsNull ? ctx.Batch.GetNewPage(out childAddr, true) : ctx.Batch.GetAt(childAddr);
-        
+
         child.Header.TreeLevel = (byte)(Header.TreeLevel + 1);
         child.Header.PageType = Header.PageType;
 
@@ -152,7 +152,7 @@ public readonly unsafe struct DataPage : IDataPage
             map.Delete(item);
         }
 
-        Data.Buckets[biggestNibble] = ctx.Batch.GetAddress(dataPage.AsPage());;
+        Data.Buckets[biggestNibble] = ctx.Batch.GetAddress(dataPage.AsPage()); ;
 
         // The page has some of the values flushed down, try to add again.
         return Set(ctx);

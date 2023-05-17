@@ -452,6 +452,12 @@ public readonly ref struct FixedMap
                 }
             }
 
+            if (span.IsEmpty)
+            {
+                // the span is empty and there's not place to move forward
+                break;
+            }
+
             // move next: ushorts sliced to the next
             // offset moved by 1 to align
             span = span.Slice(index + 1);
