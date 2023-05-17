@@ -109,11 +109,13 @@ public class MemoryMappedPageManager : PointerPageManager
                 else if (addr == EndOfBatch)
                 {
                     _lastFlushedBatchId = _currentlyFlushedBatchId;
-                    
+
                     // notify waiters
                     lock (_lastFlushedMonitor) Monitor.PulseAll(_lastFlushedMonitor);
 
-                } else {
+                }
+                else
+                {
                     // a regular address to write
                     var offset = addr.Raw * Page.PageSize;
                     var page = GetAt(addr);
@@ -129,7 +131,7 @@ public class MemoryMappedPageManager : PointerPageManager
                     }
                 }
             }
-            
+
             await AwaitWrites();
 
             if (_toFlush.IsEmpty)
@@ -150,16 +152,16 @@ public class MemoryMappedPageManager : PointerPageManager
     public override Page GetAtForWriting(DbAddress address, bool reused)
     {
         var page = GetAt(address);
-        
+
         if (reused == false)
         {
             return page;
         }
-        
+
         // the page was reused, need to check whether it was flushed already
         var writtenAt = page.Header.BatchId;
 
-        while (writtenAt > _lastFlushedBatchId )
+        while (writtenAt > _lastFlushedBatchId)
         {
             // not flushed, wait
             lock (_lastFlushedMonitor)
@@ -179,7 +181,7 @@ public class MemoryMappedPageManager : PointerPageManager
         {
             _toFlush.Enqueue(ForceFlushMarker);
         }
-        
+
         _toFlush.Enqueue(EndOfBatch);
     }
 

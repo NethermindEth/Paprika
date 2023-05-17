@@ -204,7 +204,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             // select min batch across the one respecting history and the min of all the read-only batches
             var rootBatchId = root.Header.BatchId;
-            
+
             var minBatch = rootBatchId < _historyDepth ? 0 : rootBatchId - _historyDepth;
             foreach (var batch in _batchesReadOnly)
             {
