@@ -16,7 +16,7 @@ public interface IPageManager : IDisposable, IPageResolver
     /// </summary>
     /// <param name="addresses"></param>
     /// <param name="options"></param>
-    void FlushPages(IReadOnlyCollection<DbAddress> addresses, CommitOptions options);
+    ValueTask FlushPages(IReadOnlyCollection<DbAddress> addresses, CommitOptions options);
 
-    void FlushRootPage(DbAddress rootPage, CommitOptions options);
+    ValueTask FlushRootPage(DbAddress rootPage, CommitOptions options);
 }

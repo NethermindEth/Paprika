@@ -393,7 +393,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             }
         }
 
-        public Keccak Commit(CommitOptions options)
+        public async ValueTask<Keccak> Commit(CommitOptions options)
         {
             CheckDisposed();
 
@@ -402,11 +402,11 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             // memoize the abandoned so that it's preserved for future uses 
             MemoizeAbandoned();
 
-            _db._manager.FlushPages(_written, options);
+            await _db._manager.FlushPages(_written, options);
 
             var newRootPage = _db.SetNewRoot(_root);
 
-            _db._manager.FlushRootPage(newRootPage, options);
+            await _db._manager.FlushRootPage(newRootPage, options);
 
             // if reporter passed
             _db._reporter?.Invoke(_metrics);

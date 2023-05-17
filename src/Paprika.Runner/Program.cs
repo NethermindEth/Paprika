@@ -13,7 +13,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 20_000 : 20_000;
+    private const int BlockCount = PersistentDb ? 5_000 : 20_000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
@@ -25,7 +25,7 @@ public static class Program
     private const long DbFileSize = PersistentDb ? 64 * Gb : 10 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
 
-    private const CommitOptions Commit = CommitOptions.DangerNoFlush;
+    private const CommitOptions Commit = CommitOptions.FlushDataOnly;
 
     private const int LogEvery = BlockCount / NumberOfLogs;
 
@@ -35,7 +35,7 @@ public static class Program
     private const int BigStorageAccountSlotCount = 1_000_000;
     private static readonly UInt256[] BigStorageAccountValues = new UInt256[BigStorageAccountSlotCount];
 
-    public static void Main(String[] args)
+    public static async Task Main(String[] args)
     {
         var dir = Directory.GetCurrentDirectory();
         var dataPath = Path.Combine(dir, "db");
@@ -136,7 +136,7 @@ public static class Program
                 counter++;
             }
 
-            batch.Commit(Commit);
+            await batch.Commit(Commit);
 
             if (block > 0 & block % LogEvery == 0)
             {
@@ -288,10 +288,10 @@ public static class Program
         return key;
     }
 
-    private static unsafe Span<byte> PrepareStableRandomSource()
+    private static byte[] PrepareStableRandomSource()
     {
         Console.WriteLine("Preparing random accounts addresses...");
-        var accounts = new Span<byte>(NativeMemory.Alloc((UIntPtr)RandomSampleSize), RandomSampleSize);
+        var accounts = GC.AllocateArray<byte>(RandomSampleSize);
         new Random(RandomSeed).NextBytes(accounts);
         Console.WriteLine("Accounts prepared");
         return accounts;

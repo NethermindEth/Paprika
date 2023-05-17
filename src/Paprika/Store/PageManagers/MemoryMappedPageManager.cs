@@ -1,6 +1,4 @@
 ﻿using System.Buffers;
-using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.IO.MemoryMappedFiles;
 using Paprika.Data;
 
@@ -23,17 +21,6 @@ public class MemoryMappedPageManager : PointerPageManager
     private readonly Stack<PageMemoryOwner> _owners = new();
     private readonly List<PageMemoryOwner> _ownersUsed = new();
     private readonly List<Task> _pendingWrites = new();
-
-    private static readonly DbAddress ForceFlushMarker = new(uint.MaxValue - 1);
-    private static readonly DbAddress EndOfBatch = new(uint.MaxValue - 2);
-
-    private readonly ConcurrentQueue<DbAddress> _toFlush = new();
-    private uint _currentlyFlushedBatchId;
-    private volatile uint _lastFlushedBatchId;
-    private readonly object _lastFlushedMonitor = new();
-
-    private readonly CancellationTokenSource _cts = new();
-    private readonly Task<Task> _flusher;
 
     public unsafe MemoryMappedPageManager(ulong size, byte historyDepth, string dir) : base(size)
     {
@@ -67,85 +54,38 @@ public class MemoryMappedPageManager : PointerPageManager
 
         _whole = _mapped.CreateViewAccessor();
         _whole.SafeMemoryMappedViewHandle.AcquirePointer(ref _ptr);
-
-        _flusher = Task.Factory.StartNew(() => RunFlusher(), _cts.Token, TaskCreationOptions.LongRunning,
-            TaskScheduler.Default);
     }
 
     public string Path { get; }
 
     protected override unsafe void* Ptr => _ptr;
 
-    public override void FlushPages(IReadOnlyCollection<DbAddress> dbAddresses, CommitOptions options)
+    public override async ValueTask FlushPages(IReadOnlyCollection<DbAddress> dbAddresses, CommitOptions options)
     {
         // TODO: remove alloc
         var addresses = dbAddresses.ToArray();
         Array.Sort(addresses, (a, b) => a.Raw.CompareTo(b.Raw));
 
-        foreach (var address in addresses)
+        var handle = _file.SafeFileHandle;
+
+        foreach (var addr in addresses)
         {
-            _toFlush.Enqueue(address);
+            // a regular address to write
+            _pendingWrites.Add(WriteAt(addr).AsTask());
+            await AwaitWrites();
         }
 
         if (options != CommitOptions.DangerNoFlush)
         {
-            _toFlush.Enqueue(ForceFlushMarker);
+            _file.Flush(true);
         }
     }
 
-    private async Task RunFlusher()
+    private ValueTask WriteAt(DbAddress addr)
     {
-        var handle = _file.SafeFileHandle;
-        const int maxPendingWrites = 4096;
-
-        while (_cts.IsCancellationRequested == false)
-        {
-            while (_toFlush.TryDequeue(out var addr))
-            {
-                if (addr == ForceFlushMarker)
-                {
-                    await AwaitWrites();
-                    _file.Flush(true);
-                }
-                else if (addr == EndOfBatch)
-                {
-                    Debug.Assert(_lastFlushedBatchId + 1 == _currentlyFlushedBatchId);
-
-                    _lastFlushedBatchId = _currentlyFlushedBatchId;
-
-                    // notify waiters
-                    lock (_lastFlushedMonitor) Monitor.PulseAll(_lastFlushedMonitor);
-                }
-                else
-                {
-                    // a regular address to write
-                    var offset = addr.Raw * Page.PageSize;
-                    var page = GetAt(addr);
-
-                    var batchId = page.Header.BatchId;
-
-                    Debug.Assert(_currentlyFlushedBatchId <= batchId, "Monotonicity of batches");
-
-                    _currentlyFlushedBatchId = batchId;
-
-                    _pendingWrites.Add(RandomAccess.WriteAsync(handle, Own(page).Memory, offset).AsTask());
-
-                    // TODO: this should be throttling
-                    if (_pendingWrites.Count > maxPendingWrites)
-                    {
-                        await AwaitWrites();
-                    }
-                }
-            }
-
-            await AwaitWrites();
-
-            if (_toFlush.IsEmpty)
-            {
-                // still empty, wait
-                await Task.Delay(50);
-            }
-        }
+        var offset = addr.Raw * Page.PageSize;
+        var page = GetAt(addr);
+        return RandomAccess.WriteAsync(_file.SafeFileHandle, Own(page).Memory, offset);
     }
 
     private async Task AwaitWrites()
@@ -155,47 +95,20 @@ public class MemoryMappedPageManager : PointerPageManager
         _pendingWrites.Clear();
     }
 
-    public override Page GetAtForWriting(DbAddress address, bool reused)
+    public override Page GetAtForWriting(DbAddress address, bool reused) => GetAt(address);
+
+    public override async ValueTask FlushRootPage(DbAddress root, CommitOptions options)
     {
-        var page = GetAt(address);
-
-        if (reused == false)
-        {
-            return page;
-        }
-
-        // the page was reused, need to check whether it was flushed already
-        var writtenAt = page.Header.BatchId;
-
-        while (writtenAt > _lastFlushedBatchId)
-        {
-            // not flushed, wait
-            lock (_lastFlushedMonitor)
-            {
-                Monitor.Wait(_lastFlushedMonitor, TimeSpan.FromMilliseconds(100));
-            }
-        }
-
-        return page;
-    }
-
-    public override void FlushRootPage(DbAddress root, CommitOptions options)
-    {
-        _toFlush.Enqueue(root);
+        await WriteAt(root);
 
         if (options == CommitOptions.FlushDataAndRoot)
         {
-            _toFlush.Enqueue(ForceFlushMarker);
+            _file.Flush(true);
         }
-
-        _toFlush.Enqueue(EndOfBatch);
     }
 
     public override void Dispose()
     {
-        _cts.Cancel();
-        _flusher.GetAwaiter().GetResult();
-
         _whole.SafeMemoryMappedViewHandle.ReleasePointer();
         _whole.Dispose();
         _mapped.Dispose();
