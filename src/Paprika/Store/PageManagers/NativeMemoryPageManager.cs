@@ -17,13 +17,11 @@ public unsafe class NativeMemoryPageManager : PointerPageManager
 
     public override void Dispose() => NativeMemory.AlignedFree(_ptr);
 
-    public override void FlushAllPages()
+    public override void FlushPages(IReadOnlyCollection<DbAddress> addresses, CommitOptions options)
     {
-        // no op
     }
 
-    public override void FlushRootPage(in Page rootPage)
+    public override void FlushRootPage(DbAddress rootPage, CommitOptions options)
     {
-        // no op
     }
 }

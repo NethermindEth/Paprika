@@ -14,7 +14,7 @@ namespace Paprika.Store;
 /// <remarks>
 /// Assumes a continuous memory allocation as it provides addressing based on the pointers.
 /// </remarks>
-public unsafe class PagedDb : IPageResolver, IDb, IDisposable
+public class PagedDb : IPageResolver, IDb, IDisposable
 {
     /// <summary>
     /// The number of roots kept in the history.
@@ -217,6 +217,8 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
 
     public Page GetAt(DbAddress address) => _manager.GetAt(address);
 
+    private Page GetAtForWriting(DbAddress address) => _manager.GetAtForWriting(address);
+
     private DbAddress SetNewRoot(RootPage root)
     {
         _lastRoot += 1;
@@ -395,25 +397,19 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
             // memoize the abandoned so that it's preserved for future uses 
             MemoizeAbandoned();
 
+            _db._manager.FlushPages(_written, options);
+
+            var newRootPage = _db.SetNewRoot(_root);
+
+            _db._manager.FlushRootPage(newRootPage, options);
+
+            // if reporter passed
+            _db._reporter?.Invoke(_metrics);
+
             lock (_db._batchLock)
             {
                 Debug.Assert(ReferenceEquals(this, _db._batchCurrent));
                 _db._batchCurrent = null;
-
-                if (options != CommitOptions.DangerNoFlush)
-                {
-                    _db._manager.FlushAllPages();
-                }
-
-                var newRootPage = _db.SetNewRoot(_root);
-
-                if (options == CommitOptions.FlushDataAndRoot)
-                {
-                    _db._manager.FlushRootPage(GetAt(newRootPage));
-                }
-
-                // if reporter passed
-                _db._reporter?.Invoke(_metrics);
 
                 return _root.Data.StateRootHash;
             }
@@ -446,7 +442,7 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
                 addr = _root.Data.GetNextFreePage();
             }
 
-            var page = _db.GetAt(addr);
+            var page = _db.GetAtForWriting(addr);
             if (clear)
                 page.Clear();
 
@@ -633,7 +629,7 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
     /// </summary>
     private sealed class Context
     {
-        public Context()
+        public unsafe Context()
         {
             Page = new Page((byte*)NativeMemory.AlignedAlloc((UIntPtr)Page.PageSize, (UIntPtr)UIntPtr.Size));
             Abandoned = new Queue<DbAddress>();

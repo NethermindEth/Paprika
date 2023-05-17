@@ -7,9 +7,16 @@ public interface IPageManager : IDisposable, IPageResolver
     DbAddress GetAddress(in Page page);
 
     /// <summary>
+    /// Gets the page for writing purposes.
+    /// </summary>
+    Page GetAtForWriting(DbAddress address);
+
+    /// <summary>
     /// Flushes all the mapped pages.
     /// </summary>
-    void FlushAllPages();
+    /// <param name="addresses"></param>
+    /// <param name="options"></param>
+    void FlushPages(IReadOnlyCollection<DbAddress> addresses, CommitOptions options);
 
-    void FlushRootPage(in Page rootPage);
+    void FlushRootPage(DbAddress rootPage, CommitOptions options);
 }

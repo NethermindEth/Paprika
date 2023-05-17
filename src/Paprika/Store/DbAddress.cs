@@ -61,7 +61,7 @@ public readonly struct DbAddress : IEquatable<DbAddress>
         }
     }
 
-    private DbAddress(uint value) => _value = value;
+    public DbAddress(uint value) => _value = value;
 
     public bool IsNull => _value == NullValue;
 
