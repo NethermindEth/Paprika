@@ -103,6 +103,8 @@ public readonly ref struct FixedMap
     /// </summary>
     public int Count => _header.Low / Slot.Size;
 
+    public int CapacityLeft => _data.Length - _header.Taken;
+
     public NibbleEnumerator EnumerateNibble(byte nibble) => new(this, nibble);
 
     public ref struct NibbleEnumerator
@@ -452,7 +454,7 @@ public readonly ref struct FixedMap
                 }
             }
 
-            if (span.IsEmpty)
+            if (index + 1 >= span.Length)
             {
                 // the span is empty and there's not place to move forward
                 break;

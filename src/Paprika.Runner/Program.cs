@@ -1,7 +1,6 @@
 ﻿using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Runtime.InteropServices;
 using HdrHistogram;
 using Nethermind.Int256;
 using Paprika.Crypto;
@@ -13,19 +12,19 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 10_000 : 20_000;
+    private const int BlockCount = PersistentDb ? 100_000 : 20_000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
 
     private const int RandomSeed = 17;
 
-    private const int NumberOfLogs = PersistentDb ? 20 : 10;
+    private const int NumberOfLogs = PersistentDb ? 100 : 10;
 
-    private const long DbFileSize = PersistentDb ? 64 * Gb : 10 * Gb;
+    private const long DbFileSize = PersistentDb ? 128 * Gb : 10 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
 
-    private const CommitOptions Commit = CommitOptions.DangerNoFlush;
+    private const CommitOptions Commit = CommitOptions.FlushDataOnly;
 
     private const int LogEvery = BlockCount / NumberOfLogs;
 

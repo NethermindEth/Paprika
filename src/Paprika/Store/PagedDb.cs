@@ -402,6 +402,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             await _db._manager.FlushPages(_written, options);
 
+
             var newRootPage = _db.SetNewRoot(_root);
 
             await _db._manager.FlushRootPage(newRootPage, options);
