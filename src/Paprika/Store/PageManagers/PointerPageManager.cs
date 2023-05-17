@@ -34,7 +34,7 @@ public abstract unsafe class PointerPageManager : IPageManager
             .ToInt64() / Page.PageSize));
     }
 
-    public virtual Page GetAtForWriting(DbAddress address) => GetAt(address);
+    public virtual Page GetAtForWriting(DbAddress address, bool reused) => GetAt(address);
 
     public abstract void FlushPages(IReadOnlyCollection<DbAddress> addresses, CommitOptions options);
 

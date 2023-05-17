@@ -203,7 +203,9 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             root.Data.BlockNumber++;
 
             // select min batch across the one respecting history and the min of all the read-only batches
-            var minBatch = root.Header.BatchId - _historyDepth;
+            var rootBatchId = root.Header.BatchId;
+            
+            var minBatch = rootBatchId < _historyDepth ? 0 : rootBatchId - _historyDepth;
             foreach (var batch in _batchesReadOnly)
             {
                 minBatch = Math.Min(batch.BatchId, minBatch);
@@ -217,7 +219,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
     public Page GetAt(DbAddress address) => _manager.GetAt(address);
 
-    private Page GetAtForWriting(DbAddress address) => _manager.GetAtForWriting(address);
+    private Page GetAtForWriting(DbAddress address, bool reused) => _manager.GetAtForWriting(address, reused);
 
     private DbAddress SetNewRoot(RootPage root)
     {
@@ -430,19 +432,22 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public override Page GetNewPage(out DbAddress addr, bool clear)
         {
+            bool reused;
             if (TryGetNoLongerUsedPage(out addr))
             {
+                reused = true;
                 _metrics.ReportPageReused();
             }
             else
             {
+                reused = false;
                 _metrics.ReportNewPageAllocation();
 
                 // on failure to reuse a page, default to allocating a new one.
                 addr = _root.Data.GetNextFreePage();
             }
 
-            var page = _db.GetAtForWriting(addr);
+            var page = _db.GetAtForWriting(addr, reused);
             if (clear)
                 page.Clear();
 

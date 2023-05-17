@@ -9,7 +9,7 @@ public interface IPageManager : IDisposable, IPageResolver
     /// <summary>
     /// Gets the page for writing purposes.
     /// </summary>
-    Page GetAtForWriting(DbAddress address);
+    Page GetAtForWriting(DbAddress address, bool reused);
 
     /// <summary>
     /// Flushes all the mapped pages.

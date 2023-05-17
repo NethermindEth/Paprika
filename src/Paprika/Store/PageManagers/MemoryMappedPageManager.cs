@@ -22,12 +22,15 @@ public class MemoryMappedPageManager : PointerPageManager
     private readonly Stack<PageMemoryOwner> _owners = new();
     private readonly List<PageMemoryOwner> _ownersUsed = new();
     private readonly List<Task> _pendingWrites = new();
-    private readonly List<DbAddress> _pendingAddresses = new();
 
-    private static readonly DbAddress FlushMarker = new(uint.MaxValue - 1);
+    private static readonly DbAddress ForceFlushMarker = new(uint.MaxValue - 1);
+    private static readonly DbAddress EndOfBatch = new(uint.MaxValue - 2);
 
     private readonly ConcurrentQueue<DbAddress> _toFlush = new();
-    private readonly HashSet<DbAddress> _beingFlushed = new();
+    private uint _currentlyFlushedBatchId;
+    private volatile uint _lastFlushedBatchId;
+    private readonly object _lastFlushedMonitor = new();
+
     private readonly CancellationTokenSource _cts = new();
     private readonly Task<Task> _flusher;
 
@@ -78,15 +81,6 @@ public class MemoryMappedPageManager : PointerPageManager
         var addresses = dbAddresses.ToArray();
         Array.Sort(addresses, (a, b) => a.Raw.CompareTo(b.Raw));
 
-        // report as being flushed first
-        lock (_beingFlushed)
-        {
-            foreach (var address in addresses)
-            {
-                _beingFlushed.Add(address);
-            }
-        }
-
         foreach (var address in addresses)
         {
             _toFlush.Enqueue(address);
@@ -94,7 +88,7 @@ public class MemoryMappedPageManager : PointerPageManager
 
         if (options != CommitOptions.DangerNoFlush)
         {
-            _toFlush.Enqueue(FlushMarker);
+            _toFlush.Enqueue(ForceFlushMarker);
         }
     }
 
@@ -107,17 +101,26 @@ public class MemoryMappedPageManager : PointerPageManager
         {
             while (_toFlush.TryDequeue(out var addr))
             {
-                if (addr == FlushMarker)
+                if (addr == ForceFlushMarker)
                 {
                     await AwaitWrites();
                     _file.Flush(true);
                 }
-                else
+                else if (addr == EndOfBatch)
                 {
+                    _lastFlushedBatchId = _currentlyFlushedBatchId;
+                    
+                    // notify waiters
+                    lock (_lastFlushedMonitor) Monitor.PulseAll(_lastFlushedMonitor);
+
+                } else {
                     // a regular address to write
-                    _pendingAddresses.Add(addr);
                     var offset = addr.Raw * Page.PageSize;
-                    _pendingWrites.Add(RandomAccess.WriteAsync(handle, Own(GetAt(addr)).Memory, offset).AsTask());
+                    var page = GetAt(addr);
+
+                    _currentlyFlushedBatchId = page.Header.BatchId;
+
+                    _pendingWrites.Add(RandomAccess.WriteAsync(handle, Own(page).Memory, offset).AsTask());
 
                     // TODO: this should be throttling
                     if (_pendingWrites.Count > maxPendingWrites)
@@ -141,49 +144,43 @@ public class MemoryMappedPageManager : PointerPageManager
     {
         await Task.WhenAll(_pendingWrites);
         ReleaseOwners();
-
-        lock (_beingFlushed)
-        {
-            foreach (var address in _pendingAddresses)
-            {
-                _beingFlushed.Remove(address);
-            }
-
-            // notify waiters
-            Monitor.PulseAll(_beingFlushed);
-        }
-
         _pendingWrites.Clear();
-        _pendingAddresses.Clear();
     }
 
-    public override Page GetAtForWriting(DbAddress address)
+    public override Page GetAtForWriting(DbAddress address, bool reused)
     {
-        // ensure that the page is not being flushed atm.
-        lock (_beingFlushed)
+        var page = GetAt(address);
+        
+        if (reused == false)
         {
-            while (_beingFlushed.Contains(address))
+            return page;
+        }
+        
+        // the page was reused, need to check whether it was flushed already
+        var writtenAt = page.Header.BatchId;
+
+        while (writtenAt > _lastFlushedBatchId )
+        {
+            // not flushed, wait
+            lock (_lastFlushedMonitor)
             {
-                Monitor.Wait(_beingFlushed);
+                Monitor.Wait(_lastFlushedMonitor, TimeSpan.FromMilliseconds(100));
             }
         }
 
-        return GetAt(address);
+        return page;
     }
 
     public override void FlushRootPage(DbAddress root, CommitOptions options)
     {
-        lock (_beingFlushed)
-        {
-            _beingFlushed.Add(root);
-        }
-
         _toFlush.Enqueue(root);
 
         if (options == CommitOptions.FlushDataAndRoot)
         {
-            _toFlush.Enqueue(FlushMarker);
+            _toFlush.Enqueue(ForceFlushMarker);
         }
+        
+        _toFlush.Enqueue(EndOfBatch);
     }
 
     public override void Dispose()
