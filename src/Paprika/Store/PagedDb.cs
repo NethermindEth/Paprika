@@ -225,7 +225,10 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     {
         _lastRoot += 1;
         var pageAddress = _lastRoot % _historyDepth;
-        root.CopyTo(_roots[pageAddress]);
+
+        // The GetAtForWriting is used to ensure that the given page has already been flushed to disk
+        var destination = GetAtForWriting(GetAddress(_roots[pageAddress].AsPage()), true);
+        root.CopyTo(destination);
         return DbAddress.Page((uint)pageAddress);
     }
 

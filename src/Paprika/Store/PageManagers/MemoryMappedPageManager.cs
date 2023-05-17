@@ -1,5 +1,6 @@
 ﻿using System.Buffers;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO.MemoryMappedFiles;
 using Paprika.Data;
 
@@ -108,11 +109,12 @@ public class MemoryMappedPageManager : PointerPageManager
                 }
                 else if (addr == EndOfBatch)
                 {
+                    Debug.Assert(_lastFlushedBatchId + 1 == _currentlyFlushedBatchId);
+
                     _lastFlushedBatchId = _currentlyFlushedBatchId;
 
                     // notify waiters
                     lock (_lastFlushedMonitor) Monitor.PulseAll(_lastFlushedMonitor);
-
                 }
                 else
                 {
@@ -120,7 +122,11 @@ public class MemoryMappedPageManager : PointerPageManager
                     var offset = addr.Raw * Page.PageSize;
                     var page = GetAt(addr);
 
-                    _currentlyFlushedBatchId = page.Header.BatchId;
+                    var batchId = page.Header.BatchId;
+
+                    Debug.Assert(_currentlyFlushedBatchId <= batchId, "Monotonicity of batches");
+
+                    _currentlyFlushedBatchId = batchId;
 
                     _pendingWrites.Add(RandomAccess.WriteAsync(handle, Own(page).Memory, offset).AsTask());
 
