@@ -293,6 +293,81 @@ With this, the `FixedMap` memory representation looks like the following.
 
 The `FixedMap` can wrap an arbitrary span of memory so it can be used for any page that wants to store data by key.
 
+## Examples
+
+### A small contract
+
+Let's consider a contract `0xABCD` deployed and have some of its storage cells set after performing some of the operations:
+
+1. address: `0xABCD`
+1. balance: `0123`
+1. nonce: `02`
+1. code hash: `0xFEDCBA`
+1. storage cells:
+   1. `keccak0` -> `0x0A`
+   1. `keccak1` -> `0x0B`
+
+As you can see there's no `storageRootHash` as it is calculated from the storage itself. The listing above just gets the data that are set to Paprika. Internally, it will be mapped to a list of entries. Each entry is a mapping between a `key` and an encoded value. The key, besides the `path`, contains the data `type` and an `additional` key if needed. Also, if the number of storage cells is below ~50 (a rough estimate), it will be stored on the same page, increasing the locality. Let's see to which entries the listing above will be mapped. Let's assume that it's the only contract in the state and there are no other pages above this one. If they were, the path would be truncated. Let's encode it!
+
+| Key: Path | Key: Type         | Key: Additional Key       | Byte encoded value                                                |
+| --------- | ----------------- | ------------------------- | ----------------------------------------------------------------- |
+| `0xABCD`  | `Account`         | `_`                       | `02 23 01` + `01 02` (`balance` concatenated with `nonce`)        |
+| `0xABCD`  | `CodeHash`        | `_`                       | `FEDCBA...` (keccak, always 32 bytes)                             |
+| `0xABCD`  | `StorageCell`     | `keccak0`                 | `01 0A` (var length, big-endian, number of bytes as prefix)       |
+| `0xABCD`  | `StorageCell`     | `keccak1`                 | `01 0B` (var length, big-endian, number of bytes as prefix)       |
+| `0xABCD`  | `StorageRootHash` | `keccak of storage tree`  | `keccak value` (keccak, always 32 bytes, calculated when storing) |
+| `0xABCD`  | `KeccakOrRlp`     | `keccak of the leaf node` | `keccak value` (keccak, always 32 bytes, calculated when storing) |
+
+A few remarks:
+
+1. `UInt256` is always encoded with `BigEndian`, followed by the truncation of leading zeroes and prefixed with the number of bytes used (the prefix is 1 byte)
+1. The last two values, meaning `StorageRootHash` and `KeccakOrRlp`, are evaluated and stored alongside the data, as separate entries. When data changes, they will be updated
+1. Keeping data split into attributes, make them easier to update in place, without blowing up the tree and copying a lot of data.
+1. The navigation is always path-based! Keccaks are stored as described above.
+1. For contracts with a small number of storage cells, no separate tree is created, and storage cell values are stored alongside the other data.
+1. All the entries are stored in [FixedMap](#fixedmap), where a small hash `ushort` is used to represent the slot.
+
+### A contract with a huge storage
+
+Let's consider another contract `0xCD`, deployed but wit ha lot of storage cells (thousands to millions)
+
+1. address: `0xCD`
+1. balance: `0123`
+1. nonce: `02`
+1. code hash: `0xFEDCBA`
+1. storage cells:
+   1. `keccak1` -> `0x00000001`
+   1. `keccak2` -> `0x00000002`
+   1. more...
+   1. `keccakN` -> `0x000FFFFF` (one million)
+
+Which would be stored on one page as:
+
+| Key: Path | Key: Type                    | Key: Additional Key       | Byte encoded value                                                |
+| --------- | ---------------------------- | ------------------------- | ----------------------------------------------------------------- |
+| `0xCD`    | `Account`                    | `_`                       | `02 23 01` + `01 02` (`balance` concatenated with `nonce`)        |
+| `0xCD`    | `CodeHash`                   | `_`                       | `FEDCBA...` (keccak, always 32 bytes)                             |
+| `0xCD`    | `StorageTreeRootPageAddress` | `_`                       | `02 12 34` (var length big-endian encoding of page `@1234`)       |
+| `0xCD`    | `StorageRootHash`            | `keccak of storage tree`  | `keccak value` (keccak, always 32 bytes, calculated when storing) |
+| `0xCD`    | `KeccakOrRlp`                | `keccak of the leaf node` | `keccak value` (keccak, always 32 bytes, calculated when storing) |
+
+And on the page under address `@1234`, which is a separate storage trie created for this huge account
+
+| Key: Path | Key: Type                | Key: Additional Key | Byte encoded value             |
+| --------- | ------------------------ | ------------------- | ------------------------------ |
+| `keccak1` | `StorageTreeStorageCell` | `_`                 | `01 01` (`0x00000001` encoded) |
+| `keccak2` | `StorageTreeStorageCell` | `_`                 | `01 02` (`0x00000002` encoded) |
+| `keccak3` | `StorageTreeStorageCell` | `_`                 | `01 03` (`0x00000003` encoded) |
+| ...       | `StorageTreeStorageCell` | `_`                 | `...`                          |
+
+A few remarks:
+
+1. For contracts with a large number of `StorageCells` a separate tree is created, so that the shared prefix (account address) is stored only in the entry with `StorageTreeRootPageAddress`
+1. A separate type `StorageTreeStorageCell` is used to represent an entry in this massive storage trie.
+1. An entry of type `StorageTreeRootPageAddress` provides a page address where to jump to find the storage cells of the given account
+1. `StorageTreeStorageCells` create a usual Paprika trie, with the extraction of the nibble with the biggest count if needed as a separate page
+1. All the entries are stored in [FixedMap](#fixedmap), where a small hash `ushort` is used to represent the slot
+
 ## Learning materials
 
 1. PostgreSQL
