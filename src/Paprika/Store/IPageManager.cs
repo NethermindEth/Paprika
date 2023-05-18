@@ -1,6 +1,6 @@
 ﻿using Paprika.Data;
 
-namespace Paprika.Db;
+namespace Paprika.Store;
 
 public interface IPageManager : IDisposable, IPageResolver
 {

@@ -3,10 +3,10 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
-using Paprika.Db;
+using Paprika.Store;
 using Paprika.Utils;
 
-namespace Paprika.Data.Map;
+namespace Paprika.Data;
 
 /// <summary>
 /// Represents an in-page map, responsible for storing items and information related to them.

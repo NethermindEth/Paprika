@@ -1,9 +1,8 @@
 ﻿using Nethermind.Int256;
 using Paprika.Crypto;
-using Paprika.Data.Map;
-using Paprika.Db;
+using Paprika.Data;
 
-namespace Paprika.Data;
+namespace Paprika.Store;
 
 /// <summary>
 /// An interface for a page holding data, capable to <see cref="TryGet"/> and <see cref="Set"/> values.

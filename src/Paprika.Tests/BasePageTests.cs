@@ -1,6 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 using Paprika.Data;
-using Paprika.Db;
+using Paprika.Store;
 
 namespace Paprika.Tests;
 

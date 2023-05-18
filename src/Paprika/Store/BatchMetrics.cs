@@ -1,4 +1,4 @@
-﻿namespace Paprika.Db;
+﻿namespace Paprika.Store;
 
 class BatchMetrics : IBatchMetrics
 {

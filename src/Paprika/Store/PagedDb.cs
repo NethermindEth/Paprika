@@ -4,9 +4,9 @@ using System.Runtime.InteropServices;
 using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Data;
-using Paprika.Db.PageManagers;
+using Paprika.Store.PageManagers;
 
-namespace Paprika.Db;
+namespace Paprika.Store;
 
 /// <summary>
 /// The base class for page db implementations.

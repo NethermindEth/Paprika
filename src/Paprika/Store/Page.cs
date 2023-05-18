@@ -1,8 +1,8 @@
 ﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Paprika.Db;
+using Paprika.Data;
 
-namespace Paprika.Data;
+namespace Paprika.Store;
 
 /// <summary>
 /// A markup interface for pages.

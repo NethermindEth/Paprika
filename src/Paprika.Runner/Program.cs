@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 using HdrHistogram;
 using Nethermind.Int256;
 using Paprika.Crypto;
-using Paprika.Db;
+using Paprika.Store;
 
 [assembly: ExcludeFromCodeCoverage]
 

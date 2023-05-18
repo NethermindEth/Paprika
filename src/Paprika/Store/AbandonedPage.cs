@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
 
-namespace Paprika.Db;
+namespace Paprika.Store;
 
 /// <summary>
 /// Represents a set of pages abandoned during the batch with the same <see cref="IBatchContext.BatchId"/>

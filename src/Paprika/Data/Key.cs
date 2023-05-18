@@ -1,11 +1,15 @@
 ﻿using Paprika.Crypto;
-using Paprika.Db;
+using Paprika.Store;
 
-namespace Paprika.Data.Map;
+namespace Paprika.Data;
 
 /// <summary>
-/// Represents the key of the map.
+/// Represents the key of the <see cref="FixedMap"/>, by combining a path <see cref="NibblePath"/>,
+/// a type <see cref="DataType"/> and a potential <see cref="AdditionalKey"/>.
 /// </summary>
+/// <remarks>
+/// Use factory methods to create one.
+/// </remarks>
 public readonly ref struct Key
 {
     public readonly NibblePath Path;

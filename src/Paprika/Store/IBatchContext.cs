@@ -1,6 +1,4 @@
-﻿using Paprika.Db;
-
-namespace Paprika.Data;
+﻿namespace Paprika.Store;
 
 public interface IBatchContext : IReadOnlyBatchContext
 {

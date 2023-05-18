@@ -1,8 +1,8 @@
 ﻿using System.Buffers.Binary;
 using BenchmarkDotNet.Attributes;
 using Paprika.Data;
-using Paprika.Data.Map;
-using Paprika.Db;
+using Paprika.Store;
+
 namespace Paprika.Benchmarks;
 
 [DisassemblyDiagnoser(3)]

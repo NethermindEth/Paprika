@@ -1,9 +1,9 @@
-﻿using Paprika.Data.Map;
+﻿using Paprika.Data;
 
-namespace Paprika.Data;
+namespace Paprika.Store;
 
 /// <summary>
-/// Represents an intent to set the account data.
+/// Represents a context for setting the data.
 /// </summary>
 public readonly ref struct SetContext
 {

@@ -1,5 +1,6 @@
 ﻿using NUnit.Framework;
-using Paprika.Db;
+using Paprika.Data;
+using Paprika.Store;
 
 namespace Paprika.Tests;
 

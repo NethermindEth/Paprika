@@ -1,7 +1,7 @@
 ﻿using System.Text;
 using Paprika.Crypto;
 using Paprika.Data;
-using Paprika.Db;
+using Paprika.Store;
 
 namespace Paprika.Utils;
 

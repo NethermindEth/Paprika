@@ -1,10 +1,9 @@
 ﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Paprika.Data.Map;
-using Paprika.Db;
+using Paprika.Data;
 
-namespace Paprika.Data;
+namespace Paprika.Store;
 
 /// <summary>
 /// Represents the page with the fan out of 256 to maximally flatten the tree.

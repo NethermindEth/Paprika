@@ -1,7 +1,7 @@
 ﻿using System.Runtime.InteropServices;
 using Paprika.Data;
 
-namespace Paprika.Db.PageManagers;
+namespace Paprika.Store.PageManagers;
 
 public unsafe class NativeMemoryPageManager : PointerPageManager
 {
