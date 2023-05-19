@@ -21,7 +21,7 @@ public class PrinterTests : BasePageTests
         {
             Printer.Print(db, Console.Out);
 
-            using (var block = db.BeginNextBlock())
+            using (var block = db.BeginNextBatch())
             {
                 block.Set(Key0, new Account(Balance0, (UInt256)i++));
                 block.Commit(CommitOptions.FlushDataOnly);

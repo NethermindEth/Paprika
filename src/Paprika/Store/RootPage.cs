@@ -38,7 +38,7 @@ public readonly unsafe struct RootPage : IPage
         /// </summary>
         public const byte RootNibbleLevel = 2;
 
-        private const int AbandonedPagesStart = sizeof(uint) + Keccak.Size + DbAddress.Size + DbAddress.Size * AccountPageFanOut;
+        private const int AbandonedPagesStart = DbAddress.Size + DbAddress.Size * AccountPageFanOut;
 
         /// <summary>
         /// This gives the upper boundary of the number of abandoned pages that can be kept in the list.
@@ -51,25 +51,15 @@ public readonly unsafe struct RootPage : IPage
         private const int AbandonedPagesCount = (Size - AbandonedPagesStart) / DbAddress.Size;
 
         /// <summary>
-        /// The block number that the given batch represents.
-        /// </summary>
-        [FieldOffset(0)] public uint BlockNumber;
-
-        /// <summary>
-        /// The hash of the state root of the given block identified by <see cref="BlockNumber"/>.
-        /// </summary>
-        [FieldOffset(sizeof(uint))] public Keccak StateRootHash;
-
-        /// <summary>
         /// The address of the next free page. This should be used rarely as pages should be reused
         /// with <see cref="AbandonedPage"/>.
         /// </summary>
-        [FieldOffset(sizeof(uint) + Keccak.Size)] public DbAddress NextFreePage;
+        [FieldOffset(0)] public DbAddress NextFreePage;
 
         /// <summary>
         /// The first of the data pages.
         /// </summary>
-        [FieldOffset(sizeof(uint) + Keccak.Size + DbAddress.Size)] private DbAddress AccountPage;
+        [FieldOffset(DbAddress.Size)] private DbAddress AccountPage;
 
         /// <summary>
         /// Gets the span of account pages of the root

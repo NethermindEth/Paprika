@@ -107,35 +107,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     /// Begins a batch representing the next block.
     /// </summary>
     /// <returns></returns>
-    public IBatch BeginNextBlock() => BuildFromRoot(Root);
-
-    /// <summary>
-    /// Reorganizes chain back to the given block hash and starts building on top of it.
-    /// </summary>
-    /// <param name="stateRootHash">The block hash to reorganize to.</param>
-    /// <returns>The new batch.</returns>
-    public IBatch ReorganizeBackToAndStartNew(Keccak stateRootHash)
-    {
-        RootPage? reorganizeTo = default;
-
-        // find block with the given state root hash
-        foreach (var rootPage in _roots)
-        {
-            if (rootPage.Data.StateRootHash == stateRootHash)
-            {
-                reorganizeTo = rootPage;
-            }
-        }
-
-        if (reorganizeTo == null)
-        {
-            throw new ArgumentException(
-                $"The block with the stateRootHash equal to '{stateRootHash}' was not found across history of recent {_historyDepth} blocks kept in Paprika",
-                nameof(stateRootHash));
-        }
-
-        return BuildFromRoot(reorganizeTo.Value);
-    }
+    public IBatch BeginNextBatch() => BuildFromRoot(Root);
 
     public IReadOnlyBatch BeginReadOnlyBatch()
     {
@@ -198,9 +170,6 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             // always inc the batchId
             root.Header.BatchId++;
-
-            // move to the next block
-            root.Data.BlockNumber++;
 
             // select min batch across the one respecting history and the min of all the read-only batches
             var rootBatchId = root.Header.BatchId;
@@ -391,17 +360,14 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             }
         }
 
-        public async ValueTask<Keccak> Commit(CommitOptions options)
+        public async ValueTask Commit(CommitOptions options)
         {
             CheckDisposed();
-
-            CalculateStateRootHash();
 
             // memoize the abandoned so that it's preserved for future uses 
             MemoizeAbandoned();
 
             await _db._manager.FlushPages(_written, options);
-
 
             var newRootPage = _db.SetNewRoot(_root);
 
@@ -414,18 +380,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             {
                 Debug.Assert(ReferenceEquals(this, _db._batchCurrent));
                 _db._batchCurrent = null;
-
-                return _root.Data.StateRootHash;
             }
-        }
-
-        private void CalculateStateRootHash()
-        {
-            // TODO: it's a dummy implementation now as there's no Merkle construct.
-            // when implementing, this will be the place to put the real Keccak
-            Span<byte> span = stackalloc byte[4];
-            BinaryPrimitives.WriteUInt32LittleEndian(span, _root.Data.BlockNumber);
-            _root.Data.StateRootHash = Keccak.Compute(span);
         }
 
         public override Page GetAt(DbAddress address) => _db.GetAt(address);

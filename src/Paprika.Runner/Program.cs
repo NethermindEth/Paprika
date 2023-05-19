@@ -101,7 +101,7 @@ public static class Program
 
         for (uint block = 0; block < BlockCount; block++)
         {
-            using var batch = db.BeginNextBlock();
+            using var batch = db.BeginNextBatch();
 
             for (var account = 0; account < AccountsPerBlock; account++)
             {

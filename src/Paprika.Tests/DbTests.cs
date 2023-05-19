@@ -35,13 +35,13 @@ public class DbTests
             span[0] = (byte)(i << NibblePath.NibbleShift);
             var key = new Keccak(span);
 
-            using var batch = db.BeginNextBlock();
+            using var batch = db.BeginNextBatch();
             batch.Set(key, new Account(i, i));
             batch.SetStorage(key, key, i);
             await batch.Commit(CommitOptions.FlushDataAndRoot);
         }
 
-        using var read = db.BeginNextBlock();
+        using var read = db.BeginNextBatch();
 
         for (byte i = 0; i < max; i++)
         {
@@ -59,78 +59,6 @@ public class DbTests
         Console.WriteLine($"Used memory {db.Megabytes:P}");
     }
 
-    [Test]
-    public async Task Reorganization_jump_to_given_block_hash()
-    {
-        using var db = PagedDb.NativeMemoryDb(SmallDb);
-
-        var account0 = new Account(Balance0, Nonce0);
-        var account1 = new Account(Balance1, Nonce1);
-        var account2 = new Account(Balance2, Nonce2);
-
-        Keccak block0Commit;
-
-        using (var block0 = db.BeginNextBlock())
-        {
-            block0.Set(Key0, account0);
-
-            block0Commit = await block0.Commit(CommitOptions.FlushDataOnly);
-        }
-
-        using (var block1A = db.BeginNextBlock())
-        {
-            block1A.Set(Key0, account1);
-            block1A.Set(Key1a, account2);
-
-            await block1A.Commit(CommitOptions.FlushDataOnly);
-
-            // assert
-            block1A.GetAccount(Key0).Should().Be(account1);
-            block1A.GetAccount(Key1a).Should().Be(account2);
-        }
-
-        using (var block1B = db.ReorganizeBackToAndStartNew(block0Commit))
-        {
-            block1B.GetAccount(Key0).Should().Be(account0);
-            block1B.GetAccount(Key1a).Should().Be(Account.Empty);
-
-            block1B.Set(Key0, account2);
-
-            await block1B.Commit(CommitOptions.FlushDataOnly);
-
-            // assert
-            block1B.GetAccount(Key0).Should().Be(account2);
-            block1B.GetAccount(Key1a).Should().Be(Account.Empty);
-        }
-
-        AssertPageMetadataAssigned(db);
-    }
-
-    [Test]
-    public async Task Reorganization_block_not_found()
-    {
-        using var db = PagedDb.NativeMemoryDb(SmallDb);
-
-        var account0 = new Account(Balance0, Nonce0);
-
-        using (var block0 = db.BeginNextBlock())
-        {
-            block0.Set(Key0, account0);
-            await block0.Commit(CommitOptions.FlushDataOnly);
-        }
-
-        using (var block1A = db.BeginNextBlock())
-        {
-            await block1A.Commit(CommitOptions.FlushDataOnly);
-        }
-
-        var invalidBlock = Keccak.EmptyTreeHash;
-
-        Assert.Throws<ArgumentException>(() => db.ReorganizeBackToAndStartNew(invalidBlock).Should());
-
-        AssertPageMetadataAssigned(db);
-    }
-
     [TestCase(100_000, 1, TestName = "Long history, single account")]
     [TestCase(500, 2_000, TestName = "Short history, many accounts")]
     public async Task Page_reuse(int blockCount, int accountsCount)
@@ -142,7 +70,7 @@ public class DbTests
         for (var i = 0; i < blockCount; i++)
         {
             // ReSharper disable once ConvertToUsingDeclaration
-            using (var block = db.BeginNextBlock())
+            using (var block = db.BeginNextBatch())
             {
                 for (var account = 0; account < accountsCount; account++)
                 {
@@ -173,7 +101,7 @@ public class DbTests
         using var db = PagedDb.NativeMemoryDb(size);
 
         // write first value
-        using (var block = db.BeginNextBlock())
+        using (var block = db.BeginNextBatch())
         {
             block.Set(Key0, new Account(Balance0, start));
             await block.Commit(CommitOptions.FlushDataOnly);
@@ -185,7 +113,7 @@ public class DbTests
         for (var i = 0; i < blocksDuringReadAcquired; i++)
         {
             // ReSharper disable once ConvertToUsingDeclaration
-            using (var block = db.BeginNextBlock())
+            using (var block = db.BeginNextBatch())
             {
                 var value = start + (UInt256)i;
 
@@ -208,7 +136,7 @@ public class DbTests
         for (var i = 0; i < blocksPostRead; i++)
         {
             // ReSharper disable once ConvertToUsingDeclaration
-            using (var block = db.BeginNextBlock())
+            using (var block = db.BeginNextBatch())
             {
                 var value = (UInt256)i + start;
 
@@ -232,7 +160,7 @@ public class DbTests
 
         const int count = 100000;
 
-        using (var batch = db.BeginNextBlock())
+        using (var batch = db.BeginNextBatch())
         {
             for (uint i = 0; i < count; i++)
             {
