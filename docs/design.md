@@ -345,11 +345,11 @@ Which would be stored on one page as:
 
 | Key: Path | Key: Type                    | Key: Additional Key       | Byte encoded value                                                |
 | --------- | ---------------------------- | ------------------------- | ----------------------------------------------------------------- |
-| `0xCD`    | `Account`                    | `_`                       | `02 23 01` + `01 02` (`balance` concatenated with `nonce`)        |
+| `0xCD`    | `Account`                    | `_`                       | `02 01 23` + `01 02` (`balance` concatenated with `nonce`)        |
 | `0xCD`    | `CodeHash`                   | `_`                       | `FEDCBA...` (keccak, always 32 bytes)                             |
 | `0xCD`    | `StorageTreeRootPageAddress` | `_`                       | `02 12 34` (var length big-endian encoding of page `@1234`)       |
-| `0xCD`    | `StorageRootHash`            | `keccak of storage tree`  | `keccak value` (keccak, always 32 bytes, calculated when storing) |
-| `0xCD`    | `KeccakOrRlp`                | `keccak of the leaf node` | `keccak value` (keccak, always 32 bytes, calculated when storing) |
+| `0xCD`    | `StorageRootHash`            | `_`                       | `keccak value` (keccak, always 32 bytes, calculated when storing) |
+| `0xCD`    | `KeccakOrRlp`                | `_`                       | `keccak value` (keccak, always 32 bytes, calculated when storing) |
 
 And on the page under address `@1234`, which is a separate storage trie created for this huge account
 
