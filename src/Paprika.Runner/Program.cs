@@ -28,7 +28,7 @@ public static class Program
 
     private const int LogEvery = BlockCount / NumberOfLogs;
 
-    private const bool PersistentDb = true;
+    private const bool PersistentDb = false;
     private const bool UseStorage = true;
     private const bool UseBigStorageAccount = true;
     private const int BigStorageAccountSlotCount = 1_000_000;
