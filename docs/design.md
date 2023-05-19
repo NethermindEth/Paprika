@@ -262,7 +262,7 @@ private struct Slot
 }
 ```
 
-The slot is 4 bytes long. It extracts 4 first nibbles as a prefix for fast comparisons. It has a pointer to the item. The length of the item is included in the encoded part. The drawback of this design is a linear search across all the slots when an item must be found. With the expected number of items per page, which should be no bigger than 100, it gives 400 bytes of slots to search through. This should be ok-ish with modern processors. The code is marked with an optimization opportunity.
+The slot is 4 bytes long. It extracts 4 first nibbles as a prefix for fast comparisons. It has a pointer to the item. The length of the item is calculated by subtracting the address from the previous slot address. The drawback of this design is a linear search across all the slots when an item must be found. With the expected number of items per page, which should be no bigger than 100, it gives 400 bytes of slots to search through. This should be ok-ish with modern processors. The code is marked with an optimization opportunity.
 
 With this, the `FixedMap` memory representation looks like the following.
 
@@ -282,13 +282,13 @@ With this, the `FixedMap` memory representation looks like the following.
 │                │  └──────────┐                                │
 │                │             │                                │
 │                ▼             ▼                                │
-│                ┌───┬─────────┬───┬────────────────────────────┤
-│                │ L │         │ L │                            │
-│                │ E │         │ E │                            │
-│          ◄ ◄ ◄ │ N │  DATA   │ N │            DATA            │
-│                │   │for slot1│   │          for slot 0        │
-│                │   │         │   │                            │
-└────────────────┴───┴─────────┴───┴────────────────────────────┘
+│                ┌─────────────┬────────────────────────────────┤
+│                │             │                                │
+│                │             │                                │
+│          ◄ ◄ ◄ │    DATA     │             DATA               │
+│                │ for slot1   │          for slot 0            │
+│                │             │                                │
+└────────────────┴─────────────┴────────────────────────────────┘
 ```
 
 The `FixedMap` can wrap an arbitrary span of memory so it can be used for any page that wants to store data by key.
