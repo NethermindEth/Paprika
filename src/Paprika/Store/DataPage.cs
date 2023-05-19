@@ -92,8 +92,8 @@ public readonly unsafe struct DataPage : IDataPage
             var nibble = path.FirstNibble;
             var address = Data.Buckets[nibble];
 
-            // the bucket is not null and represents a page jump, follow it
-            if (address.IsNull == false && address.IsValidPageAddress)
+            // the bucket is not null and represents a page jump, follow it but only if it was written this tx
+            if (address.IsNull == false && ctx.Batch.WasWritten(address))
             {
                 var page = ctx.Batch.GetAt(address);
                 var updated = new DataPage(page).Set(ctx.SliceFrom(NibbleCount));
@@ -131,8 +131,10 @@ public readonly unsafe struct DataPage : IDataPage
             return Set(ctx);
         }
 
-        // standard nibble extraction followed by the child creation
-        var child = ctx.Batch.GetNewPage(out var childAddr, true);
+        // check if the child page already exists. It's possible if it was not written in this batch,
+        // and check above passed through. In this case, retrieve the child as is and it'll COW itself later
+        var childAddr = Data.Buckets[biggestNibble];
+        var child = childAddr.IsNull ? ctx.Batch.GetNewPage(out childAddr, true) : ctx.Batch.GetAt(childAddr);
 
         child.Header.TreeLevel = (byte)(Header.TreeLevel + 1);
         child.Header.PageType = Header.PageType;
@@ -150,7 +152,7 @@ public readonly unsafe struct DataPage : IDataPage
             map.Delete(item);
         }
 
-        Data.Buckets[biggestNibble] = childAddr;
+        Data.Buckets[biggestNibble] = ctx.Batch.GetAddress(dataPage.AsPage()); ;
 
         // The page has some of the values flushed down, try to add again.
         return Set(ctx);
@@ -158,19 +160,6 @@ public readonly unsafe struct DataPage : IDataPage
 
     public bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
-        if (key.Path.Length > 0)
-        {
-            // try to go deeper only if the path is long enough
-            var nibble = key.Path.FirstNibble;
-            var bucket = Data.Buckets[nibble];
-
-            // non-null page jump, follow it!
-            if (bucket.IsNull == false && bucket.IsValidPageAddress)
-            {
-                return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), batch, out result);
-            }
-        }
-
         // read in-page
         var map = new FixedMap(Data.FixedMapSpan);
 
@@ -187,6 +176,20 @@ public readonly unsafe struct DataPage : IDataPage
         if (map.TryGet(key, out result))
         {
             return true;
+        }
+
+        // not found here, follow
+        if (key.Path.Length > 0)
+        {
+            // try to go deeper only if the path is long enough
+            var nibble = key.Path.FirstNibble;
+            var bucket = Data.Buckets[nibble];
+
+            // non-null page jump, follow it!
+            if (bucket.IsNull == false)
+            {
+                return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), batch, out result);
+            }
         }
 
         result = default;

@@ -1,7 +1,6 @@
 ﻿using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Runtime.InteropServices;
 using HdrHistogram;
 using Nethermind.Int256;
 using Paprika.Crypto;
@@ -13,29 +12,29 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 50_000 : 20_000;
+    private const int BlockCount = PersistentDb ? 100_000 : 20_000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
 
     private const int RandomSeed = 17;
 
-    private const int NumberOfLogs = PersistentDb ? 20 : 10;
+    private const int NumberOfLogs = PersistentDb ? 100 : 10;
 
-    private const long DbFileSize = PersistentDb ? 64 * Gb : 10 * Gb;
+    private const long DbFileSize = PersistentDb ? 128 * Gb : 10 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
 
-    private const CommitOptions Commit = CommitOptions.DangerNoFlush;
+    private const CommitOptions Commit = CommitOptions.FlushDataOnly;
 
     private const int LogEvery = BlockCount / NumberOfLogs;
 
-    private const bool PersistentDb = true;
+    private const bool PersistentDb = false;
     private const bool UseStorage = true;
     private const bool UseBigStorageAccount = true;
     private const int BigStorageAccountSlotCount = 1_000_000;
     private static readonly UInt256[] BigStorageAccountValues = new UInt256[BigStorageAccountSlotCount];
 
-    public static void Main(String[] args)
+    public static async Task Main(String[] args)
     {
         var dir = Directory.GetCurrentDirectory();
         var dataPath = Path.Combine(dir, "db");
@@ -102,7 +101,7 @@ public static class Program
 
         for (uint block = 0; block < BlockCount; block++)
         {
-            using var batch = db.BeginNextBlock();
+            using var batch = db.BeginNextBatch();
 
             for (var account = 0; account < AccountsPerBlock; account++)
             {
@@ -136,7 +135,7 @@ public static class Program
                 counter++;
             }
 
-            batch.Commit(Commit);
+            await batch.Commit(Commit);
 
             if (block > 0 & block % LogEvery == 0)
             {
@@ -288,10 +287,10 @@ public static class Program
         return key;
     }
 
-    private static unsafe Span<byte> PrepareStableRandomSource()
+    private static byte[] PrepareStableRandomSource()
     {
         Console.WriteLine("Preparing random accounts addresses...");
-        var accounts = new Span<byte>(NativeMemory.Alloc((UIntPtr)RandomSampleSize), RandomSampleSize);
+        var accounts = GC.AllocateArray<byte>(RandomSampleSize);
         new Random(RandomSeed).NextBytes(accounts);
         Console.WriteLine("Accounts prepared");
         return accounts;

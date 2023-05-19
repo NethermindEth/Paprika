@@ -14,7 +14,7 @@ namespace Paprika.Store;
 /// <remarks>
 /// Assumes a continuous memory allocation as it provides addressing based on the pointers.
 /// </remarks>
-public unsafe class PagedDb : IPageResolver, IDb, IDisposable
+public class PagedDb : IPageResolver, IDb, IDisposable
 {
     /// <summary>
     /// The number of roots kept in the history.
@@ -107,35 +107,7 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
     /// Begins a batch representing the next block.
     /// </summary>
     /// <returns></returns>
-    public IBatch BeginNextBlock() => BuildFromRoot(Root);
-
-    /// <summary>
-    /// Reorganizes chain back to the given block hash and starts building on top of it.
-    /// </summary>
-    /// <param name="stateRootHash">The block hash to reorganize to.</param>
-    /// <returns>The new batch.</returns>
-    public IBatch ReorganizeBackToAndStartNew(Keccak stateRootHash)
-    {
-        RootPage? reorganizeTo = default;
-
-        // find block with the given state root hash
-        foreach (var rootPage in _roots)
-        {
-            if (rootPage.Data.StateRootHash == stateRootHash)
-            {
-                reorganizeTo = rootPage;
-            }
-        }
-
-        if (reorganizeTo == null)
-        {
-            throw new ArgumentException(
-                $"The block with the stateRootHash equal to '{stateRootHash}' was not found across history of recent {_historyDepth} blocks kept in Paprika",
-                nameof(stateRootHash));
-        }
-
-        return BuildFromRoot(reorganizeTo.Value);
-    }
+    public IBatch BeginNextBatch() => BuildFromRoot(Root);
 
     public IReadOnlyBatch BeginReadOnlyBatch()
     {
@@ -199,11 +171,10 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
             // always inc the batchId
             root.Header.BatchId++;
 
-            // move to the next block
-            root.Data.BlockNumber++;
-
             // select min batch across the one respecting history and the min of all the read-only batches
-            var minBatch = root.Header.BatchId - _historyDepth;
+            var rootBatchId = root.Header.BatchId;
+
+            var minBatch = rootBatchId < _historyDepth ? 0 : rootBatchId - _historyDepth;
             foreach (var batch in _batchesReadOnly)
             {
                 minBatch = Math.Min(batch.BatchId, minBatch);
@@ -217,10 +188,13 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
 
     public Page GetAt(DbAddress address) => _manager.GetAt(address);
 
+    private Page GetAtForWriting(DbAddress address, bool reused) => _manager.GetAtForWriting(address, reused);
+
     private DbAddress SetNewRoot(RootPage root)
     {
         _lastRoot += 1;
         var pageAddress = _lastRoot % _historyDepth;
+
         root.CopyTo(_roots[pageAddress]);
         return DbAddress.Page((uint)pageAddress);
     }
@@ -255,7 +229,7 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
             return TryGetPage(key, out var page) ? page.GetStorage(GetPath(key), address, this) : default;
         }
 
-        private bool TryGetPage(Keccak key, out FanOut256Page page)
+        private bool TryGetPage(Keccak key, out DataPage page)
         {
             if (_disposed)
                 throw new ObjectDisposedException("The readonly batch has already been disposed");
@@ -267,7 +241,7 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
                 return false;
             }
 
-            page = new FanOut256Page(GetAt(addr));
+            page = new DataPage(GetAt(addr));
             return true;
         }
 
@@ -322,7 +296,7 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
         public Account GetAccount(in Keccak key) =>
             TryGetPageNoAlloc(key, out var page) ? page.GetAccount(GetPath(key), this) : default;
 
-        private bool TryGetPageNoAlloc(in Keccak key, out FanOut256Page page)
+        private bool TryGetPageNoAlloc(in Keccak key, out DataPage page)
         {
             CheckDisposed();
 
@@ -334,7 +308,7 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
                 return false;
             }
 
-            page = new FanOut256Page(_db.GetAt(addr));
+            page = new DataPage(_db.GetAt(addr));
             return true;
         }
 
@@ -355,7 +329,7 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
             addr = _db.GetAddress(updated);
         }
 
-        private ref DbAddress TryGetPageAlloc(in Keccak key, out FanOut256Page page)
+        private ref DbAddress TryGetPageAlloc(in Keccak key, out DataPage page)
         {
             CheckDisposed();
 
@@ -373,7 +347,7 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
                 p = GetAt(addr);
             }
 
-            page = new FanOut256Page(p);
+            page = new DataPage(p);
 
             return ref addr;
         }
@@ -386,46 +360,27 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
             }
         }
 
-        public Keccak Commit(CommitOptions options)
+        public async ValueTask Commit(CommitOptions options)
         {
             CheckDisposed();
 
-            CalculateStateRootHash();
-
             // memoize the abandoned so that it's preserved for future uses 
             MemoizeAbandoned();
+
+            await _db._manager.FlushPages(_written, options);
+
+            var newRootPage = _db.SetNewRoot(_root);
+
+            await _db._manager.FlushRootPage(newRootPage, options);
+
+            // if reporter passed
+            _db._reporter?.Invoke(_metrics);
 
             lock (_db._batchLock)
             {
                 Debug.Assert(ReferenceEquals(this, _db._batchCurrent));
                 _db._batchCurrent = null;
-
-                if (options != CommitOptions.DangerNoFlush)
-                {
-                    _db._manager.FlushAllPages();
-                }
-
-                var newRootPage = _db.SetNewRoot(_root);
-
-                if (options == CommitOptions.FlushDataAndRoot)
-                {
-                    _db._manager.FlushRootPage(GetAt(newRootPage));
-                }
-
-                // if reporter passed
-                _db._reporter?.Invoke(_metrics);
-
-                return _root.Data.StateRootHash;
             }
-        }
-
-        private void CalculateStateRootHash()
-        {
-            // TODO: it's a dummy implementation now as there's no Merkle construct.
-            // when implementing, this will be the place to put the real Keccak
-            Span<byte> span = stackalloc byte[4];
-            BinaryPrimitives.WriteUInt32LittleEndian(span, _root.Data.BlockNumber);
-            _root.Data.StateRootHash = Keccak.Compute(span);
         }
 
         public override Page GetAt(DbAddress address) => _db.GetAt(address);
@@ -434,19 +389,22 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
 
         public override Page GetNewPage(out DbAddress addr, bool clear)
         {
+            bool reused;
             if (TryGetNoLongerUsedPage(out addr))
             {
+                reused = true;
                 _metrics.ReportPageReused();
             }
             else
             {
+                reused = false;
                 _metrics.ReportNewPageAllocation();
 
                 // on failure to reuse a page, default to allocating a new one.
                 addr = _root.Data.GetNextFreePage();
             }
 
-            var page = _db.GetAt(addr);
+            var page = _db.GetAtForWriting(addr, reused);
             if (clear)
                 page.Clear();
 
@@ -633,7 +591,7 @@ public unsafe class PagedDb : IPageResolver, IDb, IDisposable
     /// </summary>
     private sealed class Context
     {
-        public Context()
+        public unsafe Context()
         {
             Page = new Page((byte*)NativeMemory.AlignedAlloc((UIntPtr)Page.PageSize, (UIntPtr)UIntPtr.Size));
             Abandoned = new Queue<DbAddress>();

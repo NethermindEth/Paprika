@@ -18,18 +18,6 @@ public readonly struct DbAddress : IEquatable<DbAddress>
 
     public const int Size = sizeof(uint);
 
-    /// <summary>
-    /// This value is bigger <see cref="Store.Page.PageCount"/> so that regular pages don't overflow.
-    /// </summary>
-    private const uint SamePage = 0x8000_0000;
-
-    private const int ValueMask = 0x00FF_FFFF;
-
-    /// <summary>
-    /// The shift that is applied to the counter of the jumps captured by the address.
-    /// </summary>
-    private const int JumpCountShift = 24;
-
     // private const uint JumpCounter = byte.MaxValue - (SamePage >> JumpCountShift);
     private const int NullValue = 0;
 
@@ -51,26 +39,11 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     /// <summary>
     /// Gets the next address.
     /// </summary>
-    public DbAddress Next
-    {
-        get
-        {
-            Debug.Assert(IsSamePage == false,
-                "The next operator should be used only of the page addresses, not same page addresses");
-            return new DbAddress(_value + 1);
-        }
-    }
+    public DbAddress Next => new(_value + 1);
 
-    private DbAddress(uint value) => _value = value;
+    public DbAddress(uint value) => _value = value;
 
     public bool IsNull => _value == NullValue;
-
-    /// <summary>
-    /// Keeps the number of frames used in the same page by jumps to the same nibble.
-    /// </summary>
-    public uint SamePageJumpCount => (_value & ~SamePage) >> JumpCountShift;
-
-    public bool IsSamePage => (_value & SamePage) == SamePage;
 
     // ReSharper disable once MergeIntoPattern
     public bool IsValidPageAddress => _value < Store.Page.PageCount;
@@ -78,8 +51,7 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     public static implicit operator uint(DbAddress address) => address._value;
     public static implicit operator int(DbAddress address) => (int)address._value;
 
-    public override string ToString() => IsNull ? "null" :
-        IsSamePage ? $"Jump within page to index: {ValueMask & _value}" : $"Page @{_value}";
+    public override string ToString() => IsNull ? "null" : $"Page @{_value}";
 
     public bool Equals(DbAddress other) => _value == other._value;
 

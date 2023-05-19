@@ -22,7 +22,7 @@ public interface IBatch : IReadOnlyBatch
     /// </summary>
     /// <param name="options">How to commit.</param>
     /// <returns>The state root hash.</returns>
-    Keccak Commit(CommitOptions options);
+    ValueTask Commit(CommitOptions options);
 }
 
 public enum CommitOptions
