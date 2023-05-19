@@ -24,16 +24,6 @@ public readonly ref struct FixedMap
 
     private const int AllocationGranularity = 8;
 
-    /// <summary>
-    /// Number of bytes used to write length prefix.
-    /// </summary>
-    private const byte ItemLengthLength = 1;
-
-    /// <summary>
-    /// The maximum length value handled properly.
-    /// </summary>
-    private const int MaxLength = byte.MaxValue;
-
     private readonly ref Header _header;
     private readonly Span<byte> _data;
     private readonly Span<Slot> _slots;
@@ -66,15 +56,7 @@ public readonly ref struct FixedMap
         var encodedKey = path.WriteTo(stackalloc byte[path.MaxByteLength]);
 
         // does not exist yet, calculate total memory needed
-        var totalRequired = GetTotalSpaceRequired(encodedKey, key.AdditionalKey, data);
-
-        if (totalRequired > MaxLength)
-        {
-            throw new Exception($"Total entry length breaches the limit of {MaxLength} bytes");
-        }
-
-        // cast down
-        var total = (byte)totalRequired;
+        var total = GetTotalSpaceRequired(encodedKey, key.AdditionalKey, data);
 
         if (_header.Taken + total + Slot.Size > _data.Length)
         {
@@ -103,18 +85,16 @@ public readonly ref struct FixedMap
         slot.ItemAddress = (ushort)(_data.Length - _header.High - total);
         slot.Type = key.Type;
 
-        // write item: length, key, additionalKey, data
+        // write item: key, additionalKey, data
         var dest = _data.Slice(slot.ItemAddress, total);
 
-        WriteEntryLength(dest, (byte)(total - ItemLengthLength));
-
-        encodedKey.CopyTo(dest.Slice(ItemLengthLength));
-        key.AdditionalKey.CopyTo(dest.Slice(ItemLengthLength + encodedKey.Length));
-        data.CopyTo(dest.Slice(ItemLengthLength + encodedKey.Length + key.AdditionalKey.Length));
+        encodedKey.CopyTo(dest);
+        key.AdditionalKey.CopyTo(dest.Slice(encodedKey.Length));
+        data.CopyTo(dest.Slice(encodedKey.Length + key.AdditionalKey.Length));
 
         // commit low and high
         _header.Low += Slot.Size;
-        _header.High += total;
+        _header.High += (ushort)total;
         return true;
     }
 
@@ -177,7 +157,7 @@ public readonly ref struct FixedMap
             get
             {
                 ref var slot = ref _map._slots[_index];
-                var span = _map.GetSlotPayload(slot);
+                var span = _map.GetSlotPayload(ref slot);
 
                 ReadOnlySpan<byte> data;
                 NibblePath path;
@@ -308,7 +288,7 @@ public readonly ref struct FixedMap
     private static int GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> additionalKey,
         ReadOnlySpan<byte> data)
     {
-        return key.Length + data.Length + additionalKey.Length + ItemLengthLength;
+        return key.Length + data.Length + additionalKey.Length;
     }
 
     /// <summary>
@@ -354,9 +334,7 @@ public readonly ref struct FixedMap
             var copyFrom = _slots[i];
             if (copyFrom.Type != DataType.Deleted)
             {
-                var source = _data.Slice(copyFrom.ItemAddress);
-                var length = ReadDataLength(source);
-                var fromSpan = source.Slice(0, length + ItemLengthLength);
+                var fromSpan = GetSlotPayload(ref _slots[i]);
 
                 ref var copyTo = ref copy._slots[copy._header.Low / Slot.Size];
 
@@ -394,8 +372,8 @@ public readonly ref struct FixedMap
             _header.Low -= Slot.Size;
 
             // undo writing high
-            var slice = _data.Slice(_slots[index].ItemAddress);
-            var total = ReadDataLength(slice) + ItemLengthLength;
+            var slice = GetSlotPayload(ref _slots[index]);
+            var total = slice.Length;
             _header.High = (ushort)(_header.High - total);
 
             // cleanup
@@ -406,11 +384,6 @@ public readonly ref struct FixedMap
             index--;
         }
     }
-
-    private static void WriteEntryLength(Span<byte> dest, byte dataRequiredWithNoLength) =>
-        dest[0] = dataRequiredWithNoLength;
-
-    private static byte ReadDataLength(Span<byte> source) => source[0];
 
     public bool TryGet(in Key key, out ReadOnlySpan<byte> data)
     {
@@ -451,10 +424,10 @@ public readonly ref struct FixedMap
             {
                 var i = offset / 2;
 
-                ref readonly var slot = ref _slots[i];
+                ref var slot = ref _slots[i];
                 if (slot.Type == key.Type)
                 {
-                    var actual = GetSlotPayload(slot);
+                    var actual = GetSlotPayload(ref slot);
 
                     // The StartsWith check assumes that all the keys have the same length.
                     if (actual.StartsWith(encodedKey))
@@ -493,11 +466,14 @@ public readonly ref struct FixedMap
     /// <summary>
     /// Gets the payload pointed to by the given slot without the length prefix.
     /// </summary>
-    private Span<byte> GetSlotPayload(Slot slot)
+    private Span<byte> GetSlotPayload(ref Slot slot)
     {
-        var slice = _data.Slice(slot.ItemAddress);
-        var dataLength = ReadDataLength(slice);
-        return slice.Slice(ItemLengthLength, dataLength);
+        // assert whether the slot has a previous, if not use data.length
+        int previousSlotAddress = Unsafe.IsAddressLessThan(ref _slots[0], ref slot)
+            ? Unsafe.Add(ref slot, -1).ItemAddress
+            : _data.Length;
+
+        return _data.Slice(slot.ItemAddress, previousSlotAddress - slot.ItemAddress);
     }
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
