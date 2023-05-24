@@ -85,10 +85,15 @@ public readonly unsafe struct RootPage : IPage
         }
     }
 
+    public static ref DbAddress FindAccountPage(Span<DbAddress> accountPages, in NibblePath path)
+    {
+        return ref accountPages[path.FirstNibble];
+    }
+
     public static ref DbAddress FindAccountPage(Span<DbAddress> accountPages, in Keccak key)
     {
         var path = NibblePath.FromKey(key);
-        return ref accountPages[path.FirstNibble];
+        return ref FindAccountPage(accountPages, path);
     }
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver)

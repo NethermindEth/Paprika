@@ -1,7 +1,10 @@
 ﻿using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Threading.Channels;
+using Nethermind.Int256;
 using Paprika.Crypto;
+using Paprika.Data;
 using Paprika.Store;
 
 namespace Paprika.Chain;
@@ -46,6 +49,54 @@ public class Blockchain
     public IWorldState StartNew(Keccak parentKeccak, Keccak blockKeccak, uint blockNumber)
     {
         return new Block(parentKeccak, blockKeccak, blockNumber, this);
+    }
+
+    private UInt256 GetStorage(in Keccak account, in Keccak address, Block start)
+    {
+        var bloom = Block.BloomForStorageOperation(account, address);
+        var key = Key.StorageCell(NibblePath.FromKey(account), address);
+
+        if (TryGetInBlockchain(start, bloom, key, out var result))
+        {
+            Serializer.ReadStorageValue(result, out var value);
+            return value;
+        }
+
+        return default;
+    }
+
+    private Account GetAccount(in Keccak account, Block start)
+    {
+        var bloom = Block.BloomForAccountOperation(account);
+        var key = Key.Account(NibblePath.FromKey(account));
+
+        if (TryGetInBlockchain(start, bloom, key, out var result))
+        {
+            Serializer.ReadAccount(result, out var balance, out var nonce);
+            return new Account(balance, nonce);
+        }
+
+        return default;
+    }
+
+    /// <summary>
+    /// Finds the given key in the blockchain.
+    /// </summary>
+    private bool TryGetInBlockchain(Block start, int bloom, in Key key, out ReadOnlySpan<byte> result)
+    {
+        var block = start;
+
+        // walk through the blocks
+        do
+        {
+            if (block.TryGet(bloom, key, out result))
+            {
+                return true;
+            }
+        } while (_blocksByHash.TryGetValue(block.ParentHash, out block));
+
+        // default to the reader
+        return _dbReader.TryGet(key, out result);
     }
 
     public void Finalize(Keccak keccak)
@@ -156,16 +207,25 @@ public class Blockchain
 
         private PagePool Pool => _blockchain._pool;
 
-        // TODO: fix
-        // public void Set(int keyHash, in Keccak key, in Account account)
-        // {
-        //     _root.SetAccount(NibblePath.FromKey(key), account, this);
-        // }
-        //
-        // public void SetStorage(int keyHash, in Keccak key, in Keccak address, UInt256 value)
-        // {
-        //     _root.SetStorage(NibblePath.FromKey(key), address, value, this);
-        // }
+
+        public UInt256 GetStorage(in Keccak key, in Keccak address) => _blockchain.GetStorage(in key, in address, this);
+
+        public Account GetAccount(in Keccak key) => _blockchain.GetAccount(in key, this);
+
+        public static int BloomForStorageOperation(in Keccak key, in Keccak address) =>
+            key.GetHashCode() ^ address.GetHashCode();
+
+        public static int BloomForAccountOperation(in Keccak key) => key.GetHashCode();
+
+        public void SetAccount(in Keccak key, in Account account)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void SetStorage(in Keccak key, in Keccak address, UInt256 value)
+        {
+            throw new NotImplementedException();
+        }
 
         Page IPageResolver.GetAt(DbAddress address) => Pool.GetAt(address);
 
@@ -200,6 +260,17 @@ public class Blockchain
             {
                 Pool.Return(page);
             }
+        }
+
+        public bool TryGet(int bloom, Key key, out ReadOnlySpan<byte> result)
+        {
+            if (_bloom.IsSet(bloom) == false)
+            {
+                result = default;
+                return false;
+            }
+
+            return _root.TryGet(key, this, out result);
         }
     }
 }

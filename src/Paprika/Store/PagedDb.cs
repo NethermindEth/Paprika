@@ -219,30 +219,19 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _db.DisposeReadOnlyBatch(this);
         }
 
-        public Account GetAccount(in Keccak key)
-        {
-            return TryGetPage(key, out var page) ? page.GetAccount(GetPath(key), this) : default;
-        }
-
-        public UInt256 GetStorage(in Keccak key, in Keccak address)
-        {
-            return TryGetPage(key, out var page) ? page.GetStorage(GetPath(key), address, this) : default;
-        }
-
-        private bool TryGetPage(Keccak key, out DataPage page)
+        public bool TryGet(in Key key, out ReadOnlySpan<byte> result)
         {
             if (_disposed)
                 throw new ObjectDisposedException("The readonly batch has already been disposed");
 
-            var addr = RootPage.FindAccountPage(_rootDataPages, key);
+            var addr = RootPage.FindAccountPage(_rootDataPages, key.Path);
             if (addr.IsNull)
             {
-                page = default;
+                result = default;
                 return false;
             }
 
-            page = new DataPage(GetAt(addr));
-            return true;
+            return new DataPage(GetAt(addr)).TryGet(key, this, out result);
         }
 
         public uint BatchId { get; }
@@ -293,27 +282,20 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _metrics = new BatchMetrics();
         }
 
-        public Account GetAccount(in Keccak key) =>
-            TryGetPageNoAlloc(key, out var page) ? page.GetAccount(GetPath(key), this) : default;
-
-        private bool TryGetPageNoAlloc(in Keccak key, out DataPage page)
+        public bool TryGet(in Key key, out ReadOnlySpan<byte> result)
         {
             CheckDisposed();
 
-            var addr = RootPage.FindAccountPage(_root.Data.AccountPages, key);
+            var addr = RootPage.FindAccountPage(_root.Data.AccountPages, key.Path);
 
             if (addr.IsNull)
             {
-                page = default;
+                result = default;
                 return false;
             }
 
-            page = new DataPage(_db.GetAt(addr));
-            return true;
+            return new DataPage(GetAt(addr)).TryGet(key, this, out result);
         }
-
-        public UInt256 GetStorage(in Keccak key, in Keccak address) =>
-            TryGetPageNoAlloc(key, out var page) ? page.GetStorage(GetPath(key), address, this) : default;
 
         public void Set(in Keccak key, in Account account)
         {
