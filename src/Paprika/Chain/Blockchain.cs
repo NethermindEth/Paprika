@@ -1,6 +1,5 @@
 ﻿using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Nethermind.Int256;
 using Paprika.Crypto;
@@ -10,7 +9,11 @@ using Paprika.Store;
 namespace Paprika.Chain;
 
 /// <summary>
-/// 
+/// The blockchain is the main component of Paprika, that can deal with latest, safe and finalized blocks.
+///
+/// For latest and safe, it uses a notion of block, that allows switching heads, querying from different heads etc.
+/// For the finalized blocks, they are queued to a <see cref="Channel"/> that is consumed by a flushing mechanism
+/// using the <see cref="PagedDb"/>.
 /// </summary>
 /// <remarks>
 /// The current implementation assumes a single threaded access. For multi-threaded, some adjustments will be required.
@@ -207,7 +210,6 @@ public class Blockchain
 
         private PagePool Pool => _blockchain._pool;
 
-
         public UInt256 GetStorage(in Keccak key, in Keccak address) => _blockchain.GetStorage(in key, in address, this);
 
         public Account GetAccount(in Keccak key) => _blockchain.GetAccount(in key, this);
@@ -219,12 +221,16 @@ public class Blockchain
 
         public void SetAccount(in Keccak key, in Account account)
         {
-            throw new NotImplementedException();
+            _bloom.Set(BloomForAccountOperation(key));
+
+            _root.SetAccount(NibblePath.FromKey(key), account, this);
         }
 
         public void SetStorage(in Keccak key, in Keccak address, UInt256 value)
         {
-            throw new NotImplementedException();
+            _bloom.Set(BloomForStorageOperation(key, address));
+
+            _root.SetStorage(NibblePath.FromKey(key), address, value, this);
         }
 
         Page IPageResolver.GetAt(DbAddress address) => Pool.GetAt(address);
