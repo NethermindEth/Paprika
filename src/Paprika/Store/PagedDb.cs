@@ -231,7 +231,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 return false;
             }
 
-            return new DataPage(GetAt(addr)).TryGet(key, this, out result);
+            return new DataPage(GetAt(addr)).TryGet(key.SliceFrom(RootPage.Payload.RootNibbleLevel), this, out result);
         }
 
         public uint BatchId { get; }
@@ -294,7 +294,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 return false;
             }
 
-            return new DataPage(GetAt(addr)).TryGet(key, this, out result);
+            return new DataPage(GetAt(addr)).TryGet(key.SliceFrom(RootPage.Payload.RootNibbleLevel), this, out result);
         }
 
         public void Set(in Keccak key, in Account account)
