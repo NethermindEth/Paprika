@@ -85,7 +85,7 @@ public enum PageType : byte
 /// Jump pages consist only of jumps according to a part of <see cref="NibblePath"/>.
 /// Value pages have buckets + skip list for storing values.
 /// </summary>
-public readonly unsafe struct Page : IPage
+public readonly unsafe struct Page : IPage, IEquatable<Page>
 {
     public const int PageCount = 0x0100_0000; // 64GB addressable
     public const int PageAddressMask = PageCount - 1;
@@ -104,4 +104,10 @@ public readonly unsafe struct Page : IPage
     public Span<byte> Span => new(_ptr, PageSize);
 
     public ref PageHeader Header => ref Unsafe.AsRef<PageHeader>(_ptr);
+
+    public bool Equals(Page other) => _ptr == other._ptr;
+
+    public override bool Equals(object? obj) => obj is Page other && Equals(other);
+
+    public override int GetHashCode() => unchecked((int)(long)_ptr);
 }
