@@ -21,7 +21,7 @@ public interface IWorldState : IDisposable
     public void SetStorage(in Keccak key, in Keccak address, UInt256 value);
 
     /// <summary>
-    /// Commits the block to the block chain.
+    /// Commits the block to the chain allowing to build upon it.
     /// </summary>
     void Commit();
 }
