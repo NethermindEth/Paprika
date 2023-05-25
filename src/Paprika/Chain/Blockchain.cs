@@ -5,6 +5,7 @@ using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store;
+using Paprika.Utils;
 
 namespace Paprika.Chain;
 
@@ -130,7 +131,7 @@ public class Blockchain : IDisposable
     // TODO: actual ownership of the block, what if it's disposed, how to handle it?
     // should it be an interlocked counter that is checked in TryGet method? incremented at the start,
     // decremented at the end and decremented at the dispose?
-    private class Block : IBatchContext, IWorldState
+    private class Block : RefCountingDisposable, IBatchContext, IWorldState
     {
         public Keccak Hash { get; }
         public Keccak ParentHash { get; }
@@ -187,17 +188,17 @@ public class Blockchain : IDisposable
             var bloom = BloomForStorageOperation(account, address);
             var key = Key.StorageCell(NibblePath.FromKey(account), address);
 
-            // TODO: memory ownership of the result
-            if (TryGet(bloom, key, out var result))
+            using var owner = TryGet(bloom, key);
+            if (owner.IsEmpty == false)
             {
-                Serializer.ReadStorageValue(result, out var value);
+                Serializer.ReadStorageValue(owner.Span, out var value);
                 return value;
             }
 
-            // TODO: memory ownership of the result
-            if (_blockchain.TryReadFromFinalized(in key, out result))
+            // TODO: memory ownership of the span
+            if (_blockchain.TryReadFromFinalized(in key, out var span))
             {
-                Serializer.ReadStorageValue(result, out var value);
+                Serializer.ReadStorageValue(span, out var value);
                 return value;
             }
 
@@ -209,17 +210,17 @@ public class Blockchain : IDisposable
             var bloom = BloomForAccountOperation(account);
             var key = Key.Account(NibblePath.FromKey(account));
 
-            // TODO: memory ownership of the result
-            if (TryGet(bloom, key, out var result))
+            using var owner = TryGet(bloom, key);
+            if (owner.IsEmpty == false)
             {
-                Serializer.ReadAccount(result, out var balance, out var nonce);
+                Serializer.ReadAccount(owner.Span, out var balance, out var nonce);
                 return new Account(balance, nonce);
             }
 
-            // TODO: memory ownership of the result
-            if (_blockchain.TryReadFromFinalized(in key, out result))
+            // TODO: memory ownership of the span
+            if (_blockchain.TryReadFromFinalized(in key, out var span))
             {
-                Serializer.ReadAccount(result, out var balance, out var nonce);
+                Serializer.ReadAccount(span, out var balance, out var nonce);
                 return new Account(balance, nonce);
             }
 
@@ -271,32 +272,41 @@ public class Blockchain : IDisposable
         /// </summary>
         bool IBatchContext.WasWritten(DbAddress addr) => true;
 
-
         /// <summary>
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        private bool TryGet(int bloom, in Key key, out ReadOnlySpan<byte> result)
+        private ReadOnlySpanOwner<byte> TryGet(int bloom, in Key key)
         {
+            var acquired = TryAcquireLease();
+            if (acquired == false)
+            {
+                return default;
+            }
+
+            // lease: acquired
             if (_bloom.IsSet(bloom))
             {
-                if (_root.TryGet(key, this, out result))
+                if (_root.TryGet(key, this, out var span))
                 {
-                    return true;
+                    // return with owned lease
+                    return new ReadOnlySpanOwner<byte>(span, this);
                 }
             }
+
+            // lease no longer needed
+            ReleaseLeaseOnce();
 
             // search the parent
             if (_parent == null || !_parent.TryGetTarget(out var parent))
             {
-                result = default;
-                return false;
+                return default;
             }
 
-            return parent.TryGet(bloom, key, out result);
+            return parent.TryGet(bloom, key);
         }
 
-        public void Dispose()
+        protected override void CleanUp()
         {
             // return all the pages
             foreach (var page in _pages)
