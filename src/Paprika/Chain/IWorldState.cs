@@ -12,11 +12,11 @@ public interface IWorldState : IDisposable
     Keccak ParentHash { get; }
     uint BlockNumber { get; }
 
-    public UInt256 GetStorage(in Keccak key, in Keccak address);
+    public UInt256 GetStorage(in Keccak account, in Keccak address);
 
     public void SetAccount(in Keccak key, in Account account);
 
-    public Account GetAccount(in Keccak key);
+    public Account GetAccount(in Keccak account);
 
     public void SetStorage(in Keccak key, in Keccak address, UInt256 value);
 

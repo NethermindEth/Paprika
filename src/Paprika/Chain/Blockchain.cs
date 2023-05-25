@@ -21,7 +21,7 @@ namespace Paprika.Chain;
 /// 1. reading a state at a given time based on the root. Should never fail.
 /// 2. TBD
 /// </remarks>
-public class Blockchain
+public class Blockchain : IDisposable
 {
     // allocate 1024 pages (4MB) at once
     private readonly PagePool _pool = new(1024);
@@ -52,51 +52,9 @@ public class Blockchain
     public IWorldState StartNew(Keccak parentKeccak, Keccak blockKeccak, uint blockNumber)
     {
         var parent = _blocksByHash.TryGetValue(parentKeccak, out var p) ? p : null;
+
+        // not added to dictionaries until Commit
         return new Block(parentKeccak, parent, blockKeccak, blockNumber, this);
-    }
-
-    private UInt256 GetStorage(in Keccak account, in Keccak address, Block head)
-    {
-        var bloom = Block.BloomForStorageOperation(account, address);
-        var key = Key.StorageCell(NibblePath.FromKey(account), address);
-
-        if (TryGetInBlockchain(head, bloom, key, out var result))
-        {
-            Serializer.ReadStorageValue(result, out var value);
-            return value;
-        }
-
-        return default;
-    }
-
-    private Account GetAccount(in Keccak account, Block head)
-    {
-        var bloom = Block.BloomForAccountOperation(account);
-        var key = Key.Account(NibblePath.FromKey(account));
-
-        if (TryGetInBlockchain(head, bloom, key, out var result))
-        {
-            Serializer.ReadAccount(result, out var balance, out var nonce);
-            return new Account(balance, nonce);
-        }
-
-        return default;
-    }
-
-    /// <summary>
-    /// Finds the given key in the blockchain.
-    /// </summary>
-    private bool TryGetInBlockchain(Block head, int bloom, in Key key, out ReadOnlySpan<byte> result)
-    {
-        // Walk through the blocks using the linkage of blocks.
-        // Calling the concurrent dictionary every single time would be unwise and would cost a lot of perf.
-        if (head.TryGet(bloom, key, out result))
-        {
-            return true;
-        }
-
-        // default to the reader
-        return _dbReader.TryGet(key, out result);
     }
 
     public void Finalize(Keccak keccak)
@@ -131,6 +89,14 @@ public class Blockchain
         }
 
         _lastFinalized += count;
+    }
+
+    /// <summary>
+    /// Finds the given key using the db reader representing the finalized blocks.
+    /// </summary>
+    private bool TryReadFromFinalized(in Key key, out ReadOnlySpan<byte> result)
+    {
+        return _dbReader.TryGet(key, out result);
     }
 
     private void ReuseAlreadyFlushed()
@@ -174,6 +140,7 @@ public class Blockchain
         private readonly WeakReference<Block>? _parent;
         private readonly DataPage _root;
         private readonly BitPage _bloom;
+
         private readonly Blockchain _blockchain;
 
         private readonly List<Page> _pages = new();
@@ -187,7 +154,7 @@ public class Blockchain
             BlockNumber = blockNumber;
             ParentHash = parentHash;
 
-            // rent one page for the bloom
+            // rent pages for the bloom
             _bloom = new BitPage(GetNewPage(out _, true));
 
             // rent one page for the root of the data
@@ -215,14 +182,54 @@ public class Blockchain
 
         private PagePool Pool => _blockchain._pool;
 
-        public UInt256 GetStorage(in Keccak key, in Keccak address) => _blockchain.GetStorage(in key, in address, this);
+        public UInt256 GetStorage(in Keccak account, in Keccak address)
+        {
+            var bloom = BloomForStorageOperation(account, address);
+            var key = Key.StorageCell(NibblePath.FromKey(account), address);
 
-        public Account GetAccount(in Keccak key) => _blockchain.GetAccount(in key, this);
+            // TODO: memory ownership of the result
+            if (TryGet(bloom, key, out var result))
+            {
+                Serializer.ReadStorageValue(result, out var value);
+                return value;
+            }
 
-        public static int BloomForStorageOperation(in Keccak key, in Keccak address) =>
+            // TODO: memory ownership of the result
+            if (_blockchain.TryReadFromFinalized(in key, out result))
+            {
+                Serializer.ReadStorageValue(result, out var value);
+                return value;
+            }
+
+            return default;
+        }
+
+        public Account GetAccount(in Keccak account)
+        {
+            var bloom = BloomForAccountOperation(account);
+            var key = Key.Account(NibblePath.FromKey(account));
+
+            // TODO: memory ownership of the result
+            if (TryGet(bloom, key, out var result))
+            {
+                Serializer.ReadAccount(result, out var balance, out var nonce);
+                return new Account(balance, nonce);
+            }
+
+            // TODO: memory ownership of the result
+            if (_blockchain.TryReadFromFinalized(in key, out result))
+            {
+                Serializer.ReadAccount(result, out var balance, out var nonce);
+                return new Account(balance, nonce);
+            }
+
+            return default;
+        }
+
+        private static int BloomForStorageOperation(in Keccak key, in Keccak address) =>
             key.GetHashCode() ^ address.GetHashCode();
 
-        public static int BloomForAccountOperation(in Keccak key) => key.GetHashCode();
+        private static int BloomForAccountOperation(in Keccak key) => key.GetHashCode();
 
         public void SetAccount(in Keccak key, in Account account)
         {
@@ -269,7 +276,7 @@ public class Blockchain
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        public bool TryGet(int bloom, Key key, out ReadOnlySpan<byte> result)
+        private bool TryGet(int bloom, in Key key, out ReadOnlySpan<byte> result)
         {
             if (_bloom.IsSet(bloom))
             {
@@ -297,5 +304,10 @@ public class Blockchain
                 Pool.Return(page);
             }
         }
+    }
+
+    public void Dispose()
+    {
+        _pool.Dispose();
     }
 }
