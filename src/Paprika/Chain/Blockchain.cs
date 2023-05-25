@@ -27,7 +27,7 @@ public class Blockchain : IDisposable
     // allocate 1024 pages (4MB) at once
     private readonly PagePool _pool = new(1024);
 
-    // TODO: potentially optimize if many blocks per one number occur
+    // It's unlikely that there will be many blocks per number as it would require the network to be heavily fragmented. 
     private readonly ConcurrentDictionary<uint, Block[]> _blocksByNumber = new();
     private readonly ConcurrentDictionary<Keccak, Block> _blocksByHash = new();
     private readonly Channel<Block> _finalizedChannel;
