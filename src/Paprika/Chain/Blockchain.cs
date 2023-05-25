@@ -51,15 +51,16 @@ public class Blockchain
 
     public IWorldState StartNew(Keccak parentKeccak, Keccak blockKeccak, uint blockNumber)
     {
-        return new Block(parentKeccak, blockKeccak, blockNumber, this);
+        var parent = _blocksByHash.TryGetValue(parentKeccak, out var p) ? p : null;
+        return new Block(parentKeccak, parent, blockKeccak, blockNumber, this);
     }
 
-    private UInt256 GetStorage(in Keccak account, in Keccak address, Block start)
+    private UInt256 GetStorage(in Keccak account, in Keccak address, Block head)
     {
         var bloom = Block.BloomForStorageOperation(account, address);
         var key = Key.StorageCell(NibblePath.FromKey(account), address);
 
-        if (TryGetInBlockchain(start, bloom, key, out var result))
+        if (TryGetInBlockchain(head, bloom, key, out var result))
         {
             Serializer.ReadStorageValue(result, out var value);
             return value;
@@ -68,12 +69,12 @@ public class Blockchain
         return default;
     }
 
-    private Account GetAccount(in Keccak account, Block start)
+    private Account GetAccount(in Keccak account, Block head)
     {
         var bloom = Block.BloomForAccountOperation(account);
         var key = Key.Account(NibblePath.FromKey(account));
 
-        if (TryGetInBlockchain(start, bloom, key, out var result))
+        if (TryGetInBlockchain(head, bloom, key, out var result))
         {
             Serializer.ReadAccount(result, out var balance, out var nonce);
             return new Account(balance, nonce);
@@ -85,18 +86,14 @@ public class Blockchain
     /// <summary>
     /// Finds the given key in the blockchain.
     /// </summary>
-    private bool TryGetInBlockchain(Block start, int bloom, in Key key, out ReadOnlySpan<byte> result)
+    private bool TryGetInBlockchain(Block head, int bloom, in Key key, out ReadOnlySpan<byte> result)
     {
-        var block = start;
-
-        // walk through the blocks
-        do
+        // Walk through the blocks using the linkage of blocks.
+        // Calling the concurrent dictionary every single time would be unwise and would cost a lot of perf.
+        if (head.TryGet(bloom, key, out result))
         {
-            if (block.TryGet(bloom, key, out result))
-            {
-                return true;
-            }
-        } while (_blocksByHash.TryGetValue(block.ParentHash, out block));
+            return true;
+        }
 
         // default to the reader
         return _dbReader.TryGet(key, out result);
@@ -163,24 +160,32 @@ public class Blockchain
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload, storing it in a in-memory trie
     /// </summary>
+
+    // TODO: actual ownership of the block, what if it's disposed, how to handle it?
+    // should it be an interlocked counter that is checked in TryGet method? incremented at the start,
+    // decremented at the end and decremented at the dispose?
     private class Block : IBatchContext, IWorldState
     {
         public Keccak Hash { get; }
         public Keccak ParentHash { get; }
         public uint BlockNumber { get; }
 
+        // a weak-ref to allow collecting blocks once they are finalized
+        private readonly WeakReference<Block>? _parent;
         private readonly DataPage _root;
         private readonly BitPage _bloom;
         private readonly Blockchain _blockchain;
 
         private readonly List<Page> _pages = new();
 
-        public Block(Keccak parentHash, Keccak hash, uint blockNumber, Blockchain blockchain)
+        public Block(Keccak parentHash, Block? parent, Keccak hash, uint blockNumber, Blockchain blockchain)
         {
+            _parent = parent != null ? new WeakReference<Block>(parent) : null;
             _blockchain = blockchain;
+
             Hash = hash;
-            ParentHash = parentHash;
             BlockNumber = blockNumber;
+            ParentHash = parentHash;
 
             // rent one page for the bloom
             _bloom = new BitPage(GetNewPage(out _, true));
@@ -259,6 +264,31 @@ public class Blockchain
         /// </summary>
         bool IBatchContext.WasWritten(DbAddress addr) => true;
 
+
+        /// <summary>
+        /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
+        /// chain.
+        /// </summary>
+        public bool TryGet(int bloom, Key key, out ReadOnlySpan<byte> result)
+        {
+            if (_bloom.IsSet(bloom))
+            {
+                if (_root.TryGet(key, this, out result))
+                {
+                    return true;
+                }
+            }
+
+            // search the parent
+            if (_parent == null || !_parent.TryGetTarget(out var parent))
+            {
+                result = default;
+                return false;
+            }
+
+            return parent.TryGet(bloom, key, out result);
+        }
+
         public void Dispose()
         {
             // return all the pages
@@ -266,17 +296,6 @@ public class Blockchain
             {
                 Pool.Return(page);
             }
-        }
-
-        public bool TryGet(int bloom, Key key, out ReadOnlySpan<byte> result)
-        {
-            if (_bloom.IsSet(bloom) == false)
-            {
-                result = default;
-                return false;
-            }
-
-            return _root.TryGet(key, this, out result);
         }
     }
 }
