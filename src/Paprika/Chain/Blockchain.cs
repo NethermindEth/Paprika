@@ -22,7 +22,7 @@ namespace Paprika.Chain;
 /// 1. reading a state at a given time based on the root. Should never fail.
 /// 2. TBD
 /// </remarks>
-public class Blockchain : IDisposable
+public class Blockchain : IAsyncDisposable
 {
     // allocate 1024 pages (4MB) at once
     private readonly PagePool _pool = new(1024);
@@ -31,23 +31,53 @@ public class Blockchain : IDisposable
     private readonly ConcurrentDictionary<uint, Block[]> _blocksByNumber = new();
     private readonly ConcurrentDictionary<Keccak, Block> _blocksByHash = new();
     private readonly Channel<Block> _finalizedChannel;
-    private readonly ConcurrentQueue<(IReadOnlyBatch reader, uint blockNumber)> _alreadyFlushedTo;
+    private readonly ConcurrentQueue<(IReadOnlyBatch reader, IEnumerable<uint> blockNumbers)> _alreadyFlushedTo;
 
     private readonly PagedDb _db;
     private uint _lastFinalized;
     private IReadOnlyBatch _dbReader;
+    private readonly Task _flusher;
 
     public Blockchain(PagedDb db)
     {
         _db = db;
         _finalizedChannel = Channel.CreateUnbounded<Block>(new UnboundedChannelOptions
         {
-            AllowSynchronousContinuations = true,
             SingleReader = true,
             SingleWriter = true
         });
-        _alreadyFlushedTo = new ConcurrentQueue<(IReadOnlyBatch reader, uint blockNumber)>();
+
+        _alreadyFlushedTo = new();
         _dbReader = db.BeginReadOnlyBatch();
+
+        _flusher = FinalizedFlusher();
+    }
+
+    /// <summary>
+    /// The flusher method run as a reader of the <see cref="_finalizedChannel"/>.
+    /// </summary>
+    private async Task FinalizedFlusher()
+    {
+        var reader = _finalizedChannel.Reader;
+
+        while (await reader.WaitToReadAsync())
+        {
+            // bulk all the finalized blocks in one batch
+            List<uint> flushedBlockNumbers = new();
+
+            using var batch = _db.BeginNextBatch();
+            while (reader.TryRead(out var finalizedBlock))
+            {
+                flushedBlockNumbers.Add(finalizedBlock.BlockNumber);
+
+                // TODO: flush the block
+                // finalizedBlock.
+            }
+
+            await batch.Commit(CommitOptions.FlushDataAndRoot);
+
+            _alreadyFlushedTo.Enqueue((_db.BeginReadOnlyBatch(), flushedBlockNumbers));
+        }
     }
 
     public IWorldState StartNew(Keccak parentKeccak, Keccak blockKeccak, uint blockNumber)
@@ -102,25 +132,28 @@ public class Blockchain : IDisposable
 
     private void ReuseAlreadyFlushed()
     {
-        while (_alreadyFlushedTo.TryDequeue(out var item))
+        while (_alreadyFlushedTo.TryDequeue(out var flushed))
         {
+            // TODO: this is wrong, non volatile access, no visibility checks. For now should do.
+
             // set the last reader
             var previous = _dbReader;
 
-            _dbReader = item.reader;
+            _dbReader = flushed.reader;
 
             previous.Dispose();
 
-
-            // TODO: this is wrong, non volatile access, no visibility checks. For now should do.
-            _lastFinalized = item.blockNumber;
-
-            // clean blocks with a given number
-            if (_blocksByNumber.Remove(item.blockNumber, out var blocks))
+            foreach (var blockNumber in flushed.blockNumbers)
             {
-                foreach (var block in blocks)
+                _lastFinalized = Math.Max(blockNumber, _lastFinalized);
+
+                // clean blocks with a given number
+                if (_blocksByNumber.Remove(blockNumber, out var blocks))
                 {
-                    block.Dispose();
+                    foreach (var block in blocks)
+                    {
+                        block.Dispose();
+                    }
                 }
             }
         }
@@ -138,7 +171,7 @@ public class Blockchain : IDisposable
         // a weak-ref to allow collecting blocks once they are finalized
         private readonly WeakReference<Block>? _parent;
         private readonly DataPage _root;
-        private readonly BitPage _bloom;
+        private readonly BloomFilter _bloom;
 
         private readonly Blockchain _blockchain;
 
@@ -154,7 +187,7 @@ public class Blockchain : IDisposable
             ParentHash = parentHash;
 
             // rent pages for the bloom
-            _bloom = new BitPage(GetNewPage(out _, true));
+            _bloom = new BloomFilter(GetNewPage(out _, true));
 
             // rent one page for the root of the data
             _root = new DataPage(GetNewPage(out _, true));
@@ -314,8 +347,10 @@ public class Blockchain : IDisposable
         }
     }
 
-    public void Dispose()
+    public ValueTask DisposeAsync()
     {
+        _finalizedChannel.Writer.Complete();
         _pool.Dispose();
+        return new ValueTask(_flusher);
     }
 }

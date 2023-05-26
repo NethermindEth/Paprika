@@ -4,10 +4,9 @@ using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Store;
-
 using static Paprika.Tests.Values;
 
-namespace Paprika.Tests;
+namespace Paprika.Tests.Chain;
 
 public class BlockchainTests
 {
@@ -19,11 +18,11 @@ public class BlockchainTests
     private static readonly Keccak Block2A = Build(nameof(Block2A));
 
     [Test]
-    public void Simple()
+    public async Task Simple()
     {
         using var db = PagedDb.NativeMemoryDb(16 * Mb, 2);
 
-        using var blockchain = new Blockchain(db);
+        await using var blockchain = new Blockchain(db);
 
         var block1A = blockchain.StartNew(Keccak.Zero, Block1A, 1);
         var block1B = blockchain.StartNew(Keccak.Zero, Block1B, 1);

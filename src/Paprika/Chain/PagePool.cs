@@ -48,6 +48,8 @@ public class PagePool : IDisposable
             }
         }
 
+        pooled.Clear();
+
         return pooled;
     }
 

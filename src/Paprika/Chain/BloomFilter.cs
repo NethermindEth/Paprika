@@ -7,14 +7,14 @@ namespace Paprika.Chain;
 /// <summary>
 /// Wraps over a <see cref="Page"/> and provides a simple <see cref="BitVector32"/> alternative.
 /// </summary>
-public readonly struct BitPage
+public readonly struct BloomFilter
 {
     private readonly Page _page;
     private const int BitPerByte = 8;
     private const int BitPerLong = 64;
     private const int Mask = Page.PageSize * BitPerByte - 1;
 
-    public BitPage(Page page) => _page = page;
+    public BloomFilter(Page page) => _page = page;
 
     public void Set(int hash)
     {

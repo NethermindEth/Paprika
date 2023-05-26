@@ -25,4 +25,20 @@ public class PagePoolTests
 
         pool.AllocatedPages.Should().Be(1);
     }
+
+    [Test]
+    public void Rented_is_clear()
+    {
+        const int index = 5;
+        using var pool = new PagePool(1);
+
+        // lease and return
+        var initial = pool.Rent();
+        initial.Span[index] = 13;
+
+        pool.Return(initial);
+
+        var page = pool.Rent();
+        page.Span[index].Should().Be(0);
+    }
 }
