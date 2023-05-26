@@ -111,6 +111,8 @@ public class Blockchain : IDisposable
 
             previous.Dispose();
 
+
+            // TODO: this is wrong, non volatile access, no visibility checks. For now should do.
             _lastFinalized = item.blockNumber;
 
             // clean blocks with a given number
@@ -127,10 +129,6 @@ public class Blockchain : IDisposable
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload, storing it in a in-memory trie
     /// </summary>
-
-    // TODO: actual ownership of the block, what if it's disposed, how to handle it?
-    // should it be an interlocked counter that is checked in TryGet method? incremented at the start,
-    // decremented at the end and decremented at the dispose?
     private class Block : RefCountingDisposable, IBatchContext, IWorldState
     {
         public Keccak Hash { get; }
@@ -254,7 +252,7 @@ public class Blockchain : IDisposable
 
         public Page GetNewPage(out DbAddress addr, bool clear)
         {
-            var page = Pool.Get();
+            var page = Pool.Rent();
 
             page.Clear(); // always clear
 

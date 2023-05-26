@@ -16,14 +16,16 @@ public class PagePool : IDisposable
     private readonly ConcurrentDictionary<DbAddress, Page> _address2Page = new();
     private readonly ConcurrentDictionary<Page, DbAddress> _page2Address = new();
     private readonly ConcurrentQueue<IntPtr> _slabs = new();
-    private uint _allocated;
+    private uint _allocatedPages;
 
     public PagePool(int pagesInOneSlab)
     {
         _pagesInOneSlab = pagesInOneSlab;
     }
 
-    public unsafe Page Get()
+    public uint AllocatedPages => _allocatedPages;
+
+    public unsafe Page Rent()
     {
         Page pooled;
         while (_pool.TryDequeue(out pooled) == false)
@@ -37,7 +39,7 @@ public class PagePool : IDisposable
             for (var i = 0; i < _pagesInOneSlab; i++)
             {
                 var page = new Page(slab + Page.PageSize * i);
-                var address = DbAddress.Page(Interlocked.Increment(ref _allocated));
+                var address = DbAddress.Page(Interlocked.Increment(ref _allocatedPages));
 
                 _page2Address[page] = address;
                 _address2Page[address] = page;
