@@ -65,12 +65,16 @@ public class Blockchain : IAsyncDisposable
             // bulk all the finalized blocks in one batch
             List<uint> flushedBlockNumbers = new();
 
-            using var batch = _db.BeginNextBatch();
-            while (reader.TryRead(out var finalizedBlock))
-            {
-                flushedBlockNumbers.Add(finalizedBlock.BlockNumber);
+            var watch = Stopwatch.StartNew();
 
-                // TODO: flush the block
+            using var batch = _db.BeginNextBatch();
+            while (watch.Elapsed < FlushEvery && reader.TryRead(out var block))
+            {
+                flushedBlockNumbers.Add(block.BlockNumber);
+
+                //batch.SetMetadata(block.BlockNumber, block.Hash);
+
+                // TODO: flush the block by adding data to it
                 // finalizedBlock.
             }
 
@@ -79,6 +83,8 @@ public class Blockchain : IAsyncDisposable
             _alreadyFlushedTo.Enqueue((_db.BeginReadOnlyBatch(), flushedBlockNumbers));
         }
     }
+
+    private static readonly TimeSpan FlushEvery = TimeSpan.FromSeconds(2);
 
     public IWorldState StartNew(Keccak parentKeccak, Keccak blockKeccak, uint blockNumber)
     {
@@ -244,15 +250,15 @@ public class Blockchain : IAsyncDisposable
             using var owner = TryGet(bloom, key);
             if (owner.IsEmpty == false)
             {
-                Serializer.ReadAccount(owner.Span, out var balance, out var nonce);
-                return new Account(balance, nonce);
+                Serializer.ReadAccount(owner.Span, out var result);
+                return result;
             }
 
             // TODO: memory ownership of the span
             if (_blockchain.TryReadFromFinalized(in key, out var span))
             {
-                Serializer.ReadAccount(span, out var balance, out var nonce);
-                return new Account(balance, nonce);
+                Serializer.ReadAccount(span, out var result);
+                return result;
             }
 
             return default;

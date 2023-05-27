@@ -11,7 +11,7 @@ public static class Serializer
     private const bool BigEndian = true;
     private const int MaxNibblePathLength = Keccak.Size + 1;
 
-    private static Span<byte> WriteToWithLeftover(Span<byte> destination, in UInt256 value)
+    private static Span<byte> WriteToWithLeftover(Span<byte> destination, UInt256 value)
     {
         var uint256 = destination.Slice(1, Uint256Size);
         value.ToBigEndian(uint256);
@@ -70,10 +70,10 @@ public static class Serializer
     /// Serializes the account balance and nonce.
     /// </summary>
     /// <returns>The actual payload written.</returns>
-    public static Span<byte> WriteAccount(Span<byte> destination, UInt256 balance, UInt256 nonce)
+    public static Span<byte> WriteAccount(Span<byte> destination, in Account account)
     {
-        var leftover = WriteToWithLeftover(destination, balance);
-        leftover = WriteToWithLeftover(leftover, nonce);
+        var leftover = WriteToWithLeftover(destination, account.Balance);
+        leftover = WriteToWithLeftover(leftover, account.Nonce);
 
         return destination.Slice(0, destination.Length - leftover.Length);
     }
@@ -81,10 +81,10 @@ public static class Serializer
     /// <summary>
     /// Reads the account balance and nonce.
     /// </summary>
-    public static void ReadAccount(ReadOnlySpan<byte> source, out UInt256 balance,
-        out UInt256 nonce)
+    public static void ReadAccount(ReadOnlySpan<byte> source, out Account account)
     {
-        var span = ReadFrom(source, out balance);
-        ReadFrom(span, out nonce);
+        var span = ReadFrom(source, out var balance);
+        ReadFrom(span, out var nonce);
+        account = new Account(balance, nonce);
     }
 }

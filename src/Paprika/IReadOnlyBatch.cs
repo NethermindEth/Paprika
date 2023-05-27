@@ -27,8 +27,8 @@ public static class ReadExtensions
     {
         if (batch.TryGet(Key.Account(NibblePath.FromKey(key)), out var result))
         {
-            Serializer.ReadAccount(result, out var balance, out var nonce);
-            return new Account(balance, nonce);
+            Serializer.ReadAccount(result, out var account);
+            return account;
         }
 
         return default;

@@ -5,6 +5,8 @@ namespace Paprika;
 
 public interface IBatch : IReadOnlyBatch
 {
+    //void SetMetadata(uint blockNumber, in Keccak blockHash);
+
     /// <summary>
     /// Sets the given account.
     /// </summary>
