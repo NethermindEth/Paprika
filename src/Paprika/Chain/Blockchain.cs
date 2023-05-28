@@ -182,6 +182,7 @@ public class Blockchain : IAsyncDisposable
         private readonly Blockchain _blockchain;
 
         private readonly List<Page> _pages = new();
+        private readonly Dictionary<Page, DbAddress> _page2Address = new();
 
         public Block(Keccak parentHash, Block? parent, Keccak hash, uint blockNumber, Blockchain blockchain)
         {
@@ -283,11 +284,13 @@ public class Blockchain : IAsyncDisposable
             _root.SetStorage(NibblePath.FromKey(key), address, value, this);
         }
 
-        Page IPageResolver.GetAt(DbAddress address) => Pool.GetAt(address);
+        Page IPageResolver.GetAt(DbAddress address) => _pages[(int)(address.Raw - AddressOffset)];
 
         uint IReadOnlyBatchContext.BatchId => 0;
 
-        DbAddress IBatchContext.GetAddress(Page page) => Pool.GetAddress(page);
+        private const uint AddressOffset = 1;
+
+        DbAddress IBatchContext.GetAddress(Page page) => _page2Address[page];
 
         public Page GetNewPage(out DbAddress addr, bool clear)
         {
@@ -297,7 +300,9 @@ public class Blockchain : IAsyncDisposable
 
             _pages.Add(page);
 
-            addr = Pool.GetAddress(page);
+            addr = DbAddress.Page((uint)(_pages.Count + AddressOffset));
+            _page2Address[page] = addr;
+
             return page;
         }
 
