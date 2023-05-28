@@ -72,7 +72,7 @@ public class Blockchain : IAsyncDisposable
             {
                 flushedBlockNumbers.Add(block.BlockNumber);
 
-                //batch.SetMetadata(block.BlockNumber, block.Hash);
+                batch.SetMetadata(block.BlockNumber, block.Hash);
 
                 // TODO: flush the block by adding data to it
                 // finalizedBlock.

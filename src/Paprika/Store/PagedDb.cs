@@ -297,6 +297,11 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             return new DataPage(GetAt(addr)).TryGet(key.SliceFrom(RootPage.Payload.RootNibbleLevel), this, out result);
         }
 
+        public void SetMetadata(uint blockNumber, in Keccak blockHash)
+        {
+            _root.Data.Metadata = new Metadata(blockNumber, blockHash);
+        }
+
         public void Set(in Keccak key, in Account account)
         {
             ref var addr = ref TryGetPageAlloc(key, out var page);

@@ -19,7 +19,6 @@ public readonly unsafe struct RootPage : IPage
 
     public ref Payload Data => ref Unsafe.AsRef<Payload>(_page.Payload);
 
-
     /// <summary>
     /// Represents the data of the page.
     /// </summary>
@@ -38,7 +37,9 @@ public readonly unsafe struct RootPage : IPage
         /// </summary>
         public const byte RootNibbleLevel = 2;
 
-        private const int AbandonedPagesStart = DbAddress.Size + DbAddress.Size * AccountPageFanOut;
+        private const int MetadataStart = DbAddress.Size + DbAddress.Size * AccountPageFanOut;
+
+        private const int AbandonedPagesStart = MetadataStart + Metadata.Size;
 
         /// <summary>
         /// This gives the upper boundary of the number of abandoned pages that can be kept in the list.
@@ -65,6 +66,9 @@ public readonly unsafe struct RootPage : IPage
         /// Gets the span of account pages of the root
         /// </summary>
         public Span<DbAddress> AccountPages => MemoryMarshal.CreateSpan(ref AccountPage, AccountPageFanOut);
+
+        [FieldOffset(MetadataStart)]
+        public Metadata Metadata;
 
         /// <summary>
         /// The start of the abandoned pages.
@@ -120,3 +124,19 @@ public readonly unsafe struct RootPage : IPage
     }
 }
 
+[StructLayout(LayoutKind.Explicit, Size = Size, Pack = 1)]
+public struct Metadata
+{
+    public const int Size = sizeof(uint) + Keccak.Size;
+
+    [FieldOffset(0)]
+    public readonly uint BlockNumber;
+    [FieldOffset(4)]
+    public readonly Keccak BlockHash;
+
+    public Metadata(uint blockNumber, Keccak blockHash)
+    {
+        BlockNumber = blockNumber;
+        BlockHash = blockHash;
+    }
+}
