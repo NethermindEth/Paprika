@@ -216,7 +216,7 @@ public readonly unsafe struct DataPage : IDataPage
         return false;
     }
 
-    private static bool TryExtractAsStorageTree((byte nibble, byte accountsCount, double percentage) biggestNibbleStats,
+    private static bool TryExtractAsStorageTree((byte nibble, byte accountsCount, double storageCellPercentage) biggestNibbleStats,
         in SetContext ctx, in FixedMap map)
     {
         // a prerequisite to plant a tree is a single account in the biggest nibble
@@ -224,7 +224,7 @@ public readonly unsafe struct DataPage : IDataPage
         // also, create only if the nibble occupies more than 0.9 of the page
         // otherwise it's just a nibble extraction
         var shouldPlant = biggestNibbleStats.accountsCount == 1 &&
-                          biggestNibbleStats.percentage > 0.9;
+                          biggestNibbleStats.storageCellPercentage > 0.9;
 
         if (shouldPlant == false)
             return false;

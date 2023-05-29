@@ -22,7 +22,7 @@ public class PagePool : IDisposable
 
     public uint AllocatedPages => _allocatedPages;
 
-    public unsafe Page Rent()
+    public unsafe Page Rent(bool clear = true)
     {
         Page pooled;
         while (_pool.TryDequeue(out pooled) == false)
@@ -42,7 +42,8 @@ public class PagePool : IDisposable
             }
         }
 
-        pooled.Clear();
+        if (clear)
+            pooled.Clear();
 
         return pooled;
     }

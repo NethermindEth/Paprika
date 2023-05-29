@@ -241,13 +241,13 @@ public readonly ref struct FixedMap
     /// Gets the nibble representing the biggest bucket and provides stats to the caller.
     /// </summary>
     /// <returns></returns>
-    public (byte nibble, byte accountsCount, double percentage) GetBiggestNibbleStats()
+    public (byte nibble, byte accountsCount, double storageCellPercentage) GetBiggestNibbleStats()
     {
         const int bucketCount = 16;
 
-        byte slotCount = 0;
         Span<ushort> buckets = stackalloc ushort[bucketCount];
         Span<byte> accountsCount = stackalloc byte[bucketCount];
+        Span<byte> storageCellCount = stackalloc byte[bucketCount];
 
         var to = _header.Low / Slot.Size;
         for (var i = 0; i < to; i++)
@@ -257,13 +257,15 @@ public readonly ref struct FixedMap
             // extract only not deleted and these which have at least one nibble
             if (slot.Type != DataType.Deleted && slot.NibbleCount > 0)
             {
-                slotCount++;
-
                 var index = slot.FirstNibbleOfPrefix % bucketCount;
 
                 if (slot.Type == DataType.Account)
                 {
                     accountsCount[index]++;
+                }
+                else if (slot.Type == DataType.StorageCell)
+                {
+                    storageCellCount[index]++;
                 }
 
                 buckets[index]++;
@@ -282,9 +284,9 @@ public readonly ref struct FixedMap
             }
         }
 
-        var percentage = (double)buckets[maxI] / slotCount;
+        var storageCellPercentage = (double)storageCellCount[maxI] / buckets[maxI];
 
-        return ((byte)maxI, accountsCount[maxI], percentage);
+        return ((byte)maxI, accountsCount[maxI], storageCellPercentage);
     }
 
     private static int GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> additionalKey,

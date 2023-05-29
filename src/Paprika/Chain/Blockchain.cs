@@ -1,5 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading.Channels;
 using Nethermind.Int256;
 using Paprika.Crypto;
@@ -115,8 +116,11 @@ public class Blockchain : IAsyncDisposable
             // to finalize
             finalized.Push(block);
 
-            // move to next
-            block = _blocksByHash[block.ParentHash];
+            if (block.TryGetParent(out block) == false)
+            {
+                // no next block, break
+                break;
+            }
         }
 
         while (finalized.TryPop(out block))
@@ -284,7 +288,7 @@ public class Blockchain : IAsyncDisposable
             _root.SetStorage(NibblePath.FromKey(key), address, value, this);
         }
 
-        Page IPageResolver.GetAt(DbAddress address) => _pages[(int)(address.Raw - AddressOffset)];
+        Page IPageResolver.GetAt(DbAddress address) => _pages[(int)(address.Raw - AddressOffset - 1)];
 
         uint IReadOnlyBatchContext.BatchId => 0;
 
@@ -294,9 +298,7 @@ public class Blockchain : IAsyncDisposable
 
         public Page GetNewPage(out DbAddress addr, bool clear)
         {
-            var page = Pool.Rent();
-
-            page.Clear(); // always clear
+            var page = Pool.Rent(clear: true);
 
             _pages.Add(page);
 
@@ -340,12 +342,16 @@ public class Blockchain : IAsyncDisposable
             ReleaseLeaseOnce();
 
             // search the parent
-            if (_parent == null || !_parent.TryGetTarget(out var parent))
-            {
-                return default;
-            }
+            if (TryGetParent(out var parent))
+                return parent.TryGet(bloom, key);
 
-            return parent.TryGet(bloom, key);
+            return default;
+        }
+
+        public bool TryGetParent([MaybeNullWhen(false)] out Block parent)
+        {
+            parent = default;
+            return _parent != null && _parent.TryGetTarget(out parent);
         }
 
         protected override void CleanUp()

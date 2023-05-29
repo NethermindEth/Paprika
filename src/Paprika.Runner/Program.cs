@@ -1,8 +1,10 @@
 ﻿using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Threading.Tasks.Dataflow;
 using HdrHistogram;
 using Nethermind.Int256;
+using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Store;
 
@@ -34,7 +36,7 @@ public static class Program
     private const int BigStorageAccountSlotCount = 1_000_000;
     private static readonly UInt256[] BigStorageAccountValues = new UInt256[BigStorageAccountSlotCount];
 
-    public static async Task Main(String[] args)
+    public static void Main(String[] args)
     {
         var dir = Directory.GetCurrentDirectory();
         var dataPath = Path.Combine(dir, "db");
@@ -76,6 +78,8 @@ public static class Program
             ? PagedDb.MemoryMappedDb(DbFileSize, MaxReorgDepth, dataPath, OnMetrics)
             : PagedDb.NativeMemoryDb(DbFileSize, MaxReorgDepth, OnMetrics);
 
+        var blockchain = new Blockchain(db);
+
         var random = PrepareStableRandomSource();
 
         var counter = 0;
@@ -99,28 +103,32 @@ public static class Program
         // writing
         var writing = Stopwatch.StartNew();
 
-        for (uint block = 0; block < BlockCount; block++)
+        var parentBlockHash = Keccak.Zero;
+
+        for (uint block = 1; block < BlockCount; block++)
         {
-            using var batch = db.BeginNextBatch();
+            var blockHash = Keccak.Compute(parentBlockHash.Span);
+            var worldState = blockchain.StartNew(parentBlockHash, blockHash, block);
+            parentBlockHash = blockHash;
 
             for (var account = 0; account < AccountsPerBlock; account++)
             {
                 var key = GetAccountKey(random, counter);
 
-                batch.Set(key, GetAccountValue(counter));
+                worldState.SetAccount(key, GetAccountValue(counter));
 
                 if (UseStorage)
                 {
                     var storageAddress = GetStorageAddress(counter);
                     var storageValue = GetStorageValue(counter);
-                    batch.SetStorage(key, storageAddress, storageValue);
+                    worldState.SetStorage(key, storageAddress, storageValue);
                 }
 
                 if (UseBigStorageAccount)
                 {
                     if (bigStorageAccountCreated == false)
                     {
-                        batch.Set(bigStorageAccount, new Account(100, 100));
+                        worldState.SetAccount(bigStorageAccount, new Account(100, 100));
                         bigStorageAccountCreated = true;
                     }
 
@@ -129,13 +137,16 @@ public static class Program
                     var storageValue = GetBigAccountStorageValue(counter);
                     BigStorageAccountValues[index] = storageValue;
 
-                    batch.SetStorage(bigStorageAccount, storageAddress, storageValue);
+                    worldState.SetStorage(bigStorageAccount, storageAddress, storageValue);
                 }
 
                 counter++;
             }
 
-            await batch.Commit(Commit);
+            worldState.Commit();
+
+            // finalize after each block for now
+            blockchain.Finalize(blockHash);
 
             if (block > 0 & block % LogEvery == 0)
             {
