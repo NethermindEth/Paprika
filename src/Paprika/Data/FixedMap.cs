@@ -240,14 +240,17 @@ public readonly ref struct FixedMap
     /// <summary>
     /// Gets the nibble representing the biggest bucket and provides stats to the caller.
     /// </summary>
-    /// <returns></returns>
-    public (byte nibble, byte accountsCount, double storageCellPercentage) GetBiggestNibbleStats()
+    /// <returns>
+    /// The nibble and how much of the page is occupied by storage cells that start their key with the nibble.
+    /// </returns>
+    public (byte nibble, double storageCellPercentageInPage) GetBiggestNibbleStats()
     {
         const int bucketCount = 16;
 
-        Span<ushort> buckets = stackalloc ushort[bucketCount];
-        Span<byte> accountsCount = stackalloc byte[bucketCount];
         Span<byte> storageCellCount = stackalloc byte[bucketCount];
+        Span<byte> slotCount = stackalloc byte[bucketCount];
+
+        var totalSlotCount = 0;
 
         var to = _header.Low / Slot.Size;
         for (var i = 0; i < to; i++)
@@ -259,34 +262,31 @@ public readonly ref struct FixedMap
             {
                 var index = slot.FirstNibbleOfPrefix % bucketCount;
 
-                if (slot.Type == DataType.Account)
-                {
-                    accountsCount[index]++;
-                }
-                else if (slot.Type == DataType.StorageCell)
+                if (slot.Type == DataType.StorageCell)
                 {
                     storageCellCount[index]++;
                 }
 
-                buckets[index]++;
+                slotCount[index]++;
+                totalSlotCount++;
             }
         }
 
-        var maxI = 0;
+        var maxNibble = 0;
 
-        for (int i = 1; i < bucketCount; i++)
+        for (int nibble = 1; nibble < bucketCount; nibble++)
         {
-            var currentCount = buckets[i];
-            var maxCount = buckets[maxI];
+            var currentCount = slotCount[nibble];
+            var maxCount = slotCount[maxNibble];
             if (currentCount > maxCount)
             {
-                maxI = i;
+                maxNibble = nibble;
             }
         }
 
-        var storageCellPercentage = (double)storageCellCount[maxI] / buckets[maxI];
+        var storageCellPercentageInPage = (double)storageCellCount[maxNibble] / totalSlotCount;
 
-        return ((byte)maxI, accountsCount[maxI], storageCellPercentage);
+        return ((byte)maxNibble, storageCellPercentageInPage);
     }
 
     private static int GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> additionalKey,
