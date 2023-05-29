@@ -36,17 +36,15 @@ public class BlockchainTests
         block1A.GetAccount(Key0).Should().Be(account1A);
         block1B.GetAccount(Key0).Should().Be(account1B);
 
-        // commit block 1a as properly processed
+        // commit both blocks as they were seen in the network
         block1A.Commit();
-
-        // dispose block 1b as it was not correct
-        block1B.Dispose();
+        block1B.Commit();
 
         // start a next block
-        var block2a = blockchain.StartNew(Block1A, Block2A, 2);
+        var block2A = blockchain.StartNew(Block1A, Block2A, 2);
 
         // assert whether the history is preserved
-        block2a.GetAccount(Key0).Should().Be(account1A);
+        block2A.GetAccount(Key0).Should().Be(account1A);
     }
 
     private static Keccak Build(string name) => Keccak.Compute(Encoding.UTF8.GetBytes(name));

@@ -239,8 +239,7 @@ public readonly unsafe struct DataPage : IDataPage
                 {
                     if (item.Key.Path.Equals(accountPath) == false)
                     {
-                        // If there's at least one item that has a different key, it won't be a massive storage tree
-                        // for now
+                        // If there's at least one item that has a different key, it won't be a massive storage tree.
                         return false;
                     }
                 }
@@ -257,7 +256,7 @@ public readonly unsafe struct DataPage : IDataPage
 
         foreach (var item in map.EnumerateNibble(nibble))
         {
-            // no need to check whether the path is aligned because it was checked above.
+            // no need to check whether the path is the same because it was checked above.
             if (item.Type == DataType.StorageCell)
             {
                 // it's ok to use item.Key, the enumerator does not changes the additional key bytes
