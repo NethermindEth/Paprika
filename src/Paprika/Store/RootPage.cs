@@ -30,14 +30,14 @@ public readonly unsafe struct RootPage : IPage
         /// <summary>
         /// How big is the fan out for the root.
         /// </summary>
-        private const int AccountPageFanOut = 16;
+        public const int RootFanOut = 16;
 
         /// <summary>
         /// The number of nibbles that are "consumed" on the root level.
         /// </summary>
-        public const byte RootNibbleLevel = 2;
+        public const byte RootNibbleLevel = 1;
 
-        private const int MetadataStart = DbAddress.Size + DbAddress.Size * AccountPageFanOut;
+        private const int MetadataStart = DbAddress.Size + DbAddress.Size * RootFanOut;
 
         private const int AbandonedPagesStart = MetadataStart + Metadata.Size;
 
@@ -45,7 +45,7 @@ public readonly unsafe struct RootPage : IPage
         /// This gives the upper boundary of the number of abandoned pages that can be kept in the list.
         /// </summary>
         /// <remarks>
-        /// The value is dependent on <see cref="AccountPageFanOut"/> as the more data pages addresses, the less space for
+        /// The value is dependent on <see cref="RootFanOut"/> as the more data pages addresses, the less space for
         /// the abandoned. Still, the number of abandoned that is required is ~max reorg depth as later, pages are reused.
         /// Even with fan-out of data pages equal to 256, there's still a lot of room here.
         /// </remarks>
@@ -65,7 +65,7 @@ public readonly unsafe struct RootPage : IPage
         /// <summary>
         /// Gets the span of account pages of the root
         /// </summary>
-        public Span<DbAddress> AccountPages => MemoryMarshal.CreateSpan(ref AccountPage, AccountPageFanOut);
+        public Span<DbAddress> AccountPages => MemoryMarshal.CreateSpan(ref AccountPage, RootFanOut);
 
         [FieldOffset(MetadataStart)]
         public Metadata Metadata;

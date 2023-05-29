@@ -180,7 +180,7 @@ public class Blockchain : IAsyncDisposable
 
         // a weak-ref to allow collecting blocks once they are finalized
         private readonly WeakReference<Block>? _parent;
-        private readonly DataPage _root;
+        private readonly DataPage[] _roots;
         private readonly BloomFilter _bloom;
 
         private readonly Blockchain _blockchain;
@@ -200,8 +200,8 @@ public class Blockchain : IAsyncDisposable
             // rent pages for the bloom
             _bloom = new BloomFilter(GetNewPage(out _, true));
 
-            // rent one page for the root of the data
-            _root = new DataPage(GetNewPage(out _, true));
+            // create roots
+            _roots = new DataPage[RootPage.Payload.RootFanOut];
         }
 
         /// <summary>
@@ -278,14 +278,30 @@ public class Blockchain : IAsyncDisposable
         {
             _bloom.Set(BloomForAccountOperation(key));
 
-            _root.SetAccount(NibblePath.FromKey(key), account, this);
+            var path = NibblePath.FromKey(key);
+            var root = GetDataPage(path);
+            root.SetAccount(path.SliceFrom(RootPage.Payload.RootNibbleLevel), account, this);
         }
 
         public void SetStorage(in Keccak key, in Keccak address, UInt256 value)
         {
             _bloom.Set(BloomForStorageOperation(key, address));
 
-            _root.SetStorage(NibblePath.FromKey(key), address, value, this);
+            var path = NibblePath.FromKey(key);
+            var root = GetDataPage(path);
+            root.SetStorage(path.SliceFrom(RootPage.Payload.RootNibbleLevel), address, value, this);
+        }
+
+        private DataPage GetDataPage(NibblePath path)
+        {
+            ref var root = ref _roots[path.FirstNibble];
+
+            if (root.AsPage().Raw == UIntPtr.Zero)
+            {
+                root = new DataPage(GetNewPage(out _, true));
+            }
+
+            return root;
         }
 
         Page IPageResolver.GetAt(DbAddress address) => _pages[(int)(address.Raw - AddressOffset - 1)];
@@ -331,7 +347,8 @@ public class Blockchain : IAsyncDisposable
             // lease: acquired
             if (_bloom.IsSet(bloom))
             {
-                if (_root.TryGet(key, this, out var span))
+                var root = GetDataPage(key.Path);
+                if (root.TryGet(key.SliceFrom(RootPage.Payload.RootNibbleLevel), this, out var span))
                 {
                     // return with owned lease
                     return new ReadOnlySpanOwner<byte>(span, this);
