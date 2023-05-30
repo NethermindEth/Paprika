@@ -320,7 +320,7 @@ public readonly unsafe struct DataPage : IDataPage
             var writable = batch.GetWritableCopy(_page);
             return new DataPage(writable).Apply(externalPage, batch, externalPageResolver);
         }
-        
+
         // condition above ensures properly COWed page, not it's time to copy
         var external = new FixedMap(externalPage.Data.FixedMapSpan);
         foreach (var item in external.EnumerateAll())

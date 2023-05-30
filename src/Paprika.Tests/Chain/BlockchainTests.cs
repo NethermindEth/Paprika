@@ -16,7 +16,7 @@ public class BlockchainTests
     private static readonly Keccak Block1B = Build(nameof(Block1B));
 
     private static readonly Keccak Block2A = Build(nameof(Block2A));
-    
+
     private static readonly Keccak Block3A = Build(nameof(Block3A));
 
     [Test]
