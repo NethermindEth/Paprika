@@ -1,5 +1,6 @@
 ﻿using Nethermind.Int256;
 using Paprika.Crypto;
+using Paprika.Store;
 
 namespace Paprika;
 
@@ -28,6 +29,11 @@ public interface IBatch : IReadOnlyBatch
     /// <param name="options">How to commit.</param>
     /// <returns>The state root hash.</returns>
     ValueTask Commit(CommitOptions options);
+
+    /// <summary>
+    /// Applies roots in raw form on the root of the batch.
+    /// </summary>
+    void Apply(DbAddress[] externalRoots, IPageResolver externalPageResolver);
 }
 
 public enum CommitOptions

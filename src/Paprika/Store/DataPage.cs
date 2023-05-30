@@ -304,4 +304,40 @@ public readonly unsafe struct DataPage : IDataPage
             }
         }
     }
+
+    /// <summary>
+    /// Provides a recursive way of applying an <paramref name="externalPage"/> with all the ancestors on this page.
+    /// </summary>
+    /// <param name="externalPage">The page that is applied.</param>
+    /// <param name="batch">The current batch.</param>
+    /// <param name="externalPageResolver">The resolver used to resolve the external tree.</param>
+    /// <returns></returns>
+    public Page Apply(DataPage externalPage, IBatchContext batch, IPageResolver externalPageResolver)
+    {
+        // enumerate map
+        // TODO: map.EnumerateNibble()
+        // var map = new FixedMap(externalPage.Data.FixedMapSpan);
+
+        for (var i = 0; i < Payload.BucketCount; i++)
+        {
+            var externalBucket = externalPage.Data.Buckets[i];
+            if (externalBucket.IsNull == false)
+            {
+                var page = externalPageResolver.GetAt(externalBucket);
+                var child = new DataPage(page);
+
+                // ensure there's the destination bucket
+                ref var bucket = ref Data.Buckets[i];
+                if (bucket.IsNull)
+                {
+                    batch.GetNewPage(out bucket, true);
+                }
+
+                var copyTo = new DataPage(batch.GetAt(bucket));
+                bucket = batch.GetAddress(copyTo.Apply(child, batch, externalPageResolver));
+            }
+        }
+
+        return _page;
+    }
 }

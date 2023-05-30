@@ -1,4 +1,5 @@
-﻿using FluentAssertions;
+﻿using System.Buffers.Binary;
+using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Chain;
 
@@ -19,6 +20,8 @@ public class PagePoolTests
         for (int i = 0; i < 100; i++)
         {
             var page = pool.Rent();
+            BinaryPrimitives.WriteInt64BigEndian(page.Span, i);
+
             page.Should().Be(initial);
             pool.Return(page);
         }

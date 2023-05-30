@@ -45,6 +45,11 @@ public class BlockchainTests
 
         // assert whether the history is preserved
         block2A.GetAccount(Key0).Should().Be(account1A);
+
+        block2A.Commit();
+
+        // finalize second block
+        blockchain.Finalize(Block2A);
     }
 
     private static Keccak Build(string name) => Keccak.Compute(Encoding.UTF8.GetBytes(name));

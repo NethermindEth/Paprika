@@ -75,8 +75,7 @@ public class Blockchain : IAsyncDisposable
 
                 batch.SetMetadata(block.BlockNumber, block.Hash);
 
-                // TODO: flush the block by adding data to it
-                // finalizedBlock.
+                block.Apply(batch);
             }
 
             await batch.Commit(CommitOptions.FlushDataAndRoot);
@@ -180,7 +179,7 @@ public class Blockchain : IAsyncDisposable
 
         // a weak-ref to allow collecting blocks once they are finalized
         private readonly WeakReference<Block>? _parent;
-        private readonly DataPage[] _roots;
+        private readonly DbAddress[] _roots;
         private readonly BloomFilter _bloom;
 
         private readonly Blockchain _blockchain;
@@ -201,7 +200,7 @@ public class Blockchain : IAsyncDisposable
             _bloom = new BloomFilter(GetNewPage(out _, true));
 
             // create roots
-            _roots = new DataPage[RootPage.Payload.RootFanOut];
+            _roots = new DbAddress[RootPage.Payload.RootFanOut];
         }
 
         /// <summary>
@@ -295,19 +294,16 @@ public class Blockchain : IAsyncDisposable
         private DataPage GetDataPage(NibblePath path)
         {
             ref var root = ref _roots[path.FirstNibble];
-
-            if (root.AsPage().Raw == UIntPtr.Zero)
-            {
-                root = new DataPage(GetNewPage(out _, true));
-            }
-
-            return root;
+            return root.IsNull ? new DataPage(GetNewPage(out root, true)) : new DataPage(GetAt(root));
         }
 
-        Page IPageResolver.GetAt(DbAddress address) => _pages[(int)(address.Raw - AddressOffset - 1)];
+        public Page GetAt(DbAddress address) => _pages[(int)(address.Raw - AddressOffset)];
 
         uint IReadOnlyBatchContext.BatchId => 0;
 
+        /// <summary>
+        /// An offset added/subtracted to produce a non-zero db address.
+        /// </summary>
         private const uint AddressOffset = 1;
 
         DbAddress IBatchContext.GetAddress(Page page) => _page2Address[page];
@@ -316,9 +312,11 @@ public class Blockchain : IAsyncDisposable
         {
             var page = Pool.Rent(clear: true);
 
-            _pages.Add(page);
+            var array = page.Span.ToArray();
 
-            addr = DbAddress.Page((uint)(_pages.Count + AddressOffset));
+            addr = DbAddress.Page((uint)_pages.Count + AddressOffset);
+
+            _pages.Add(page);
             _page2Address[page] = addr;
 
             return page;
@@ -379,6 +377,8 @@ public class Blockchain : IAsyncDisposable
                 Pool.Return(page);
             }
         }
+
+        public void Apply(IBatch batch) => batch.Apply(_roots, this);
     }
 
     public ValueTask DisposeAsync()

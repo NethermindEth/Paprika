@@ -370,6 +370,24 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             }
         }
 
+        public void Apply(DbAddress[] externalRoots, IPageResolver externalPageResolver)
+        {
+            for (var i = 0; i < RootPage.Payload.RootFanOut; i++)
+            {
+                ref var root = ref _root.Data.AccountPages[i];
+                var external = externalRoots[i];
+                if (external.IsNull == false)
+                {
+                    // non page to apply, ensure root is not null as well
+                    var page = root.IsNull ? GetNewPage(out root, true) : GetAt(root);
+
+                    var resolved = externalPageResolver.GetAt(external);
+                    var externalDataPage = new DataPage(resolved);
+                    root = GetAddress(new DataPage(page).Apply(externalDataPage, this, externalPageResolver));
+                }
+            }
+        }
+
         public override Page GetAt(DbAddress address) => _db.GetAt(address);
 
         public override DbAddress GetAddress(Page page) => _db.GetAddress(page);
