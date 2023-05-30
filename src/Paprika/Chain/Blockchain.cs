@@ -88,6 +88,8 @@ public class Blockchain : IAsyncDisposable
 
     public IWorldState StartNew(Keccak parentKeccak, Keccak blockKeccak, uint blockNumber)
     {
+        ReuseAlreadyFlushed();
+        
         var parent = _blocksByHash.TryGetValue(parentKeccak, out var p) ? p : null;
 
         // not added to dictionaries until Commit

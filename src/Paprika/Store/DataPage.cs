@@ -314,9 +314,19 @@ public readonly unsafe struct DataPage : IDataPage
     /// <returns></returns>
     public Page Apply(DataPage externalPage, IBatchContext batch, IPageResolver externalPageResolver)
     {
-        // enumerate map
-        // TODO: map.EnumerateNibble()
-        // var map = new FixedMap(externalPage.Data.FixedMapSpan);
+        if (Header.BatchId != batch.BatchId)
+        {
+            // the page is from another batch, meaning, it's readonly. Copy
+            var writable = batch.GetWritableCopy(_page);
+            return new DataPage(writable).Apply(externalPage, batch, externalPageResolver);
+        }
+        
+        // condition above ensures properly COWed page, not it's time to copy
+        var external = new FixedMap(externalPage.Data.FixedMapSpan);
+        foreach (var item in external.EnumerateAll())
+        {
+            Set(new SetContext(item.Key, item.RawData, batch));
+        }
 
         for (var i = 0; i < Payload.BucketCount; i++)
         {
