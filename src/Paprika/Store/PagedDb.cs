@@ -229,6 +229,11 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             return TryGetPage(key, out var page) ? page.GetStorage(GetPath(key), address, this) : default;
         }
 
+        public Keccak GetRootHash()
+        {
+            return Keccak.EmptyTreeHash;
+        }
+
         private bool TryGetPage(Keccak key, out DataPage page)
         {
             if (_disposed)
@@ -314,6 +319,11 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public UInt256 GetStorage(in Keccak key, in Keccak address) =>
             TryGetPageNoAlloc(key, out var page) ? page.GetStorage(GetPath(key), address, this) : default;
+
+        public Keccak GetRootHash()
+        {
+            return Keccak.EmptyTreeHash;
+        }
 
         public void Set(in Keccak key, in Account account)
         {

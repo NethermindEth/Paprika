@@ -16,4 +16,9 @@ public interface IReadOnlyBatch : IDisposable
     /// Gets the storage value.
     /// </summary>
     UInt256 GetStorage(in Keccak key, in Keccak address);
+
+    /// <summary>
+    /// Gets the Root Hash as if it were a Merkle Tree
+    /// </summary>
+    Keccak GetRootHash();
 }
