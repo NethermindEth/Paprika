@@ -44,4 +44,20 @@ public class PagePoolTests
         var page = pool.Rent();
         page.Span[index].Should().Be(0);
     }
+
+    [Test]
+    public void Big_pool()
+    {
+        const int pageCount = 1024;
+        using var pool = new PagePool(pageCount);
+
+        var set = new HashSet<UIntPtr>();
+
+        for (int i = 0; i < pageCount; i++)
+        {
+            set.Add(pool.Rent().Raw);
+        }
+
+        set.Count.Should().Be(pageCount);
+    }
 }

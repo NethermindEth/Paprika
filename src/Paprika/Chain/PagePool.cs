@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Store;
 
@@ -34,7 +35,7 @@ public class PagePool : IDisposable
 
             _slabs.Enqueue(new IntPtr(slab));
 
-            // enqueue all but first
+            // enqueue all
             for (var i = 0; i < _pagesInOneSlab; i++)
             {
                 var page = new Page(slab + Page.PageSize * i);

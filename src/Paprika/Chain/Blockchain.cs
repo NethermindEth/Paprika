@@ -312,8 +312,6 @@ public class Blockchain : IAsyncDisposable
         {
             var page = Pool.Rent(clear: true);
 
-            var array = page.Span.ToArray();
-
             addr = DbAddress.Page((uint)_pages.Count + AddressOffset);
 
             _pages.Add(page);
@@ -381,10 +379,15 @@ public class Blockchain : IAsyncDisposable
         public void Apply(IBatch batch) => batch.Apply(_roots, this);
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
+        // mark writer as complete
         _finalizedChannel.Writer.Complete();
+
+        // await the flushing task
+        await _flusher;
+
+        // once the flushing is done, dispose the pool
         _pool.Dispose();
-        return new ValueTask(_flusher);
     }
 }
