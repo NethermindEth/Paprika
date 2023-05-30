@@ -107,8 +107,12 @@ public readonly ref struct FixedMap
 
     public NibbleEnumerator EnumerateNibble(byte nibble) => new(this, nibble);
 
+    public NibbleEnumerator EnumerateAll() => new(this, NibbleEnumerator.AllNibbles);
+
     public ref struct NibbleEnumerator
     {
+        public const byte AllNibbles = byte.MaxValue;
+
         /// <summary>The map being enumerated.</summary>
         private readonly FixedMap _map;
 
@@ -138,9 +142,11 @@ public readonly ref struct FixedMap
             var to = _map.Count;
 
             while (index < to &&
-                   (_map._slots[index].Type == DataType.Deleted ||
-                    _map._slots[index].NibbleCount == 0 ||
-                    _map._slots[index].FirstNibbleOfPrefix != _nibble))
+                   (_map._slots[index].Type == DataType.Deleted || // filter out deleted
+                    (_nibble != AllNibbles &&
+                     (
+                         _map._slots[index].NibbleCount == 0 ||
+                         _map._slots[index].FirstNibbleOfPrefix != _nibble))))
             {
                 index += 1;
             }

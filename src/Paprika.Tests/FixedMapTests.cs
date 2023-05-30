@@ -9,12 +9,14 @@ namespace Paprika.Tests;
 public class FixedMapTests
 {
     private static NibblePath Key0 => NibblePath.FromKey(new byte[] { 0x12, 0x34, 0x56, 0x78, 0x90 });
-
     private static ReadOnlySpan<byte> Data0 => new byte[] { 23 };
+
     private static NibblePath Key1 => NibblePath.FromKey(new byte[] { 0x12, 0x34, 0x56, 0x78, 0x99 });
     private static ReadOnlySpan<byte> Data1 => new byte[] { 29, 31 };
+
     private static NibblePath Key2 => NibblePath.FromKey(new byte[] { 19, 21, 23, 29, 23 });
     private static ReadOnlySpan<byte> Data2 => new byte[] { 37, 39 };
+
     private static ReadOnlySpan<byte> Data3 => new byte[] { 39, 41, 43 };
 
     private static readonly Keccak StorageCell0 = Keccak.Compute(new byte[] { 2, 43, 4, 5, 34 });
@@ -71,6 +73,37 @@ public class FixedMapTests
         e.MoveNext().Should().BeTrue();
         e.Current.Key.Path.ToString().Should().Be(path1.ToString());
         e.Current.RawData.SequenceEqual(Data1).Should().BeTrue();
+
+        e.MoveNext().Should().BeFalse();
+    }
+
+    [Test]
+    public void Enumerate_all()
+    {
+        Span<byte> span = stackalloc byte[256];
+        var map = new FixedMap(span);
+
+        var key0 = Key.Account(Key0);
+        var key1 = Key.Account(Key2);
+        var key2 = Key.Account(NibblePath.Empty);
+
+        map.SetAssert(key0, Data0);
+        map.SetAssert(key1, Data1);
+        map.SetAssert(key2, Data2);
+
+        using var e = map.EnumerateAll();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Path.ToString().Should().Be(Key0.ToString());
+        e.Current.RawData.SequenceEqual(Data0).Should().BeTrue();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Path.ToString().Should().Be(Key2.ToString());
+        e.Current.RawData.SequenceEqual(Data1).Should().BeTrue();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Path.ToString().Should().Be(NibblePath.Empty.ToString());
+        e.Current.RawData.SequenceEqual(Data2).Should().BeTrue();
 
         e.MoveNext().Should().BeFalse();
     }
