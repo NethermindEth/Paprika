@@ -1,11 +1,14 @@
 ﻿using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Store;
 
 namespace Paprika;
 
 public interface IReadOnlyBatch : IDisposable
 {
+    Metadata Metadata { get; }
+    
     /// <summary>
     /// Low level retrieval of data.
     /// </summary>

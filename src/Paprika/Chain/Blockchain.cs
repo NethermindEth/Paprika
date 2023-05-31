@@ -163,6 +163,8 @@ public class Blockchain : IAsyncDisposable
                 {
                     foreach (var block in blocks)
                     {
+                        // remove by hash as well
+                        _blocksByHash.TryRemove(block.Hash, out _);
                         block.Dispose();
                     }
                 }

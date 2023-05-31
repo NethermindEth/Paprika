@@ -1,7 +1,6 @@
 ﻿using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Threading.Tasks.Dataflow;
 using HdrHistogram;
 using Nethermind.Int256;
 using Paprika.Chain;
@@ -14,7 +13,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 100_000 : 20_000;
+    private const int BlockCount = PersistentDb ? 100_000 : 1000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
@@ -32,7 +31,7 @@ public static class Program
 
     private const bool PersistentDb = false;
     private const bool UseStorage = true;
-    private const bool UseBigStorageAccount = true;
+    private const bool UseBigStorageAccount = false;
     private const int BigStorageAccountSlotCount = 1_000_000;
     private static readonly UInt256[] BigStorageAccountValues = new UInt256[BigStorageAccountSlotCount];
 
@@ -178,9 +177,12 @@ public static class Program
         Console.WriteLine();
         Console.WriteLine("Reading and asserting values...");
 
+        // finality of writes
+        Thread.Sleep(10000);
+        
         var reading = Stopwatch.StartNew();
         using var read = db.BeginReadOnlyBatch();
-
+        
         var logReadEvery = counter / NumberOfLogs;
         for (var i = 0; i < counter; i++)
         {
@@ -240,13 +242,13 @@ public static class Program
             var secondsPerBlock = TimeSpan.FromTicks(sw.ElapsedTicks / LogEvery).TotalSeconds;
             var blocksPerSecond = 1 / secondsPerBlock;
 
-            PrintRow(
-                block.ToString(),
-                $"{blocksPerSecond:F1} blocks/s",
-                $"{db.Megabytes / 1024:F2}GB",
-                $"{histograms.reused.GetValueAtPercentile(90)}",
-                $"{histograms.allocated.GetValueAtPercentile(90)}",
-                $"{histograms.total.GetValueAtPercentile(90)}");
+            // PrintRow(
+            //     block.ToString(),
+            //     $"{blocksPerSecond:F1} blocks/s",
+            //     $"{db.Megabytes / 1024:F2}GB",
+            //     $"{histograms.reused.GetValueAtPercentile(90)}",
+            //     $"{histograms.allocated.GetValueAtPercentile(90)}",
+            //     $"{histograms.total.GetValueAtPercentile(90)}");
         }
     }
 

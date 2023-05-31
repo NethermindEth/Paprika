@@ -1,5 +1,7 @@
-﻿using System.Text;
+﻿using System.Buffers.Binary;
+using System.Text;
 using FluentAssertions;
+using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
@@ -58,6 +60,71 @@ public class BlockchainTests
 
         var block3A = blockchain.StartNew(Block2A, Block3A, 3);
         block3A.GetAccount(Key0).Should().Be(account1A);
+    }
+    
+    [Test]
+    public async Task BigBlock()
+    {
+        const int blockCount = 10;
+        const int perBlock = 1000;
+        
+        using var db = PagedDb.NativeMemoryDb(128 * Mb, 2);
+
+        await using var blockchain = new Blockchain(db);
+
+        var counter = 0;
+        
+        for (int i = 1; i < blockCount + 1; i++)
+        {
+            var block = blockchain.StartNew(Keccak.Zero, BuildKey(i), (uint)i);
+            
+            for (var j = 0; j < perBlock; j++)
+            {
+                var key = BuildKey(counter);
+            
+                block.SetAccount(key, GetAccount(counter));
+                block.SetStorage(key, key, (UInt256)counter);
+
+                counter++;
+            }    
+            
+            // commit first
+            block.Commit();
+            
+            // finalize
+            blockchain.Finalize(block.Hash);
+        }
+        
+        // for now, to monitor the block chain, requires better handling of ref-counting on finalized
+        await Task.Delay(1000);
+
+        using var read = db.BeginReadOnlyBatch();
+
+        read.Metadata.BlockNumber.Should().Be(blockCount);
+
+        // reset the counter
+        counter = 0;
+        for (int i = 1; i < blockCount + 1; i++)
+        {
+            for (var j = 0; j < perBlock; j++)
+            {
+                var key = BuildKey(counter);
+
+                read.GetAccount(key).Should().Be(GetAccount(counter));
+                read.GetStorage(key, key).Should().Be((UInt256)counter);
+
+                counter++;
+            }    
+        }
+    }
+
+    private static Account GetAccount(int i) => new((UInt256)i, (UInt256)i);
+
+    private static Keccak BuildKey(int i)
+    {
+        Span<byte> span = stackalloc byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(span, i);
+        return Keccak.Compute(span);
     }
 
     private static Keccak Build(string name) => Keccak.Compute(Encoding.UTF8.GetBytes(name));

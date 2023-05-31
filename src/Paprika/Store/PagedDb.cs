@@ -1,5 +1,4 @@
-﻿using System.Buffers.Binary;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Nethermind.Int256;
 using Paprika.Crypto;
@@ -114,7 +113,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         lock (_batchLock)
         {
             var batchId = Root.Header.BatchId;
-            var batch = new ReadOnlyBatch(this, batchId, Root.Data.AccountPages.ToArray());
+            var batch = new ReadOnlyBatch(this, batchId, Root.Data.AccountPages.ToArray(), Root.Data.Metadata);
             _batchesReadOnly.Add(batch);
             return batch;
         }
@@ -206,11 +205,12 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         private readonly DbAddress[] _rootDataPages;
 
-        public ReadOnlyBatch(PagedDb db, uint batchId, DbAddress[] rootDataPages)
+        public ReadOnlyBatch(PagedDb db, uint batchId, DbAddress[] rootDataPages, Metadata metadata)
         {
             _db = db;
             _rootDataPages = rootDataPages;
             BatchId = batchId;
+            Metadata = metadata;
         }
 
         public void Dispose()
@@ -218,6 +218,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _disposed = true;
             _db.DisposeReadOnlyBatch(this);
         }
+
+        public Metadata Metadata { get; } 
 
         public bool TryGet(in Key key, out ReadOnlySpan<byte> result)
         {
@@ -281,6 +283,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             _metrics = new BatchMetrics();
         }
+
+        public Metadata Metadata => _root.Data.Metadata;
 
         public bool TryGet(in Key key, out ReadOnlySpan<byte> result)
         {

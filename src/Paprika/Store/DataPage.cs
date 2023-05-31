@@ -321,13 +321,9 @@ public readonly unsafe struct DataPage : IDataPage
             return new DataPage(writable).Apply(externalPage, batch, externalPageResolver);
         }
 
-        // condition above ensures properly COWed page, not it's time to copy
-        var external = new FixedMap(externalPage.Data.FixedMapSpan);
-        foreach (var item in external.EnumerateAll())
-        {
-            Set(new SetContext(item.Key, item.RawData, batch));
-        }
+        // condition above ensures properly COWed page
 
+        // first visit children, later use map. Otherwise it would break the rule to follow the most nested one
         for (var i = 0; i < Payload.BucketCount; i++)
         {
             var externalBucket = externalPage.Data.Buckets[i];
@@ -346,6 +342,12 @@ public readonly unsafe struct DataPage : IDataPage
                 var copyTo = new DataPage(batch.GetAt(bucket));
                 bucket = batch.GetAddress(copyTo.Apply(child, batch, externalPageResolver));
             }
+        }
+        
+        var external = new FixedMap(externalPage.Data.FixedMapSpan);
+        foreach (var item in external.EnumerateAll())
+        {
+            Set(new SetContext(item.Key, item.RawData, batch));
         }
 
         return _page;
