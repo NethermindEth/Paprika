@@ -13,7 +13,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 100_000 : 1000;
+    private const int BlockCount = PersistentDb ? 100_000 : 5_000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
@@ -22,7 +22,7 @@ public static class Program
 
     private const int NumberOfLogs = PersistentDb ? 100 : 10;
 
-    private const long DbFileSize = PersistentDb ? 128 * Gb : 10 * Gb;
+    private const long DbFileSize = PersistentDb ? 128 * Gb : 16 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
 
     private const CommitOptions Commit = CommitOptions.FlushDataOnly;
@@ -68,9 +68,9 @@ public static class Program
 
         void OnMetrics(IBatchMetrics metrics)
         {
-            histograms.allocated.RecordValue(metrics.PagesAllocated);
-            histograms.reused.RecordValue(metrics.PagesReused);
-            histograms.total.RecordValue(metrics.TotalPagesWritten);
+            // histograms.allocated.RecordValue(metrics.PagesAllocated);
+            // histograms.reused.RecordValue(metrics.PagesReused);
+            // histograms.total.RecordValue(metrics.TotalPagesWritten);
         }
 
         PagedDb db = PersistentDb
@@ -173,16 +173,23 @@ public static class Program
         Console.WriteLine("- generated accounts total number: {0} ", counter);
         Console.WriteLine("- space used: {0:F2}GB ", db.Megabytes / 1024);
 
+        // waiting for finalization
+        var read = db.BeginReadOnlyBatch();
+        uint flushedTo = 0;
+        while ((flushedTo = read.Metadata.BlockNumber) < BlockCount - 1)
+        {
+            Console.WriteLine($"Flushed to block: {flushedTo}. Waiting...");
+            read.Dispose();
+            Thread.Sleep(1000);
+            read = db.BeginReadOnlyBatch();
+        }
+
         // reading
         Console.WriteLine();
         Console.WriteLine("Reading and asserting values...");
 
-        // finality of writes
-        Thread.Sleep(10000);
-        
         var reading = Stopwatch.StartNew();
-        using var read = db.BeginReadOnlyBatch();
-        
+
         var logReadEvery = counter / NumberOfLogs;
         for (var i = 0; i < counter; i++)
         {
@@ -232,10 +239,10 @@ public static class Program
         Console.WriteLine("Reading state of all of {0} accounts from the last block took {1}",
             counter, reading.Elapsed);
 
-        Console.WriteLine("90th percentiles:");
-        Write90Th(histograms.allocated, "new pages allocated");
-        Write90Th(histograms.reused, "pages reused allocated");
-        Write90Th(histograms.total, "total pages written");
+        // Console.WriteLine("90th percentiles:");
+        // Write90Th(histograms.allocated, "new pages allocated");
+        // Write90Th(histograms.reused, "pages reused allocated");
+        // Write90Th(histograms.total, "total pages written");
 
         void ReportProgress(uint block, Stopwatch sw)
         {

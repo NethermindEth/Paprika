@@ -219,14 +219,14 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _db.DisposeReadOnlyBatch(this);
         }
 
-        public Metadata Metadata { get; } 
+        public Metadata Metadata { get; }
 
         public bool TryGet(in Key key, out ReadOnlySpan<byte> result)
         {
             if (_disposed)
                 throw new ObjectDisposedException("The readonly batch has already been disposed");
 
-            var addr = RootPage.FindAccountPage(_rootDataPages, key.Path);
+            var addr = RootPage.FindAccountPage(_rootDataPages, key.Path.FirstNibble);
             if (addr.IsNull)
             {
                 result = default;
@@ -290,7 +290,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         {
             CheckDisposed();
 
-            var addr = RootPage.FindAccountPage(_root.Data.AccountPages, key.Path);
+            var addr = RootPage.FindAccountPage(_root.Data.AccountPages, key.Path.FirstNibble);
 
             if (addr.IsNull)
             {
@@ -308,23 +308,35 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public void Set(in Keccak key, in Account account)
         {
-            ref var addr = ref TryGetPageAlloc(key, out var page);
-            var updated = page.SetAccount(GetPath(key), account, this);
+            var path = NibblePath.FromKey(key);
+            ref var addr = ref TryGetPageAlloc(path.FirstNibble, out var page);
+            var sliced = path.SliceFrom(RootPage.Payload.RootNibbleLevel);
+            var updated = page.SetAccount(sliced, account, this);
             addr = _db.GetAddress(updated);
         }
 
         public void SetStorage(in Keccak key, in Keccak address, UInt256 value)
         {
-            ref var addr = ref TryGetPageAlloc(key, out var page);
-            var updated = page.SetStorage(GetPath(key), address, value, this);
+            var path = NibblePath.FromKey(key);
+            ref var addr = ref TryGetPageAlloc(path.FirstNibble, out var page);
+            var sliced = path.SliceFrom(RootPage.Payload.RootNibbleLevel);
+            var updated = page.SetStorage(sliced, address, value, this);
             addr = _db.GetAddress(updated);
         }
 
-        private ref DbAddress TryGetPageAlloc(in Keccak key, out DataPage page)
+        public void SetRaw(in Key key, ReadOnlySpan<byte> rawData)
+        {
+            ref var addr = ref TryGetPageAlloc(key.Path.FirstNibble, out var page);
+            var sliced = key.SliceFrom(RootPage.Payload.RootNibbleLevel);
+            var updated = page.Set(new SetContext(sliced, rawData, this));
+            addr = _db.GetAddress(updated);
+        }
+
+        private ref DbAddress TryGetPageAlloc(byte firstNibble, out DataPage page)
         {
             CheckDisposed();
 
-            ref var addr = ref RootPage.FindAccountPage(_root.Data.AccountPages, key);
+            ref var addr = ref RootPage.FindAccountPage(_root.Data.AccountPages, firstNibble);
             Page p;
             if (addr.IsNull)
             {
@@ -371,24 +383,6 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             {
                 Debug.Assert(ReferenceEquals(this, _db._batchCurrent));
                 _db._batchCurrent = null;
-            }
-        }
-
-        public void Apply(DbAddress[] externalRoots, IPageResolver externalPageResolver)
-        {
-            for (var i = 0; i < RootPage.Payload.RootFanOut; i++)
-            {
-                ref var root = ref _root.Data.AccountPages[i];
-                var external = externalRoots[i];
-                if (external.IsNull == false)
-                {
-                    // non page to apply, ensure root is not null as well
-                    var page = root.IsNull ? GetNewPage(out root, true) : GetAt(root);
-
-                    var resolved = externalPageResolver.GetAt(external);
-                    var externalDataPage = new DataPage(resolved);
-                    root = GetAddress(new DataPage(page).Apply(externalDataPage, this, externalPageResolver));
-                }
             }
         }
 
@@ -624,10 +618,5 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             // no need to clear, it's always overwritten
             //Page.Clear();
         }
-    }
-
-    private static NibblePath GetPath(in Keccak key)
-    {
-        return NibblePath.FromKey(key).SliceFrom(RootPage.Payload.RootNibbleLevel);
     }
 }

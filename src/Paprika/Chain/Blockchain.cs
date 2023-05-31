@@ -61,26 +61,33 @@ public class Blockchain : IAsyncDisposable
     {
         var reader = _finalizedChannel.Reader;
 
-        while (await reader.WaitToReadAsync())
+        try
         {
-            // bulk all the finalized blocks in one batch
-            List<uint> flushedBlockNumbers = new();
-
-            var watch = Stopwatch.StartNew();
-
-            using var batch = _db.BeginNextBatch();
-            while (watch.Elapsed < FlushEvery && reader.TryRead(out var block))
+            while (await reader.WaitToReadAsync())
             {
-                flushedBlockNumbers.Add(block.BlockNumber);
+                // bulk all the finalized blocks in one batch
+                List<uint> flushedBlockNumbers = new();
 
-                batch.SetMetadata(block.BlockNumber, block.Hash);
+                var watch = Stopwatch.StartNew();
 
-                block.Apply(batch);
+                using var batch = _db.BeginNextBatch();
+                while (watch.Elapsed < FlushEvery && reader.TryRead(out var block))
+                {
+                    flushedBlockNumbers.Add(block.BlockNumber);
+
+                    batch.SetMetadata(block.BlockNumber, block.Hash);
+                    block.Apply(batch);
+                }
+
+                await batch.Commit(CommitOptions.FlushDataAndRoot);
+
+                _alreadyFlushedTo.Enqueue((_db.BeginReadOnlyBatch(), flushedBlockNumbers));
             }
-
-            await batch.Commit(CommitOptions.FlushDataAndRoot);
-
-            _alreadyFlushedTo.Enqueue((_db.BeginReadOnlyBatch(), flushedBlockNumbers));
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine(e);
+            throw;
         }
     }
 
@@ -175,7 +182,7 @@ public class Blockchain : IAsyncDisposable
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload, storing it in a in-memory trie
     /// </summary>
-    private class Block : RefCountingDisposable, IBatchContext, IWorldState
+    private class Block : RefCountingDisposable, IWorldState
     {
         public Keccak Hash { get; }
         public Keccak ParentHash { get; }
@@ -183,13 +190,12 @@ public class Blockchain : IAsyncDisposable
 
         // a weak-ref to allow collecting blocks once they are finalized
         private readonly WeakReference<Block>? _parent;
-        private readonly DbAddress[] _roots;
         private readonly BloomFilter _bloom;
 
         private readonly Blockchain _blockchain;
 
         private readonly List<Page> _pages = new();
-        private readonly Dictionary<Page, DbAddress> _page2Address = new();
+        private readonly List<RawFixedMap> _maps = new();
 
         public Block(Keccak parentHash, Block? parent, Keccak hash, uint blockNumber, Blockchain blockchain)
         {
@@ -201,10 +207,14 @@ public class Blockchain : IAsyncDisposable
             ParentHash = parentHash;
 
             // rent pages for the bloom
-            _bloom = new BloomFilter(GetNewPage(out _, true));
+            _bloom = new BloomFilter(Rent());
+        }
 
-            // create roots
-            _roots = new DbAddress[RootPage.Payload.RootFanOut];
+        private Page Rent()
+        {
+            var page = Pool.Rent(true);
+            _pages.Add(page);
+            return page;
         }
 
         /// <summary>
@@ -282,8 +292,11 @@ public class Blockchain : IAsyncDisposable
             _bloom.Set(BloomForAccountOperation(key));
 
             var path = NibblePath.FromKey(key);
-            var root = GetDataPage(path);
-            root.SetAccount(path.SliceFrom(RootPage.Payload.RootNibbleLevel), account, this);
+
+            Span<byte> payload = stackalloc byte[Serializer.BalanceNonceMaxByteCount];
+            payload = Serializer.WriteAccount(payload, account);
+
+            Set(Key.Account(path), payload);
         }
 
         public void SetStorage(in Keccak key, in Keccak address, UInt256 value)
@@ -291,46 +304,38 @@ public class Blockchain : IAsyncDisposable
             _bloom.Set(BloomForStorageOperation(key, address));
 
             var path = NibblePath.FromKey(key);
-            var root = GetDataPage(path);
-            root.SetStorage(path.SliceFrom(RootPage.Payload.RootNibbleLevel), address, value, this);
+
+            Span<byte> payload = stackalloc byte[Serializer.StorageValueMaxByteCount];
+            payload = Serializer.WriteStorageValue(payload, value);
+
+            Set(Key.StorageCell(path, address), payload);
         }
 
-        private DataPage GetDataPage(NibblePath path)
+        private void Set(in Key key, in ReadOnlySpan<byte> payload)
         {
-            ref var root = ref _roots[path.FirstNibble];
-            return root.IsNull ? new DataPage(GetNewPage(out root, true)) : new DataPage(GetAt(root));
+            RawFixedMap map;
+
+            if (_maps.Count == 0)
+            {
+                map = new RawFixedMap(Rent());
+                _maps.Add(map);
+            }
+            else
+            {
+                map = _maps[^1];
+            }
+
+            if (map.TrySet(key, payload))
+            {
+                return;
+            }
+
+            // not enough space, allocate one more
+            map = new RawFixedMap(Rent());
+            _maps.Add(map);
+
+            map.TrySet(key, payload);
         }
-
-        public Page GetAt(DbAddress address) => _pages[(int)(address.Raw - AddressOffset)];
-
-        uint IReadOnlyBatchContext.BatchId => 0;
-
-        /// <summary>
-        /// An offset added/subtracted to produce a non-zero db address.
-        /// </summary>
-        private const uint AddressOffset = 1;
-
-        DbAddress IBatchContext.GetAddress(Page page) => _page2Address[page];
-
-        public Page GetNewPage(out DbAddress addr, bool clear)
-        {
-            var page = Pool.Rent(clear: true);
-
-            addr = DbAddress.Page((uint)_pages.Count + AddressOffset);
-
-            _pages.Add(page);
-            _page2Address[page] = addr;
-
-            return page;
-        }
-
-        Page IBatchContext.GetWritableCopy(Page page) =>
-            throw new Exception("The COW should never happen in block. It should always use only writable pages");
-
-        /// <summary>
-        /// The implementation assumes that all the pages are writable.
-        /// </summary>
-        bool IBatchContext.WasWritten(DbAddress addr) => true;
 
         /// <summary>
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
@@ -347,11 +352,14 @@ public class Blockchain : IAsyncDisposable
             // lease: acquired
             if (_bloom.IsSet(bloom))
             {
-                var root = GetDataPage(key.Path);
-                if (root.TryGet(key.SliceFrom(RootPage.Payload.RootNibbleLevel), this, out var span))
+                // go from last to youngest to find the recent value
+                for (int i = _maps.Count - 1; i >= 0; i--)
                 {
-                    // return with owned lease
-                    return new ReadOnlySpanOwner<byte>(span, this);
+                    if (_maps[i].TryGet(key, out var span))
+                    {
+                        // return with owned lease
+                        return new ReadOnlySpanOwner<byte>(span, this);
+                    }
                 }
             }
 
@@ -380,7 +388,13 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-        public void Apply(IBatch batch) => batch.Apply(_roots, this);
+        public void Apply(IBatch batch)
+        {
+            foreach (var map in _maps)
+            {
+                map.Apply(batch);
+            }
+        }
     }
 
     public async ValueTask DisposeAsync()

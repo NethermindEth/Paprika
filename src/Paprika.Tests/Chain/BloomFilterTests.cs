@@ -10,7 +10,7 @@ public class BloomFilterTests
     [Test]
     public void Set_is_set()
     {
-        const int size = 100;
+        const int size = 1000;
         var page = Page.DevOnlyNativeAlloc();
         var bloom = new BloomFilter(page);
 

@@ -8,7 +8,7 @@ namespace Paprika;
 public interface IReadOnlyBatch : IDisposable
 {
     Metadata Metadata { get; }
-    
+
     /// <summary>
     /// Low level retrieval of data.
     /// </summary>

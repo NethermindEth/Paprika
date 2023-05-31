@@ -1,5 +1,4 @@
 ﻿using System.Collections.Concurrent;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Store;
 
@@ -10,10 +9,11 @@ namespace Paprika.Chain;
 /// </summary>
 public class PagePool : IDisposable
 {
+
     private readonly uint _pagesInOneSlab;
     private readonly ConcurrentQueue<Page> _pool = new();
-
     private readonly ConcurrentQueue<IntPtr> _slabs = new();
+
     private uint _allocatedPages;
 
     public PagePool(uint pagesInOneSlab)

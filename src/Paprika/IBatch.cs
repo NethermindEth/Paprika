@@ -1,5 +1,6 @@
 ﻿using Nethermind.Int256;
 using Paprika.Crypto;
+using Paprika.Data;
 using Paprika.Store;
 
 namespace Paprika;
@@ -24,16 +25,16 @@ public interface IBatch : IReadOnlyBatch
     void SetStorage(in Keccak key, in Keccak address, UInt256 value);
 
     /// <summary>
+    /// Sets data raw.
+    /// </summary>
+    void SetRaw(in Key key, ReadOnlySpan<byte> rawData);
+
+    /// <summary>
     /// Commits the block returning its root hash.
     /// </summary>
     /// <param name="options">How to commit.</param>
     /// <returns>The state root hash.</returns>
     ValueTask Commit(CommitOptions options);
-
-    /// <summary>
-    /// Applies roots in raw form on the root of the batch.
-    /// </summary>
-    void Apply(DbAddress[] externalRoots, IPageResolver externalPageResolver);
 }
 
 public enum CommitOptions
