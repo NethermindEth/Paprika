@@ -16,16 +16,7 @@ public readonly ref struct ReadOnlySpanOwner<T>
     }
 
     /// <summary>
-    /// Whether the owner is empty.
-    /// </summary>
-    public bool IsEmpty => _owner == null;
-
-    /// <summary>
     /// Disposes the owner provided as <see cref="IDisposable"/> once.
     /// </summary>
-    public void Dispose()
-    {
-        if (_owner != null)
-            _owner.Dispose();
-    }
+    public void Dispose() => _owner?.Dispose();
 }

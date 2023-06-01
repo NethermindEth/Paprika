@@ -187,8 +187,18 @@ public class Blockchain : IAsyncDisposable
 
         public bool TryGet(in Key key, out ReadOnlySpan<byte> result)
         {
-            if (TryAcquireLease())
+            if (!TryAcquireLease())
             {
+                throw new Exception("Should be able to lease it!");
+            }
+
+            try
+            {
+                return _batch.TryGet(key, out result);
+            }
+            finally
+            {
+                Dispose();
             }
         }
     }
@@ -258,18 +268,14 @@ public class Blockchain : IAsyncDisposable
             var bloom = BloomForStorageOperation(account, address);
             var key = Key.StorageCell(NibblePath.FromKey(account), address);
 
-            using var owner = TryGet(bloom, key);
-            if (owner.IsEmpty == false)
-            {
-                // check the span emptiness
-                if (owner.Span.IsEmpty)
-                    return default;
+            using var owner = Get(bloom, key);
 
-                Serializer.ReadStorageValue(owner.Span, out var value);
-                return value;
-            }
+            // check the span emptiness
+            if (owner.Span.IsEmpty)
+                return default;
 
-            return default;
+            Serializer.ReadStorageValue(owner.Span, out var value);
+            return value;
         }
 
         public Account GetAccount(in Keccak account)
@@ -277,14 +283,14 @@ public class Blockchain : IAsyncDisposable
             var bloom = BloomForAccountOperation(account);
             var key = Key.Account(NibblePath.FromKey(account));
 
-            using var owner = TryGet(bloom, key);
-            if (owner.IsEmpty == false)
-            {
-                Serializer.ReadAccount(owner.Span, out var result);
-                return result;
-            }
+            using var owner = Get(bloom, key);
 
-            return default;
+            // check the span emptiness
+            if (owner.Span.IsEmpty)
+                return default;
+
+            Serializer.ReadAccount(owner.Span, out var result);
+            return result;
         }
 
         private static int BloomForStorageOperation(in Keccak key, in Keccak address) =>
@@ -342,6 +348,19 @@ public class Blockchain : IAsyncDisposable
             map.TrySet(key, payload);
         }
 
+        private ReadOnlySpanOwner<byte> Get(int bloom, in Key key)
+        {
+            ReadOnlySpanOwner<byte> result;
+
+            // loop till the get is right
+            while (TryGet(bloom, key, out result) == false)
+            {
+                Thread.Sleep(0);
+            }
+
+            return result;
+        }
+
         /// <summary>
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
@@ -349,12 +368,13 @@ public class Blockchain : IAsyncDisposable
         [OptimizationOpportunity(OptimizationType.CPU,
             "If bloom filter was stored in-line in block, not rented, it could be used without leasing to check " +
             "whether the value is there. Less contention over lease for sure")]
-        private ReadOnlySpanOwner<byte> TryGet(int bloom, in Key key)
+        private bool TryGet(int bloom, in Key key, out ReadOnlySpanOwner<byte> result)
         {
             var acquired = TryAcquireLease();
             if (acquired == false)
             {
-                return default;
+                result = default;
+                return false;
             }
 
             // lease: acquired
@@ -366,11 +386,12 @@ public class Blockchain : IAsyncDisposable
                     if (_maps[i].TryGet(key, out var span))
                     {
                         // return with owned lease
-                        return new ReadOnlySpanOwner<byte>(span, this);
+                        result = new ReadOnlySpanOwner<byte>(span, this);
+                        return true;
                     }
                 }
             }
-            
+
             // try batch now
             var batch = _batch;
             if (batch != null)
@@ -378,8 +399,17 @@ public class Blockchain : IAsyncDisposable
                 if (batch.TryGet(key, out var span))
                 {
                     // return with owned lease
-                    return new ReadOnlySpanOwner<byte>(span, this);
+                    result = new ReadOnlySpanOwner<byte>(span, this);
+                    return true;
                 }
+
+                // nothing was found but the read was served from a proper snapshot of the database so 
+                // true should be returned
+                ReleaseLeaseOnce();
+
+                // nothing found, return default but state that the search was successful
+                result = default;
+                return true;
             }
 
             // lease no longer needed
@@ -388,12 +418,15 @@ public class Blockchain : IAsyncDisposable
             // search the parent
             if (TryGetParent(out var parent))
             {
-                var owner = parent.TryGet(bloom, key);
-                return owner;
+                var readProperly = parent.TryGet(bloom, key, out result);
+                if (readProperly)
+                    return true;
             }
 
-            // searched but nothing was found, return default
-            return default;
+            // searched but none of the paths succeeded, which means that there was not a proper read/write ordering
+            // return false for the caller to worry
+            result = default;
+            return false;
         }
 
         public bool TryGetParent([MaybeNullWhen(false)] out Block parent)
@@ -409,7 +442,7 @@ public class Blockchain : IAsyncDisposable
             {
                 Pool.Return(page);
             }
-            
+
             _batch.Dispose();
         }
 
