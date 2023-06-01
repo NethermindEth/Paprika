@@ -9,7 +9,6 @@ namespace Paprika.Chain;
 /// </summary>
 public class PagePool : IDisposable
 {
-
     private readonly uint _pagesInOneSlab;
     private readonly ConcurrentQueue<Page> _pool = new();
     private readonly ConcurrentQueue<IntPtr> _slabs = new();

@@ -341,6 +341,9 @@ public class Blockchain : IAsyncDisposable
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
+        [OptimizationOpportunity(OptimizationType.CPU,
+            "If bloom filter was stored in-line in block, not rented, it could be used without leasing to check " +
+            "whether the value is there. Less contention over lease for sure")]
         private ReadOnlySpanOwner<byte> TryGet(int bloom, in Key key)
         {
             var acquired = TryAcquireLease();
