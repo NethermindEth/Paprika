@@ -32,12 +32,13 @@ public class Blockchain : IAsyncDisposable
     private readonly ConcurrentDictionary<uint, Block[]> _blocksByNumber = new();
     private readonly ConcurrentDictionary<Keccak, Block> _blocksByHash = new();
     private readonly Channel<Block> _finalizedChannel;
-    private readonly ConcurrentQueue<(IReadOnlyBatch reader, IEnumerable<uint> blockNumbers)> _alreadyFlushedTo;
 
     private readonly PagedDb _db;
-    private uint _lastFinalized;
-    private IReadOnlyBatch _dbReader;
     private readonly Task _flusher;
+
+    private uint _lastFinalized;
+
+    private volatile ReadOnlyBatchCountingRefs _dbReader;
 
     public Blockchain(PagedDb db)
     {
@@ -48,16 +49,14 @@ public class Blockchain : IAsyncDisposable
             SingleWriter = true
         });
 
-        _alreadyFlushedTo = new();
-        _dbReader = db.BeginReadOnlyBatch();
-
-        _flusher = FinalizedFlusher();
+        _dbReader = new ReadOnlyBatchCountingRefs(db.BeginReadOnlyBatch());
+        _flusher = FlusherTask();
     }
 
     /// <summary>
     /// The flusher method run as a reader of the <see cref="_finalizedChannel"/>.
     /// </summary>
-    private async Task FinalizedFlusher()
+    private async Task FlusherTask()
     {
         var reader = _finalizedChannel.Reader;
 
@@ -65,15 +64,16 @@ public class Blockchain : IAsyncDisposable
         {
             while (await reader.WaitToReadAsync())
             {
-                // bulk all the finalized blocks in one batch
-                List<uint> flushedBlockNumbers = new();
+                var flushed = new List<uint>();
 
+                uint flushedTo = 0;
                 var watch = Stopwatch.StartNew();
 
                 using var batch = _db.BeginNextBatch();
                 while (watch.Elapsed < FlushEvery && reader.TryRead(out var block))
                 {
-                    flushedBlockNumbers.Add(block.BlockNumber);
+                    flushed.Add(block.BlockNumber);
+                    flushedTo = block.BlockNumber;
 
                     batch.SetMetadata(block.BlockNumber, block.Hash);
                     block.Apply(batch);
@@ -81,7 +81,30 @@ public class Blockchain : IAsyncDisposable
 
                 await batch.Commit(CommitOptions.FlushDataAndRoot);
 
-                _alreadyFlushedTo.Enqueue((_db.BeginReadOnlyBatch(), flushedBlockNumbers));
+                // publish the reader to the blocks following up the flushed one
+                var readOnlyBatch = new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch());
+                var nextBlocksToFlushedOne = _blocksByNumber[flushedTo + 1];
+
+                foreach (var block in nextBlocksToFlushedOne)
+                {
+                    // lease first to bump up the counter, then pass
+                    readOnlyBatch.Lease();
+                    block.SetParentReader(readOnlyBatch);
+                }
+
+                // clean the earliest blocks
+                foreach (var flushedBlockNumber in flushed)
+                {
+                    if (_blocksByNumber.TryRemove(flushedBlockNumber, out var removed) == false)
+                        throw new Exception($"Missing blocks at block number {flushedBlockNumber}");
+
+                    foreach (var block in removed)
+                    {
+                        // remove by hash as well
+                        _blocksByHash.TryRemove(block.Hash, out _);
+                        block.Dispose();
+                    }
+                }
             }
         }
         catch (Exception e)
@@ -95,8 +118,6 @@ public class Blockchain : IAsyncDisposable
 
     public IWorldState StartNew(Keccak parentKeccak, Keccak blockKeccak, uint blockNumber)
     {
-        ReuseAlreadyFlushed();
-
         var parent = _blocksByHash.TryGetValue(parentKeccak, out var p) ? p : null;
 
         // not added to dictionaries until Commit
@@ -105,8 +126,6 @@ public class Blockchain : IAsyncDisposable
 
     public void Finalize(Keccak keccak)
     {
-        ReuseAlreadyFlushed();
-
         // find the block to finalize
         if (_blocksByHash.TryGetValue(keccak, out var block) == false)
         {
@@ -145,36 +164,31 @@ public class Blockchain : IAsyncDisposable
     /// </summary>
     private bool TryReadFromFinalized(in Key key, out ReadOnlySpan<byte> result)
     {
+        // TODO: any caller of this method should provide a block number that it read through
+        // if the blockNumber is smaller than the one remembered by _dbReader it's fine
         return _dbReader.TryGet(key, out result);
     }
 
-    private void ReuseAlreadyFlushed()
+    private class ReadOnlyBatchCountingRefs : RefCountingDisposable, IReadOnlyBatch
     {
-        while (_alreadyFlushedTo.TryDequeue(out var flushed))
+        private readonly IReadOnlyBatch _batch;
+
+        public ReadOnlyBatchCountingRefs(IReadOnlyBatch batch)
         {
-            // TODO: this is wrong, non volatile access, no visibility checks. For now should do.
+            _batch = batch;
+            Metadata = batch.Metadata;
+        }
 
-            // set the last reader
-            var previous = _dbReader;
+        protected override void CleanUp() => _batch.Dispose();
 
-            _dbReader = flushed.reader;
+        public Metadata Metadata { get; }
 
-            previous.Dispose();
+        public void Lease() => TryAcquireLease();
 
-            foreach (var blockNumber in flushed.blockNumbers)
+        public bool TryGet(in Key key, out ReadOnlySpan<byte> result)
+        {
+            if (TryAcquireLease())
             {
-                _lastFinalized = Math.Max(blockNumber, _lastFinalized);
-
-                // clean blocks with a given number
-                if (_blocksByNumber.Remove(blockNumber, out var blocks))
-                {
-                    foreach (var block in blocks)
-                    {
-                        // remove by hash as well
-                        _blocksByHash.TryRemove(block.Hash, out _);
-                        block.Dispose();
-                    }
-                }
             }
         }
     }
@@ -196,6 +210,7 @@ public class Blockchain : IAsyncDisposable
 
         private readonly List<Page> _pages = new();
         private readonly List<RawFixedMap> _maps = new();
+        private volatile IReadOnlyBatch? _batch;
 
         public Block(Keccak parentHash, Block? parent, Keccak hash, uint blockNumber, Blockchain blockchain)
         {
@@ -246,14 +261,11 @@ public class Blockchain : IAsyncDisposable
             using var owner = TryGet(bloom, key);
             if (owner.IsEmpty == false)
             {
-                Serializer.ReadStorageValue(owner.Span, out var value);
-                return value;
-            }
+                // check the span emptiness
+                if (owner.Span.IsEmpty)
+                    return default;
 
-            // TODO: memory ownership of the span
-            if (_blockchain.TryReadFromFinalized(in key, out var span))
-            {
-                Serializer.ReadStorageValue(span, out var value);
+                Serializer.ReadStorageValue(owner.Span, out var value);
                 return value;
             }
 
@@ -269,13 +281,6 @@ public class Blockchain : IAsyncDisposable
             if (owner.IsEmpty == false)
             {
                 Serializer.ReadAccount(owner.Span, out var result);
-                return result;
-            }
-
-            // TODO: memory ownership of the span
-            if (_blockchain.TryReadFromFinalized(in key, out var span))
-            {
-                Serializer.ReadAccount(span, out var result);
                 return result;
             }
 
@@ -365,14 +370,29 @@ public class Blockchain : IAsyncDisposable
                     }
                 }
             }
+            
+            // try batch now
+            var batch = _batch;
+            if (batch != null)
+            {
+                if (batch.TryGet(key, out var span))
+                {
+                    // return with owned lease
+                    return new ReadOnlySpanOwner<byte>(span, this);
+                }
+            }
 
             // lease no longer needed
             ReleaseLeaseOnce();
 
             // search the parent
             if (TryGetParent(out var parent))
-                return parent.TryGet(bloom, key);
+            {
+                var owner = parent.TryGet(bloom, key);
+                return owner;
+            }
 
+            // searched but nothing was found, return default
             return default;
         }
 
@@ -389,6 +409,8 @@ public class Blockchain : IAsyncDisposable
             {
                 Pool.Return(page);
             }
+            
+            _batch.Dispose();
         }
 
         public void Apply(IBatch batch)
@@ -397,6 +419,12 @@ public class Blockchain : IAsyncDisposable
             {
                 map.Apply(batch);
             }
+        }
+
+        public void SetParentReader(IReadOnlyBatch readOnlyBatch)
+        {
+            // no need to lease, this happens always on an active block
+            _batch = readOnlyBatch;
         }
     }
 
