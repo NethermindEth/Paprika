@@ -19,7 +19,7 @@ public static class Leaf
         // Stage 1: value = RLP(accountBalance, accountNonce, codeHash, storageRootHash)
         var rlpStream = RlpOfAccount(account, codeHash, storageRootHash);
 
-        // Stage 2: res = KeccakOrRlp(nibblePath, value) 
+        // Stage 2: res = KeccakOrRlp(nibblePath, value)
         var result = EncodeLeaf(nibblePath, rlpStream.Data);
 
         return result;
@@ -60,24 +60,6 @@ public static class Leaf
         rlp.Encode(hexPath);
         rlp.Encode(value);
 
-        return WrapRlp(rlp.Data);
-    }
-
-
-    private static KeccakOrRlp WrapRlp(Span<byte> data)
-    {
-        var destination = new byte[32];
-
-        if (data.Length < 32)
-        {
-            destination[0] = (byte)data.Length;
-            data.CopyTo(destination[1..]);
-            return new KeccakOrRlp(KeccakOrRlp.Type.Rlp, data);
-        }
-        else
-        {
-            KeccakHash.ComputeHash(data, destination);
-            return new KeccakOrRlp(KeccakOrRlp.Type.Keccak, destination);
-        }
+        return KeccakOrRlp.WrapRlp(rlp.Data);
     }
 }

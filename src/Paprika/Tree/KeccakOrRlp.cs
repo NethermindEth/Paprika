@@ -1,3 +1,5 @@
+using Paprika.Crypto;
+
 namespace Paprika.Tree;
 
 public ref struct KeccakOrRlp
@@ -15,5 +17,22 @@ public ref struct KeccakOrRlp
     {
         DataType = dataType;
         Data = data;
+    }
+
+    public static KeccakOrRlp WrapRlp(Span<byte> data)
+    {
+        var destination = new byte[32];
+
+        if (data.Length < 32)
+        {
+            destination[0] = (byte)data.Length;
+            data.CopyTo(destination[1..]);
+            return new KeccakOrRlp(Type.Rlp, destination);
+        }
+        else
+        {
+            KeccakHash.ComputeHash(data, destination);
+            return new KeccakOrRlp(Type.Keccak, destination);
+        }
     }
 }
