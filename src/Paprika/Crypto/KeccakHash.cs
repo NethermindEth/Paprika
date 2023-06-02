@@ -322,7 +322,7 @@ public sealed class KeccakHash
     }
 
     // compute a Keccak hash (md) of given byte length from "in"
-    private static void ComputeHash(ReadOnlySpan<byte> input, Span<byte> output)
+    public static void ComputeHash(ReadOnlySpan<byte> input, Span<byte> output)
     {
         int size = output.Length;
         int roundSize = GetRoundSize(size);
