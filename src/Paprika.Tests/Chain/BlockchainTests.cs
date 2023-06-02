@@ -28,8 +28,8 @@ public class BlockchainTests
 
         await using var blockchain = new Blockchain(db);
 
-        var block1A = blockchain.StartNew(Keccak.Zero, Block1A, 1);
-        var block1B = blockchain.StartNew(Keccak.Zero, Block1B, 1);
+        using var block1A = blockchain.StartNew(Keccak.Zero, Block1A, 1);
+        using var block1B = blockchain.StartNew(Keccak.Zero, Block1B, 1);
 
         var account1A = new Account(1, 1);
         var account1B = new Account(2, 2);
@@ -49,21 +49,23 @@ public class BlockchainTests
 
         // assert whether the history is preserved
         block2A.GetAccount(Key0).Should().Be(account1A);
-
         block2A.Commit();
+        
+        // start the third block
+        using var block3A = blockchain.StartNew(Block2A, Block3A, 3);
+        block3A.Commit();
 
         // finalize second block
         blockchain.Finalize(Block2A);
 
         // for now, to monitor the block chain, requires better handling of ref-counting on finalized
         await Task.Delay(1000);
-
-        var block3A = blockchain.StartNew(Block2A, Block3A, 3);
+        
         block3A.GetAccount(Key0).Should().Be(account1A);
     }
 
     [Test]
-    public async Task BigBlock()
+    public async Task BiggerTest()
     {
         const int blockCount = 10;
         const int perBlock = 1000;
@@ -74,9 +76,13 @@ public class BlockchainTests
 
         var counter = 0;
 
-        for (int i = 1; i < blockCount + 1; i++)
+        var previousBlock = Keccak.Zero;
+        
+        for (var i = 1; i < blockCount + 1; i++)
         {
-            var block = blockchain.StartNew(Keccak.Zero, BuildKey(i), (uint)i);
+            var hash = BuildKey(i);
+            
+            using var block = blockchain.StartNew(previousBlock, hash, (uint)i);
 
             for (var j = 0; j < perBlock; j++)
             {
@@ -87,13 +93,23 @@ public class BlockchainTests
 
                 counter++;
             }
-
+            
             // commit first
             block.Commit();
-
-            // finalize
-            blockchain.Finalize(block.Hash);
+            
+            if (i > 1)
+            {
+                blockchain.Finalize(previousBlock);
+            }
+            
+            previousBlock = hash;
         }
+        
+        // make next visible
+        using var next = blockchain.StartNew(previousBlock, BuildKey(blockCount + 1), (uint) blockCount + 1);
+        next.Commit();
+        
+        blockchain.Finalize(previousBlock);
 
         // for now, to monitor the block chain, requires better handling of ref-counting on finalized
         await Task.Delay(1000);

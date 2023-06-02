@@ -16,7 +16,15 @@ public abstract class RefCountingDisposable : IDisposable
         _counter = initialCount;
     }
 
-    protected bool TryAcquireLease()
+    public void AcquireLease()
+    {
+        if (TryAcquireLease() == false)
+        {
+            throw new Exception("The lease cannot be acquired");
+        }
+    }
+
+    public bool TryAcquireLease()
     {
         var value = Interlocked.Increment(ref _counter);
         if ((value & Disposing) == Disposing)
