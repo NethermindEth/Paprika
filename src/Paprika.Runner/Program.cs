@@ -108,7 +108,7 @@ public static class Program
             for (uint block = 1; block < BlockCount; block++)
             {
                 var blockHash = Keccak.Compute(parentBlockHash.Span);
-                var worldState = blockchain.StartNew(parentBlockHash, blockHash, block);
+                using var worldState = blockchain.StartNew(parentBlockHash, blockHash, block);
 
                 parentBlockHash = blockHash;
 
