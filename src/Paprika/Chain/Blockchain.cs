@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Metrics;
 using System.Threading.Channels;
 using Nethermind.Int256;
 using Paprika.Crypto;
@@ -35,6 +36,12 @@ public class Blockchain : IAsyncDisposable
     private readonly ConcurrentDictionary<Keccak, Block> _blocksByHash = new();
     private readonly Channel<Block> _finalizedChannel;
 
+    // metrics
+    private readonly Meter _meter;
+    private readonly Histogram<int> _flusherBatchSize;
+    private readonly Histogram<int> _flusherBlockCommitInMs;
+    private readonly MetricsExtensions.IAtomicIntGauge _flusherQueueCount;
+
     private readonly PagedDb _db;
     private readonly Task _flusher;
 
@@ -55,6 +62,16 @@ public class Blockchain : IAsyncDisposable
         _blocksByHash[GenesisHash] = genesis;
 
         _flusher = FlusherTask();
+
+        // metrics
+        _meter = new Meter("Paprika.Chain.Blockchain");
+
+        _flusherBatchSize = _meter.CreateHistogram<int>("Blocks finalized in one batch", "Blocks",
+            "The number of blocks finalized by the flushing task in one db batch");
+        _flusherBlockCommitInMs = _meter.CreateHistogram<int>("Block commit in ms", "ms",
+            "The amortized time it takes for flush one block in a batch by the flusher task");
+        _flusherQueueCount = _meter.CreateAtomicObservableGauge("Flusher queue count", "Blocks",
+            "The number of the blocks in the flush queue");
     }
 
     /// <summary>
@@ -84,6 +101,13 @@ public class Blockchain : IAsyncDisposable
                 }
 
                 await batch.Commit(CommitOptions.FlushDataAndRoot);
+
+                watch.Stop();
+
+                // measure
+                _flusherBatchSize.Record(flushed.Count);
+                _flusherBlockCommitInMs.Record((int)(watch.ElapsedMilliseconds / flushed.Count));
+                _flusherQueueCount.Subtract(flushed.Count);
 
                 // publish the reader to the blocks following up the flushed one
                 var readOnlyBatch = new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch());
@@ -157,6 +181,8 @@ public class Blockchain : IAsyncDisposable
                 break;
             }
         }
+
+        _flusherQueueCount.Add((int)count);
 
         while (finalized.TryPop(out block))
         {
@@ -482,6 +508,12 @@ public class Blockchain : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // mark writer as complete
+        _finalizedChannel.Writer.Complete();
+
+        // await the flushing task
+        await _flusher;
+
         // dispose all memoized blocks to please the ref-counting
         foreach (var (_, block) in _blocksByHash)
         {
@@ -491,13 +523,10 @@ public class Blockchain : IAsyncDisposable
         _blocksByHash.Clear();
         _blocksByNumber.Clear();
 
-        // mark writer as complete
-        _finalizedChannel.Writer.Complete();
-
-        // await the flushing task
-        await _flusher;
-
-        // once the flushing is done, dispose the pool
+        // once the flushing is done and blocks are disposed, dispose the pool
         _pool.Dispose();
+
+        // unregister metrics
+        _meter.Dispose();
     }
 }

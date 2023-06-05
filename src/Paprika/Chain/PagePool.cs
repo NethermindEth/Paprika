@@ -1,5 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
 using Paprika.Store;
 
@@ -10,18 +11,25 @@ namespace Paprika.Chain;
 /// </summary>
 public class PagePool : IDisposable
 {
-    private readonly uint _pagesInOneSlab;
+    private readonly int _pagesInOneSlab;
     private readonly ConcurrentQueue<Page> _pool = new();
     private readonly ConcurrentQueue<IntPtr> _slabs = new();
 
-    private uint _allocatedPages;
+    private int _allocatedPages;
 
-    public PagePool(uint pagesInOneSlab)
+    // metrics
+    private readonly Meter _meter;
+
+    public PagePool(int pagesInOneSlab)
     {
         _pagesInOneSlab = pagesInOneSlab;
+
+        _meter = new Meter("Paprika.Chain.PagePool");
+        _meter.CreateObservableCounter("Allocated Pages", () => Volatile.Read(ref _allocatedPages), "4kb page",
+            "the number of pages allocated in the page pool");
     }
 
-    public uint AllocatedPages => _allocatedPages;
+    public int AllocatedPages => _allocatedPages;
 
     public unsafe Page Rent(bool clear = true)
     {
@@ -65,5 +73,7 @@ public class PagePool : IDisposable
                 NativeMemory.AlignedFree(slab.ToPointer());
             }
         }
+
+        _meter.Dispose();
     }
 }

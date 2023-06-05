@@ -17,6 +17,7 @@ public static class Program
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
+    private const int FinalizeEvery = 32;
 
     private const int RandomSeed = 17;
 
@@ -35,7 +36,7 @@ public static class Program
     private const int BigStorageAccountSlotCount = 1_000_000;
     private static readonly UInt256[] BigStorageAccountValues = new UInt256[BigStorageAccountSlotCount];
 
-    public static void Main(String[] args)
+    public static async Task Main(String[] args)
     {
         var dir = Directory.GetCurrentDirectory();
         var dataPath = Path.Combine(dir, "db");
@@ -77,84 +78,99 @@ public static class Program
             ? PagedDb.MemoryMappedDb(DbFileSize, MaxReorgDepth, dataPath, OnMetrics)
             : PagedDb.NativeMemoryDb(DbFileSize, MaxReorgDepth, OnMetrics);
 
-        var blockchain = new Blockchain(db);
-
+        // consts
         var random = PrepareStableRandomSource();
-
+        var bigStorageAccount = GetAccountKey(random, RandomSampleSize - Keccak.Size);
         var counter = 0;
 
-        Console.WriteLine();
-        Console.WriteLine("(P) - 90th percentile of the value");
-        Console.WriteLine();
-
-        PrintHeader("At Block",
-            "Avg. speed",
-            "Space used",
-            "New pages(P)",
-            "Pages reused(P)",
-            "Total pages(P)");
-
-
-        var bigStorageAccount = GetAccountKey(random, RandomSampleSize - Keccak.Size);
-
-        bool bigStorageAccountCreated = false;
-
-        // writing
-        var writing = Stopwatch.StartNew();
-
-        var parentBlockHash = Keccak.Zero;
-
-        for (uint block = 1; block < BlockCount; block++)
+        await using (var blockchain = new Blockchain(db))
         {
-            var blockHash = Keccak.Compute(parentBlockHash.Span);
-            var worldState = blockchain.StartNew(parentBlockHash, blockHash, block);
-            parentBlockHash = blockHash;
+            Console.WriteLine();
+            Console.WriteLine("(P) - 90th percentile of the value");
+            Console.WriteLine();
 
-            for (var account = 0; account < AccountsPerBlock; account++)
+            PrintHeader("At Block",
+                "Avg. speed",
+                "Space used",
+                "New pages(P)",
+                "Pages reused(P)",
+                "Total pages(P)");
+
+
+            bool bigStorageAccountCreated = false;
+
+            // writing
+            var writing = Stopwatch.StartNew();
+            var parentBlockHash = Keccak.Zero;
+
+            var toFinalize = new List<Keccak>();
+
+            for (uint block = 1; block < BlockCount; block++)
             {
-                var key = GetAccountKey(random, counter);
+                var blockHash = Keccak.Compute(parentBlockHash.Span);
+                var worldState = blockchain.StartNew(parentBlockHash, blockHash, block);
 
-                worldState.SetAccount(key, GetAccountValue(counter));
+                parentBlockHash = blockHash;
 
-                if (UseStorage)
+                for (var account = 0; account < AccountsPerBlock; account++)
                 {
-                    var storageAddress = GetStorageAddress(counter);
-                    var storageValue = GetStorageValue(counter);
-                    worldState.SetStorage(key, storageAddress, storageValue);
-                }
+                    var key = GetAccountKey(random, counter);
 
-                if (UseBigStorageAccount)
-                {
-                    if (bigStorageAccountCreated == false)
+                    worldState.SetAccount(key, GetAccountValue(counter));
+
+                    if (UseStorage)
                     {
-                        worldState.SetAccount(bigStorageAccount, new Account(100, 100));
-                        bigStorageAccountCreated = true;
+                        var storageAddress = GetStorageAddress(counter);
+                        var storageValue = GetStorageValue(counter);
+                        worldState.SetStorage(key, storageAddress, storageValue);
                     }
 
-                    var index = counter % BigStorageAccountSlotCount;
-                    var storageAddress = GetStorageAddress(index);
-                    var storageValue = GetBigAccountStorageValue(counter);
-                    BigStorageAccountValues[index] = storageValue;
+                    if (UseBigStorageAccount)
+                    {
+                        if (bigStorageAccountCreated == false)
+                        {
+                            worldState.SetAccount(bigStorageAccount, new Account(100, 100));
+                            bigStorageAccountCreated = true;
+                        }
 
-                    worldState.SetStorage(bigStorageAccount, storageAddress, storageValue);
+                        var index = counter % BigStorageAccountSlotCount;
+                        var storageAddress = GetStorageAddress(index);
+                        var storageValue = GetBigAccountStorageValue(counter);
+                        BigStorageAccountValues[index] = storageValue;
+
+                        worldState.SetStorage(bigStorageAccount, storageAddress, storageValue);
+                    }
+
+                    counter++;
                 }
 
-                counter++;
+                worldState.Commit();
+
+                // finalize
+                if (toFinalize.Count >= FinalizeEvery)
+                {
+                    // finalize first
+                    blockchain.Finalize(toFinalize[0]);
+                    toFinalize.Clear();
+                }
+
+                toFinalize.Add(blockHash);
+
+                if (block > 0 & block % LogEvery == 0)
+                {
+                    ReportProgress(block, writing);
+                    writing.Restart();
+                }
             }
 
-            worldState.Commit();
+            // flush leftovers by adding one more block for now
+            var lastBlock = toFinalize.Last();
+            using var placeholder = blockchain.StartNew(lastBlock, Keccak.Compute(lastBlock.Span), BlockCount);
+            placeholder.Commit();
+            blockchain.Finalize(lastBlock);
 
-            // finalize after each block for now
-            blockchain.Finalize(blockHash);
-
-            if (block > 0 & block % LogEvery == 0)
-            {
-                ReportProgress(block, writing);
-                writing.Restart();
-            }
+            ReportProgress(BlockCount - 1, writing);
         }
-
-        ReportProgress(BlockCount - 1, writing);
 
         Console.WriteLine();
         Console.WriteLine("Writing in numbers:");
@@ -231,8 +247,9 @@ public static class Program
                 var secondsPerRead = TimeSpan.FromTicks(reading.ElapsedTicks / logReadEvery).TotalSeconds;
                 var readsPerSeconds = 1 / secondsPerRead;
 
-                Console.WriteLine($"Reading at {i,9} out of {counter} accounts. Current speed: {readsPerSeconds:F1} reads/s");
-                writing.Restart();
+                Console.WriteLine(
+                    $"Reading at {i,9} out of {counter} accounts. Current speed: {readsPerSeconds:F1} reads/s");
+                reading.Restart();
             }
         }
 
