@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Paprika.Store;
 
@@ -52,6 +53,11 @@ public class PagePool : IDisposable
 
     public void Dispose()
     {
+        var expectedCount = _pagesInOneSlab * _slabs.Count;
+        var actualCount = _pool.Count;
+        Debug.Assert(expectedCount == actualCount,
+            $"There should be {expectedCount} pages in the pool but there are only {actualCount}");
+
         while (_slabs.TryDequeue(out var slab))
         {
             unsafe

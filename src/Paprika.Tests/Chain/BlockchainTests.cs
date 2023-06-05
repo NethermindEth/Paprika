@@ -45,12 +45,12 @@ public class BlockchainTests
         block1B.Commit();
 
         // start a next block
-        var block2A = blockchain.StartNew(Block1A, Block2A, 2);
+        using var block2A = blockchain.StartNew(Block1A, Block2A, 2);
 
         // assert whether the history is preserved
         block2A.GetAccount(Key0).Should().Be(account1A);
         block2A.Commit();
-        
+
         // start the third block
         using var block3A = blockchain.StartNew(Block2A, Block3A, 3);
         block3A.Commit();
@@ -60,7 +60,7 @@ public class BlockchainTests
 
         // for now, to monitor the block chain, requires better handling of ref-counting on finalized
         await Task.Delay(1000);
-        
+
         block3A.GetAccount(Key0).Should().Be(account1A);
     }
 
@@ -77,11 +77,11 @@ public class BlockchainTests
         var counter = 0;
 
         var previousBlock = Keccak.Zero;
-        
+
         for (var i = 1; i < blockCount + 1; i++)
         {
             var hash = BuildKey(i);
-            
+
             using var block = blockchain.StartNew(previousBlock, hash, (uint)i);
 
             for (var j = 0; j < perBlock; j++)
@@ -93,22 +93,22 @@ public class BlockchainTests
 
                 counter++;
             }
-            
+
             // commit first
             block.Commit();
-            
+
             if (i > 1)
             {
                 blockchain.Finalize(previousBlock);
             }
-            
+
             previousBlock = hash;
         }
-        
+
         // make next visible
-        using var next = blockchain.StartNew(previousBlock, BuildKey(blockCount + 1), (uint) blockCount + 1);
+        using var next = blockchain.StartNew(previousBlock, BuildKey(blockCount + 1), (uint)blockCount + 1);
         next.Commit();
-        
+
         blockchain.Finalize(previousBlock);
 
         // for now, to monitor the block chain, requires better handling of ref-counting on finalized

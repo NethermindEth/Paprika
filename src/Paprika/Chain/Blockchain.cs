@@ -1,7 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Net.NetworkInformation;
 using System.Threading.Channels;
 using Nethermind.Int256;
 using Paprika.Crypto;
@@ -27,7 +26,7 @@ namespace Paprika.Chain;
 public class Blockchain : IAsyncDisposable
 {
     public static readonly Keccak GenesisHash = Keccak.Zero;
-    
+
     // allocate 1024 pages (4MB) at once
     private readonly PagePool _pool = new(1024);
 
@@ -54,7 +53,7 @@ public class Blockchain : IAsyncDisposable
 
         _blocksByNumber[0] = new[] { genesis };
         _blocksByHash[GenesisHash] = genesis;
-        
+
         _flusher = FlusherTask();
     }
 
@@ -251,7 +250,7 @@ public class Blockchain : IAsyncDisposable
         {
             // acquires one more lease for this block as it is stored in the blockchain
             AcquireLease();
-            
+
             // set to blocks in number and in blocks by hash
             _blockchain._blocksByNumber.AddOrUpdate(BlockNumber,
                 static (_, block) => new[] { block },
@@ -359,18 +358,18 @@ public class Blockchain : IAsyncDisposable
             {
                 throw new ObjectDisposedException("This block has already been disposed");
             }
-            
+
             var result = TryGet(bloom, key, out var succeeded);
             if (succeeded)
                 return result;
-            
+
             // slow path
             while (true)
             {
                 result = TryGet(bloom, key, out succeeded);
                 if (succeeded)
                     return result;
-                
+
                 Thread.Yield();
             }
         }
@@ -382,7 +381,7 @@ public class Blockchain : IAsyncDisposable
         [OptimizationOpportunity(OptimizationType.CPU,
             "If bloom filter was stored in-line in block, not rented, it could be used without leasing to check " +
             "whether the value is there. Less contention over lease for sure")]
-        private ReadOnlySpanOwner<byte>  TryGet(int bloom, in Key key, out bool succeeded)
+        private ReadOnlySpanOwner<byte> TryGet(int bloom, in Key key, out bool succeeded)
         {
             // The lease of this is not needed.
             // The reason for that is that the caller did not .Dispose the reference held,
@@ -426,7 +425,7 @@ public class Blockchain : IAsyncDisposable
                 if (batch.TryGet(key, out var span))
                 {
                     // return leased batch
-                    succeeded =  true;
+                    succeeded = true;
                     return new ReadOnlySpanOwner<byte>(span, batch);
                 }
             }
@@ -459,11 +458,11 @@ public class Blockchain : IAsyncDisposable
         public void SetParentReader(ReadOnlyBatchCountingRefs readOnlyBatch)
         {
             AcquireLease();
-            
+
             var previous = Interlocked.Exchange(ref _previous, readOnlyBatch);
             // dismiss the previous block
             ((Block)previous).Dispose();
-            
+
             ReleaseLeaseOnce();
         }
 
@@ -483,6 +482,15 @@ public class Blockchain : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        // dispose all memoized blocks to please the ref-counting
+        foreach (var (_, block) in _blocksByHash)
+        {
+            block.Dispose();
+        }
+
+        _blocksByHash.Clear();
+        _blocksByNumber.Clear();
+
         // mark writer as complete
         _finalizedChannel.Writer.Complete();
 
