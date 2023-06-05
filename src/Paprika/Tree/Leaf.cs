@@ -29,7 +29,7 @@ public static class Leaf
     {
         var contentLength =
             Rlp.LengthOf(account.Balance)
-            + Rlp.LengthOf(account.Balance)
+            + Rlp.LengthOf(account.Nonce)
             + Rlp.LengthOfKeccakRlp // CodeHash
             + Rlp.LengthOfKeccakRlp; // StorageRootHash
 

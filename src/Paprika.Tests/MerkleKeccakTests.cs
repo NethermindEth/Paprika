@@ -38,5 +38,10 @@ public class MerkleKeccakTests
             Values.Key2, Values.Balance2, Values.Nonce2,
             "A654F039A5F9E9F30C89F21555C92F1CB1E739AF11A9E9B12693DEDC6E76F628"
         },
+        new object[]
+        {
+            Values.Key0, UInt256.MaxValue, Values.Nonce0,
+            "FC790A3674B6847C609BB91B7014D67B2E70FF0E60F53AC49A8A45F1FECF35A6"
+        },
     };
 }
