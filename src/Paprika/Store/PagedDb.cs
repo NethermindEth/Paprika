@@ -44,6 +44,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     private readonly Counter<long> _writes;
     private readonly Counter<long> _commits;
     private readonly Histogram<float> _commitDuration;
+    private readonly MetricsExtensions.IAtomicIntGauge _dbSize;
 
     // pool
     private Context? _ctx;
@@ -68,8 +69,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         RootInit();
 
         _meter = new Meter("Paprika.Store.PagedDb");
-        _meter.CreateObservableGauge("DB Size", () => Root.Data.NextFreePage * Page.PageSize / 1024 / 1024, "MB",
-            "The size of the database in MB");
+        _dbSize = _meter.CreateAtomicObservableGauge("DB Size", "MB", "The size of the database in MB");
 
         _reads = _meter.CreateCounter<long>("Reads", "Reads", "The number of reads db handles");
         _writes = _meter.CreateCounter<long>("Writes", "Writes", "The number of writes db handles");
@@ -408,6 +408,10 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             await _db._manager.FlushPages(_written, options);
 
             var newRootPage = _db.SetNewRoot(_root);
+
+            // report
+            var size = (long)_root.Data.NextFreePage.Raw * Page.PageSize / 1024 / 1024;
+            _db._dbSize.Set((int)size);
 
             await _db._manager.FlushRootPage(newRootPage, options);
 

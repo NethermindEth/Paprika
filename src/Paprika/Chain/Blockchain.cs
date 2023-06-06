@@ -66,7 +66,7 @@ public class Blockchain : IAsyncDisposable
         // metrics
         _meter = new Meter("Paprika.Chain.Blockchain");
 
-        _flusherBatchSize = _meter.CreateHistogram<int>("Blocks finalized in one batch", "Blocks",
+        _flusherBatchSize = _meter.CreateHistogram<int>("Blocks finalized / batch", "Blocks",
             "The number of blocks finalized by the flushing task in one db batch");
         _flusherBlockCommitInMs = _meter.CreateHistogram<int>("Block commit in ms", "ms",
             "The amortized time it takes for flush one block in a batch by the flusher task");

@@ -7,7 +7,7 @@ namespace Paprika.Runner;
 abstract class Measurement : JustInTimeRenderable
 {
     private const long NoValue = Int64.MaxValue;
-    
+
     private long _value;
 
     protected override IRenderable Build()
@@ -16,7 +16,7 @@ abstract class Measurement : JustInTimeRenderable
         return value == NoValue ? new Text("") : new Text(value.ToString());
     }
 
-    public void Update(double measurement, ReadOnlySpan<KeyValuePair<string,object?>> tags)
+    public void Update(double measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags)
     {
         var updated = Update(measurement);
         var previous = Interlocked.Exchange(ref _value, updated);
@@ -35,7 +35,7 @@ abstract class Measurement : JustInTimeRenderable
         if (type.IsGenericType)
         {
             var definition = type.GetGenericTypeDefinition();
-            
+
             if (definition == typeof(ObservableGauge<>))
             {
                 return new GaugeMeasurement();
@@ -59,16 +59,16 @@ abstract class Measurement : JustInTimeRenderable
     {
         protected override long Update(double measurement) => (long)measurement;
     }
-    
+
     private class NoMeasurement : Measurement
     {
         protected override long Update(double measurement) => NoValue;
     }
-    
+
     private class CounterMeasurement : Measurement
     {
         private long _sum;
-        
+
         protected override long Update(double measurement) => Interlocked.Add(ref _sum, (long)measurement);
     }
-} 
+}

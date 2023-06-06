@@ -8,6 +8,8 @@ public static class MetricsExtensions
     {
         private int _value;
 
+        public void Set(int value) => Interlocked.Exchange(ref _value, value);
+
         public void Add(int value) => Interlocked.Add(ref _value, value);
 
         public int Read() => Volatile.Read(ref _value);
@@ -18,6 +20,8 @@ public static class MetricsExtensions
     public interface IAtomicIntGauge
     {
         public int Read();
+
+        public void Set(int value);
 
         public void Add(int value);
 
