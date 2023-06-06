@@ -1,9 +1,11 @@
 ﻿using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
 using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store.PageManagers;
+using Paprika.Utils;
 
 namespace Paprika.Store;
 
@@ -28,7 +30,6 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
     private readonly IPageManager _manager;
     private readonly byte _historyDepth;
-    private readonly Action<IBatchMetrics>? _reporter;
     private long _lastRoot;
     private readonly RootPage[] _roots;
 
@@ -36,6 +37,13 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     private readonly object _batchLock = new();
     private readonly List<ReadOnlyBatch> _batchesReadOnly = new();
     private Batch? _batchCurrent;
+
+    // metrics
+    private readonly Meter _meter;
+    private readonly Counter<long> _reads;
+    private readonly Counter<long> _writes;
+    private readonly Counter<long> _commits;
+    private readonly Histogram<float> _commitDuration;
 
     // pool
     private Context? _ctx;
@@ -46,28 +54,42 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     /// <param name="manager">The page manager.</param>
     /// <param name="historyDepth">The depth history represent how many blocks should be able to be restored from the past. Effectively,
     ///     a reorg depth. At least 2 are required</param>
-    /// <param name="reporter"></param>
-    private PagedDb(IPageManager manager, byte historyDepth, Action<IBatchMetrics>? reporter)
+    private PagedDb(IPageManager manager, byte historyDepth)
     {
         if (historyDepth < MinHistoryDepth)
             throw new ArgumentException($"{nameof(historyDepth)} should be bigger than {MinHistoryDepth}");
 
         _manager = manager;
         _historyDepth = historyDepth;
-        _reporter = reporter;
         _roots = new RootPage[historyDepth];
         _batchCurrent = null;
         _ctx = new Context();
 
         RootInit();
+
+        _meter = new Meter("Paprika.Store.PagedDb");
+        _meter.CreateObservableGauge("DB Size", () => Root.Data.NextFreePage * Page.PageSize / 1024 / 1024, "MB",
+            "The size of the database in MB");
+
+        _reads = _meter.CreateCounter<long>("Reads", "Reads", "The number of reads db handles");
+        _writes = _meter.CreateCounter<long>("Writes", "Writes", "The number of writes db handles");
+        _commits = _meter.CreateCounter<long>("Commits", "Commits", "The number of batch commits db handles");
+        _commitDuration = _meter.CreateHistogram<float>("Commit duration", "ms", "The time it takes to perform a commit");
     }
 
-    public static PagedDb NativeMemoryDb(ulong size, byte historyDepth = 2, Action<IBatchMetrics>? reporter = null) =>
-        new(new NativeMemoryPageManager(size), historyDepth, reporter);
+    public static PagedDb NativeMemoryDb(ulong size, byte historyDepth = 2) =>
+        new(new NativeMemoryPageManager(size), historyDepth);
 
-    public static PagedDb MemoryMappedDb(ulong size, byte historyDepth, string directory,
-        Action<IBatchMetrics>? reporter = null) =>
-        new(new MemoryMappedPageManager(size, historyDepth, directory), historyDepth, reporter);
+    public static PagedDb MemoryMappedDb(ulong size, byte historyDepth, string directory) =>
+        new(new MemoryMappedPageManager(size, historyDepth, directory), historyDepth);
+
+    private void ReportRead() => _reads.Add(1);
+    private void ReportWrite() => _writes.Add(1);
+    private void ReportCommit(TimeSpan elapsed)
+    {
+        _commits.Add(1);
+        _commitDuration.Record((float)elapsed.TotalMilliseconds);
+    }
 
     private void RootInit()
     {
@@ -100,6 +122,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     public void Dispose()
     {
         _manager.Dispose();
+        _meter.Dispose();
     }
 
     /// <summary>
@@ -226,6 +249,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             if (_disposed)
                 throw new ObjectDisposedException("The readonly batch has already been disposed");
 
+            _db.ReportRead();
+
             var addr = RootPage.FindAccountPage(_rootDataPages, key.Path.FirstNibble);
             if (addr.IsNull)
             {
@@ -292,6 +317,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             var addr = RootPage.FindAccountPage(_root.Data.AccountPages, key.Path.FirstNibble);
 
+            _db.ReportRead();
+
             if (addr.IsNull)
             {
                 result = default;
@@ -308,6 +335,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public void Set(in Keccak key, in Account account)
         {
+            _db.ReportWrite();
+
             var path = NibblePath.FromKey(key);
             ref var addr = ref TryGetPageAlloc(path.FirstNibble, out var page);
             var sliced = path.SliceFrom(RootPage.Payload.RootNibbleLevel);
@@ -317,6 +346,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public void SetStorage(in Keccak key, in Keccak address, UInt256 value)
         {
+            _db.ReportWrite();
+
             var path = NibblePath.FromKey(key);
             ref var addr = ref TryGetPageAlloc(path.FirstNibble, out var page);
             var sliced = path.SliceFrom(RootPage.Payload.RootNibbleLevel);
@@ -326,6 +357,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public void SetRaw(in Key key, ReadOnlySpan<byte> rawData)
         {
+            _db.ReportWrite();
+
             ref var addr = ref TryGetPageAlloc(key.Path.FirstNibble, out var page);
             var sliced = key.SliceFrom(RootPage.Payload.RootNibbleLevel);
             var updated = page.Set(new SetContext(sliced, rawData, this));
@@ -365,6 +398,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public async ValueTask Commit(CommitOptions options)
         {
+            var watch = Stopwatch.StartNew();
+
             CheckDisposed();
 
             // memoize the abandoned so that it's preserved for future uses 
@@ -376,14 +411,13 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             await _db._manager.FlushRootPage(newRootPage, options);
 
-            // if reporter passed
-            _db._reporter?.Invoke(_metrics);
-
             lock (_db._batchLock)
             {
                 Debug.Assert(ReferenceEquals(this, _db._batchCurrent));
                 _db._batchCurrent = null;
             }
+
+            _db.ReportCommit(watch.Elapsed);
         }
 
         public override Page GetAt(DbAddress address) => _db.GetAt(address);

@@ -13,7 +13,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 100_000 : 5_000;
+    private const int BlockCount = PersistentDb ? 100_000 : 10_000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
@@ -60,23 +60,9 @@ public static class Program
         Console.WriteLine("Initializing db of size {0}GB", DbFileSize / Gb);
         Console.WriteLine("Starting benchmark with commit level {0}", Commit);
 
-        var histograms = new
-        {
-            allocated = new IntHistogram(short.MaxValue, 3),
-            reused = new IntHistogram(short.MaxValue, 3),
-            total = new IntHistogram(short.MaxValue, 3),
-        };
-
-        void OnMetrics(IBatchMetrics metrics)
-        {
-            // histograms.allocated.RecordValue(metrics.PagesAllocated);
-            // histograms.reused.RecordValue(metrics.PagesReused);
-            // histograms.total.RecordValue(metrics.TotalPagesWritten);
-        }
-
         PagedDb db = PersistentDb
-            ? PagedDb.MemoryMappedDb(DbFileSize, MaxReorgDepth, dataPath, OnMetrics)
-            : PagedDb.NativeMemoryDb(DbFileSize, MaxReorgDepth, OnMetrics);
+            ? PagedDb.MemoryMappedDb(DbFileSize, MaxReorgDepth, dataPath)
+            : PagedDb.NativeMemoryDb(DbFileSize, MaxReorgDepth);
 
         // consts
         var random = PrepareStableRandomSource();
@@ -85,18 +71,6 @@ public static class Program
 
         await using (var blockchain = new Blockchain(db))
         {
-            Console.WriteLine();
-            Console.WriteLine("(P) - 90th percentile of the value");
-            Console.WriteLine();
-
-            PrintHeader("At Block",
-                "Avg. speed",
-                "Space used",
-                "New pages(P)",
-                "Pages reused(P)",
-                "Total pages(P)");
-
-
             bool bigStorageAccountCreated = false;
 
             // writing
@@ -170,6 +144,8 @@ public static class Program
             blockchain.Finalize(lastBlock);
 
             ReportProgress(BlockCount - 1, writing);
+
+            Console.WriteLine("Finalizing the latest block. It may take a while as it will flush everything in the pipeline");
         }
 
         Console.WriteLine();
@@ -191,14 +167,6 @@ public static class Program
 
         // waiting for finalization
         var read = db.BeginReadOnlyBatch();
-        uint flushedTo = 0;
-        while ((flushedTo = read.Metadata.BlockNumber) < BlockCount - 1)
-        {
-            Console.WriteLine($"Flushed to block: {flushedTo}. Waiting...");
-            read.Dispose();
-            Thread.Sleep(1000);
-            read = db.BeginReadOnlyBatch();
-        }
 
         // reading
         Console.WriteLine();
@@ -256,37 +224,10 @@ public static class Program
         Console.WriteLine("Reading state of all of {0} accounts from the last block took {1}",
             counter, reading.Elapsed);
 
-        // Console.WriteLine("90th percentiles:");
-        // Write90Th(histograms.allocated, "new pages allocated");
-        // Write90Th(histograms.reused, "pages reused allocated");
-        // Write90Th(histograms.total, "total pages written");
-
         void ReportProgress(uint block, Stopwatch sw)
         {
-            var secondsPerBlock = TimeSpan.FromTicks(sw.ElapsedTicks / LogEvery).TotalSeconds;
-            var blocksPerSecond = 1 / secondsPerBlock;
-
-            // PrintRow(
-            //     block.ToString(),
-            //     $"{blocksPerSecond:F1} blocks/s",
-            //     $"{db.Megabytes / 1024:F2}GB",
-            //     $"{histograms.reused.GetValueAtPercentile(90)}",
-            //     $"{histograms.allocated.GetValueAtPercentile(90)}",
-            //     $"{histograms.total.GetValueAtPercentile(90)}");
+            Console.WriteLine($"At block {block,9} / {BlockCount,9}");
         }
-    }
-
-    private const string Separator = " | ";
-    private const int Padding = 15;
-
-    private static void PrintHeader(params string[] values)
-    {
-        Console.Out.WriteLine(string.Join(Separator, values.Select(v => v.PadRight(Padding))));
-    }
-
-    private static void PrintRow(params string[] values)
-    {
-        Console.Out.WriteLine(string.Join(Separator, values.Select(v => v.PadLeft(Padding))));
     }
 
     private static Account GetAccountValue(int counter)
@@ -297,12 +238,6 @@ public static class Program
     private static UInt256 GetStorageValue(int counter) => (UInt256)counter + 100000;
 
     private static UInt256 GetBigAccountStorageValue(int counter) => (UInt256)counter + 123456;
-
-    private static void Write90Th(HistogramBase histogram, string name)
-    {
-        Console.WriteLine($"   - {name} per block: {histogram.GetValueAtPercentile(0.9)}");
-        histogram.Reset();
-    }
 
     private static Keccak GetAccountKey(Span<byte> accountsBytes, int counter)
     {

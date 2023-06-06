@@ -12,7 +12,7 @@ public static class MetricsExtensions
 
         public int Read() => Volatile.Read(ref _value);
 
-        public override string ToString() => $"Value: {Read()}";
+        public override string ToString() => $"{Read()}";
     }
 
     public interface IAtomicIntGauge
