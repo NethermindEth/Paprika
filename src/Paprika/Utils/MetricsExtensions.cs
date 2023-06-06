@@ -29,7 +29,7 @@ public static class MetricsExtensions
     {
         var atomic = new AtomicIntGauge();
 
-        meter.CreateObservableCounter(name, atomic.Read, unit, description);
+        meter.CreateObservableGauge(name, atomic.Read, unit, description);
 
         return atomic;
     }
