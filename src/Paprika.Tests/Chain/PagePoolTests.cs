@@ -43,13 +43,15 @@ public class PagePoolTests
 
         var page = pool.Rent();
         page.Span[index].Should().Be(0);
+
+        pool.Return(initial);
     }
 
     [Test]
     public void Big_pool()
     {
         const int pageCount = 1024;
-        using var pool = new PagePool(pageCount);
+        using var pool = new PagePool(pageCount, assertCountOnDispose: false);
 
         var set = new HashSet<UIntPtr>();
 

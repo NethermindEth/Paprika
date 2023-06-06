@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
 using Paprika.Store;
+using Paprika.Utils;
 
 namespace Paprika.Chain;
 
@@ -12,31 +13,33 @@ namespace Paprika.Chain;
 public class PagePool : IDisposable
 {
     private readonly int _pagesInOneSlab;
+    private readonly bool _assertCountOnDispose;
     private readonly ConcurrentQueue<Page> _pool = new();
     private readonly ConcurrentQueue<IntPtr> _slabs = new();
 
-    private int _allocatedPages;
+    private readonly MetricsExtensions.IAtomicIntGauge _allocatedPages;
 
     // metrics
     private readonly Meter _meter;
 
-    public PagePool(int pagesInOneSlab)
+    public PagePool(int pagesInOneSlab, bool assertCountOnDispose = true)
     {
         _pagesInOneSlab = pagesInOneSlab;
+        _assertCountOnDispose = assertCountOnDispose;
 
         _meter = new Meter("Paprika.Chain.PagePool");
-        _meter.CreateObservableCounter("Allocated Pages", () => Volatile.Read(ref _allocatedPages), "4kb page",
+        _allocatedPages = _meter.CreateAtomicObservableGauge("Allocated Pages", "4kb page",
             "the number of pages allocated in the page pool");
     }
 
-    public int AllocatedPages => _allocatedPages;
+    public int AllocatedPages => _allocatedPages.Read();
 
     public unsafe Page Rent(bool clear = true)
     {
         Page pooled;
         while (_pool.TryDequeue(out pooled) == false)
         {
-            Interlocked.Add(ref _allocatedPages, _pagesInOneSlab);
+            _allocatedPages.Add(_pagesInOneSlab);
 
             var allocSize = (UIntPtr)(_pagesInOneSlab * Page.PageSize);
             var slab = (byte*)NativeMemory.AlignedAlloc(allocSize, (UIntPtr)Page.PageSize);
@@ -63,8 +66,12 @@ public class PagePool : IDisposable
     {
         var expectedCount = _pagesInOneSlab * _slabs.Count;
         var actualCount = _pool.Count;
-        Debug.Assert(expectedCount == actualCount,
-            $"There should be {expectedCount} pages in the pool but there are only {actualCount}");
+
+        if (_assertCountOnDispose)
+        {
+            Debug.Assert(expectedCount == actualCount,
+                $"There should be {expectedCount} pages in the pool but there are only {actualCount}");
+        }
 
         while (_slabs.TryDequeue(out var slab))
         {

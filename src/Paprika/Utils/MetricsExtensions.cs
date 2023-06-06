@@ -7,12 +7,18 @@ public static class MetricsExtensions
     private class AtomicIntGauge : IAtomicIntGauge
     {
         private int _value;
+
         public void Add(int value) => Interlocked.Add(ref _value, value);
+
         public int Read() => Volatile.Read(ref _value);
+
+        public override string ToString() => $"Value: {Read()}";
     }
 
     public interface IAtomicIntGauge
     {
+        public int Read();
+
         public void Add(int value);
 
         public void Subtract(int value) => Add(-value);
