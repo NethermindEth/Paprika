@@ -30,7 +30,7 @@ public readonly unsafe struct DataPage : IDataPage
 
     /// <summary>
     /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
-    /// These buckets is used to store up to <see cref="FixedMapSize"/> entries before flushing them down as other pages
+    /// These buckets is used to store up to <see cref="DataSize"/> entries before flushing them down as other pages
     /// like page split. 
     /// </summary>
     [StructLayout(LayoutKind.Explicit, Size = Size)]
@@ -38,15 +38,14 @@ public readonly unsafe struct DataPage : IDataPage
     {
         private const int Size = Page.PageSize - PageHeader.Size;
 
-        // to align to long
-        public const int BucketCount = 16;
+        private const int BucketCount = 16;
 
         /// <summary>
-        /// The size of the <see cref="FixedMap"/> held in this page. Must be long aligned.
+        /// The size of the raw byte data held in this page. Must be long aligned.
         /// </summary>
-        private const int FixedMapSize = Size - BucketCount * DbAddress.Size;
+        private const int DataSize = Size - BucketCount * DbAddress.Size;
 
-        private const int FixedMapOffset = Size - FixedMapSize;
+        private const int DataOffset = Size - DataSize;
 
         /// <summary>
         /// The first field of buckets.
@@ -58,12 +57,12 @@ public readonly unsafe struct DataPage : IDataPage
         /// <summary>
         /// The first item of map of frames to allow ref to it.
         /// </summary>
-        [FieldOffset(FixedMapOffset)] private byte FixedMapStart;
+        [FieldOffset(DataOffset)] private byte DataStart;
 
         /// <summary>
         /// Fixed map memory
         /// </summary>
-        public Span<byte> FixedMapSpan => MemoryMarshal.CreateSpan(ref FixedMapStart, FixedMapSize);
+        public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
     }
 
     /// <summary>
@@ -102,7 +101,7 @@ public readonly unsafe struct DataPage : IDataPage
         }
 
         // try in-page write
-        var map = new FixedMap(Data.FixedMapSpan);
+        var map = new FixedMap(Data.DataSpan);
 
         // if written value is a storage cell, try to find the storage tree first
         if (TryFindExistingStorageTreeForCellOf(map, ctx.Key, out var storageTreeAddress))
@@ -169,7 +168,7 @@ public readonly unsafe struct DataPage : IDataPage
         }
 
         // read in-page
-        var map = new FixedMap(Data.FixedMapSpan);
+        var map = new FixedMap(Data.DataSpan);
 
         // try first storage tree
         if (TryFindExistingStorageTreeForCellOf(map, key, out var storageTreeAddress))

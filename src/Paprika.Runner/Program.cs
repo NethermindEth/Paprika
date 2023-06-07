@@ -13,7 +13,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 16_000 : 5_000;
+    private const int BlockCount = PersistentDb ? 2_000 : 5_000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
@@ -103,7 +103,7 @@ public static class Program
 
         // ReSharper disable once MethodSupportsCancellation
 #pragma warning disable CS4014
-        Task.Run(() => AnsiConsole.Live(layout)
+        var reportingTask = Task.Run(() => AnsiConsole.Live(layout)
 #pragma warning restore CS4014
             .StartAsync(async ctx =>
             {
@@ -175,7 +175,7 @@ public static class Program
             }
         }
 
-        ReportReading(counter - 1);
+        ReportReading(counter);
 
         void ReportReading(int i)
         {
@@ -188,6 +188,10 @@ public static class Program
 
             readingStopWatch.Restart();
         }
+
+        // the final report
+        spectre.Cancel();
+        await reportingTask;
     }
 
     private static int Writer(Blockchain blockchain, Keccak bigStorageAccount, byte[] random,
