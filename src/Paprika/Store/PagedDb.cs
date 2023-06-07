@@ -44,6 +44,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     private readonly Counter<long> _writes;
     private readonly Counter<long> _commits;
     private readonly Histogram<float> _commitDuration;
+    private readonly Histogram<int> _commitPageCount;
     private readonly MetricsExtensions.IAtomicIntGauge _dbSize;
 
     // pool
@@ -75,6 +76,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         _writes = _meter.CreateCounter<long>("Writes", "Writes", "The number of writes db handles");
         _commits = _meter.CreateCounter<long>("Commits", "Commits", "The number of batch commits db handles");
         _commitDuration = _meter.CreateHistogram<float>("Commit duration", "ms", "The time it takes to perform a commit");
+        _commitPageCount = _meter.CreateHistogram<int>("Commit page count", "pages",
+            "The number of pages flushed during the commit");
     }
 
     public static PagedDb NativeMemoryDb(ulong size, byte historyDepth = 2) =>
@@ -90,6 +93,10 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         _commits.Add(1);
         _commitDuration.Record((float)elapsed.TotalMilliseconds);
     }
+
+    private void ReportDbSize(int megabytes) => _dbSize.Set(megabytes);
+
+    private void ReportPageCountPerCommit(int pageCount) => _commitPageCount.Record(pageCount);
 
     private void RootInit()
     {
@@ -405,13 +412,15 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             // memoize the abandoned so that it's preserved for future uses 
             MemoizeAbandoned();
 
+            _db.ReportPageCountPerCommit(_written.Count);
+
             await _db._manager.FlushPages(_written, options);
 
             var newRootPage = _db.SetNewRoot(_root);
 
             // report
             var size = (long)_root.Data.NextFreePage.Raw * Page.PageSize / 1024 / 1024;
-            _db._dbSize.Set((int)size);
+            _db.ReportDbSize((int)size);
 
             await _db._manager.FlushRootPage(newRootPage, options);
 
