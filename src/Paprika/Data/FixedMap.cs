@@ -107,8 +107,12 @@ public readonly ref struct FixedMap
 
     public NibbleEnumerator EnumerateNibble(byte nibble) => new(this, nibble);
 
+    public NibbleEnumerator EnumerateAll() => new(this, NibbleEnumerator.AllNibbles);
+
     public ref struct NibbleEnumerator
     {
+        public const byte AllNibbles = byte.MaxValue;
+
         /// <summary>The map being enumerated.</summary>
         private readonly FixedMap _map;
 
@@ -138,9 +142,11 @@ public readonly ref struct FixedMap
             var to = _map.Count;
 
             while (index < to &&
-                   (_map._slots[index].Type == DataType.Deleted ||
-                    _map._slots[index].NibbleCount == 0 ||
-                    _map._slots[index].FirstNibbleOfPrefix != _nibble))
+                   (_map._slots[index].Type == DataType.Deleted || // filter out deleted
+                    (_nibble != AllNibbles &&
+                     (
+                         _map._slots[index].NibbleCount == 0 ||
+                         _map._slots[index].FirstNibbleOfPrefix != _nibble))))
             {
                 index += 1;
             }
@@ -240,14 +246,17 @@ public readonly ref struct FixedMap
     /// <summary>
     /// Gets the nibble representing the biggest bucket and provides stats to the caller.
     /// </summary>
-    /// <returns></returns>
-    public (byte nibble, byte accountsCount, double percentage) GetBiggestNibbleStats()
+    /// <returns>
+    /// The nibble and how much of the page is occupied by storage cells that start their key with the nibble.
+    /// </returns>
+    public (byte nibble, double storageCellPercentageInPage) GetBiggestNibbleStats()
     {
         const int bucketCount = 16;
 
-        byte slotCount = 0;
-        Span<ushort> buckets = stackalloc ushort[bucketCount];
-        Span<byte> accountsCount = stackalloc byte[bucketCount];
+        Span<byte> storageCellCount = stackalloc byte[bucketCount];
+        Span<byte> slotCount = stackalloc byte[bucketCount];
+
+        var totalSlotCount = 0;
 
         var to = _header.Low / Slot.Size;
         for (var i = 0; i < to; i++)
@@ -257,34 +266,33 @@ public readonly ref struct FixedMap
             // extract only not deleted and these which have at least one nibble
             if (slot.Type != DataType.Deleted && slot.NibbleCount > 0)
             {
-                slotCount++;
-
                 var index = slot.FirstNibbleOfPrefix % bucketCount;
 
-                if (slot.Type == DataType.Account)
+                if (slot.Type == DataType.StorageCell)
                 {
-                    accountsCount[index]++;
+                    storageCellCount[index]++;
                 }
 
-                buckets[index]++;
+                slotCount[index]++;
+                totalSlotCount++;
             }
         }
 
-        var maxI = 0;
+        var maxNibble = 0;
 
-        for (int i = 1; i < bucketCount; i++)
+        for (int nibble = 1; nibble < bucketCount; nibble++)
         {
-            var currentCount = buckets[i];
-            var maxCount = buckets[maxI];
+            var currentCount = slotCount[nibble];
+            var maxCount = slotCount[maxNibble];
             if (currentCount > maxCount)
             {
-                maxI = i;
+                maxNibble = nibble;
             }
         }
 
-        var percentage = (double)buckets[maxI] / slotCount;
+        var storageCellPercentageInPage = (double)storageCellCount[maxNibble] / totalSlotCount;
 
-        return ((byte)maxI, accountsCount[maxI], percentage);
+        return ((byte)maxNibble, storageCellPercentageInPage);
     }
 
     private static int GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> additionalKey,

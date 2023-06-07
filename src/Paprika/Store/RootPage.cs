@@ -19,7 +19,6 @@ public readonly unsafe struct RootPage : IPage
 
     public ref Payload Data => ref Unsafe.AsRef<Payload>(_page.Payload);
 
-
     /// <summary>
     /// Represents the data of the page.
     /// </summary>
@@ -31,20 +30,22 @@ public readonly unsafe struct RootPage : IPage
         /// <summary>
         /// How big is the fan out for the root.
         /// </summary>
-        private const int AccountPageFanOut = 16;
+        public const int RootFanOut = 16;
 
         /// <summary>
         /// The number of nibbles that are "consumed" on the root level.
         /// </summary>
-        public const byte RootNibbleLevel = 2;
+        public const byte RootNibbleLevel = 1;
 
-        private const int AbandonedPagesStart = DbAddress.Size + DbAddress.Size * AccountPageFanOut;
+        private const int MetadataStart = DbAddress.Size + DbAddress.Size * RootFanOut;
+
+        private const int AbandonedPagesStart = MetadataStart + Metadata.Size;
 
         /// <summary>
         /// This gives the upper boundary of the number of abandoned pages that can be kept in the list.
         /// </summary>
         /// <remarks>
-        /// The value is dependent on <see cref="AccountPageFanOut"/> as the more data pages addresses, the less space for
+        /// The value is dependent on <see cref="RootFanOut"/> as the more data pages addresses, the less space for
         /// the abandoned. Still, the number of abandoned that is required is ~max reorg depth as later, pages are reused.
         /// Even with fan-out of data pages equal to 256, there's still a lot of room here.
         /// </remarks>
@@ -64,7 +65,10 @@ public readonly unsafe struct RootPage : IPage
         /// <summary>
         /// Gets the span of account pages of the root
         /// </summary>
-        public Span<DbAddress> AccountPages => MemoryMarshal.CreateSpan(ref AccountPage, AccountPageFanOut);
+        public Span<DbAddress> AccountPages => MemoryMarshal.CreateSpan(ref AccountPage, RootFanOut);
+
+        [FieldOffset(MetadataStart)]
+        public Metadata Metadata;
 
         /// <summary>
         /// The start of the abandoned pages.
@@ -85,10 +89,9 @@ public readonly unsafe struct RootPage : IPage
         }
     }
 
-    public static ref DbAddress FindAccountPage(Span<DbAddress> accountPages, in Keccak key)
+    public static ref DbAddress FindAccountPage(Span<DbAddress> accountPages, byte firstNibble)
     {
-        var path = NibblePath.FromKey(key);
-        return ref accountPages[path.FirstNibble];
+        return ref accountPages[firstNibble];
     }
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver)
@@ -115,3 +118,19 @@ public readonly unsafe struct RootPage : IPage
     }
 }
 
+[StructLayout(LayoutKind.Explicit, Size = Size, Pack = 1)]
+public struct Metadata
+{
+    public const int Size = sizeof(uint) + Keccak.Size;
+
+    [FieldOffset(0)]
+    public readonly uint BlockNumber;
+    [FieldOffset(4)]
+    public readonly Keccak BlockHash;
+
+    public Metadata(uint blockNumber, Keccak blockHash)
+    {
+        BlockNumber = blockNumber;
+        BlockHash = blockHash;
+    }
+}

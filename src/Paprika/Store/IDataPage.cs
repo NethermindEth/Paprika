@@ -26,8 +26,8 @@ public static class DataPageExtensions
 
         if (page.TryGet(key, ctx, out var result))
         {
-            Serializer.ReadAccount(result, out var balance, out var nonce);
-            return new Account(balance, nonce);
+            Serializer.ReadAccount(result, out var account);
+            return account;
         }
 
         return default;
@@ -39,7 +39,7 @@ public static class DataPageExtensions
         var key = Key.Account(path);
 
         Span<byte> payload = stackalloc byte[Serializer.BalanceNonceMaxByteCount];
-        payload = Serializer.WriteAccount(payload, account.Balance, account.Nonce);
+        payload = Serializer.WriteAccount(payload, account);
         var ctx = new SetContext(key, payload, batch);
         return page.Set(ctx);
     }

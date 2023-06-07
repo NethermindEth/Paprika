@@ -67,13 +67,10 @@ public readonly unsafe struct DataPage : IDataPage
     }
 
     /// <summary>
-    /// Sets values for the given <see cref="SetContext.Path"/>
+    /// Sets values for the given <see cref="SetContext.Key"/>
     /// </summary>
-    /// <param name="ctx"></param>
-    /// <param name="level">The nesting level of the call</param>
     /// <returns>
     /// The actual page which handled the set operation. Due to page being COWed, it may be a different page.
-    /// 
     /// </returns>
     public Page Set(in SetContext ctx)
     {
@@ -90,16 +87,16 @@ public readonly unsafe struct DataPage : IDataPage
         {
             // try to go deeper only if the path is long enough
             var nibble = path.FirstNibble;
-            var address = Data.Buckets[nibble];
+            ref var address = ref Data.Buckets[nibble];
 
             // the bucket is not null and represents a page jump, follow it but only if it was written this tx
-            if (address.IsNull == false && ctx.Batch.WasWritten(address))
+            if (address.IsNull == false)
             {
                 var page = ctx.Batch.GetAt(address);
                 var updated = new DataPage(page).Set(ctx.SliceFrom(NibbleCount));
 
                 // remember the updated
-                Data.Buckets[nibble] = ctx.Batch.GetAddress(updated);
+                address = ctx.Batch.GetAddress(updated);
                 return _page;
             }
         }
@@ -131,11 +128,8 @@ public readonly unsafe struct DataPage : IDataPage
             return Set(ctx);
         }
 
-        // check if the child page already exists. It's possible if it was not written in this batch,
-        // and check above passed through. In this case, retrieve the child as is and it'll COW itself later
-        var childAddr = Data.Buckets[biggestNibble];
-        var child = childAddr.IsNull ? ctx.Batch.GetNewPage(out childAddr, true) : ctx.Batch.GetAt(childAddr);
-
+        // Create a new child page and flush to it
+        var child = ctx.Batch.GetNewPage(out Data.Buckets[biggestNibble], true);
         child.Header.TreeLevel = (byte)(Header.TreeLevel + 1);
         child.Header.PageType = Header.PageType;
 
@@ -152,7 +146,7 @@ public readonly unsafe struct DataPage : IDataPage
             map.Delete(item);
         }
 
-        Data.Buckets[biggestNibble] = ctx.Batch.GetAddress(dataPage.AsPage()); ;
+        Data.Buckets[biggestNibble] = ctx.Batch.GetAddress(dataPage.AsPage());
 
         // The page has some of the values flushed down, try to add again.
         return Set(ctx);
@@ -160,6 +154,20 @@ public readonly unsafe struct DataPage : IDataPage
 
     public bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
+        // path longer than 0, try to find in child
+        if (key.Path.Length > 0)
+        {
+            // try to go deeper only if the path is long enough
+            var nibble = key.Path.FirstNibble;
+            var bucket = Data.Buckets[nibble];
+
+            // non-null page jump, follow it!
+            if (bucket.IsNull == false)
+            {
+                return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), batch, out result);
+            }
+        }
+
         // read in-page
         var map = new FixedMap(Data.FixedMapSpan);
 
@@ -176,20 +184,6 @@ public readonly unsafe struct DataPage : IDataPage
         if (map.TryGet(key, out result))
         {
             return true;
-        }
-
-        // not found here, follow
-        if (key.Path.Length > 0)
-        {
-            // try to go deeper only if the path is long enough
-            var nibble = key.Path.FirstNibble;
-            var bucket = Data.Buckets[nibble];
-
-            // non-null page jump, follow it!
-            if (bucket.IsNull == false)
-            {
-                return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), batch, out result);
-            }
         }
 
         result = default;
@@ -216,36 +210,41 @@ public readonly unsafe struct DataPage : IDataPage
         return false;
     }
 
-    private static bool TryExtractAsStorageTree((byte nibble, byte accountsCount, double percentage) biggestNibbleStats,
+    private static bool TryExtractAsStorageTree((byte nibble, double storageCellPercentageInPage) biggestNibbleStats,
         in SetContext ctx, in FixedMap map)
     {
-        // a prerequisite to plant a tree is a single account in the biggest nibble
-        // if there are 2 or more then the accounts should be split first
-        // also, create only if the nibble occupies more than 0.9 of the page
-        // otherwise it's just a nibble extraction
-        var shouldPlant = biggestNibbleStats.accountsCount == 1 &&
-                          biggestNibbleStats.percentage > 0.9;
+        // A prerequisite to plan a massive storage tree is to have at least 90% of the page occupied by a single nibble
+        // storage cells. If then they share the same key, we're ready to extract
+        var hasEnoughOfStorageCells = biggestNibbleStats.storageCellPercentageInPage > 0.9;
 
-        if (shouldPlant == false)
+        if (hasEnoughOfStorageCells == false)
             return false;
 
         var nibble = biggestNibbleStats.nibble;
 
         // required as enumerator destroys paths when enumeration moves to the next value
         Span<byte> accountPathBytes = stackalloc byte[ctx.Key.Path.MaxByteLength];
+        NibblePath accountPath = default;
 
-        // find account first
+        // assert that all StorageCells have the same prefix
         foreach (var item in map.EnumerateNibble(nibble))
         {
-            if (item.Type == DataType.Account)
+            if (item.Type == DataType.StorageCell)
             {
-                accountPathBytes = item.Key.Path.WriteTo(accountPathBytes);
-                break;
+                if (accountPath.Equals(NibblePath.Empty))
+                {
+                    NibblePath.ReadFrom(item.Key.Path.WriteTo(accountPathBytes), out accountPath);
+                }
+                else
+                {
+                    if (item.Key.Path.Equals(accountPath) == false)
+                    {
+                        // If there's at least one item that has a different key, it won't be a massive storage tree.
+                        return false;
+                    }
+                }
             }
         }
-
-        // parse the account
-        NibblePath.ReadFrom(accountPathBytes, out var accountPath);
 
         var storage = ctx.Batch.GetNewPage(out _, true);
 
@@ -257,12 +256,11 @@ public readonly unsafe struct DataPage : IDataPage
 
         foreach (var item in map.EnumerateNibble(nibble))
         {
-            if (item.Type == DataType.StorageCell && item.Key.Path.Equals(accountPath))
+            // no need to check whether the path is the same because it was checked above.
+            if (item.Type == DataType.StorageCell)
             {
                 // it's ok to use item.Key, the enumerator does not changes the additional key bytes
                 var key = Key.StorageTreeStorageCell(item.Key);
-
-                Serializer.ReadStorageValue(item.RawData, out var value);
 
                 dataPage = new DataPage(dataPage.Set(new SetContext(key, item.RawData, ctx.Batch)));
 

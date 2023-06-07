@@ -373,6 +373,9 @@ public readonly ref struct NibblePath
 
     public override string ToString()
     {
+        if (Length == 0)
+            return "";
+
         Span<char> path = stackalloc char[Length];
         ref var ch = ref path[0];
 

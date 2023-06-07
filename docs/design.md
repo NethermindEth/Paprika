@@ -1,24 +1,55 @@
 # :hot_pepper: Paprika
 
-Paprika is a custom database implementation for `State` and `Storage` trees of Ethereum. This document covers the main design ideas, inspirations, and most important implementation details.
+Paprika is a custom implementation for `State` and `Storage` trees of Ethereum. It provides a persistent store solution that is aligned with the Execution Engine API. This means that it's aware of the concepts like blocks, finality, and others, and it leverages them to provide a performant implementation This document covers the main design ideas, inspirations, and most important implementation details.
 
 ## Design
 
-Paprika is a database that uses [memory-mapped files](https://en.wikipedia.org/wiki/Memory-mapped_file). To handle concurrency, [Copy on Write](https://en.wikipedia.org/wiki/Copy-on-write) is used. This allows multiple concurrent readers to cooperate in a full lock-free manner and a single writer that runs the current transaction. In that manner, it's heavily inspired by [LMBD](https://github.com/LMDB/lmdb). Paprika uses 4kb pages.
+Paprika is split into two major components:
 
-### Reorganizations handling
+1. `Blockchain`
+1. `PagedDb`
 
-The foundation of any blockchain is a single list of blocks, a chain. The _canonical chain_ is the chain that is perceived to be the main chain. Due to the nature of the network, the canonical chain changes in time. If a block at a given position in the list is replaced by another, the effect is called a _reorganization_. The usual process of handling a reorganization is undoing recent N operations, until the youngest block was changed, and applying new blocks. From the database perspective, it means that it needs to be able to undo an arbitrary number of committed blocks.
+### Blockchain component
 
-In Paprika, it's handled by specifying the _history depth_ that keeps the block information for at least _history depth_. This allows undoing blocks till the reorganization boundary and applying blocks from the canonical chain. Paprika internally keeps the _history \_depth_ of the last root pages. If a reorganization is detected and the state needs to be reverted to any of the last _history depth_, it copies the root page with all the metadata as current and allows to re-build the state on top of it. Due to its internal page reuse, as the snapshot of the past is restored, it also logically undoes all the page writes, etc. It works as a clock that is turned back by a given amount of time (blocks).
+`Blockchain` is responsible for handling the new state that is subject to change. The blocks after the merge can be labeled as `latest`, `safe`, and `finalized`. Paprika uses the `finalized` as the cut-off point between the blockchain component and `PagedDb`. The `Blockchain` allows handling the execution API requests such as `NewPayload` and `FCU`. The new payload request is handled by creating a new block on top of the previously existing one. Paprika fully supports handling `NewPayload` in parallel as each block just points to its parent. The following example of creating two blocks that have the same parent shows the possibilities of such API:
 
-### Merkle construct
+```csharp
+await using var blockchain = new Blockchain(db);
 
-Paprika focuses on delivering fast reads and writes by using path-based addressing. The hashes of intermediate nodes, needed for the efficient calculation of the root hash of the `Merkle` tree, are stored by using path-based addressing in pages as well (see: [FixedMap](#fixedmap)). This approach allows to load and access of pages with data in a fast manner, leaving the update of the root hash (and other nodes) for the transaction commit. It also allows choosing which Keccaks are memoized. For example, the implementor may choose to store every other level of Keccaks.
+// create two blocks on top of a shared parent
+using var block1A = blockchain.StartNew(parentHash, Block1A, 1);
+using var block1B = blockchain.StartNew(parentHash, Block1B, 1);
 
-### ACID
+var account1A = new Account(1, 1);
+var account1B = new Account(2, 2);
 
-Paprika allows 2 modes of commits:
+// set values to the account different for each block
+block1A.SetAccount(Key0, account1A);
+block1B.SetAccount(Key0, account1B);
+
+// blocks preserve the values set
+block1A.GetAccount(Key0).Should().Be(account1A);
+block1B.GetAccount(Key0).Should().Be(account1B);
+```
+
+It also handles `FCU` in a straight-forward way
+
+```csharp
+// finalize the blocks with the given hash that was previously committed
+blockchain.Finalize(Block2A);
+```
+
+### PagedDb component
+
+The `PagedDb` component is responsible for storing the left-fold of the blocks that are beyond the cut-off point. This database uses [memory-mapped files](https://en.wikipedia.org/wiki/Memory-mapped_file) to provide storing capabilities. To handle concurrency, [Copy on Write](https://en.wikipedia.org/wiki/Copy-on-write) is used. This allows multiple concurrent readers to cooperate in a full lock-free manner and a single writer that runs the current transaction. In that manner, it's heavily inspired by [LMBD](https://github.com/LMDB/lmdb).
+
+It's worth to mention that due to the design of the `Blockchain` component, having a single writer available is sufficient. At the same time, having multiple readers allow to create readonly transactions that are later used by blocks from `Blockchain`.
+
+The `PagedDb` component is capable of preserving an arbitrary number of the versions, which makes it different from `LMDB`, `BoltDB` et al. This feature was heavily used before, when all the blocks were immediately added to it. Right now, with readonly transactions and the last blocks handled by the `Blockchain` component, it is not important that much. It might be a subject to change when `Archive` mode is considered.
+
+#### ACID
+
+The database allows 2 modes of commits:
 
 1. `FlushDataOnly`
 1. `FlushDataAndRoot`
@@ -27,29 +58,29 @@ Paprika allows 2 modes of commits:
 
 `FlushDataAndRoot` flushes both, all the data pages and the root page. This mode is not only **Atomic** but also **Durable** as after the commit, the database is fully stored on the disk. This requires two calls to `MSYNC` and two calls to `FSYNC` though, which is a lot heavier than the previous mode. `FlushDataOnly` should be the default one that is used and `FlushDataAndRoot` should be used mostly when closing the database.
 
-### Memory-mapped caveats
+#### Memory-mapped caveats
 
 It's worth mentioning that memory-mapped files were lately critiqued by [Andy Pavlo and the team](https://db.cs.cmu.edu/mmap-cidr2022/). The paper's outcome is that any significant DBMS system will need to provide buffer pooling management and `mmap` is not the right tool to build a database. At the moment of writing the decision is to keep the codebase small and use `mmap` and later, if performance is shown to be degrading, migrate.
 
-## Implementation
+#### Implementation
 
 The following part provides implementation-related details, that might be helpful when working on or amending the Paprika ~sauce~ source code.
 
-### Allocations, classes, and objects
+##### Allocations, classes, and objects
 
 Whenever possible initialization should be skipped using `[SkipLocalsInit]` or `Unsafe.` methods.
 
 If a `class` is declared instead of a `struct`, it should be allocated very infrequently. A good example is a transaction or a database that is allocated not that often. When designing constructs created often, like `Keccak` or a `Page`, using the class and allocating an object should be the last resort.
 
-### NibblePath
+##### NibblePath
 
 `NibblePath` is a custom implementation of the path of nibbles, needed to traverse the Trie of Ethereum. The structure allocates no memory and uses `ref` semantics to effectively traverse the path. It also allows for efficient comparisons and slicing. As it's `ref` based, it can be built on top of `Span<byte>`.
 
-### Keccak and RLP encoding
+##### Keccak and RLP encoding
 
 Paprika provides custom implementations for some of the operations involving `Keccak` and `RLP` encoding. As the Merkle construct is based on `Keccak` values calculated for Trie nodes that are RLP encoded, Paprika provides combined methods, that first perform the RLP encoding and then calculate the Keccak. This allows an efficient, allocation-free implementation. No `RLP` is used for storing or retrieving data. `RLP` is only used to match the requirements of the Merkle construct.
 
-### Const constructs and \[StructLayout\]
+##### Const constructs and \[StructLayout\]
 
 Whenever a value type needs to be preserved, it's worth considering the usage of `[StructLayout]`, which specifies the placement of the fields. Additionally, the usage of a `Size` const can be of tremendous help. It allows having all the sizes calculated on the step of compilation. It also allows skipping to copy lengths and other unneeded information and replace it with information known upfront.
 
@@ -61,7 +92,7 @@ public struct PageHeader
 }
 ```
 
-### Pages
+##### Pages
 
 Paprika uses paged-based addressing. Every page is 4kb. The size of the page is constant and cannot be changed. This makes pages lighter as they do not need to pass the information about their size. The page address, called `DbAddress`, can be encoded within the first 3 bytes of an `uint` if the database size is smaller than 64GB. This leaves one byte for addressing within the page without blowing the address beyond 4 bytes.
 
@@ -71,7 +102,7 @@ There are different types of pages:
 1. `AbandonedPage`
 1. `DataPage`
 
-#### Root page
+###### Root page
 
 The `RootPage` is a page responsible for holding all the metadata information needed to query and amend data. It consists of:
 
@@ -82,7 +113,7 @@ The `RootPage` is a page responsible for holding all the metadata information ne
 
 The last one is a collection of `DbAddress` pointing to the `Abandoned Pages`. As the amount of metadata is not big, one root page can store over 1 thousand addresses of the abandoned pages.
 
-#### Abandoned Page
+###### Abandoned Page
 
 An abandoned page is a page storing information about pages that were abandoned during a given batch. Let's describe what abandonment means. When a page is COWed, the original copy should be maintained for the readers. After a given period, defined by the reorganization max depth, the page should be reused to not blow up the database. That is why `AbandonedPage` memoizes the batch at which it was created. Whenever a new page is requested, the allocator checks the list of unused pages (pages that were abandoned that passed the threshold of max reorg depth. If there are some, the page can be reused.
 
@@ -90,11 +121,11 @@ As each `AbandonedPage` can store ~1,000 pages, in cases of big updates, several
 
 The biggest caveat is where to store the `AbandonedPage`. The same mechanism is used for them as for other pages. This means, that when a block is committed, to store an `AbandonedPage`, the batch needs to allocate (which may get it from the pool) a page and copy to it.
 
-#### Data Page
+###### Data Page
 
 A data page is responsible for both storing data in-page and providing a fanout for lower levels of the tree. The data page tries to store as much data as possible inline using the [FixedMap component](#FixedMap). If there's no more space, left, it selects a bucket, defined by a nibble. The one with the highest count of items is flushed as a separate page and a pointer to that page is stored in the bucket of the original `DataPage`. This is a bit different approach from using page splits. Instead of splitting the page and updating the parent, the page can flush down some of its data, leaving more space for the new. A single `PageData` can hold roughly 50-100 entries. An entry, again, is described in a `FixedMap`.
 
-### Page design in C\#
+##### Page design in C\#
 
 Pages are designed as value types that provide a wrapper around a raw memory pointer. The underlying pointer does not change, so pages can be implemented as `readonly unsafe struct` like in the following example.
 
@@ -162,7 +193,7 @@ public static class PageExtensions
 }
 ```
 
-#### Page number
+###### Page number
 
 As each page is a wrapper for a pointer. It contains no information about the page number. The page number can be retrieved from the database though, that provides it with the following calculation:
 
@@ -175,7 +206,7 @@ private DbAddress GetAddress(in Page page)
 }
 ```
 
-#### Page headers
+###### Page headers
 
 As pages may differ by how they use 4kb of provided memory, they need to share some amount of data that can be used to:
 
@@ -206,7 +237,7 @@ public struct PageHeader
 }
 ```
 
-### FixedMap
+##### FixedMap
 
 The `FixedMap` component is responsible for storing data in-page. It does it by using path-based addressing based on the functionality provided by `NibblePath`. The path is not the only discriminator for the values though. The other part required to create a `FixedMap.Key` is the `type` of entry. This is an implementation of [Entity-Attribute-Value](https://en.wikipedia.org/wiki/Entity%E2%80%93attribute%E2%80%93value_model). Currently, there are the following types of entries:
 
@@ -227,7 +258,7 @@ and
 
 The addition of additional bytes breaks the uniform addressing that is based on the path only. It allows at the same time for auto optimization of the tree and much more dense packaging of pages.
 
-#### FixedMap layout
+###### FixedMap layout
 
 `FixedMap` needs to store values with variant lengths over a fixed `Span<byte>` provided by the page. To make it work, Paprika uses a modified pattern of the slot array, used by major players in the world of B+ oriented databases (see: [PostgreSQL page layout](https://www.postgresql.org/docs/current/storage-page-layout.html#STORAGE-PAGE-LAYOUT-FIGURE)). How it works then?
 
@@ -343,13 +374,13 @@ Let's consider another contract `0xCD`, deployed but wit ha lot of storage cells
 
 Which would be stored on one page as:
 
-| Key: Path | Key: Type                    | Key: Additional Key       | Byte encoded value                                                |
-| --------- | ---------------------------- | ------------------------- | ----------------------------------------------------------------- |
-| `0xCD`    | `Account`                    | `_`                       | `02 01 23` + `01 02` (`balance` concatenated with `nonce`)        |
-| `0xCD`    | `CodeHash`                   | `_`                       | `FEDCBA...` (keccak, always 32 bytes)                             |
-| `0xCD`    | `StorageTreeRootPageAddress` | `_`                       | `02 12 34` (var length big-endian encoding of page `@1234`)       |
-| `0xCD`    | `StorageRootHash`            | `_`                       | `keccak value` (keccak, always 32 bytes, calculated when storing) |
-| `0xCD`    | `KeccakOrRlp`                | `_`                       | `keccak value` (keccak, always 32 bytes, calculated when storing) |
+| Key: Path | Key: Type                    | Key: Additional Key | Byte encoded value                                                |
+| --------- | ---------------------------- | ------------------- | ----------------------------------------------------------------- |
+| `0xCD`    | `Account`                    | `_`                 | `02 01 23` + `01 02` (`balance` concatenated with `nonce`)        |
+| `0xCD`    | `CodeHash`                   | `_`                 | `FEDCBA...` (keccak, always 32 bytes)                             |
+| `0xCD`    | `StorageTreeRootPageAddress` | `_`                 | `02 12 34` (var length big-endian encoding of page `@1234`)       |
+| `0xCD`    | `StorageRootHash`            | `_`                 | `keccak value` (keccak, always 32 bytes, calculated when storing) |
+| `0xCD`    | `KeccakOrRlp`                | `_`                 | `keccak value` (keccak, always 32 bytes, calculated when storing) |
 
 And on the page under address `@1234`, which is a separate storage trie created for this huge account
 
@@ -367,6 +398,12 @@ A few remarks:
 1. An entry of type `StorageTreeRootPageAddress` provides a page address where to jump to find the storage cells of the given account
 1. `StorageTreeStorageCells` create a usual Paprika trie, with the extraction of the nibble with the biggest count if needed as a separate page
 1. All the entries are stored in [FixedMap](#fixedmap), where a small hash `ushort` is used to represent the slot
+
+### Merkle construct
+
+From Ethereum point of view, any storage mechanism needs to be able to calculate the `StateRootHash`. This hash allows to verify whether the block state is valid. How it is done and what is used underneath is not important as long as the store mechanism can provide the answer to the ultimate question: _what is the StateRootHash of the given block?_.
+
+The Merkle construct is in the making and it will be update later.
 
 ## Learning materials
 

@@ -1,10 +1,17 @@
 ﻿using Nethermind.Int256;
 using Paprika.Crypto;
+using Paprika.Data;
+using Paprika.Store;
 
 namespace Paprika;
 
 public interface IBatch : IReadOnlyBatch
 {
+    /// <summary>
+    /// Sets the metadata of the root of the current batch.
+    /// </summary>
+    void SetMetadata(uint blockNumber, in Keccak blockHash);
+
     /// <summary>
     /// Sets the given account.
     /// </summary>
@@ -16,6 +23,11 @@ public interface IBatch : IReadOnlyBatch
     /// Sets storage.
     /// </summary>
     void SetStorage(in Keccak key, in Keccak address, UInt256 value);
+
+    /// <summary>
+    /// Sets data raw.
+    /// </summary>
+    void SetRaw(in Key key, ReadOnlySpan<byte> rawData);
 
     /// <summary>
     /// Commits the block returning its root hash.
