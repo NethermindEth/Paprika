@@ -48,15 +48,28 @@ public class Blockchain : IAsyncDisposable
 
     private uint _lastFinalized;
 
-    public Blockchain(PagedDb db, Action? beforeMetricsDisposed = null)
+    public Blockchain(PagedDb db, int? finalizationQueueLimit = null, Action? beforeMetricsDisposed = null)
     {
         _db = db;
         _beforeMetricsDisposed = beforeMetricsDisposed;
-        _finalizedChannel = Channel.CreateUnbounded<Block>(new UnboundedChannelOptions
+
+        if (finalizationQueueLimit == null)
         {
-            SingleReader = true,
-            SingleWriter = true
-        });
+            _finalizedChannel = Channel.CreateUnbounded<Block>(new UnboundedChannelOptions
+            {
+                SingleReader = true,
+                SingleWriter = true,
+            });
+        }
+        else
+        {
+            _finalizedChannel = Channel.CreateBounded<Block>(new BoundedChannelOptions(finalizationQueueLimit.Value)
+            {
+                SingleReader = true,
+                SingleWriter = true,
+                FullMode = BoundedChannelFullMode.Wait,
+            });
+        }
 
         var genesis = new Block(GenesisHash, new ReadOnlyBatchCountingRefs(db.BeginReadOnlyBatch()), GenesisHash, 0, this);
 
@@ -184,12 +197,18 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
+        // report count before actual writing to do no
         _flusherQueueCount.Add((int)count);
+
+        var writer = _finalizedChannel.Writer;
 
         while (finalized.TryPop(out block))
         {
-            // publish for the PagedDb
-            _finalizedChannel.Writer.TryWrite(block);
+            if (writer.TryWrite(block) == false)
+            {
+                // hard spin wait on breaching the size
+                SpinWait.SpinUntil(() => writer.TryWrite(block));
+            }
         }
 
         _lastFinalized += count;

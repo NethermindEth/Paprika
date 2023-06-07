@@ -13,7 +13,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 100_000 : 5_000;
+    private const int BlockCount = PersistentDb ? 16_000 : 5_000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
@@ -30,7 +30,7 @@ public static class Program
 
     private const int LogEvery = BlockCount / NumberOfLogs;
 
-    private const bool PersistentDb = false;
+    private const bool PersistentDb = true;
     private const bool UseStorage = true;
     private const bool UseBigStorageAccount = false;
     private const int BigStorageAccountSlotCount = 1_000_000;
@@ -119,7 +119,7 @@ public static class Program
                 ctx.Refresh();
             }));
 
-        await using (var blockchain = new Blockchain(db, reporter.Observe))
+        await using (var blockchain = new Blockchain(db, 1000, reporter.Observe))
         {
             counter = Writer(blockchain, bigStorageAccount, random, layout[writing]);
         }
