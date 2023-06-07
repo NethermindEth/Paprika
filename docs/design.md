@@ -329,6 +329,12 @@ With this, the `FixedMap` memory representation looks like the following.
 
 The `FixedMap` can wrap an arbitrary span of memory so it can be used for any page that wants to store data by key.
 
+### Merkle construct
+
+From Ethereum's point of view, any storage mechanism needs to be able to calculate the `StateRootHash`. This hash allows us to verify whether the block state is valid. How it is done and what is used underneath is not important as long as the store mechanism can provide the answer to the ultimate question: _what is the StateRootHash of the given block?_
+
+The Merkle construct is in the making and it will be updated later.
+
 ## Examples
 
 ### A small contract
@@ -403,12 +409,6 @@ A few remarks:
 1. An entry of type `StorageTreeRootPageAddress` provides a page address where to jump to find the storage cells of the given account
 1. `StorageTreeStorageCells` create a usual Paprika trie, with the extraction of the nibble with the biggest count if needed as a separate page
 1. All the entries are stored in [FixedMap](#fixedmap), where a small hash `ushort` is used to represent the slot
-
-### Merkle construct
-
-From Ethereum point of view, any storage mechanism needs to be able to calculate the `StateRootHash`. This hash allows to verify whether the block state is valid. How it is done and what is used underneath is not important as long as the store mechanism can provide the answer to the ultimate question: _what is the StateRootHash of the given block?_.
-
-The Merkle construct is in the making and it will be update later.
 
 ## Learning materials
 
