@@ -9,7 +9,12 @@ Paprika is split into two major components:
 1. `Blockchain`
 1. `PagedDb`
 
-### Blockchain component
+Additionally, some other components are extracted into as reusable parts:
+
+1. `NibblePath`
+1. `FixedMap`
+
+### Blockchain
 
 `Blockchain` is responsible for handling the new state that is subject to change. The blocks after the merge can be labeled as `latest`, `safe`, and `finalized`. Paprika uses the `finalized` as the cut-off point between the blockchain component and `PagedDb`. The `Blockchain` allows handling the execution API requests such as `NewPayload` and `FCU`. The new payload request is handled by creating a new block on top of the previously existing one. Paprika fully supports handling `NewPayload` in parallel as each block just points to its parent. The following example of creating two blocks that have the same parent shows the possibilities of such API:
 
@@ -39,7 +44,7 @@ It also handles `FCU` in a straight-forward way
 blockchain.Finalize(Block2A);
 ```
 
-### PagedDb component
+### PagedDb
 
 The `PagedDb` component is responsible for storing the left-fold of the blocks that are beyond the cut-off point. This database uses [memory-mapped files](https://en.wikipedia.org/wiki/Memory-mapped_file) to provide storing capabilities. To handle concurrency, [Copy on Write](https://en.wikipedia.org/wiki/Copy-on-write) is used. This allows multiple concurrent readers to cooperate in a full lock-free manner and a single writer that runs the current transaction. In that manner, it's heavily inspired by [LMBD](https://github.com/LMDB/lmdb).
 
@@ -71,10 +76,6 @@ The following part provides implementation-related details, that might be helpfu
 Whenever possible initialization should be skipped using `[SkipLocalsInit]` or `Unsafe.` methods.
 
 If a `class` is declared instead of a `struct`, it should be allocated very infrequently. A good example is a transaction or a database that is allocated not that often. When designing constructs created often, like `Keccak` or a `Page`, using the class and allocating an object should be the last resort.
-
-##### NibblePath
-
-`NibblePath` is a custom implementation of the path of nibbles, needed to traverse the Trie of Ethereum. The structure allocates no memory and uses `ref` semantics to effectively traverse the path. It also allows for efficient comparisons and slicing. As it's `ref` based, it can be built on top of `Span<byte>`.
 
 ##### Keccak and RLP encoding
 
@@ -237,7 +238,11 @@ public struct PageHeader
 }
 ```
 
-##### FixedMap
+### NibblePath
+
+`NibblePath` is a custom implementation of the path of nibbles, needed to traverse the Trie of Ethereum. The structure allocates no memory and uses `ref` semantics to effectively traverse the path. It also allows for efficient comparisons and slicing. As it's `ref` based, it can be built on top of `Span<byte>`.
+
+### FixedMap
 
 The `FixedMap` component is responsible for storing data in-page. It does it by using path-based addressing based on the functionality provided by `NibblePath`. The path is not the only discriminator for the values though. The other part required to create a `FixedMap.Key` is the `type` of entry. This is an implementation of [Entity-Attribute-Value](https://en.wikipedia.org/wiki/Entity%E2%80%93attribute%E2%80%93value_model). Currently, there are the following types of entries:
 
@@ -258,7 +263,7 @@ and
 
 The addition of additional bytes breaks the uniform addressing that is based on the path only. It allows at the same time for auto optimization of the tree and much more dense packaging of pages.
 
-###### FixedMap layout
+#### FixedMap layout
 
 `FixedMap` needs to store values with variant lengths over a fixed `Span<byte>` provided by the page. To make it work, Paprika uses a modified pattern of the slot array, used by major players in the world of B+ oriented databases (see: [PostgreSQL page layout](https://www.postgresql.org/docs/current/storage-page-layout.html#STORAGE-PAGE-LAYOUT-FIGURE)). How it works then?
 
