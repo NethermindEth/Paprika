@@ -39,6 +39,7 @@ public class Blockchain : IAsyncDisposable
     // metrics
     private readonly Meter _meter;
     private readonly Histogram<int> _flusherBatchSize;
+    private readonly Histogram<int> _flusherBlockApplicationInMs;
     private readonly Histogram<int> _flusherBlockCommitInMs;
     private readonly MetricsExtensions.IAtomicIntGauge _flusherQueueCount;
 
@@ -83,8 +84,10 @@ public class Blockchain : IAsyncDisposable
 
         _flusherBatchSize = _meter.CreateHistogram<int>("Blocks finalized / batch", "Blocks",
             "The number of blocks finalized by the flushing task in one db batch");
-        _flusherBlockCommitInMs = _meter.CreateHistogram<int>("Block commit in ms", "ms",
-            "The amortized time it takes for flush one block in a batch by the flusher task");
+        _flusherBlockApplicationInMs = _meter.CreateHistogram<int>("Block data application in ms", "ms",
+            "The amortized time it takes for one block to apply on PagedDb");
+        _flusherBlockCommitInMs = _meter.CreateHistogram<int>("DB commit time / block in ms", "ms",
+            "The amortized time it takes for one block to commit in PagedDb");
         _flusherQueueCount = _meter.CreateAtomicObservableGauge("Flusher queue count", "Blocks",
             "The number of the blocks in the flush queue");
     }
@@ -103,10 +106,10 @@ public class Blockchain : IAsyncDisposable
                 var flushed = new List<uint>();
 
                 uint flushedTo = 0;
-                var watch = Stopwatch.StartNew();
+                var application = Stopwatch.StartNew();
 
                 using var batch = _db.BeginNextBatch();
-                while (watch.Elapsed < FlushEvery && reader.TryRead(out var block))
+                while (application.Elapsed < FlushEvery && reader.TryRead(out var block))
                 {
                     flushed.Add(block.BlockNumber);
                     flushedTo = block.BlockNumber;
@@ -115,14 +118,19 @@ public class Blockchain : IAsyncDisposable
                     block.Apply(batch);
                 }
 
-                await batch.Commit(CommitOptions.FlushDataAndRoot);
+                application.Stop();
 
-                watch.Stop();
+                var commit = Stopwatch.StartNew();
+                await batch.Commit(CommitOptions.FlushDataAndRoot);
+                commit.Stop();
 
                 // measure
-                _flusherBatchSize.Record(flushed.Count);
-                _flusherBlockCommitInMs.Record((int)(watch.ElapsedMilliseconds / flushed.Count));
-                _flusherQueueCount.Subtract(flushed.Count);
+                var count = flushed.Count;
+
+                _flusherBatchSize.Record(count);
+                _flusherBlockApplicationInMs.Record((int)(application.ElapsedMilliseconds / count));
+                _flusherBlockCommitInMs.Record((int)(commit.ElapsedMilliseconds / count));
+                _flusherQueueCount.Subtract(count);
 
                 // publish the reader to the blocks following up the flushed one
                 var readOnlyBatch = new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch());
