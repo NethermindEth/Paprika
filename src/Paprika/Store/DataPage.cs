@@ -91,11 +91,35 @@ public readonly unsafe struct DataPage : IDataPage
             // the bucket is not null and represents a page jump, follow it but only if it was written this tx
             if (address.IsNull == false)
             {
-                var page = ctx.Batch.GetAt(address);
-                var updated = new DataPage(page).Set(ctx.SliceFrom(NibbleCount));
+                if (HasAllChildPages)
+                {
+                    // try to use bucket map first
+                    var buckets = new BucketMap(Data.DataSpan);
+                    if (buckets.TryGetByNibble(nibble, out var key, out var data))
+                    {
+                        // flush down the previous
+                        var newContext = new SetContext(key, data, ctx.Batch);
+                        
+                        var page = ctx.Batch.GetAt(address);
+                        var updated = new DataPage(page).Set(newContext.SliceFrom(NibbleCount));
 
-                // remember the updated
-                address = ctx.Batch.GetAddress(updated);
+                        // remember the updated
+                        address = ctx.Batch.GetAddress(updated);
+                    }
+                    
+                    // set this value in bucket
+                    buckets.Set(ctx.Key, ctx.Data);
+                }
+                else
+                {
+                    // not full page, just follow
+                    var page = ctx.Batch.GetAt(address);
+                    var updated = new DataPage(page).Set(ctx.SliceFrom(NibbleCount));
+
+                    // remember the updated
+                    address = ctx.Batch.GetAddress(updated);
+                }
+                
                 return _page;
             }
         }
@@ -151,6 +175,8 @@ public readonly unsafe struct DataPage : IDataPage
         return Set(ctx);
     }
 
+    private bool HasAllChildPages => Data.Buckets.IndexOf(DbAddress.Null) == -1;
+
     public bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
         // path longer than 0, try to find in child
@@ -160,9 +186,23 @@ public readonly unsafe struct DataPage : IDataPage
             var nibble = key.Path.FirstNibble;
             var bucket = Data.Buckets[nibble];
 
-            // non-null page jump, follow it!
+            // non-null page jump
             if (bucket.IsNull == false)
             {
+                if (HasAllChildPages)
+                {
+                    // try to find in situ first
+                    var buckets = new BucketMap(Data.DataSpan);
+                    if (buckets.TryGetByNibble(nibble, out var existingKey, out var existingData))
+                    {
+                        if (existingKey.Equals(key))
+                        {
+                            result = existingData;
+                            return true;
+                        }
+                    }
+                }
+                
                 return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), batch, out result);
             }
         }
