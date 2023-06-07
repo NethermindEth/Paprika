@@ -40,16 +40,17 @@ public static class Program
     {
         const string metrics = "Metrics";
         const string reports = "Reports";
+        const string writing = "Writing";
+        const string reading = "Reading";
 
         var layout = new Layout("Runner")
-            .SplitRows(
+            .SplitColumns(
                 new Layout(metrics),
-                new Layout(reports));
+                new Layout(reports).SplitRows(new Layout(writing), new Layout(reading)));
 
         using var reporter = new MetricsReporter();
 
         layout[metrics].Update(reporter.Renderer);
-        var reportingPanel = layout[reports];
 
         var dir = Directory.GetCurrentDirectory();
         var dataPath = Path.Combine(dir, "db");
@@ -118,9 +119,9 @@ public static class Program
                 ctx.Refresh();
             }));
 
-        await using (var blockchain = new Blockchain(db))
+        await using (var blockchain = new Blockchain(db, reporter.Observe))
         {
-            counter = Writer(blockchain, bigStorageAccount, random, reportingPanel);
+            counter = Writer(blockchain, bigStorageAccount, random, layout[writing]);
         }
 
         // waiting for finalization
@@ -130,7 +131,7 @@ public static class Program
         // Console.WriteLine();
         // Console.WriteLine("Reading and asserting values...");
 
-        var reading = Stopwatch.StartNew();
+        var readingStopWatch = Stopwatch.StartNew();
 
         var logReadEvery = counter / NumberOfLogs;
         for (var i = 0; i < counter; i++)
@@ -170,21 +171,27 @@ public static class Program
 
             if (i > 0 & i % logReadEvery == 0)
             {
-                var secondsPerRead = TimeSpan.FromTicks(reading.ElapsedTicks / logReadEvery).TotalSeconds;
-                var readsPerSeconds = 1 / secondsPerRead;
-
-                // Console.WriteLine(
-                //     $"Reading at {i,9} out of {counter} accounts. Current speed: {readsPerSeconds:F1} reads/s");
-                // reading.Restart();
+                ReportReading(i);
             }
         }
 
-        // Console.WriteLine("Reading state of all of {0} accounts from the last block took {1}",
-        //     counter, reading.Elapsed);
+        ReportReading(counter - 1);
+
+        void ReportReading(int i)
+        {
+            var secondsPerRead = TimeSpan.FromTicks(readingStopWatch.ElapsedTicks / logReadEvery).TotalSeconds;
+            var readsPerSeconds = 1 / secondsPerRead;
+
+            var txt = $"Reading at {i,9} out of {counter} accounts. Current speed: {readsPerSeconds:F1} reads/s";
+
+            layout[reading].Update(new Panel(txt).Header(reading).Expand());
+
+            readingStopWatch.Restart();
+        }
     }
 
     private static int Writer(Blockchain blockchain, Keccak bigStorageAccount, byte[] random,
-        Layout reportingPanel)
+        Layout reporting)
     {
         var counter = 0;
 
@@ -249,7 +256,9 @@ public static class Program
 
             if (block > 0 & block % LogEvery == 0)
             {
-                reportingPanel.Update(new Text($@"At block {block}. Writing last batch took {writing.Elapsed:g}"));
+                reporting.Update(
+                    new Panel($@"At block {block}. Writing last batch took {writing.Elapsed:g}").Header("Writing")
+                        .Expand());
                 writing.Restart();
             }
         }
@@ -260,7 +269,9 @@ public static class Program
         placeholder.Commit();
         blockchain.Finalize(lastBlock);
 
-        reportingPanel.Update(new Text($@"At block {BlockCount - 1}. Writing last batch took {writing.Elapsed:g}"));
+        reporting.Update(
+            new Panel($@"At block {BlockCount - 1}. Writing last batch took {writing.Elapsed:g}").Header("Writing")
+                .Expand());
 
         return counter;
     }

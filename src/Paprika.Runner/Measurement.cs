@@ -6,9 +6,15 @@ namespace Paprika.Runner;
 
 abstract class Measurement : JustInTimeRenderable
 {
+    private readonly Instrument _instrument;
     private const long NoValue = Int64.MaxValue;
 
     private long _value;
+
+    private Measurement(Instrument instrument)
+    {
+        _instrument = instrument;
+    }
 
     protected override IRenderable Build()
     {
@@ -29,6 +35,8 @@ abstract class Measurement : JustInTimeRenderable
 
     protected abstract long Update(double measurement);
 
+    public override string ToString() => $"{nameof(Instrument)}: {_instrument.Name}, Value: {Volatile.Read(ref _value)}";
+
     public static Measurement Build(Instrument instrument)
     {
         var type = instrument.GetType();
@@ -38,17 +46,17 @@ abstract class Measurement : JustInTimeRenderable
 
             if (definition == typeof(ObservableGauge<>))
             {
-                return new GaugeMeasurement();
+                return new GaugeMeasurement(instrument);
             }
 
             if (definition == typeof(Counter<>))
             {
-                return new CounterMeasurement();
+                return new CounterMeasurement(instrument);
             }
 
             if (definition == typeof(Histogram<>))
             {
-                return new NoMeasurement();
+                return new HistogramMeasurement(instrument);
             }
         }
 
@@ -57,12 +65,24 @@ abstract class Measurement : JustInTimeRenderable
 
     private class GaugeMeasurement : Measurement
     {
+        public GaugeMeasurement(Instrument instrument) : base(instrument)
+        {
+        }
+
         protected override long Update(double measurement) => (long)measurement;
     }
 
-    private class NoMeasurement : Measurement
+    // for now use the last value
+    private class HistogramMeasurement : Measurement
     {
-        protected override long Update(double measurement) => NoValue;
+        protected override long Update(double measurement)
+        {
+            return (long)measurement;
+        }
+
+        public HistogramMeasurement(Instrument instrument) : base(instrument)
+        {
+        }
     }
 
     private class CounterMeasurement : Measurement
@@ -70,5 +90,9 @@ abstract class Measurement : JustInTimeRenderable
         private long _sum;
 
         protected override long Update(double measurement) => Interlocked.Add(ref _sum, (long)measurement);
+
+        public CounterMeasurement(Instrument instrument) : base(instrument)
+        {
+        }
     }
 }

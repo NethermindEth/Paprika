@@ -43,13 +43,15 @@ public class Blockchain : IAsyncDisposable
     private readonly MetricsExtensions.IAtomicIntGauge _flusherQueueCount;
 
     private readonly PagedDb _db;
+    private readonly Action? _beforeMetricsDisposed;
     private readonly Task _flusher;
 
     private uint _lastFinalized;
 
-    public Blockchain(PagedDb db)
+    public Blockchain(PagedDb db, Action? beforeMetricsDisposed = null)
     {
         _db = db;
+        _beforeMetricsDisposed = beforeMetricsDisposed;
         _finalizedChannel = Channel.CreateUnbounded<Block>(new UnboundedChannelOptions
         {
             SingleReader = true,
@@ -526,7 +528,8 @@ public class Blockchain : IAsyncDisposable
         // once the flushing is done and blocks are disposed, dispose the pool
         _pool.Dispose();
 
-        // unregister metrics
+        // dispose metrics, but flush them last time before unregistering
+        _beforeMetricsDisposed?.Invoke();
         _meter.Dispose();
     }
 }
