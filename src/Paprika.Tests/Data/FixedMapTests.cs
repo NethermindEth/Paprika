@@ -2,9 +2,8 @@
 using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
-using Paprika.Store;
 
-namespace Paprika.Tests;
+namespace Paprika.Tests.Data;
 
 public class FixedMapTests
 {

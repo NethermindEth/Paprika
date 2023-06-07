@@ -16,7 +16,7 @@ public readonly ref struct Key
     public readonly DataType Type;
     public readonly ReadOnlySpan<byte> AdditionalKey;
 
-    private Key(NibblePath path, DataType type, ReadOnlySpan<byte> additionalKey)
+    public Key(NibblePath path, DataType type, ReadOnlySpan<byte> additionalKey)
     {
         Path = path;
         Type = type;
@@ -90,5 +90,16 @@ public readonly ref struct Key
         return $"{nameof(Path)}: {Path.ToString()}, " +
                $"{nameof(Type)}: {Type}, " +
                $"{nameof(AdditionalKey)}: {AdditionalKey.ToHexString(false)}";
+    }
+
+    public bool Equals(in Key other)
+    {
+        if (Type != other.Type)
+            return false;
+
+        if (!Path.Equals(other.Path))
+            return false;
+
+        return AdditionalKey.SequenceEqual(other.AdditionalKey);
     }
 }
