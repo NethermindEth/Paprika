@@ -26,31 +26,48 @@ function substrings(str) {
 class Db {
     constructor(ctx) {
         this._ctx = ctx
-        this._ptrs = {}
+        this._rootPtr = {}
     }
 
-    setNodes(nodes) {
-        this._ptrs = nodes
+    get(path) {
+        let nibbles = path.split('')
+        let ptr = this._rootPtr
+        for (let nibble of nibbles) {
+            ptr = ptr[nibble]
+        }
+        return ptr.node
+    }
+
+    set(path, value) {
+        let nibbles = path.split('')
+        let ptr = this._rootPtr
+        for (let nibble of nibbles) {
+            if (!ptr[nibble]) { ptr[nibble] = {} }
+
+            ptr = ptr[nibble]
+        }
+        ptr.node = value
     }
 
     async update(path, value) {
-        let node = this.getNode(path)
-        if (!node) { throw new Error(`No associated node for path ${path}`) }
-
-        node._value = value
-        node._dirty = true
-        for (let prefix of substrings(path)) {
-            let node = this.getNode(prefix)
-            if (node) {
-                node._dirty = true
+        let ptr = this._rootPtr
+        for (let nibble of path.split('')) {
+            if (ptr.node) {
+                ptr.node._dirty = true
                 this.displayNodes()
             }
+
+            ptr = ptr[nibble]
         }
+        ptr.node._dirty = true
+        ptr.node._value = value
+
+        this.displayNodes()
     }
 
     // We compute the root hash starting on the empty prefix
     async rootHash() {
-        let rootNode = this._ptrs['']
+        let rootNode = this.get('')
         if (rootNode) {
             return await rootNode.hash('', this)
         } else {
@@ -58,13 +75,26 @@ class Db {
         }
     }
 
-    getNode(path) { return this._ptrs[path] }
+    flatNodes() {
+        let nodes = []
+        function flatNodesRec(path, ptr) {
+            if (!ptr) { return }
+            if (ptr.node) { nodes.push([path, ptr.node]) }
+
+            for (let [k, v] of Object.entries(ptr)) {
+                if (k == 'node') { continue }
+                flatNodesRec(path + k, v)
+            }
+        }
+        flatNodesRec('', this._rootPtr)
+
+        return nodes
+    }
 
     displayNodes() {
         this._ctx.clearRect(0, 0, 500, 500)
 
-        let kvs = Object.entries(this._ptrs);
-        kvs.sort(([k1, _e1], [k2, _e2]) => k1.length - k2.length);
+        let kvs = this.flatNodes()
 
         let offsets = { x: -1, y: 0 }
         for (let [path, node] of kvs) {
@@ -116,6 +146,11 @@ class Node {
         await this._onHash()
         return this._hash
     }
+
+    async setDirty(dirty) {
+        this._dirty = dirty
+        await this._onDirtyChange()
+    }
 }
 
 class Leaf extends Node {
@@ -143,7 +178,7 @@ class Extension extends Node {
 
     async computeHash(path, db) {
         let childPath = path + this._value
-        let child = db.getNode(childPath)
+        let child = db.get(childPath)
         let childHash = await child.hash(childPath, db)
         return `h(${childHash})`
     }
@@ -164,7 +199,7 @@ class Branch extends Node {
             let nibble = this._value[i]
 
             let childPath = path + nibble
-            let child = db.getNode(childPath)
+            let child = db.get(childPath)
 
             let childHash = await child.hash(childPath, db)
             childrenHashes.push(childHash)
@@ -202,12 +237,11 @@ async function main() {
         await delay()
         db.displayNodes()
     }
-    db.setNodes({
-        '': mkNode({ type: 'extension', value: 'AB' }, onHash),
-        'AB': mkNode({ type: 'branch', value: ['C', 'D'] }, onHash),
-        'ABC': mkNode({ type: 'leaf', value: 'Hello' }, onHash),
-        'ABD': mkNode({ type: 'leaf', value: 'World' }, onHash),
-    })
+    db.set('', mkNode({ type: 'extension', value: 'AB' }, onHash))
+    db.set('AB', mkNode({ type: 'branch', value: ['C', 'D'] }, onHash))
+    db.set('ABC', mkNode({ type: 'leaf', value: 'Hello' }, onHash))
+    db.set('ABD', mkNode({ type: 'leaf', value: 'World' }, onHash))
+
     db.displayNodes()
     displayRoot('<unknown>')
 
@@ -215,6 +249,7 @@ async function main() {
 
     await delay()
     await db.update('ABC', 'updated1')
+    db.displayNodes()
     displayRoot(await db.rootHash())
 
     await delay()
