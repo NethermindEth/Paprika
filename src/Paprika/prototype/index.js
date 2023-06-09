@@ -54,19 +54,15 @@ class Db {
         for (let nibble of path.split('')) {
             if (ptr.node) {
                 ptr.node._dirty = true
-                this.displayNodes()
             }
-
             ptr = ptr[nibble]
         }
         ptr.node._dirty = true
         ptr.node._value = value
-
-        this.displayNodes()
     }
 
-    // We compute the root hash starting on the empty prefix
     async rootHash() {
+        // We compute the root hash starting on the empty prefix
         let rootNode = this.get('')
         if (rootNode) {
             return await rootNode.hash('', this)
@@ -139,17 +135,10 @@ class Node {
 
     async hash(path, db) {
         if (!this._dirty) { return this._hash }
-
         this._hash = await this.computeHash(path, db)
-
         this._dirty = false
         await this._onHash()
         return this._hash
-    }
-
-    async setDirty(dirty) {
-        this._dirty = dirty
-        await this._onDirtyChange()
     }
 }
 
@@ -254,6 +243,7 @@ async function main() {
 
     await delay()
     await db.update('ABD', 'updated2')
+    db.displayNodes()
     displayRoot(await db.rootHash())
 }
 
