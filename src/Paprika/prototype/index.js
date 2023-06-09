@@ -2,6 +2,13 @@ const root = document.getElementById('root')
 const canvas = document.getElementById('canvas')
 const ctx = canvas.getContext('2d')
 
+const updateBtn = document.getElementById('updateBtn')
+const updatePath = document.getElementById('updatePath')
+const updateValue = document.getElementById('updateValue')
+
+const rootHashBtn = document.getElementById('rootHashBtn')
+function displayRootHash(value) { root.innerText = value }
+
 const NODE_WIDTH = 200
 const NODE_HEIGHT = 50
 const PADDING = 10
@@ -13,14 +20,6 @@ function delay() {
     return new Promise((res, _) => {
         setTimeout(() => { res() }, DELAY);
     })
-}
-
-function substrings(str) {
-    let res = []
-    for (let i = 0; i <= str.length; i++) {
-        res.push(str.substring(0, i));
-    }
-    return res;
 }
 
 class Db {
@@ -38,18 +37,17 @@ class Db {
         return ptr.node
     }
 
-    set(path, value) {
+    set(path, node) {
         let nibbles = path.split('')
         let ptr = this._rootPtr
         for (let nibble of nibbles) {
             if (!ptr[nibble]) { ptr[nibble] = {} }
-
             ptr = ptr[nibble]
         }
-        ptr.node = value
+        ptr.node = node
     }
 
-    async update(path, value) {
+    async updateValue(path, value) {
         let ptr = this._rootPtr
         for (let nibble of path.split('')) {
             if (ptr.node) {
@@ -57,6 +55,9 @@ class Db {
             }
             ptr = ptr[nibble]
         }
+
+        if (!ptr) { throw new Error(`No node on path ${path}`) }
+        if (!(ptr.node instanceof Leaf)) { throw new Error(`Can't update non-Leaf node`) }
         ptr.node._dirty = true
         ptr.node._value = value
     }
@@ -71,18 +72,18 @@ class Db {
         }
     }
 
-    flatNodes() {
+    allNodes() {
         let nodes = []
-        function flatNodesRec(path, ptr) {
+        function rec(path, ptr) {
             if (!ptr) { return }
             if (ptr.node) { nodes.push([path, ptr.node]) }
 
             for (let [k, v] of Object.entries(ptr)) {
                 if (k == 'node') { continue }
-                flatNodesRec(path + k, v)
+                rec(path + k, v)
             }
         }
-        flatNodesRec('', this._rootPtr)
+        rec('', this._rootPtr)
 
         return nodes
     }
@@ -90,10 +91,8 @@ class Db {
     displayNodes() {
         this._ctx.clearRect(0, 0, 500, 500)
 
-        let kvs = this.flatNodes()
-
         let offsets = { x: -1, y: 0 }
-        for (let [path, node] of kvs) {
+        for (let [path, node] of this.allNodes()) {
             let depth = path.length
 
             if (offsets.y < depth) {
@@ -131,7 +130,7 @@ class Node {
         this._onHash = onHash
     }
 
-    async computeHash(path, db) { throw new Error('not implemented') }
+    async computeHash(path, db) { throw new Error('Abstract method not implemented') }
 
     async hash(path, db) {
         if (!this._dirty) { return this._hash }
@@ -143,10 +142,6 @@ class Node {
 }
 
 class Leaf extends Node {
-    constructor(value, onHash) {
-        super(value, onHash)
-    }
-
     toString() { return `"${this._value}"` }
 
     color() { return 'rgb(200, 190, 220)' }
@@ -157,10 +152,6 @@ class Leaf extends Node {
 }
 
 class Extension extends Node {
-    constructor(value, onHash) {
-        super(value, onHash)
-    }
-
     toString() { return `<${this._value}>` }
 
     color() { return 'rgb(215, 230, 190)' }
@@ -174,10 +165,6 @@ class Extension extends Node {
 }
 
 class Branch extends Node {
-    constructor(value, onHash) {
-        super(value, onHash)
-    }
-
     toString() { return `[${this._value}]` }
 
     color() { return 'rgb(180, 220, 240)' }
@@ -205,10 +192,6 @@ function mkNode({ type, value }, onHash) {
     }
 }
 
-function displayRoot(value) {
-    root.innerText = value
-}
-
 async function main() {
     /*
     Storage is:
@@ -232,19 +215,18 @@ async function main() {
     db.set('ABD', mkNode({ type: 'leaf', value: 'World' }, onHash))
 
     db.displayNodes()
-    displayRoot('<unknown>')
+    displayRootHash('<unknown>')
 
-    displayRoot(await db.rootHash())
+    updateBtn.onclick = async () => {
+        db.updateValue(updatePath.value, updateValue.value)
+        updatePath.value = ''
+        updateValue.value = ''
+        db.displayNodes()
+    }
 
-    await delay()
-    await db.update('ABC', 'updated1')
-    db.displayNodes()
-    displayRoot(await db.rootHash())
-
-    await delay()
-    await db.update('ABD', 'updated2')
-    db.displayNodes()
-    displayRoot(await db.rootHash())
+    rootHashBtn.onclick = async () => {
+        displayRootHash(await db.rootHash())
+    }
 }
 
 main()

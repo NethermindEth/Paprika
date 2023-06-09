@@ -10,14 +10,18 @@
 </head>
 
 <body>
-    <h1>Root sum: <span id="root"></span></h1>
-    <canvas id="canvas" width="500" height="500" style="border: 2px solid black;"></canvas>
     <div>
-        <h2>Storage for</h2>
-        <ul>
-            <li>ABC -> "Hello"</li>
-            <li>ABD -> "World"</li>
-        </ul>
+        <h2>Root Hash: <span id="root"></span></h2>
+        <button id="rootHashBtn">Calculate Root Hash</button>
+    </div>
+    <canvas id="canvas" width="500" height="500" style="border: 2px solid black; margin: 1rem 0"></canvas>
+    <div>
+        <h2>Update Nodes</h2>
+        <label for="updatePath">Path: </label>
+        <input type="text" name="updatePath" id="updatePath">
+        <label for="updateValue">Value: </label>
+        <input type="text" name="updateValue" id="updateValue">
+        <button id="updateBtn">Update</button>
     </div>
 </body>
 
