@@ -44,14 +44,16 @@ public class Blockchain : IAsyncDisposable
     private readonly MetricsExtensions.IAtomicIntGauge _flusherQueueCount;
 
     private readonly PagedDb _db;
+    private readonly CommitOptions _flushOptions;
     private readonly Action? _beforeMetricsDisposed;
     private readonly Task _flusher;
 
     private uint _lastFinalized;
 
-    public Blockchain(PagedDb db, int? finalizationQueueLimit = null, Action? beforeMetricsDisposed = null)
+    public Blockchain(PagedDb db, CommitOptions flushOptions = CommitOptions.FlushDataAndRoot, int? finalizationQueueLimit = null, Action? beforeMetricsDisposed = null)
     {
         _db = db;
+        _flushOptions = flushOptions;
         _beforeMetricsDisposed = beforeMetricsDisposed;
 
         if (finalizationQueueLimit == null)
@@ -104,32 +106,37 @@ public class Blockchain : IAsyncDisposable
             while (await reader.WaitToReadAsync())
             {
                 var flushed = new List<uint>();
-
                 uint flushedTo = 0;
-                var application = Stopwatch.StartNew();
+                var loop = Stopwatch.StartNew();
 
-                using var batch = _db.BeginNextBatch();
-                while (application.Elapsed < FlushEvery && reader.TryRead(out var block))
+                while (loop.Elapsed < LoopEvery && reader.TryRead(out var block))
                 {
+                    using var batch = _db.BeginNextBatch();
+
+                    // apply
+                    var application = Stopwatch.StartNew();
+
                     flushed.Add(block.BlockNumber);
                     flushedTo = block.BlockNumber;
 
                     batch.SetMetadata(block.BlockNumber, block.Hash);
+
                     block.Apply(batch);
+
+                    application.Stop();
+                    _flusherBlockApplicationInMs.Record((int)application.ElapsedMilliseconds);
+
+                    // commit
+                    var commit = Stopwatch.StartNew();
+                    await batch.Commit(_flushOptions);
+                    commit.Stop();
+                    _flusherBlockCommitInMs.Record((int)commit.ElapsedMilliseconds);
                 }
-
-                application.Stop();
-
-                var commit = Stopwatch.StartNew();
-                await batch.Commit(CommitOptions.FlushDataAndRoot);
-                commit.Stop();
 
                 // measure
                 var count = flushed.Count;
 
                 _flusherBatchSize.Record(count);
-                _flusherBlockApplicationInMs.Record((int)(application.ElapsedMilliseconds / count));
-                _flusherBlockCommitInMs.Record((int)(commit.ElapsedMilliseconds / count));
                 _flusherQueueCount.Subtract(count);
 
                 // publish the reader to the blocks following up the flushed one
@@ -168,7 +175,7 @@ public class Blockchain : IAsyncDisposable
         }
     }
 
-    private static readonly TimeSpan FlushEvery = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan LoopEvery = TimeSpan.FromSeconds(2);
 
     public IWorldState StartNew(Keccak parentKeccak, Keccak blockKeccak, uint blockNumber)
     {

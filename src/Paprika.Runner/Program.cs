@@ -13,7 +13,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 2_000 : 5_000;
+    private const int BlockCount = PersistentDb ? 10_000 : 3_000;
     private const int RandomSampleSize = 260_000_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
@@ -31,167 +31,192 @@ public static class Program
     private const int LogEvery = BlockCount / NumberOfLogs;
 
     private const bool PersistentDb = true;
-    private const bool UseStorage = true;
+    private const int UseStorageEveryNAccounts = 10;
     private const bool UseBigStorageAccount = false;
     private const int BigStorageAccountSlotCount = 1_000_000;
     private static readonly UInt256[] BigStorageAccountValues = new UInt256[BigStorageAccountSlotCount];
 
     public static async Task Main(String[] args)
     {
+        const string left = "Left";
         const string metrics = "Metrics";
-        const string reports = "Reports";
+        const string info = "Info";
+        const string right = "Right";
         const string writing = "Writing";
         const string reading = "Reading";
 
         var layout = new Layout("Runner")
             .SplitColumns(
-                new Layout(metrics),
-                new Layout(reports).SplitRows(new Layout(writing), new Layout(reading)));
+                new Layout(left).SplitRows(new Layout(metrics), new Layout(info)),
+                new Layout(right).SplitRows(new Layout(writing), new Layout(reading)));
 
-        using var reporter = new MetricsReporter();
-
-        layout[metrics].Update(reporter.Renderer);
-
-        var dir = Directory.GetCurrentDirectory();
-        var dataPath = Path.Combine(dir, "db");
-
-        if (PersistentDb)
-        {
-            if (Directory.Exists(dataPath))
-            {
-                Console.WriteLine("Deleting previous db...");
-                Directory.Delete(dataPath, true);
-            }
-
-            Directory.CreateDirectory(dataPath);
-            Console.WriteLine($"Using persistent DB on disk, located: {dataPath}");
-        }
-        else
-        {
-            Console.WriteLine("Using in-memory DB for greater speed.");
-        }
-
-        Console.WriteLine("Initializing db of size {0}GB", DbFileSize / Gb);
-        Console.WriteLine("Starting benchmark with commit level {0}", Commit);
-
-        PagedDb db = PersistentDb
-            ? PagedDb.MemoryMappedDb(DbFileSize, MaxReorgDepth, dataPath)
-            : PagedDb.NativeMemoryDb(DbFileSize, MaxReorgDepth);
-
-        // consts
-        var random = PrepareStableRandomSource();
-        var bigStorageAccount = GetAccountKey(random, RandomSampleSize - Keccak.Size);
-
-        Console.WriteLine();
-        Console.WriteLine("Writing:");
-        Console.WriteLine("- {0} accounts per block", AccountsPerBlock);
-        Console.WriteLine("- through {0} blocks ", BlockCount);
-
-        if (UseStorage)
-        {
-            Console.WriteLine("- each account with 1 storage slot written");
-        }
-
-        if (UseBigStorageAccount)
-        {
-            Console.WriteLine("- each account amends 1 slot in Big Storage account");
-        }
-
-        var counter = 0;
+        Task reportingTask = Task.CompletedTask;
 
         var spectre = new CancellationTokenSource();
 
-        // ReSharper disable once MethodSupportsCancellation
-#pragma warning disable CS4014
-        var reportingTask = Task.Run(() => AnsiConsole.Live(layout)
-#pragma warning restore CS4014
-            .StartAsync(async ctx =>
+        try
+        {
+            using var reporter = new MetricsReporter();
+
+            layout[metrics].Update(reporter.Renderer);
+
+            var dir = Directory.GetCurrentDirectory();
+            var dataPath = Path.Combine(dir, "db");
+
+            if (PersistentDb)
             {
-                while (spectre.IsCancellationRequested == false)
+                if (Directory.Exists(dataPath))
                 {
-                    reporter.Observe();
-                    ctx.Refresh();
-                    await Task.Delay(500);
+                    Console.WriteLine("Deleting previous db...");
+                    Directory.Delete(dataPath, true);
                 }
 
-                // the final report
-                reporter.Observe();
-                ctx.Refresh();
-            }));
-
-        await using (var blockchain = new Blockchain(db, 1000, reporter.Observe))
-        {
-            counter = Writer(blockchain, bigStorageAccount, random, layout[writing]);
-        }
-
-        // waiting for finalization
-        var read = db.BeginReadOnlyBatch();
-
-        // reading
-        // Console.WriteLine();
-        // Console.WriteLine("Reading and asserting values...");
-
-        var readingStopWatch = Stopwatch.StartNew();
-
-        var logReadEvery = counter / NumberOfLogs;
-        for (var i = 0; i < counter; i++)
-        {
-            var key = GetAccountKey(random, i);
-            var a = read.GetAccount(key);
-
-            if (a != GetAccountValue(i))
+                Directory.CreateDirectory(dataPath);
+                Console.WriteLine($"Using persistent DB on disk, located: {dataPath}");
+            }
+            else
             {
-                throw new InvalidOperationException($"Invalid account state for account {i}!");
+                Console.WriteLine("Using in-memory DB for greater speed.");
             }
 
-            if (UseStorage)
-            {
-                var storageAddress = GetStorageAddress(i);
-                var expectedStorageValue = GetStorageValue(i);
-                var actualStorage = read.GetStorage(key, storageAddress);
+            Console.WriteLine("Initializing db of size {0}GB", DbFileSize / Gb);
+            Console.WriteLine("Starting benchmark with commit level {0}", Commit);
 
-                if (actualStorage != expectedStorageValue)
-                {
-                    throw new InvalidOperationException($"Invalid storage for account number {i}!");
-                }
+            PagedDb db = PersistentDb
+                ? PagedDb.MemoryMappedDb(DbFileSize, MaxReorgDepth, dataPath)
+                : PagedDb.NativeMemoryDb(DbFileSize, MaxReorgDepth);
+
+            // consts
+            var random = PrepareStableRandomSource();
+            var bigStorageAccount = GetAccountKey(random, RandomSampleSize - Keccak.Size);
+
+            Console.WriteLine();
+            Console.WriteLine("Writing:");
+            Console.WriteLine("- {0} accounts per block", AccountsPerBlock);
+            Console.WriteLine("- through {0} blocks ", BlockCount);
+
+
+            if (UseStorageEveryNAccounts > 0)
+            {
+                Console.WriteLine($"- every {UseStorageEveryNAccounts}th account will have 1 storage slot written");
             }
 
             if (UseBigStorageAccount)
             {
-                var index = i % BigStorageAccountSlotCount;
-                var storageAddress = GetStorageAddress(index);
-                var expectedStorageValue = BigStorageAccountValues[index];
-                var actualStorage = read.GetStorage(bigStorageAccount, storageAddress);
+                Console.WriteLine("- each account amends 1 slot in Big Storage account");
+            }
 
-                if (actualStorage != expectedStorageValue)
+            var counter = 0;
+
+
+
+            // ReSharper disable once MethodSupportsCancellation
+#pragma warning disable CS4014
+
+            reportingTask = Task.Run(() => AnsiConsole.Live(layout)
+#pragma warning restore CS4014
+                .StartAsync(async ctx =>
                 {
-                    throw new InvalidOperationException($"Invalid storage for big storage account at index {i}!");
+                    while (spectre.IsCancellationRequested == false)
+                    {
+                        reporter.Observe();
+                        ctx.Refresh();
+                        await Task.Delay(500);
+                    }
+
+                    // the final report
+                    reporter.Observe();
+                    ctx.Refresh();
+                }));
+
+            await using (var blockchain = new Blockchain(db, CommitOptions.DangerNoWrite, 1000, reporter.Observe))
+            {
+                counter = Writer(blockchain, bigStorageAccount, random, layout[writing]);
+            }
+
+            // waiting for finalization
+            var read = db.BeginReadOnlyBatch();
+
+            // reading
+            // Console.WriteLine();
+            // Console.WriteLine("Reading and asserting values...");
+
+            var readingStopWatch = Stopwatch.StartNew();
+
+            var logReadEvery = counter / NumberOfLogs;
+            for (var i = 0; i < counter; i++)
+            {
+                var key = GetAccountKey(random, i);
+                var actual = read.GetAccount(key);
+
+                var expected = GetAccountValue(i);
+
+                if (actual != expected)
+                {
+                    throw new InvalidOperationException($"Invalid account state for account number {i} with address {key.ToString()}. " +
+                                                        $"The expected value is {expected} while the actual is {actual}!");
+                }
+
+                if (UseStorageEveryNAccounts > 0 && i % UseStorageEveryNAccounts == 0)
+                {
+                    var storageAddress = GetStorageAddress(i);
+                    var expectedStorageValue = GetStorageValue(i);
+                    var actualStorage = read.GetStorage(key, storageAddress);
+
+                    if (actualStorage != expectedStorageValue)
+                    {
+                        throw new InvalidOperationException($"Invalid storage for account number {i}!");
+                    }
+                }
+
+                if (UseBigStorageAccount)
+                {
+                    var index = i % BigStorageAccountSlotCount;
+                    var storageAddress = GetStorageAddress(index);
+                    var expectedStorageValue = BigStorageAccountValues[index];
+                    var actualStorage = read.GetStorage(bigStorageAccount, storageAddress);
+
+                    if (actualStorage != expectedStorageValue)
+                    {
+                        throw new InvalidOperationException($"Invalid storage for big storage account at index {i}!");
+                    }
+                }
+
+                if (i > 0 & i % logReadEvery == 0)
+                {
+                    ReportReading(i);
                 }
             }
 
-            if (i > 0 & i % logReadEvery == 0)
+            // the final report
+            ReportReading(counter);
+
+            spectre.Cancel();
+            await reportingTask;
+
+            void ReportReading(int i)
             {
-                ReportReading(i);
+                var secondsPerRead = TimeSpan.FromTicks(readingStopWatch.ElapsedTicks / logReadEvery).TotalSeconds;
+                var readsPerSeconds = 1 / secondsPerRead;
+
+                var txt = $"Reading at {i,9} out of {counter} accounts. Current speed: {readsPerSeconds:F1} reads/s";
+
+                layout[reading].Update(new Panel(txt).Header(reading).Expand());
+
+                readingStopWatch.Restart();
             }
         }
-
-        ReportReading(counter);
-
-        void ReportReading(int i)
+        catch (Exception e)
         {
-            var secondsPerRead = TimeSpan.FromTicks(readingStopWatch.ElapsedTicks / logReadEvery).TotalSeconds;
-            var readsPerSeconds = 1 / secondsPerRead;
+            layout[info].Update(new Panel(new Markup($"[red]{e.Message}[/]")).Header(info).Expand());
+            spectre.Cancel();
 
-            var txt = $"Reading at {i,9} out of {counter} accounts. Current speed: {readsPerSeconds:F1} reads/s";
-
-            layout[reading].Update(new Panel(txt).Header(reading).Expand());
-
-            readingStopWatch.Restart();
+            await reportingTask;
+            return;
         }
 
-        // the final report
-        spectre.Cancel();
-        await reportingTask;
+        layout[info].Update(new Panel(new Markup("[green]All data read and asserted correctly [/]")).Header(info)
+            .Expand());
     }
 
     private static int Writer(Blockchain blockchain, Keccak bigStorageAccount, byte[] random,
@@ -220,7 +245,7 @@ public static class Program
 
                 worldState.SetAccount(key, GetAccountValue(counter));
 
-                if (UseStorage)
+                if (UseStorageEveryNAccounts > 0 && counter % UseStorageEveryNAccounts == 0)
                 {
                     var storageAddress = GetStorageAddress(counter);
                     var storageValue = GetStorageValue(counter);
@@ -276,6 +301,7 @@ public static class Program
         reporting.Update(
             new Panel($@"At block {BlockCount - 1}. Writing last batch took {writing.Elapsed:g}").Header("Writing")
                 .Expand());
+
 
         return counter;
     }

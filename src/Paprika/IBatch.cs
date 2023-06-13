@@ -58,4 +58,9 @@ public enum CommitOptions
     /// No actual flush happens and the database may become corrupted when the program is interrupted.
     /// </summary>
     DangerNoFlush,
+
+    /// <summary>
+    /// No write to file. Everything is in-memory only.
+    /// </summary>
+    DangerNoWrite,
 }

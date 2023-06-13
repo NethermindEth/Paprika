@@ -62,20 +62,21 @@ public class MemoryMappedPageManager : PointerPageManager
 
     public override async ValueTask FlushPages(IReadOnlyCollection<DbAddress> dbAddresses, CommitOptions options)
     {
-        // TODO: remove alloc
-        var addresses = dbAddresses.ToArray();
-        Array.Sort(addresses, (a, b) => a.Raw.CompareTo(b.Raw));
-
-        var handle = _file.SafeFileHandle;
-
-        foreach (var addr in addresses)
+        if (options != CommitOptions.DangerNoWrite)
         {
-            // a regular address to write
-            _pendingWrites.Add(WriteAt(addr).AsTask());
-            await AwaitWrites();
+            // TODO: remove alloc
+            var addresses = dbAddresses.ToArray();
+            Array.Sort(addresses, (a, b) => a.Raw.CompareTo(b.Raw));
+
+            foreach (var addr in addresses)
+            {
+                // a regular address to write
+                _pendingWrites.Add(WriteAt(addr).AsTask());
+                await AwaitWrites();
+            }
         }
 
-        if (options != CommitOptions.DangerNoFlush)
+        if (options != CommitOptions.DangerNoFlush && options != CommitOptions.DangerNoWrite)
         {
             _file.Flush(true);
         }
@@ -99,7 +100,10 @@ public class MemoryMappedPageManager : PointerPageManager
 
     public override async ValueTask FlushRootPage(DbAddress root, CommitOptions options)
     {
-        await WriteAt(root);
+        if (options != CommitOptions.DangerNoWrite)
+        {
+            await WriteAt(root);
+        }
 
         if (options == CommitOptions.FlushDataAndRoot)
         {
