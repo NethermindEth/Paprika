@@ -10,6 +10,7 @@ namespace Paprika.Data;
 
 /// <summary>
 /// Represents an in-page map, responsible for storing items and information related to them.
+/// Allows for efficient nibble enumeration so that if a subset of items should be extracted, it's easy to do so.
 /// </summary>
 /// <remarks>
 /// The map is fixed in since as it's page dependent, hence the name.
@@ -18,7 +19,7 @@ namespace Paprika.Data;
 /// It keeps an internal map, now implemented with a not-the-best loop over slots.
 /// With the use of key prefix, it should be small enough and fast enough for now.
 /// </remarks>
-public readonly ref struct FixedMap
+public readonly ref struct NibbleBasedMap
 {
     public const int MinSize = AllocationGranularity * 3;
 
@@ -29,7 +30,7 @@ public readonly ref struct FixedMap
     private readonly Span<Slot> _slots;
     private readonly Span<byte> _raw;
 
-    public FixedMap(Span<byte> buffer)
+    public NibbleBasedMap(Span<byte> buffer)
     {
         _raw = buffer;
         _header = ref Unsafe.As<byte, Header>(ref _raw[0]);
@@ -114,7 +115,7 @@ public readonly ref struct FixedMap
         public const byte AllNibbles = byte.MaxValue;
 
         /// <summary>The map being enumerated.</summary>
-        private readonly FixedMap _map;
+        private readonly NibbleBasedMap _map;
 
         /// <summary>
         /// The nibble being enumerated.
@@ -126,7 +127,7 @@ public readonly ref struct FixedMap
 
         private readonly byte[] _bytes;
 
-        internal NibbleEnumerator(FixedMap map, byte nibble)
+        internal NibbleEnumerator(NibbleBasedMap map, byte nibble)
         {
             _map = map;
             _nibble = nibble;
@@ -336,7 +337,7 @@ public readonly ref struct FixedMap
         var span = array.AsSpan(0, size);
 
         span.Clear();
-        var copy = new FixedMap(span);
+        var copy = new NibbleBasedMap(span);
         var count = _header.Low / Slot.Size;
 
         for (int i = 0; i < count; i++)

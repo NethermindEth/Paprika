@@ -4,7 +4,7 @@ using Paprika.Store;
 namespace Paprika.Data;
 
 /// <summary>
-/// Represents the key of the <see cref="FixedMap"/>, by combining a path <see cref="NibblePath"/>,
+/// Represents the key of the <see cref="NibbleBasedMap"/>, by combining a path <see cref="NibblePath"/>,
 /// a type <see cref="DataType"/> and a potential <see cref="AdditionalKey"/>.
 /// </summary>
 /// <remarks>

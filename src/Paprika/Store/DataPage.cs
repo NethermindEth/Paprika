@@ -101,7 +101,7 @@ public readonly unsafe struct DataPage : IDataPage
         }
 
         // try in-page write
-        var map = new FixedMap(Data.DataSpan);
+        var map = new NibbleBasedMap(Data.DataSpan);
 
         // if written value is a storage cell, try to find the storage tree first
         if (TryFindExistingStorageTreeForCellOf(map, ctx.Key, out var storageTreeAddress))
@@ -168,7 +168,7 @@ public readonly unsafe struct DataPage : IDataPage
         }
 
         // read in-page
-        var map = new FixedMap(Data.DataSpan);
+        var map = new NibbleBasedMap(Data.DataSpan);
 
         // try first storage tree
         if (TryFindExistingStorageTreeForCellOf(map, key, out var storageTreeAddress))
@@ -189,7 +189,7 @@ public readonly unsafe struct DataPage : IDataPage
         return false;
     }
 
-    private static bool TryFindExistingStorageTreeForCellOf(in FixedMap map, in Key key,
+    private static bool TryFindExistingStorageTreeForCellOf(in NibbleBasedMap map, in Key key,
         out DbAddress storageTreeAddress)
     {
         if (key.Type != DataType.StorageCell)
@@ -210,7 +210,7 @@ public readonly unsafe struct DataPage : IDataPage
     }
 
     private static bool TryExtractAsStorageTree((byte nibble, double storageCellPercentageInPage) biggestNibbleStats,
-        in SetContext ctx, in FixedMap map)
+        in SetContext ctx, in NibbleBasedMap map)
     {
         // A prerequisite to plan a massive storage tree is to have at least 90% of the page occupied by a single nibble
         // storage cells. If then they share the same key, we're ready to extract
@@ -281,7 +281,7 @@ public readonly unsafe struct DataPage : IDataPage
     }
 
     private static void WriteStorageCellInStorageTrie(SetContext ctx,
-        DbAddress storageTreeRootPageAddress, in FixedMap map)
+        DbAddress storageTreeRootPageAddress, in NibbleBasedMap map)
     {
         var storageTree = ctx.Batch.GetAt(storageTreeRootPageAddress);
 
