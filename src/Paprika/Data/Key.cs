@@ -34,6 +34,8 @@ public readonly ref struct Key
     /// </summary>
     public static Key Account(NibblePath path) => new(path, DataType.Account, ReadOnlySpan<byte>.Empty);
 
+    public static Key Account(in Keccak key) => Account(NibblePath.FromKey(key));
+
     /// <summary>
     /// Builds the key for <see cref="DataType.CodeHash"/>.
     /// </summary>

@@ -13,18 +13,6 @@ public interface IBatch : IReadOnlyBatch
     void SetMetadata(uint blockNumber, in Keccak blockHash);
 
     /// <summary>
-    /// Sets the given account.
-    /// </summary>
-    /// <param name="key"></param>
-    /// <param name="account"></param>
-    void Set(in Keccak key, in Account account);
-
-    /// <summary>
-    /// Sets storage.
-    /// </summary>
-    void SetStorage(in Keccak key, in Keccak address, UInt256 value);
-
-    /// <summary>
     /// Sets data raw.
     /// </summary>
     void SetRaw(in Key key, ReadOnlySpan<byte> rawData);

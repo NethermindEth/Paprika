@@ -1,10 +1,9 @@
 ﻿using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
-using Paprika.Crypto;
 using Paprika.Data;
 
-namespace Paprika.Tests;
+namespace Paprika.Tests.Data;
 
 public class SerializerTests
 {
