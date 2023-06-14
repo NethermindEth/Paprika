@@ -1,6 +1,8 @@
 ﻿using Nethermind.Int256;
 using NUnit.Framework;
+using Paprika.Data;
 using Paprika.Store;
+using Paprika.Tests.Store;
 using Paprika.Utils;
 using static Paprika.Tests.Values;
 
@@ -23,7 +25,7 @@ public class PrinterTests : BasePageTests
 
             using (var block = db.BeginNextBatch())
             {
-                block.Set(Key0, new Account(Balance0, (UInt256)i++));
+                block.SetRaw(Key.Account(NibblePath.FromKey(Key0)), ((UInt256)i++).ToBigEndian());
                 block.Commit(CommitOptions.FlushDataOnly);
             }
         }

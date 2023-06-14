@@ -15,7 +15,7 @@ namespace Paprika.Store;
 /// The page preserves locality of the data though. It's either all the children with a given nibble stored
 /// in the parent page, or they are flushed underneath. 
 /// </remarks>
-public readonly unsafe struct DataPage : IDataPage
+public readonly unsafe struct DataPage : IPage
 {
     private readonly Page _page;
 

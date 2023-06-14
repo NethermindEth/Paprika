@@ -2,7 +2,7 @@
 using NUnit.Framework;
 using Paprika.Store;
 
-namespace Paprika.Tests;
+namespace Paprika.Tests.Store;
 
 public class DbAddressTests
 {

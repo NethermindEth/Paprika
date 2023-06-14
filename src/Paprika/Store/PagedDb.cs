@@ -340,28 +340,6 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _root.Data.Metadata = new Metadata(blockNumber, blockHash);
         }
 
-        public void Set(in Keccak key, in Account account)
-        {
-            _db.ReportWrite();
-
-            var path = NibblePath.FromKey(key);
-            ref var addr = ref TryGetPageAlloc(path.FirstNibble, out var page);
-            var sliced = path.SliceFrom(RootPage.Payload.RootNibbleLevel);
-            var updated = page.SetAccount(sliced, account, this);
-            addr = _db.GetAddress(updated);
-        }
-
-        public void SetStorage(in Keccak key, in Keccak address, UInt256 value)
-        {
-            _db.ReportWrite();
-
-            var path = NibblePath.FromKey(key);
-            ref var addr = ref TryGetPageAlloc(path.FirstNibble, out var page);
-            var sliced = path.SliceFrom(RootPage.Payload.RootNibbleLevel);
-            var updated = page.SetStorage(sliced, address, value, this);
-            addr = _db.GetAddress(updated);
-        }
-
         public void SetRaw(in Key key, ReadOnlySpan<byte> rawData)
         {
             _db.ReportWrite();

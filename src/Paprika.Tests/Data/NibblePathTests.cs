@@ -2,11 +2,10 @@
 using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Data;
-using Paprika.Store;
 
 // ReSharper disable HeapView.BoxingAllocation
 
-namespace Paprika.Tests;
+namespace Paprika.Tests.Data;
 
 public class NibblePathTests
 {

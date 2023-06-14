@@ -1,8 +1,7 @@
 ﻿using NUnit.Framework;
 using Paprika.Data;
-using Paprika.Store;
 
-namespace Paprika.Tests;
+namespace Paprika.Tests.Data;
 
 [TestFixture(true)]
 [TestFixture(false)]

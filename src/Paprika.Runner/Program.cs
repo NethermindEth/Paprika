@@ -5,6 +5,7 @@ using Nethermind.Int256;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Store;
+using Paprika.Tests;
 using Spectre.Console;
 
 [assembly: ExcludeFromCodeCoverage]

@@ -126,8 +126,8 @@ public class BlockchainTests
             {
                 var key = BuildKey(counter);
 
-                read.GetAccount(key).Should().Be(GetAccount(counter));
-                read.GetStorage(key, key).Should().Be((UInt256)counter);
+                read.ShouldHaveAccount(key, GetAccount(counter));
+                read.ShouldHaveStorage(key, key, (UInt256)counter);
 
                 counter++;
             }

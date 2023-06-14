@@ -9,6 +9,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+      <ProjectReference Include="..\Paprika.Tests\Paprika.Tests.csproj" />
       <ProjectReference Include="..\Paprika\Paprika.csproj" />
     </ItemGroup>
 
