@@ -9,8 +9,11 @@ public class HashingMapTests
 {
     private static NibblePath Path0 => NibblePath.FromKey(Values.Key0);
     private static NibblePath Path1 => NibblePath.FromKey(Values.Key1a);
+    private static NibblePath Path2 => NibblePath.FromKey(Values.Key1b);
+
     private static ReadOnlySpan<byte> Data0 => new byte[] { 23 };
     private static ReadOnlySpan<byte> Data1 => new byte[] { 37 };
+    private static ReadOnlySpan<byte> Data2 => new byte[] { 41 };
 
     [Test]
     public void Set_Get_Should_use_hash_for_operations()
@@ -23,7 +26,7 @@ public class HashingMapTests
         var hash = HashingMap.GetHash(key);
         var data = Data0;
 
-        hash.Should().NotBe(HashingMap.Null);
+        hash.Should().NotBe(HashingMap.NoHash);
 
         map.SetAssert(hash, key, data);
         map.GetAssert(hash, key, data);
@@ -46,7 +49,7 @@ public class HashingMapTests
 
         var data = Data0;
 
-        hash0.Should().NotBe(HashingMap.Null);
+        hash0.Should().NotBe(HashingMap.NoHash);
 
         map.SetAssert(hash0, key0, data);
         map.TrySet(hash1, key1, data).Should().BeFalse();
@@ -75,6 +78,49 @@ public class HashingMapTests
     }
 
     [Test]
+    public void Enumerate()
+    {
+        Span<byte> span = stackalloc byte[HashingMap.MinSize * 3];
+        var map = new HashingMap(span);
+
+        var key0 = Key.Account(Path0);
+        var hash0 = HashingMap.GetHash(key0);
+
+        var key1 = Key.StorageCell(Path1, Keccak.EmptyTreeHash);
+        var hash1 = HashingMap.GetHash(key1);
+
+        var key2 = Key.Account(Path2);
+        var hash2 = HashingMap.GetHash(key2);
+
+        var data0 = Data0;
+        var data1 = Data1;
+        var data2 = Data2;
+
+        map.SetAssert(hash0, key0, data0);
+        map.SetAssert(hash1, key1, data1);
+        map.SetAssert(hash2, key2, data2);
+
+        var e = map.GetEnumerator();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Hash.Should().Be(hash0);
+        e.Current.RawData.SequenceEqual(data0);
+        //e.Current.Key.Equals(key0).Should().BeTrue();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Hash.Should().Be(hash1);
+        e.Current.RawData.SequenceEqual(data1);
+        //e.Current.Key.Equals(key1).Should().BeTrue();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Hash.Should().Be(hash2);
+        e.Current.RawData.SequenceEqual(data2);
+        //e.Current.Key.Equals(key1).Should().BeTrue();
+
+        e.MoveNext().Should().BeFalse();
+    }
+
+    [Test]
     public void Clear()
     {
         Span<byte> span = stackalloc byte[HashingMap.MinSize];
@@ -85,7 +131,7 @@ public class HashingMapTests
         var hash = HashingMap.GetHash(key);
         var data = Data0;
 
-        hash.Should().NotBe(HashingMap.Null);
+        hash.Should().NotBe(HashingMap.NoHash);
 
         map.SetAssert(hash, key, data);
 
