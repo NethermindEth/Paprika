@@ -68,12 +68,16 @@ public static class TestExtensions
     public static DataPage SetStorage(this DataPage page, in Keccak key, in Keccak storage, ReadOnlySpan<byte> data,
         IBatchContext batch)
     {
-        return new DataPage(page.Set(new SetContext(Key.StorageCell(NibblePath.FromKey(key), storage), data, batch)));
+        var k = Key.StorageCell(NibblePath.FromKey(key), storage);
+        var hash = HashingMap.GetHash(k);
+        return new DataPage(page.Set(new SetContext(hash, k, data, batch)));
     }
 
     public static DataPage SetAccount(this DataPage page, in Keccak key, ReadOnlySpan<byte> data, IBatchContext batch)
     {
-        return new DataPage(page.Set(new SetContext(Key.Account(NibblePath.FromKey(key)), data, batch)));
+        var k = Key.Account(NibblePath.FromKey(key));
+        var hash = HashingMap.GetHash(k);
+        return new DataPage(page.Set(new SetContext(hash, k, data, batch)));
     }
 
     public static void ShouldHaveAccount(this DataPage read, in Keccak key, ReadOnlySpan<byte> expected,

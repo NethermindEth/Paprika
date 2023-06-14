@@ -87,8 +87,6 @@ public class DataPageTests : BasePageTests
 
         const int count = 1 * 1024 * 1024;
 
-        const int offset = 0x12345678;
-
         for (int i = 0; i < count; i++)
         {
             var key = GetKey(i);
@@ -182,7 +180,8 @@ public class DataPageTests : BasePageTests
 
         // set the empty path which may happen on var-length scenarios
         var keccakKey = Key.KeccakOrRlp(NibblePath.Empty);
-        dataPage = dataPage.Set(new SetContext(keccakKey, Span<byte>.Empty, batch)).Cast<DataPage>();
+        var keccakHash = HashingMap.GetHash(keccakKey);
+        dataPage = dataPage.Set(new SetContext(keccakHash, keccakKey, Span<byte>.Empty, batch)).Cast<DataPage>();
 
         for (var i = 0; i < count; i++)
         {

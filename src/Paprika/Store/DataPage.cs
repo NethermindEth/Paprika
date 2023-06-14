@@ -169,7 +169,7 @@ public readonly unsafe struct DataPage : IPage
         foreach (var item in map.EnumerateNibble(biggestNibble))
         {
             var key = item.Key.SliceFrom(NibbleCount);
-            var set = new SetContext(key, item.RawData, ctx.Batch);
+            var set = new SetContext(HashingMap.GetHash(key), key, item.RawData, ctx.Batch);
 
             dataPage = new DataPage(dataPage.Set(set));
 
@@ -317,7 +317,7 @@ public readonly unsafe struct DataPage : IPage
                 // it's ok to use item.Key, the enumerator does not changes the additional key bytes
                 var key = Key.StorageTreeStorageCell(item.Key);
 
-                dataPage = new DataPage(dataPage.Set(new SetContext(key, item.RawData, ctx.Batch)));
+                dataPage = new DataPage(dataPage.Set(new SetContext(HashingMap.GetHash(key), key, item.RawData, ctx.Batch)));
 
                 // fast delete by enumerator item
                 map.Delete(item);
@@ -343,9 +343,10 @@ public readonly unsafe struct DataPage : IPage
 
         // build a new key, based just on the storage key as the root is addressed by the account address
         var inTreeAddress = Key.StorageTreeStorageCell(ctx.Key);
+        var hash = HashingMap.GetHash(inTreeAddress);
 
         var updatedStorageTree =
-            new DataPage(storageTree).Set(new SetContext(inTreeAddress, ctx.Data, ctx.Batch));
+            new DataPage(storageTree).Set(new SetContext(hash, inTreeAddress, ctx.Data, ctx.Batch));
 
         if (updatedStorageTree.Raw != storageTree.Raw)
         {

@@ -141,7 +141,7 @@ public class HashingMapTests
     }
 }
 
-static class TestExtensions
+static class HashingMapTestExtensions
 {
     public static void SetAssert(this HashingMap map, uint hash, in Key key, ReadOnlySpan<byte> data)
     {

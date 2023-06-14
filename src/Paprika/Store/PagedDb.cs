@@ -346,7 +346,10 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             ref var addr = ref TryGetPageAlloc(key.Path.FirstNibble, out var page);
             var sliced = key.SliceFrom(RootPage.Payload.RootNibbleLevel);
-            var updated = page.Set(new SetContext(sliced, rawData, this));
+
+            var hash = HashingMap.GetHash(sliced);
+
+            var updated = page.Set(new SetContext(hash, sliced, rawData, this));
             addr = _db.GetAddress(updated);
         }
 
