@@ -1,5 +1,4 @@
 ﻿using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
@@ -110,7 +109,7 @@ public readonly unsafe struct DataPage : IPage
                     {
                         var context = new SetContext(item.Hash, item.Key, item.RawData, ctx.Batch);
 
-                        ref var addr = ref Data.Buckets[item.Key.Path.FirstNibble];
+                        ref var addr = ref Data.Buckets[nibble];
 
                         var page = ctx.Batch.GetAt(addr);
                         var updated = new DataPage(page).Set(context.SliceFrom(NibbleCount));
@@ -202,14 +201,15 @@ public readonly unsafe struct DataPage : IPage
         return false;
     }
 
-    public bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
+    public bool TryGet(uint hash, Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
         // path longer than 0, try to find in child
         if (key.Path.Length > 0)
         {
             if (TryGetHashingInPageMap(key, out var hashingMap))
             {
-
+                if (hashingMap.TryGet(hash, key, out result))
+                    return true;
             }
 
             // try to go deeper only if the path is long enough
@@ -219,7 +219,7 @@ public readonly unsafe struct DataPage : IPage
             // non-null page jump, follow it!
             if (bucket.IsNull == false)
             {
-                return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), batch, out result);
+                return new DataPage(batch.GetAt(bucket)).TryGet(hash, key.SliceFrom(NibbleCount), batch, out result);
             }
         }
 
@@ -231,8 +231,9 @@ public readonly unsafe struct DataPage : IPage
         {
             var storageTree = new DataPage(batch.GetAt(storageTreeAddress));
             var inTreeAddress = Key.StorageTreeStorageCell(key);
+            var inTreeHash = HashingMap.GetHash(inTreeAddress);
 
-            return storageTree.TryGet(inTreeAddress, batch, out result);
+            return storageTree.TryGet(inTreeHash, inTreeAddress, batch, out result);
         }
 
         // try regular map

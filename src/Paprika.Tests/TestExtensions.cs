@@ -81,16 +81,26 @@ public static class TestExtensions
     }
 
     public static void ShouldHaveAccount(this DataPage read, in Keccak key, ReadOnlySpan<byte> expected,
-        IReadOnlyBatchContext batch)
+        IReadOnlyBatchContext batch, int? iteration = null)
     {
-        read.TryGet(Key.Account(key), batch, out var value).Should().BeTrue();
-        value.SequenceEqual(expected);
+        var account = Key.Account(key);
+        var hash = HashingMap.GetHash(account);
+        var because = $"Data for {account.Path.ToString()} should exist.";
+        if (iteration != null)
+        {
+            because += $" Iteration: {iteration}";
+        }
+        read.TryGet(hash, account, batch, out var value).Should().BeTrue(because);
+        value.SequenceEqual(expected).Should().BeTrue(because);
     }
 
     public static void ShouldHaveStorage(this DataPage read, in Keccak key, in Keccak storage, ReadOnlySpan<byte> expected,
         IReadOnlyBatchContext batch)
     {
-        read.TryGet(Key.StorageCell(NibblePath.FromKey(key), storage), batch, out var value).Should().BeTrue();
-        value.SequenceEqual(expected);
+        var storageCell = Key.StorageCell(NibblePath.FromKey(key), storage);
+        var hash = HashingMap.GetHash(storageCell);
+        var because = $"Storage at {storageCell.ToString()} should exist";
+        read.TryGet(hash, storageCell, batch, out var value).Should().BeTrue(because);
+        value.SequenceEqual(expected).Should().BeTrue();
     }
 }

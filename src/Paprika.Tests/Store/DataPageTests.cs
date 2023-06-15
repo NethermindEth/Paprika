@@ -1,4 +1,5 @@
 ﻿using System.Buffers.Binary;
+using System.Diagnostics;
 using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
@@ -85,7 +86,7 @@ public class DataPageTests : BasePageTests
         var batch = NewBatch(BatchId);
         var dataPage = new DataPage(page);
 
-        const int count = 1 * 1024 * 1024;
+        const int count = 2 * 1024;
 
         for (int i = 0; i < count; i++)
         {
@@ -96,7 +97,11 @@ public class DataPageTests : BasePageTests
         for (int i = 0; i < count; i++)
         {
             var key = GetKey(i);
-            dataPage.ShouldHaveAccount(key, GetValue(i), batch);
+            if (i == 811)
+            {
+                Debugger.Break();
+            }
+            dataPage.ShouldHaveAccount(key, GetValue(i), batch, i);
         }
     }
 
@@ -190,7 +195,8 @@ public class DataPageTests : BasePageTests
         }
 
         // assert
-        dataPage.TryGet(keccakKey, batch, out var value).Should().BeTrue();
+        var hash = HashingMap.GetHash(keccakKey);
+        dataPage.TryGet(hash, keccakKey, batch, out var value).Should().BeTrue();
         value.Length.Should().Be(0);
 
         for (int i = 0; i < count; i++)

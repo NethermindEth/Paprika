@@ -60,8 +60,8 @@ public readonly ref struct HashingMap
             var entry = GetEntry(offset);
 
             // ReSharper disable once StackAllocInsideLoop, highly unlikely as this should be only one hit
-            Span<byte> destination = stackalloc byte[key.Path.MaxByteLength + TypeBytes + LengthOfLength + key.AdditionalKey.Length];
-            var prefix = WritePrefix(key, destination);
+            var prefix = WritePrefix(key,
+                stackalloc byte[key.Path.MaxByteLength + TypeBytes + LengthOfLength + key.AdditionalKey.Length]);
 
             if (entry.StartsWith(prefix))
             {
@@ -97,8 +97,7 @@ public readonly ref struct HashingMap
 
         _hashes[position] = hash;
 
-        Span<byte> destination = stackalloc byte[GetPrefixAllocationSize(key)];
-        var prefix = WritePrefix(key, destination);
+        var prefix = WritePrefix(key, stackalloc byte[GetPrefixAllocationSize(key)]);
 
         // get the entry
         var entry = GetEntry(position);
@@ -106,7 +105,8 @@ public readonly ref struct HashingMap
         // copy to the entry
         prefix.CopyTo(entry);
         entry[prefix.Length] = (byte)value.Length;
-        value.CopyTo(entry.Slice(prefix.Length + LengthOfLength));
+        var valueDestination = entry.Slice(prefix.Length + LengthOfLength);
+        value.CopyTo(valueDestination);
 
         return true;
     }
@@ -200,7 +200,10 @@ public readonly ref struct HashingMap
             var leftover = NibblePath.ReadFrom(entry, out var path);
             var type = (DataType)leftover[0];
             var additionalKeyLength = leftover[TypeBytes];
-            var data = leftover.Slice(TypeBytes + LengthOfLength + additionalKeyLength);
+
+            var dataStart = TypeBytes + LengthOfLength + additionalKeyLength;
+            var dataLength = leftover[dataStart];
+            var data = leftover.Slice(dataStart + LengthOfLength, dataLength);
 
             if (type == DataType.StorageCell)
             {
