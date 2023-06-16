@@ -38,22 +38,24 @@ public class Blockchain : IAsyncDisposable
 
     // metrics
     private readonly Meter _meter;
-    private readonly Histogram<int> _flusherBatchSize;
+    private readonly Histogram<int> _flusherBlockPerS;
     private readonly Histogram<int> _flusherBlockApplicationInMs;
-    private readonly Histogram<int> _flusherBlockCommitInMs;
+    private readonly Histogram<int> _flusherFlushInMs;
     private readonly MetricsExtensions.IAtomicIntGauge _flusherQueueCount;
 
     private readonly PagedDb _db;
-    private readonly CommitOptions _flushOptions;
+    private readonly TimeSpan _minFlushDelay;
     private readonly Action? _beforeMetricsDisposed;
     private readonly Task _flusher;
 
     private uint _lastFinalized;
 
-    public Blockchain(PagedDb db, CommitOptions flushOptions = CommitOptions.FlushDataAndRoot, int? finalizationQueueLimit = null, Action? beforeMetricsDisposed = null)
+    private static readonly TimeSpan DefaultFlushDelay = TimeSpan.FromSeconds(1);
+
+    public Blockchain(PagedDb db, TimeSpan? minFlushDelay = null, int? finalizationQueueLimit = null, Action? beforeMetricsDisposed = null)
     {
         _db = db;
-        _flushOptions = flushOptions;
+        _minFlushDelay = minFlushDelay ?? DefaultFlushDelay;
         _beforeMetricsDisposed = beforeMetricsDisposed;
 
         if (finalizationQueueLimit == null)
@@ -84,12 +86,12 @@ public class Blockchain : IAsyncDisposable
         // metrics
         _meter = new Meter("Paprika.Chain.Blockchain");
 
-        _flusherBatchSize = _meter.CreateHistogram<int>("Blocks finalized / batch", "Blocks",
-            "The number of blocks finalized by the flushing task in one db batch");
+        _flusherBlockPerS = _meter.CreateHistogram<int>("Blocks stored / s", "Blocks/s",
+            "The number of blocks stored by the flushing task in one second");
         _flusherBlockApplicationInMs = _meter.CreateHistogram<int>("Block data application in ms", "ms",
             "The amortized time it takes for one block to apply on PagedDb");
-        _flusherBlockCommitInMs = _meter.CreateHistogram<int>("DB commit time / block in ms", "ms",
-            "The amortized time it takes for one block to commit in PagedDb");
+        _flusherFlushInMs = _meter.CreateHistogram<int>("Flush buffers in ms", "ms",
+            "The time it took to synchronize the file");
         _flusherQueueCount = _meter.CreateAtomicObservableGauge("Flusher queue count", "Blocks",
             "The number of the blocks in the flush queue");
     }
@@ -107,9 +109,9 @@ public class Blockchain : IAsyncDisposable
             {
                 var flushed = new List<uint>();
                 uint flushedTo = 0;
-                var loop = Stopwatch.StartNew();
+                var timer = Stopwatch.StartNew();
 
-                while (loop.Elapsed < LoopEvery && reader.TryRead(out var block))
+                while (timer.Elapsed < _minFlushDelay && reader.TryRead(out var block))
                 {
                     using var batch = _db.BeginNextBatch();
 
@@ -126,17 +128,20 @@ public class Blockchain : IAsyncDisposable
                     application.Stop();
                     _flusherBlockApplicationInMs.Record((int)application.ElapsedMilliseconds);
 
-                    // commit
-                    var commit = Stopwatch.StartNew();
-                    await batch.Commit(_flushOptions);
-                    commit.Stop();
-                    _flusherBlockCommitInMs.Record((int)commit.ElapsedMilliseconds);
+                    // commit but no flush here, it's too heavy
+                    await batch.Commit(CommitOptions.DangerNoFlush);
                 }
+
+                timer.Stop();
+
+                var flushWatch = Stopwatch.StartNew();
+                _db.Flush();
+                _flusherFlushInMs.Record((int)flushWatch.ElapsedMilliseconds);
 
                 // measure
                 var count = flushed.Count;
 
-                _flusherBatchSize.Record(count);
+                _flusherBlockPerS.Record((int)(count * 1000 / timer.ElapsedMilliseconds));
                 _flusherQueueCount.Subtract(count);
 
                 // publish the reader to the blocks following up the flushed one
@@ -174,8 +179,6 @@ public class Blockchain : IAsyncDisposable
             throw;
         }
     }
-
-    private static readonly TimeSpan LoopEvery = TimeSpan.FromSeconds(2);
 
     public IWorldState StartNew(Keccak parentKeccak, Keccak blockKeccak, uint blockNumber)
     {
