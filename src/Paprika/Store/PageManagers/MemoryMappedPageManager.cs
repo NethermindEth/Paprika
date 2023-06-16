@@ -1,6 +1,5 @@
 ﻿using System.Buffers;
 using System.IO.MemoryMappedFiles;
-using Paprika.Data;
 
 namespace Paprika.Store.PageManagers;
 
@@ -110,6 +109,8 @@ public class MemoryMappedPageManager : PointerPageManager
             _file.Flush(true);
         }
     }
+
+    public override void Flush() => _file.Flush(true);
 
     public override void Dispose()
     {

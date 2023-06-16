@@ -651,4 +651,6 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             //Page.Clear();
         }
     }
+
+    public void Flush() => _manager.Flush();
 }
