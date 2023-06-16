@@ -265,7 +265,9 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 return false;
             }
 
-            return new DataPage(GetAt(addr)).TryGet(key.SliceFrom(RootPage.Payload.RootNibbleLevel), this, out result);
+            var sliced = key.SliceFrom(RootPage.Payload.RootNibbleLevel);
+            var hash = HashingMap.GetHash(sliced);
+            return new DataPage(GetAt(addr)).TryGet(hash, sliced, this, out result);
         }
 
         public uint BatchId { get; }
@@ -332,7 +334,9 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 return false;
             }
 
-            return new DataPage(GetAt(addr)).TryGet(key.SliceFrom(RootPage.Payload.RootNibbleLevel), this, out result);
+            var sliced = key.SliceFrom(RootPage.Payload.RootNibbleLevel);
+            var hash = HashingMap.GetHash(sliced);
+            return new DataPage(GetAt(addr)).TryGet(hash, sliced, this, out result);
         }
 
         public void SetMetadata(uint blockNumber, in Keccak blockHash)
@@ -346,7 +350,10 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             ref var addr = ref TryGetPageAlloc(key.Path.FirstNibble, out var page);
             var sliced = key.SliceFrom(RootPage.Payload.RootNibbleLevel);
-            var updated = page.Set(new SetContext(sliced, rawData, this));
+
+            var hash = HashingMap.GetHash(sliced);
+
+            var updated = page.Set(new SetContext(hash, sliced, rawData, this));
             addr = _db.GetAddress(updated);
         }
 

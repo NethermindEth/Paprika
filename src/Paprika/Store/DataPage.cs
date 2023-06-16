@@ -60,9 +60,14 @@ public readonly unsafe struct DataPage : IPage
         [FieldOffset(DataOffset)] private byte DataStart;
 
         /// <summary>
-        /// Fixed map memory
+        /// Writable area.
         /// </summary>
         public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
+
+        /// <summary>
+        /// Whether all the buckets point to pages underneath.
+        /// </summary>
+        public bool AllBucketsFull => Buckets.IndexOf(DbAddress.Null) == -1;
     }
 
     /// <summary>
@@ -91,12 +96,38 @@ public readonly unsafe struct DataPage : IPage
             // the bucket is not null and represents a page jump, follow it but only if it was written this tx
             if (address.IsNull == false)
             {
-                var page = ctx.Batch.GetAt(address);
-                var updated = new DataPage(page).Set(ctx.SliceFrom(NibbleCount));
+                if (TryGetHashingInPageMap(ctx.Key, out var hashingMap))
+                {
+                    if (hashingMap.TrySet(ctx.Hash, ctx.Key, ctx.Data))
+                    {
+                        // insertion in the map succeeds
+                        return _page;
+                    }
 
-                // remember the updated
-                address = ctx.Batch.GetAddress(updated);
-                return _page;
+                    // no more place in the map, enumerate and add to appropriate child pages
+                    foreach (var item in hashingMap)
+                    {
+                        var context = new SetContext(item.Hash, item.Key, item.RawData, ctx.Batch);
+
+                        ref var addr = ref Data.Buckets[item.Key.Path.FirstNibble];
+
+                        var page = ctx.Batch.GetAt(addr);
+                        var updated = new DataPage(page).Set(context.SliceFrom(NibbleCount));
+                        addr = ctx.Batch.GetAddress(updated);
+                    }
+
+                    hashingMap.Clear();
+                }
+
+                // write in a corresponding child page
+                {
+                    var page = ctx.Batch.GetAt(address);
+                    var updated = new DataPage(page).Set(ctx.SliceFrom(NibbleCount));
+
+                    // remember the updated
+                    address = ctx.Batch.GetAddress(updated);
+                    return _page;
+                }
             }
         }
 
@@ -137,7 +168,7 @@ public readonly unsafe struct DataPage : IPage
         foreach (var item in map.EnumerateNibble(biggestNibble))
         {
             var key = item.Key.SliceFrom(NibbleCount);
-            var set = new SetContext(key, item.RawData, ctx.Batch);
+            var set = new SetContext(HashingMap.GetHash(key), key, item.RawData, ctx.Batch);
 
             dataPage = new DataPage(dataPage.Set(set));
 
@@ -147,15 +178,40 @@ public readonly unsafe struct DataPage : IPage
 
         Data.Buckets[biggestNibble] = ctx.Batch.GetAddress(dataPage.AsPage());
 
+        // new page added, check if all buckets full and repurpose the data span
+        if (HashingMap.CanBeCached(ctx.Key) && Data.AllBucketsFull)
+        {
+            Data.DataSpan.Clear();
+        }
+
         // The page has some of the values flushed down, try to add again.
         return Set(ctx);
     }
 
-    public bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
+    private bool TryGetHashingInPageMap(in Key key, out HashingMap map)
+    {
+        if (HashingMap.CanBeCached(key) && Data.AllBucketsFull)
+        {
+            // all buckets are full, so it means that the span can be used with a hash map
+            map = new HashingMap(Data.DataSpan);
+            return true;
+        }
+
+        map = default;
+        return false;
+    }
+
+    public bool TryGet(uint hash, Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
         // path longer than 0, try to find in child
         if (key.Path.Length > 0)
         {
+            if (TryGetHashingInPageMap(key, out var hashingMap))
+            {
+                if (hashingMap.TryGet(hash, key, out result))
+                    return true;
+            }
+
             // try to go deeper only if the path is long enough
             var nibble = key.Path.FirstNibble;
             var bucket = Data.Buckets[nibble];
@@ -163,7 +219,7 @@ public readonly unsafe struct DataPage : IPage
             // non-null page jump, follow it!
             if (bucket.IsNull == false)
             {
-                return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), batch, out result);
+                return new DataPage(batch.GetAt(bucket)).TryGet(hash, key.SliceFrom(NibbleCount), batch, out result);
             }
         }
 
@@ -175,8 +231,9 @@ public readonly unsafe struct DataPage : IPage
         {
             var storageTree = new DataPage(batch.GetAt(storageTreeAddress));
             var inTreeAddress = Key.StorageTreeStorageCell(key);
+            var inTreeHash = HashingMap.GetHash(inTreeAddress);
 
-            return storageTree.TryGet(inTreeAddress, batch, out result);
+            return storageTree.TryGet(inTreeHash, inTreeAddress, batch, out result);
         }
 
         // try regular map
@@ -261,7 +318,7 @@ public readonly unsafe struct DataPage : IPage
                 // it's ok to use item.Key, the enumerator does not changes the additional key bytes
                 var key = Key.StorageTreeStorageCell(item.Key);
 
-                dataPage = new DataPage(dataPage.Set(new SetContext(key, item.RawData, ctx.Batch)));
+                dataPage = new DataPage(dataPage.Set(new SetContext(HashingMap.GetHash(key), key, item.RawData, ctx.Batch)));
 
                 // fast delete by enumerator item
                 map.Delete(item);
@@ -287,9 +344,10 @@ public readonly unsafe struct DataPage : IPage
 
         // build a new key, based just on the storage key as the root is addressed by the account address
         var inTreeAddress = Key.StorageTreeStorageCell(ctx.Key);
+        var hash = HashingMap.GetHash(inTreeAddress);
 
         var updatedStorageTree =
-            new DataPage(storageTree).Set(new SetContext(inTreeAddress, ctx.Data, ctx.Batch));
+            new DataPage(storageTree).Set(new SetContext(hash, inTreeAddress, ctx.Data, ctx.Batch));
 
         if (updatedStorageTree.Raw != storageTree.Raw)
         {

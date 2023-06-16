@@ -115,7 +115,7 @@ public readonly ref struct NibbleBasedMap
         public const byte AllNibbles = byte.MaxValue;
 
         /// <summary>The map being enumerated.</summary>
-        private readonly NibbleBasedMap _map;
+        private NibbleBasedMap _map;
 
         /// <summary>
         /// The nibble being enumerated.
@@ -126,6 +126,7 @@ public readonly ref struct NibbleBasedMap
         private int _index;
 
         private readonly byte[] _bytes;
+        private Item _current;
 
         internal NibbleEnumerator(NibbleBasedMap map, byte nibble)
         {
@@ -155,67 +156,67 @@ public readonly ref struct NibbleBasedMap
             if (index < to)
             {
                 _index = index;
+                _current = Build();
                 return true;
             }
 
             return false;
         }
 
-        public Item Current
+        public Item Current => _current;
+
+        private Item Build()
         {
-            get
+            ref var slot = ref _map._slots[_index];
+            var span = _map.GetSlotPayload(ref slot);
+
+            ReadOnlySpan<byte> data;
+            NibblePath path;
+
+            // path rebuilding
+            Span<byte> nibbles = stackalloc byte[3];
+            var count = slot.DecodeNibblesFromPrefix(nibbles);
+
+            if (count == 0)
             {
-                ref var slot = ref _map._slots[_index];
-                var span = _map.GetSlotPayload(ref slot);
-
-                ReadOnlySpan<byte> data;
-                NibblePath path;
-
-                // path rebuilding
-                Span<byte> nibbles = stackalloc byte[3];
-                var count = slot.DecodeNibblesFromPrefix(nibbles);
-
-                if (count == 0)
-                {
-                    // no nibbles stored in the slot, read as is.
-                    data = NibblePath.ReadFrom(span, out path);
-                }
-                else
-                {
-                    // there's at least one nibble extracted
-                    var raw = NibblePath.RawExtract(span);
-                    data = span.Slice(raw.Length);
-
-                    const int space = 2;
-
-                    var bytes = _bytes.AsSpan(0, raw.Length + space); //big enough to handle all cases
-
-                    // copy forward enough to allow negative pointer arithmetics
-                    var pathDestination = bytes.Slice(space);
-                    raw.CopyTo(pathDestination);
-
-                    // Terribly unsafe region!
-                    // Operate on the copy, pathDestination, as it will be overwritten with unsafe ref.
-                    NibblePath.ReadFrom(pathDestination, out path);
-
-                    var countOdd = (byte)(count & 1);
-                    for (var i = 0; i < count; i++)
-                    {
-                        path.UnsafeSetAt(i - count - 1, countOdd, nibbles[i]);
-                    }
-
-                    path = path.CopyWithUnsafePointerMoveBack(count);
-                }
-
-                if (slot.Type == DataType.StorageCell)
-                {
-                    const int size = Keccak.Size;
-                    var additionalKey = data.Slice(0, size);
-                    return new Item(Key.StorageCell(path, additionalKey), data.Slice(size), _index, slot.Type);
-                }
-
-                return new Item(Key.Raw(path, slot.Type), data, _index, slot.Type);
+                // no nibbles stored in the slot, read as is.
+                data = NibblePath.ReadFrom(span, out path);
             }
+            else
+            {
+                // there's at least one nibble extracted
+                var raw = NibblePath.RawExtract(span);
+                data = span.Slice(raw.Length);
+
+                const int space = 2;
+
+                var bytes = _bytes.AsSpan(0, raw.Length + space); //big enough to handle all cases
+
+                // copy forward enough to allow negative pointer arithmetics
+                var pathDestination = bytes.Slice(space);
+                raw.CopyTo(pathDestination);
+
+                // Terribly unsafe region!
+                // Operate on the copy, pathDestination, as it will be overwritten with unsafe ref.
+                NibblePath.ReadFrom(pathDestination, out path);
+
+                var countOdd = (byte)(count & 1);
+                for (var i = 0; i < count; i++)
+                {
+                    path.UnsafeSetAt(i - count - 1, countOdd, nibbles[i]);
+                }
+
+                path = path.CopyWithUnsafePointerMoveBack(count);
+            }
+
+            if (slot.Type == DataType.StorageCell)
+            {
+                const int size = Keccak.Size;
+                var additionalKey = data.Slice(0, size);
+                return new Item(Key.StorageCell(path, additionalKey), data.Slice(size), _index, slot.Type);
+            }
+
+            return new Item(Key.Raw(path, slot.Type), data, _index, slot.Type);
         }
 
         public void Dispose()

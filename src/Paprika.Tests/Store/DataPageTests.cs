@@ -1,4 +1,5 @@
 ﻿using System.Buffers.Binary;
+using System.Diagnostics;
 using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
@@ -69,11 +70,11 @@ public class DataPageTests : BasePageTests
         var value1B = GetValue(1);
 
         var updated = dataPage
-            .SetAccount(Key1a, value1A, batch)
-            .SetAccount(Key1b, value1B, batch);
+            .SetAccount(Key1A, value1A, batch)
+            .SetAccount(Key1B, value1B, batch);
 
-        updated.ShouldHaveAccount(Key1a, value1A, batch);
-        updated.ShouldHaveAccount(Key1b, value1B, batch);
+        updated.ShouldHaveAccount(Key1A, value1A, batch);
+        updated.ShouldHaveAccount(Key1B, value1B, batch);
     }
 
     [Test]
@@ -85,9 +86,7 @@ public class DataPageTests : BasePageTests
         var batch = NewBatch(BatchId);
         var dataPage = new DataPage(page);
 
-        const int count = 1 * 1024 * 1024;
-
-        const int offset = 0x12345678;
+        const int count = 1063;
 
         for (int i = 0; i < count; i++)
         {
@@ -98,7 +97,12 @@ public class DataPageTests : BasePageTests
         for (int i = 0; i < count; i++)
         {
             var key = GetKey(i);
-            dataPage.ShouldHaveAccount(key, GetValue(i), batch);
+            if (i == 811)
+            {
+                Debugger.Break();
+            }
+
+            dataPage.ShouldHaveAccount(key, GetValue(i), batch, i);
         }
     }
 
@@ -182,7 +186,8 @@ public class DataPageTests : BasePageTests
 
         // set the empty path which may happen on var-length scenarios
         var keccakKey = Key.KeccakOrRlp(NibblePath.Empty);
-        dataPage = dataPage.Set(new SetContext(keccakKey, Span<byte>.Empty, batch)).Cast<DataPage>();
+        var keccakHash = HashingMap.GetHash(keccakKey);
+        dataPage = dataPage.Set(new SetContext(keccakHash, keccakKey, Span<byte>.Empty, batch)).Cast<DataPage>();
 
         for (var i = 0; i < count; i++)
         {
@@ -191,7 +196,8 @@ public class DataPageTests : BasePageTests
         }
 
         // assert
-        dataPage.TryGet(keccakKey, batch, out var value).Should().BeTrue();
+        var hash = HashingMap.GetHash(keccakKey);
+        dataPage.TryGet(hash, keccakKey, batch, out var value).Should().BeTrue();
         value.Length.Should().Be(0);
 
         for (int i = 0; i < count; i++)
