@@ -44,6 +44,7 @@ public class Blockchain : IAsyncDisposable
     private readonly MetricsExtensions.IAtomicIntGauge _flusherQueueCount;
 
     private readonly PagedDb _db;
+    private readonly IPreCommitBehavior? _preCommit;
     private readonly TimeSpan _minFlushDelay;
     private readonly Action? _beforeMetricsDisposed;
     private readonly Task _flusher;
@@ -52,9 +53,10 @@ public class Blockchain : IAsyncDisposable
 
     private static readonly TimeSpan DefaultFlushDelay = TimeSpan.FromSeconds(1);
 
-    public Blockchain(PagedDb db, TimeSpan? minFlushDelay = null, int? finalizationQueueLimit = null, Action? beforeMetricsDisposed = null)
+    public Blockchain(PagedDb db, IPreCommitBehavior? preCommit = null, TimeSpan? minFlushDelay = null, int? finalizationQueueLimit = null, Action? beforeMetricsDisposed = null)
     {
         _db = db;
+        _preCommit = preCommit;
         _minFlushDelay = minFlushDelay ?? DefaultFlushDelay;
         _beforeMetricsDisposed = beforeMetricsDisposed;
 
@@ -270,7 +272,7 @@ public class Blockchain : IAsyncDisposable
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload, storing it in a in-memory trie
     /// </summary>
-    private class Block : RefCountingDisposable, IWorldState
+    private class Block : RefCountingDisposable, IWorldState, ICommit
     {
         public Keccak Hash { get; }
         public Keccak ParentHash { get; }
@@ -315,6 +317,9 @@ public class Blockchain : IAsyncDisposable
         {
             // acquires one more lease for this block as it is stored in the blockchain
             AcquireLease();
+
+            // run pre-commit
+            _blockchain._preCommit?.BeforeCommit(this);
 
             // set to blocks in number and in blocks by hash
             _blockchain._blocksByNumber.AddOrUpdate(BlockNumber,
@@ -391,7 +396,9 @@ public class Blockchain : IAsyncDisposable
             Set(Key.StorageCell(path, address), payload);
         }
 
-        private void Set(in Key key, in ReadOnlySpan<byte> payload)
+        public bool TryGet(in Key key, out ReadOnlySpanOwner<byte> result) => throw new NotImplementedException("Not implemented yet");
+
+        public void Set(in Key key, in ReadOnlySpan<byte> payload)
         {
             RawFixedMap map;
 
@@ -416,6 +423,8 @@ public class Blockchain : IAsyncDisposable
 
             map.TrySet(key, payload);
         }
+
+        public IKeyEnumerator GetEnumerator() => throw new NotImplementedException("Not implemented yet");
 
         private ReadOnlySpanOwner<byte> Get(int bloom, in Key key)
         {
