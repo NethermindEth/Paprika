@@ -27,7 +27,7 @@ public static class Program
     private const long DbFileSize = PersistentDb ? 128 * Gb : 16 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
 
-    private const CommitOptions Commit = CommitOptions.FlushDataOnly;
+    private const CommitOptions Commit = CommitOptions.FlushDataAndRoot;
 
     private const int LogEvery = BlockCount / NumberOfLogs;
 
@@ -130,7 +130,7 @@ public static class Program
                     ctx.Refresh();
                 }));
 
-            await using (var blockchain = new Blockchain(db, CommitOptions.DangerNoWrite, 1000, reporter.Observe))
+            await using (var blockchain = new Blockchain(db, Commit, 1000, reporter.Observe))
             {
                 counter = Writer(blockchain, bigStorageAccount, random, layout[writing]);
             }

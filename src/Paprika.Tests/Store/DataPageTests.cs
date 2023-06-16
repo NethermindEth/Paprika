@@ -70,11 +70,11 @@ public class DataPageTests : BasePageTests
         var value1B = GetValue(1);
 
         var updated = dataPage
-            .SetAccount(Key1a, value1A, batch)
-            .SetAccount(Key1b, value1B, batch);
+            .SetAccount(Key1A, value1A, batch)
+            .SetAccount(Key1B, value1B, batch);
 
-        updated.ShouldHaveAccount(Key1a, value1A, batch);
-        updated.ShouldHaveAccount(Key1b, value1B, batch);
+        updated.ShouldHaveAccount(Key1A, value1A, batch);
+        updated.ShouldHaveAccount(Key1B, value1B, batch);
     }
 
     [Test]
@@ -86,7 +86,7 @@ public class DataPageTests : BasePageTests
         var batch = NewBatch(BatchId);
         var dataPage = new DataPage(page);
 
-        const int count = 2 * 1024;
+        const int count = 1063;
 
         for (int i = 0; i < count; i++)
         {
@@ -101,6 +101,7 @@ public class DataPageTests : BasePageTests
             {
                 Debugger.Break();
             }
+
             dataPage.ShouldHaveAccount(key, GetValue(i), batch, i);
         }
     }

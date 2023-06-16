@@ -8,8 +8,8 @@ namespace Paprika.Tests;
 public class HashingMapTests
 {
     private static NibblePath Path0 => NibblePath.FromKey(Values.Key0);
-    private static NibblePath Path1 => NibblePath.FromKey(Values.Key1a);
-    private static NibblePath Path2 => NibblePath.FromKey(Values.Key1b);
+    private static NibblePath Path1 => NibblePath.FromKey(Values.Key1A);
+    private static NibblePath Path2 => NibblePath.FromKey(Values.Key1B);
 
     private static ReadOnlySpan<byte> Data0 => new byte[] { 23 };
     private static ReadOnlySpan<byte> Data1 => new byte[] { 37 };
@@ -105,17 +105,17 @@ public class HashingMapTests
         e.MoveNext().Should().BeTrue();
         e.Current.Hash.Should().Be(hash0);
         e.Current.RawData.SequenceEqual(data0);
-        //e.Current.Key.Equals(key0).Should().BeTrue();
+        e.Current.Key.Equals(key0).Should().BeTrue();
 
         e.MoveNext().Should().BeTrue();
         e.Current.Hash.Should().Be(hash1);
         e.Current.RawData.SequenceEqual(data1);
-        //e.Current.Key.Equals(key1).Should().BeTrue();
+        e.Current.Key.Equals(key1).Should().BeTrue();
 
         e.MoveNext().Should().BeTrue();
         e.Current.Hash.Should().Be(hash2);
         e.Current.RawData.SequenceEqual(data2);
-        //e.Current.Key.Equals(key1).Should().BeTrue();
+        e.Current.Key.Equals(key2).Should().BeTrue();
 
         e.MoveNext().Should().BeFalse();
     }

@@ -109,7 +109,7 @@ public readonly unsafe struct DataPage : IPage
                     {
                         var context = new SetContext(item.Hash, item.Key, item.RawData, ctx.Batch);
 
-                        ref var addr = ref Data.Buckets[nibble];
+                        ref var addr = ref Data.Buckets[item.Key.Path.FirstNibble];
 
                         var page = ctx.Batch.GetAt(addr);
                         var updated = new DataPage(page).Set(context.SliceFrom(NibbleCount));

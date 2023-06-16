@@ -87,6 +87,11 @@ public readonly ref struct Key
 
     public Key SliceFrom(int nibbles) => new(Path.SliceFrom(nibbles), Type, AdditionalKey);
 
+    public bool Equals(in Key key)
+    {
+        return Type == key.Type && AdditionalKey.SequenceEqual(key.AdditionalKey) && Path.Equals(key.Path);
+    }
+
     public override string ToString()
     {
         return $"{nameof(Path)}: {Path.ToString()}, " +

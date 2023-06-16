@@ -91,7 +91,8 @@ public static class TestExtensions
             because += $" Iteration: {iteration}";
         }
         read.TryGet(hash, account, batch, out var value).Should().BeTrue(because);
-        value.SequenceEqual(expected).Should().BeTrue(because);
+        value.SequenceEqual(expected).Should()
+            .BeTrue($"Expected value is {expected.ToHexString(false)} while actual is {value.ToHexString(false)}");
     }
 
     public static void ShouldHaveStorage(this DataPage read, in Keccak key, in Keccak storage, ReadOnlySpan<byte> expected,
