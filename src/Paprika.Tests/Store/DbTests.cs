@@ -3,11 +3,10 @@ using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Crypto;
-using Paprika.Data;
 using Paprika.Store;
 using static Paprika.Tests.Values;
 
-namespace Paprika.Tests;
+namespace Paprika.Tests.Store;
 
 public class DbTests
 {
@@ -23,40 +22,37 @@ public class DbTests
 
         using var db = PagedDb.NativeMemoryDb(MB);
 
-        byte[] span = new byte[Keccak.Size];
-
-        span[1] = 0x12;
-        span[2] = 0x34;
-        span[3] = 0x56;
-        span[4] = 0x78;
-
         for (byte i = 0; i < max; i++)
         {
-            span[0] = (byte)(i << NibblePath.NibbleShift);
-            var key = new Keccak(span);
+            var key = GetKey(i);
 
             using var batch = db.BeginNextBatch();
-            batch.Set(key, new Account(i, i));
-            batch.SetStorage(key, key, i);
+
+            var value = GetValue(i);
+
+            batch.SetAccount(key, value);
+            batch.SetStorage(key, key, value);
+
             await batch.Commit(CommitOptions.FlushDataAndRoot);
         }
 
         using var read = db.BeginNextBatch();
 
-        for (byte i = 0; i < max; i++)
-        {
-            span[0] = (byte)(i << NibblePath.NibbleShift);
-            var key = new Keccak(span);
-
-            var expected = (UInt256)i;
-            var account = read.GetAccount(key);
-            Assert.AreEqual(expected, account.Nonce);
-
-            var actual = read.GetStorage(key, key);
-            actual.Should().Be(expected);
-        }
+        Assert(read);
 
         Console.WriteLine($"Used memory {db.Megabytes:P}");
+
+        static void Assert(IReadOnlyBatch read)
+        {
+            for (byte i = 0; i < max; i++)
+            {
+                var key = GetKey(i);
+                var expected = GetValue(i);
+
+                read.ShouldHaveAccount(key, expected);
+                read.ShouldHaveStorage(key, key, expected);
+            }
+        }
     }
 
     [TestCase(100_000, 1, TestName = "Long history, single account")]
@@ -70,18 +66,14 @@ public class DbTests
         for (var i = 0; i < blockCount; i++)
         {
             // ReSharper disable once ConvertToUsingDeclaration
-            using (var block = db.BeginNextBatch())
+            using (var batch = db.BeginNextBatch())
             {
                 for (var account = 0; account < accountsCount; account++)
                 {
-                    var key = Key0;
-
-                    BinaryPrimitives.WriteInt32LittleEndian(key.BytesAsSpan, account);
-
-                    block.Set(key, new Account(Balance0, (UInt256)i));
+                    batch.SetAccount(GetKey(i), GetValue(i));
                 }
 
-                await block.Commit(CommitOptions.FlushDataOnly);
+                await batch.Commit(CommitOptions.FlushDataOnly);
             }
         }
 
@@ -96,41 +88,40 @@ public class DbTests
         const int size = MB16;
         const int blocksDuringReadAcquired = 500; // the number should be smaller than the number of buckets in the root
         const int blocksPostRead = 10_000;
-        UInt256 start = 13;
+        const int start = -1;
 
         using var db = PagedDb.NativeMemoryDb(size);
 
         // write first value
         using (var block = db.BeginNextBatch())
         {
-            block.Set(Key0, new Account(Balance0, start));
+            block.SetAccount(Key0, GetValue(start));
             await block.Commit(CommitOptions.FlushDataOnly);
         }
 
         // start read batch, it will make new allocs only
-        var readBatch = db.BeginReadOnlyBatch();
+        var read = db.BeginReadOnlyBatch();
 
         for (var i = 0; i < blocksDuringReadAcquired; i++)
         {
             // ReSharper disable once ConvertToUsingDeclaration
             using (var block = db.BeginNextBatch())
             {
-                var value = start + (UInt256)i;
-
                 // assert previous
-                block.GetAccount(Key0).Nonce.Should().Be(value);
+                block.ShouldHaveAccount(Key0, GetValue(i + start));
 
-                block.Set(Key0, new Account(Balance0, value + 1));
+                // write current
+                block.SetAccount(Key0, GetValue(i));
                 await block.Commit(CommitOptions.FlushDataOnly);
 
-                readBatch.GetAccount(Key0).Nonce.Should().Be(start);
+                read.ShouldHaveAccount(Key0, GetValue(start));
             }
         }
 
         var snapshot = db.Megabytes;
 
         // disable read
-        readBatch.Dispose();
+        read.Dispose();
 
         // write again
         for (var i = 0; i < blocksPostRead; i++)
@@ -138,9 +129,9 @@ public class DbTests
             // ReSharper disable once ConvertToUsingDeclaration
             using (var block = db.BeginNextBatch())
             {
-                var value = (UInt256)i + start;
+                var value = GetValue(i + start);
 
-                block.Set(Key0, new Account(Balance0, value + 1));
+                block.SetAccount(Key0, value);
                 await block.Commit(CommitOptions.FlushDataOnly);
             }
         }
@@ -162,12 +153,12 @@ public class DbTests
 
         using (var batch = db.BeginNextBatch())
         {
-            for (uint i = 0; i < count; i++)
+            for (int i = 0; i < count; i++)
             {
                 var address = GetStorageAddress(i);
 
-                batch.Set(Key0, new Account(1, 1));
-                batch.SetStorage(Key0, address, i);
+                batch.SetAccount(Key0, GetValue(i));
+                batch.SetStorage(Key0, address, GetValue(i));
             }
 
             await batch.Commit(CommitOptions.FlushDataOnly);
@@ -175,17 +166,17 @@ public class DbTests
 
         using (var read = db.BeginReadOnlyBatch())
         {
-            for (uint i = 0; i < count; i++)
+            for (int i = 0; i < count; i++)
             {
                 var address = GetStorageAddress(i);
-                read.GetStorage(Key0, address).Should().Be(i);
+                read.ShouldHaveStorage(Key0, address, GetValue(i));
             }
         }
 
-        static Keccak GetStorageAddress(uint i)
+        static Keccak GetStorageAddress(int i)
         {
-            var address = Key1a;
-            BinaryPrimitives.WriteUInt32LittleEndian(address.BytesAsSpan, i);
+            var address = Key1A;
+            BinaryPrimitives.WriteInt32LittleEndian(address.BytesAsSpan, i);
             return address;
         }
 
@@ -213,4 +204,13 @@ public class DbTests
             header.PaprikaVersion.Should().Be(1);
         }
     }
+
+    private static Keccak GetKey(int i)
+    {
+        var keccak = Keccak.EmptyTreeHash;
+        BinaryPrimitives.WriteInt32LittleEndian(keccak.BytesAsSpan, i);
+        return keccak;
+    }
+
+    static byte[] GetValue(int i) => new UInt256((uint)i).ToBigEndian();
 }

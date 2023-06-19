@@ -1,8 +1,7 @@
 ﻿using System.Runtime.InteropServices;
-using Paprika.Data;
 using Paprika.Store;
 
-namespace Paprika.Tests;
+namespace Paprika.Tests.Store;
 
 public abstract class BasePageTests
 {

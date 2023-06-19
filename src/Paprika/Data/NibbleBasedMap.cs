@@ -10,6 +10,7 @@ namespace Paprika.Data;
 
 /// <summary>
 /// Represents an in-page map, responsible for storing items and information related to them.
+/// Allows for efficient nibble enumeration so that if a subset of items should be extracted, it's easy to do so.
 /// </summary>
 /// <remarks>
 /// The map is fixed in since as it's page dependent, hence the name.
@@ -18,7 +19,7 @@ namespace Paprika.Data;
 /// It keeps an internal map, now implemented with a not-the-best loop over slots.
 /// With the use of key prefix, it should be small enough and fast enough for now.
 /// </remarks>
-public readonly ref struct FixedMap
+public readonly ref struct NibbleBasedMap
 {
     public const int MinSize = AllocationGranularity * 3;
 
@@ -29,7 +30,7 @@ public readonly ref struct FixedMap
     private readonly Span<Slot> _slots;
     private readonly Span<byte> _raw;
 
-    public FixedMap(Span<byte> buffer)
+    public NibbleBasedMap(Span<byte> buffer)
     {
         _raw = buffer;
         _header = ref Unsafe.As<byte, Header>(ref _raw[0]);
@@ -107,10 +108,14 @@ public readonly ref struct FixedMap
 
     public NibbleEnumerator EnumerateNibble(byte nibble) => new(this, nibble);
 
+    public NibbleEnumerator EnumerateAll() => new(this, NibbleEnumerator.AllNibbles);
+
     public ref struct NibbleEnumerator
     {
+        public const byte AllNibbles = byte.MaxValue;
+
         /// <summary>The map being enumerated.</summary>
-        private readonly FixedMap _map;
+        private NibbleBasedMap _map;
 
         /// <summary>
         /// The nibble being enumerated.
@@ -121,8 +126,9 @@ public readonly ref struct FixedMap
         private int _index;
 
         private readonly byte[] _bytes;
+        private Item _current;
 
-        internal NibbleEnumerator(FixedMap map, byte nibble)
+        internal NibbleEnumerator(NibbleBasedMap map, byte nibble)
         {
             _map = map;
             _nibble = nibble;
@@ -138,9 +144,11 @@ public readonly ref struct FixedMap
             var to = _map.Count;
 
             while (index < to &&
-                   (_map._slots[index].Type == DataType.Deleted ||
-                    _map._slots[index].NibbleCount == 0 ||
-                    _map._slots[index].FirstNibbleOfPrefix != _nibble))
+                   (_map._slots[index].Type == DataType.Deleted || // filter out deleted
+                    (_nibble != AllNibbles &&
+                     (
+                         _map._slots[index].NibbleCount == 0 ||
+                         _map._slots[index].FirstNibbleOfPrefix != _nibble))))
             {
                 index += 1;
             }
@@ -148,67 +156,67 @@ public readonly ref struct FixedMap
             if (index < to)
             {
                 _index = index;
+                _current = Build();
                 return true;
             }
 
             return false;
         }
 
-        public Item Current
+        public Item Current => _current;
+
+        private Item Build()
         {
-            get
+            ref var slot = ref _map._slots[_index];
+            var span = _map.GetSlotPayload(ref slot);
+
+            ReadOnlySpan<byte> data;
+            NibblePath path;
+
+            // path rebuilding
+            Span<byte> nibbles = stackalloc byte[3];
+            var count = slot.DecodeNibblesFromPrefix(nibbles);
+
+            if (count == 0)
             {
-                ref var slot = ref _map._slots[_index];
-                var span = _map.GetSlotPayload(ref slot);
-
-                ReadOnlySpan<byte> data;
-                NibblePath path;
-
-                // path rebuilding
-                Span<byte> nibbles = stackalloc byte[3];
-                var count = slot.DecodeNibblesFromPrefix(nibbles);
-
-                if (count == 0)
-                {
-                    // no nibbles stored in the slot, read as is.
-                    data = NibblePath.ReadFrom(span, out path);
-                }
-                else
-                {
-                    // there's at least one nibble extracted
-                    var raw = NibblePath.RawExtract(span);
-                    data = span.Slice(raw.Length);
-
-                    const int space = 2;
-
-                    var bytes = _bytes.AsSpan(0, raw.Length + space); //big enough to handle all cases
-
-                    // copy forward enough to allow negative pointer arithmetics
-                    var pathDestination = bytes.Slice(space);
-                    raw.CopyTo(pathDestination);
-
-                    // Terribly unsafe region!
-                    // Operate on the copy, pathDestination, as it will be overwritten with unsafe ref.
-                    NibblePath.ReadFrom(pathDestination, out path);
-
-                    var countOdd = (byte)(count & 1);
-                    for (var i = 0; i < count; i++)
-                    {
-                        path.UnsafeSetAt(i - count - 1, countOdd, nibbles[i]);
-                    }
-
-                    path = path.CopyWithUnsafePointerMoveBack(count);
-                }
-
-                if (slot.Type == DataType.StorageCell)
-                {
-                    const int size = Keccak.Size;
-                    var additionalKey = data.Slice(0, size);
-                    return new Item(Key.StorageCell(path, additionalKey), data.Slice(size), _index, slot.Type);
-                }
-
-                return new Item(Key.Raw(path, slot.Type), data, _index, slot.Type);
+                // no nibbles stored in the slot, read as is.
+                data = NibblePath.ReadFrom(span, out path);
             }
+            else
+            {
+                // there's at least one nibble extracted
+                var raw = NibblePath.RawExtract(span);
+                data = span.Slice(raw.Length);
+
+                const int space = 2;
+
+                var bytes = _bytes.AsSpan(0, raw.Length + space); //big enough to handle all cases
+
+                // copy forward enough to allow negative pointer arithmetics
+                var pathDestination = bytes.Slice(space);
+                raw.CopyTo(pathDestination);
+
+                // Terribly unsafe region!
+                // Operate on the copy, pathDestination, as it will be overwritten with unsafe ref.
+                NibblePath.ReadFrom(pathDestination, out path);
+
+                var countOdd = (byte)(count & 1);
+                for (var i = 0; i < count; i++)
+                {
+                    path.UnsafeSetAt(i - count - 1, countOdd, nibbles[i]);
+                }
+
+                path = path.CopyWithUnsafePointerMoveBack(count);
+            }
+
+            if (slot.Type == DataType.StorageCell)
+            {
+                const int size = Keccak.Size;
+                var additionalKey = data.Slice(0, size);
+                return new Item(Key.StorageCell(path, additionalKey), data.Slice(size), _index, slot.Type);
+            }
+
+            return new Item(Key.Raw(path, slot.Type), data, _index, slot.Type);
         }
 
         public void Dispose()
@@ -240,14 +248,17 @@ public readonly ref struct FixedMap
     /// <summary>
     /// Gets the nibble representing the biggest bucket and provides stats to the caller.
     /// </summary>
-    /// <returns></returns>
-    public (byte nibble, byte accountsCount, double percentage) GetBiggestNibbleStats()
+    /// <returns>
+    /// The nibble and how much of the page is occupied by storage cells that start their key with the nibble.
+    /// </returns>
+    public (byte nibble, double storageCellPercentageInPage) GetBiggestNibbleStats()
     {
         const int bucketCount = 16;
 
-        byte slotCount = 0;
-        Span<ushort> buckets = stackalloc ushort[bucketCount];
-        Span<byte> accountsCount = stackalloc byte[bucketCount];
+        Span<byte> storageCellCount = stackalloc byte[bucketCount];
+        Span<byte> slotCount = stackalloc byte[bucketCount];
+
+        var totalSlotCount = 0;
 
         var to = _header.Low / Slot.Size;
         for (var i = 0; i < to; i++)
@@ -257,34 +268,33 @@ public readonly ref struct FixedMap
             // extract only not deleted and these which have at least one nibble
             if (slot.Type != DataType.Deleted && slot.NibbleCount > 0)
             {
-                slotCount++;
-
                 var index = slot.FirstNibbleOfPrefix % bucketCount;
 
-                if (slot.Type == DataType.Account)
+                if (slot.Type == DataType.StorageCell)
                 {
-                    accountsCount[index]++;
+                    storageCellCount[index]++;
                 }
 
-                buckets[index]++;
+                slotCount[index]++;
+                totalSlotCount++;
             }
         }
 
-        var maxI = 0;
+        var maxNibble = 0;
 
-        for (int i = 1; i < bucketCount; i++)
+        for (int nibble = 1; nibble < bucketCount; nibble++)
         {
-            var currentCount = buckets[i];
-            var maxCount = buckets[maxI];
+            var currentCount = slotCount[nibble];
+            var maxCount = slotCount[maxNibble];
             if (currentCount > maxCount)
             {
-                maxI = i;
+                maxNibble = nibble;
             }
         }
 
-        var percentage = (double)buckets[maxI] / slotCount;
+        var storageCellPercentageInPage = (double)storageCellCount[maxNibble] / totalSlotCount;
 
-        return ((byte)maxI, accountsCount[maxI], percentage);
+        return ((byte)maxNibble, storageCellPercentageInPage);
     }
 
     private static int GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> additionalKey,
@@ -328,7 +338,7 @@ public readonly ref struct FixedMap
         var span = array.AsSpan(0, size);
 
         span.Clear();
-        var copy = new FixedMap(span);
+        var copy = new NibbleBasedMap(span);
         var count = _header.Low / Slot.Size;
 
         for (int i = 0; i < count; i++)

@@ -1,21 +1,21 @@
 ﻿using Nethermind.Int256;
 using Paprika.Crypto;
+using Paprika.Data;
+using Paprika.Store;
 
 namespace Paprika;
 
 public interface IBatch : IReadOnlyBatch
 {
     /// <summary>
-    /// Sets the given account.
+    /// Sets the metadata of the root of the current batch.
     /// </summary>
-    /// <param name="key"></param>
-    /// <param name="account"></param>
-    void Set(in Keccak key, in Account account);
+    void SetMetadata(uint blockNumber, in Keccak blockHash);
 
     /// <summary>
-    /// Sets storage.
+    /// Sets data raw.
     /// </summary>
-    void SetStorage(in Keccak key, in Keccak address, UInt256 value);
+    void SetRaw(in Key key, ReadOnlySpan<byte> rawData);
 
     /// <summary>
     /// Commits the block returning its root hash.
@@ -46,4 +46,9 @@ public enum CommitOptions
     /// No actual flush happens and the database may become corrupted when the program is interrupted.
     /// </summary>
     DangerNoFlush,
+
+    /// <summary>
+    /// No write to file. Everything is in-memory only.
+    /// </summary>
+    DangerNoWrite,
 }

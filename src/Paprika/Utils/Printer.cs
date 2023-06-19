@@ -110,19 +110,6 @@ public class Printer : IPageVisitor
         _printable.Add(addr.Raw, p);
     }
 
-    public void On(FanOut256Page page, DbAddress addr)
-    {
-        var nextPages = page.Data.Buckets.ToArray().Where(a => a.IsNull == false && a.IsValidPageAddress).ToArray();
-        var p = new[]
-        {
-            (Type, "FanOut256Page"),
-            ("BatchId", page.Header.BatchId.ToString()),
-            ("Points Down To Pages", ListPages(nextPages)),
-        };
-
-        _printable.Add(addr.Raw, p);
-    }
-
     public void Print(TextWriter writer)
     {
         var builders = Enumerable.Range(0, PageHeight)

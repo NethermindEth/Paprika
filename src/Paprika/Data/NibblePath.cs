@@ -68,6 +68,8 @@ public readonly ref struct NibblePath
     /// </summary>
     public int MaxByteLength => Length / 2 + 2;
 
+    public const int FullKeccakByteLength = Keccak.Size / 2 + 2;
+
     /// <summary>
     /// Writes the nibble path into the destination.
     /// </summary>
@@ -373,6 +375,9 @@ public readonly ref struct NibblePath
 
     public override string ToString()
     {
+        if (Length == 0)
+            return "";
+
         Span<char> path = stackalloc char[Length];
         ref var ch = ref path[0];
 

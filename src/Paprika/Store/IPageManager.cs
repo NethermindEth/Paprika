@@ -1,6 +1,4 @@
-﻿using Paprika.Data;
-
-namespace Paprika.Store;
+﻿namespace Paprika.Store;
 
 public interface IPageManager : IDisposable, IPageResolver
 {
@@ -19,4 +17,9 @@ public interface IPageManager : IDisposable, IPageResolver
     ValueTask FlushPages(IReadOnlyCollection<DbAddress> addresses, CommitOptions options);
 
     ValueTask FlushRootPage(DbAddress rootPage, CommitOptions options);
+
+    /// <summary>
+    /// Flushes underlying buffers.
+    /// </summary>
+    void Flush();
 }

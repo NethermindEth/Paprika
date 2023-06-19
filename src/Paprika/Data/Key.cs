@@ -4,7 +4,7 @@ using Paprika.Store;
 namespace Paprika.Data;
 
 /// <summary>
-/// Represents the key of the <see cref="FixedMap"/>, by combining a path <see cref="NibblePath"/>,
+/// Represents the key of the <see cref="NibbleBasedMap"/>, by combining a path <see cref="NibblePath"/>,
 /// a type <see cref="DataType"/> and a potential <see cref="AdditionalKey"/>.
 /// </summary>
 /// <remarks>
@@ -33,6 +33,8 @@ public readonly ref struct Key
     /// Builds the key for <see cref="DataType.Account"/>.
     /// </summary>
     public static Key Account(NibblePath path) => new(path, DataType.Account, ReadOnlySpan<byte>.Empty);
+
+    public static Key Account(in Keccak key) => Account(NibblePath.FromKey(key));
 
     /// <summary>
     /// Builds the key for <see cref="DataType.CodeHash"/>.
@@ -84,6 +86,11 @@ public readonly ref struct Key
         new(path, DataType.KeccakOrRlp, ReadOnlySpan<byte>.Empty);
 
     public Key SliceFrom(int nibbles) => new(Path.SliceFrom(nibbles), Type, AdditionalKey);
+
+    public bool Equals(in Key key)
+    {
+        return Type == key.Type && AdditionalKey.SequenceEqual(key.AdditionalKey) && Path.Equals(key.Path);
+    }
 
     public override string ToString()
     {

@@ -14,7 +14,7 @@ public class FixedMapBenchmarks
 
     public FixedMapBenchmarks()
     {
-        var map = new FixedMap(_writtenData);
+        var map = new NibbleBasedMap(_writtenData);
 
         Span<byte> key = stackalloc byte[4];
 
@@ -37,7 +37,7 @@ public class FixedMapBenchmarks
     public int Write_whole_page_of_data()
     {
         _writable.AsSpan().Clear();
-        var map = new FixedMap(_writable);
+        var map = new NibbleBasedMap(_writable);
 
         Span<byte> key = stackalloc byte[4];
 
@@ -60,7 +60,7 @@ public class FixedMapBenchmarks
     [Benchmark]
     public int Read_existing_keys()
     {
-        var map = new FixedMap(_writtenData);
+        var map = new NibbleBasedMap(_writtenData);
         Span<byte> key = stackalloc byte[4];
 
         var result = 0;
@@ -82,7 +82,7 @@ public class FixedMapBenchmarks
     [Benchmark]
     public int Read_nonexistent_keys()
     {
-        var map = new FixedMap(_writtenData);
+        var map = new NibbleBasedMap(_writtenData);
         Span<byte> key = stackalloc byte[4];
 
         var result = 0;

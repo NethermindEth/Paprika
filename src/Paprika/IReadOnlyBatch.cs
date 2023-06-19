@@ -1,24 +1,19 @@
 ﻿using Nethermind.Int256;
 using Paprika.Crypto;
+using Paprika.Data;
+using Paprika.Store;
 
 namespace Paprika;
 
 public interface IReadOnlyBatch : IDisposable
 {
-    /// <summary>
-    /// Gets the account information
-    /// </summary>
-    /// <param name="key">The key to looked up.</param>
-    /// <returns>The account or default on non-existence.</returns>
-    Account GetAccount(in Keccak key);
+    Metadata Metadata { get; }
 
     /// <summary>
-    /// Gets the storage value.
+    /// Low level retrieval of data.
     /// </summary>
-    UInt256 GetStorage(in Keccak key, in Keccak address);
-
-    /// <summary>
-    /// Gets the Root Hash as if it were a Merkle Tree
-    /// </summary>
-    Keccak GetRootHash();
+    /// <param name="key"></param>
+    /// <param name="result"></param>
+    /// <returns></returns>
+    bool TryGet(in Key key, out ReadOnlySpan<byte> result);
 }

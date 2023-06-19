@@ -1,10 +1,9 @@
 ﻿using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
-using Paprika.Crypto;
 using Paprika.Data;
 
-namespace Paprika.Tests;
+namespace Paprika.Tests.Data;
 
 public class SerializerTests
 {
@@ -18,12 +17,12 @@ public class SerializerTests
     {
         Span<byte> destination = stackalloc byte[Serializer.BalanceNonceMaxByteCount];
 
-        var actual = Serializer.WriteAccount(destination, balance, nonce);
+        var expected = new Account(balance, nonce);
+        var actual = Serializer.WriteAccount(destination, expected);
 
-        Serializer.ReadAccount(actual, out var balanceRead, out var nonceRead);
+        Serializer.ReadAccount(actual, out var account);
 
-        balanceRead.Should().Be(balance);
-        nonceRead.Should().Be(nonce);
+        account.Should().Be(expected);
     }
 
     static IEnumerable<TestCaseData> GetEOAData()

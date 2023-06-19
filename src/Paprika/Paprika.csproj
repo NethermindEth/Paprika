@@ -9,6 +9,7 @@
 
     <ItemGroup>
       <PackageReference Include="Nethermind.Numerics.Int256" Version="1.1.0" />
+      <PackageReference Include="System.IO.Hashing" Version="8.0.0-preview.4.23259.5" />
     </ItemGroup>
 
 </Project>
