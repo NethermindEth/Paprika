@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using Paprika.Crypto;
+using Paprika.Data;
 using Paprika.Merkle;
 
 namespace Paprika.Tests.Merkle;
@@ -25,4 +26,25 @@ public class NodeTest
         Assert.That(branch.Keccak, Is.EqualTo(Keccak.Zero));
     }
 
+
+    [Test]
+    public void Extension_encoding()
+    {
+        var rawPath = new byte[] { 0x1, 0x2, 0x3 };
+        var nibblePath = new NibblePath(rawPath, 0, rawPath.Length);
+        var extension = new Extension(nibblePath);
+
+        // TODO: Figure how to store var-length encoded `NibblePath`
+        // Assert.That(extension.Path.Equals(nibblePath));
+
+        // TODO: Test without unsafe
+        unsafe
+        {
+            Assert.That(sizeof(Extension), Is.EqualTo(33));
+        }
+
+        Assert.That(extension.IsDirty, Is.EqualTo(true));
+        Assert.That(extension.Type, Is.EqualTo(NodeType.Extension));
+        Assert.That(extension.Keccak, Is.EqualTo(Keccak.Zero));
+    }
 }
