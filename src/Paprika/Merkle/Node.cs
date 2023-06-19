@@ -57,7 +57,7 @@ public readonly struct Branch
 public readonly struct Extension
 {
     // Extension: 1 byte for type + dirty, var-length for path (usually it will be a nibble or a few)
-    private const int Size = 33;
+    private const int Size = 1;
     private const byte IsDirtyFlag = 0b1000;
     private const byte NodeTypeFlag = 0b0110;
 
@@ -65,11 +65,6 @@ public readonly struct Extension
     private readonly byte _header;
 
     public NibblePath Path => default;
-
-    [FieldOffset(1)]
-    private readonly Keccak _keccak;
-
-    public Keccak Keccak => _keccak;
 
     public bool IsDirty => (_header & IsDirtyFlag) != 0;
     public NodeType Type => (NodeType)((_header & NodeTypeFlag) >> 1);

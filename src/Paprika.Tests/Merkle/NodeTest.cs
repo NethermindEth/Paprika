@@ -40,11 +40,10 @@ public class NodeTest
         // TODO: Test without unsafe
         unsafe
         {
-            Assert.That(sizeof(Extension), Is.EqualTo(33));
+            Assert.That(sizeof(Extension), Is.EqualTo(1));
         }
 
         Assert.That(extension.IsDirty, Is.EqualTo(true));
         Assert.That(extension.Type, Is.EqualTo(NodeType.Extension));
-        Assert.That(extension.Keccak, Is.EqualTo(Keccak.Zero));
     }
 }
