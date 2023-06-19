@@ -30,7 +30,7 @@ public class MerkleKeccakTests
         },
         new object[]
         {
-            Values.Key1a, Values.Balance1, Values.Nonce1,
+            Values.Key1A, Values.Balance1, Values.Nonce1,
             "DD358AF6B1D8E875FBA0E585710D054F14DD9D06FA3C8C5F2BAF66F413178F82"
         },
         new object[]
