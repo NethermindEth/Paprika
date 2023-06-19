@@ -3,11 +3,11 @@ using Paprika.Store;
 
 namespace Paprika.Chain;
 
-public readonly struct RawFixedMap
+public readonly struct InBlockMap
 {
     private readonly Page _page;
 
-    public RawFixedMap(Page page) => _page = page;
+    public InBlockMap(Page page) => _page = page;
 
     public bool TrySet(in Key key, ReadOnlySpan<byte> data)
     {
