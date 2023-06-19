@@ -30,14 +30,15 @@ public static class TestExtensions
 
     public static Account GetAccount(this IReadOnlyBatch read, in Keccak key)
     {
-        read.TryGet(Key.Account(key), out var value);
+        read.TryGet(Key.Account(key), out var value).Should().BeTrue($"Key: {key.ToString()} should exist.");
         Serializer.ReadAccount(value, out var account);
         return account;
     }
 
     public static UInt256 GetStorage(this IReadOnlyBatch read, in Keccak key, in Keccak storage)
     {
-        read.TryGet(Key.StorageCell(NibblePath.FromKey(key), storage), out var value);
+        read.TryGet(Key.StorageCell(NibblePath.FromKey(key), storage), out var value).Should()
+            .BeTrue($"Storage for the account: {key.ToString()} @ {storage.ToString()} should exist.");
         Serializer.ReadStorageValue(value, out var v);
         return v;
     }

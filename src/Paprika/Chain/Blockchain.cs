@@ -281,7 +281,7 @@ public class Blockchain : IAsyncDisposable
         private readonly Blockchain _blockchain;
 
         private readonly List<Page> _pages = new();
-        private readonly List<RawFixedMap> _maps = new();
+        private readonly List<InBlockMap> _maps = new();
 
         // one of: Block as the parent, or IReadOnlyBatch if flushed
         private RefCountingDisposable _previous;
@@ -393,11 +393,11 @@ public class Blockchain : IAsyncDisposable
 
         private void Set(in Key key, in ReadOnlySpan<byte> payload)
         {
-            RawFixedMap map;
+            InBlockMap map;
 
             if (_maps.Count == 0)
             {
-                map = new RawFixedMap(Rent());
+                map = new InBlockMap(Rent());
                 _maps.Add(map);
             }
             else
@@ -411,7 +411,7 @@ public class Blockchain : IAsyncDisposable
             }
 
             // not enough space, allocate one more
-            map = new RawFixedMap(Rent());
+            map = new InBlockMap(Rent());
             _maps.Add(map);
 
             map.TrySet(key, payload);
