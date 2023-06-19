@@ -46,4 +46,25 @@ public class NodeTest
         Assert.That(extension.IsDirty, Is.EqualTo(true));
         Assert.That(extension.Type, Is.EqualTo(NodeType.Extension));
     }
+
+
+    [Test]
+    public void Leaf_encoding()
+    {
+        var rawPath = new byte[] { 0x2, 0x4, 0x6 };
+        var nibblePath = new NibblePath(rawPath, 0, rawPath.Length);
+        var leaf = new LeafNode(nibblePath);
+
+        // TODO: Figure how to store var-length encoded `NibblePath`
+        // Assert.That(leaf.Path.Equals(nibblePath));
+
+        // TODO: Test without unsafe
+        unsafe
+        {
+            Assert.That(sizeof(LeafNode), Is.EqualTo(33));
+        }
+
+        Assert.That(leaf.IsDirty, Is.EqualTo(true));
+        Assert.That(leaf.Type, Is.EqualTo(NodeType.Leaf));
+    }
 }

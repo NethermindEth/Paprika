@@ -74,3 +74,31 @@ public readonly struct Extension
         _header = (byte)NodeType.Extension << 1 | IsDirtyFlag;
     }
 }
+
+[StructLayout(LayoutKind.Explicit, Pack = 1, Size = Size)]
+// Temporary name due to clash with existing `Leaf`
+public readonly struct LeafNode
+{
+    // Leaf: 1 byte for type + dirty, var-length for path, 32 bytes for keccak
+    private const int Size = 33;
+    private const byte IsDirtyFlag = 0b1000;
+    private const byte NodeTypeFlag = 0b0110;
+
+    [FieldOffset(0)]
+    private readonly byte _header;
+
+    [FieldOffset(1)]
+    private readonly Keccak _keccak;
+
+    public Keccak Keccak => _keccak;
+
+    public NibblePath Path => default;
+
+    public bool IsDirty => (_header & IsDirtyFlag) != 0;
+    public NodeType Type => (NodeType)((_header & NodeTypeFlag) >> 1);
+
+    public LeafNode(NibblePath path)
+    {
+        _header = (byte)NodeType.Leaf << 1 | IsDirtyFlag;
+    }
+}
