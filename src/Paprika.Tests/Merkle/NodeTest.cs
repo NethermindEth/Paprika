@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using Paprika.Crypto;
 using Paprika.Merkle;
 
 namespace Paprika.Tests.Merkle;
@@ -21,5 +22,7 @@ public class NodeTest
 
         Assert.That(branch.IsDirty, Is.EqualTo(true));
         Assert.That(branch.Type, Is.EqualTo(NodeType.Branch));
+        Assert.That(branch.Keccak, Is.EqualTo(Keccak.Zero));
     }
+
 }

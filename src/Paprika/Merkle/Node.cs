@@ -42,6 +42,8 @@ public readonly struct Branch
         }
     }
 
+    public Keccak Keccak => _keccak;
+
     // TODO: Should we expose ushort? What about a Span of two bytes?
     public Branch(ushort nibbles)
     {
