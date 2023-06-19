@@ -27,7 +27,7 @@ public static class Program
     private const long DbFileSize = PersistentDb ? 256 * Gb : 16 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
 
-    private static readonly TimeSpan FlushEvery = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan FlushEvery = TimeSpan.FromSeconds(5);
 
     private const int LogEvery = BlockCount / NumberOfLogs;
 
@@ -93,9 +93,8 @@ public static class Program
 
             Console.WriteLine();
             Console.WriteLine("Writing:");
-            Console.WriteLine("- {0} accounts per block", AccountsPerBlock);
-            Console.WriteLine("- through {0} blocks ", BlockCount);
-
+            Console.WriteLine("- {0} accounts per block through {1} blocks", AccountsPerBlock, BlockCount);
+            Console.WriteLine("- it gives {0} total accounts", AccountsPerBlock * BlockCount);
 
             if (UseStorageEveryNAccounts > 0)
             {
@@ -152,11 +151,11 @@ public static class Program
 
                 var expected = GetAccountValue(i);
 
-                // if (actual != expected)
-                // {
-                //     throw new InvalidOperationException($"Invalid account state for account number {i} with address {key.ToString()}. " +
-                //                                         $"The expected value is {expected} while the actual is {actual}!");
-                // }
+                if (actual != expected)
+                {
+                    throw new InvalidOperationException($"Invalid account state for account number {i} with address {key.ToString()}. " +
+                                                        $"The expected value is {expected} while the actual is {actual}!");
+                }
 
                 if (UseStorageEveryNAccounts > 0 && i % UseStorageEveryNAccounts == 0)
                 {
@@ -164,10 +163,10 @@ public static class Program
                     var expectedStorageValue = GetStorageValue(i);
                     var actualStorage = read.GetStorage(key, storageAddress);
 
-                    // if (actualStorage != expectedStorageValue)
-                    // {
-                    //     throw new InvalidOperationException($"Invalid storage for account number {i}!");
-                    // }
+                    if (actualStorage != expectedStorageValue)
+                    {
+                        throw new InvalidOperationException($"Invalid storage for account number {i}!");
+                    }
                 }
 
                 if (UseBigStorageAccount)
@@ -209,7 +208,13 @@ public static class Program
         }
         catch (Exception e)
         {
-            layout[info].Update(new Panel(new Markup($"[red]{e.Message}[/]")).Header(info).Expand());
+            var paragraph = new Paragraph();
+
+            var style = new Style().Foreground(Color.Red);
+            paragraph.Append(e.Message, style);
+            paragraph.Append(e.StackTrace!, style);
+
+            layout[info].Update(new Panel(paragraph).Header(info).Expand());
             spectre.Cancel();
 
             await reportingTask;
