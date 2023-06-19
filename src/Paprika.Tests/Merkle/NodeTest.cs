@@ -66,5 +66,6 @@ public class NodeTest
 
         Assert.That(leaf.IsDirty, Is.EqualTo(true));
         Assert.That(leaf.Type, Is.EqualTo(NodeType.Leaf));
+        Assert.That(leaf.Keccak, Is.EqualTo(Keccak.Zero));
     }
 }
