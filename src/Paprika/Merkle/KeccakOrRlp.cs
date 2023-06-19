@@ -1,6 +1,6 @@
 using Paprika.Crypto;
 
-namespace Paprika.Tree;
+namespace Paprika.Merkle;
 
 public ref struct KeccakOrRlp
 {

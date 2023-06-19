@@ -2,7 +2,7 @@ using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.RLP;
 
-namespace Paprika.Tree;
+namespace Paprika.Merkle;
 
 public static class Leaf
 {

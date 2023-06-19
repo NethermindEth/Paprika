@@ -2,9 +2,9 @@ using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
-using Paprika.Tree;
+using Paprika.Merkle;
 
-namespace Paprika.Tests;
+namespace Paprika.Tests.Merkle;
 
 public class MerkleKeccakTests
 {

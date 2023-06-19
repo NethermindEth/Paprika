@@ -4,9 +4,9 @@ using Paprika.Crypto;
 using Paprika.Merkle;
 using Paprika.Store;
 
-namespace Paprika.Tests;
+namespace Paprika.Tests.Merkle;
 
-public class MerkleTests
+public class MerkleRootHashTests
 {
     private const int SmallDb = 256 * Page.PageSize;
     private readonly Keccak _blockKeccak = Keccak.Compute("block"u8);
