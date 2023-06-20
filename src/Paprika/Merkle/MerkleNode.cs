@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Paprika.Crypto;
 
 namespace Paprika.Merkle;
 
@@ -12,6 +13,37 @@ public enum NodeType : byte
 public ref struct MerkleNode
 {
 
+}
+
+[StructLayout(LayoutKind.Explicit, Pack = 1, Size = 35)]
+public readonly ref struct Branch
+{
+    [FieldOffset(0)]
+    private readonly MerkleNodeHeader _header;
+
+    [FieldOffset(1)]
+    private readonly ushort _nibbleBitSet;
+
+    [FieldOffset(3)]
+    private readonly Keccak _keccak;
+
+    public bool IsDirty => _header.IsDirty;
+    public NodeType NodeType => NodeType.Branch;
+    public Keccak Keccak => _keccak;
+
+    // TODO: What interface do we want to expose for nibbles?
+    // Options:
+    // - `IEnumerable<byte>` with all nibbles is not possible
+    // - `byte[]` with all nibbles
+    // - `bool HasNibble(byte nibble)` to lookup a single nibble at a time
+    public bool HasNibble(byte nibble) => (_nibbleBitSet & (1 << nibble)) != 0;
+
+    public Branch(ushort nibbleBitSet, Keccak keccak)
+    {
+        _header = new MerkleNodeHeader(NodeType.Branch);
+        _nibbleBitSet = nibbleBitSet;
+        _keccak = keccak;
+    }
 }
 
 [StructLayout(LayoutKind.Explicit, Pack = 1, Size = Size)]
