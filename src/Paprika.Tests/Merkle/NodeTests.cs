@@ -30,36 +30,22 @@ public class NodeTests
     }
 
     [Test]
-    [TestCase(new byte[]{ 0b0000 }, false, NodeType.Leaf)]
-    [TestCase(new byte[]{ 0b0010 }, false, NodeType.Extension)]
-    [TestCase(new byte[]{ 0b0100 }, false, NodeType.Branch)]
-
-    [TestCase(new byte[]{ 0b0001 }, true, NodeType.Leaf)]
-    [TestCase(new byte[]{ 0b0011 }, true, NodeType.Extension)]
-    [TestCase(new byte[]{ 0b0101 }, true, NodeType.Branch)]
-    public void Node_header_read_from(byte[] source, bool isDirty, NodeType nodeType)
-    {
-        var _ = MerkleNodeHeader.ReadFrom(source, out var header);
-
-        Assert.That(header.IsDirty, Is.EqualTo(isDirty));
-        Assert.That(header.NodeType, Is.EqualTo(nodeType));
-    }
-
-    [Test]
     [TestCase( NodeType.Leaf, false, new byte[]{ 0b0000 })]
     [TestCase( NodeType.Extension, false, new byte[]{ 0b0010 })]
     [TestCase( NodeType.Branch, false, new byte[]{ 0b0100 })]
     [TestCase(NodeType.Leaf, true, new byte[]{ 0b0001 })]
     [TestCase(NodeType.Extension, true, new byte[]{ 0b0011 })]
     [TestCase(NodeType.Branch, true, new byte[]{ 0b0101 })]
-    public void Node_header_write_to(NodeType nodeType, bool isDirty, byte[] expected)
+    public void Node_header_read_write(NodeType nodeType, bool isDirty, byte[] encoded)
     {
-        var header = new MerkleNodeHeader(nodeType, isDirty);
-        Span<byte> output = stackalloc byte[MerkleNodeHeader.MaxSize];
+        _ = MerkleNodeHeader.ReadFrom(encoded, out var header);
+        Assert.That(header.IsDirty, Is.EqualTo(isDirty));
+        Assert.That(header.NodeType, Is.EqualTo(nodeType));
 
-        header.WriteTo(output);
 
-        Assert.That(output.SequenceEqual(expected));
+        Span<byte> buffer = stackalloc byte[MerkleNodeHeader.MaxSize];
+        _ = header.WriteTo(buffer);
+        Assert.That(buffer.SequenceEqual(encoded));
     }
 
     [Test]
