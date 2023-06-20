@@ -82,6 +82,36 @@ public class NodeTests
         }
     }
 
+    [Test]
+    public void Branch_read_from()
+    {
+        Span<byte> buffer = stackalloc byte[Branch.MaxSize];
+        // Header
+        buffer[0] = 0b0101;
+
+        // Nibble BitSet
+        var nibbles = new byte[] { 1, 3, 4, 6, 8, 11, 13, 14 };
+
+        // TODO: Be careful with endianness
+        buffer[2] = 0b0110_1001;
+        buffer[1] = 0b0101_1010;
+
+        // Keccak
+        var keccak = Values.Key0;
+        keccak.Span.CopyTo(buffer.Slice(3));
+
+        var _ = Branch.ReadFrom(buffer, out var branch);
+
+        Assert.That(branch.NodeType, Is.EqualTo(NodeType.Branch));
+        Assert.That(branch.IsDirty, Is.True);
+        Assert.That(branch.Keccak, Is.EqualTo(keccak));
+        foreach (var nibble in nibbles)
+        {
+            Assert.That(branch.HasNibble(nibble), $"Nibble {nibble} was expected to be set, but it's not");
+        }
+
+    }
+
     private static int GetTypeSize(Type type)
     {
         var dm = new DynamicMethod("$", typeof(int), Type.EmptyTypes);

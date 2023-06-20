@@ -15,9 +15,11 @@ public ref struct MerkleNode
 
 }
 
-[StructLayout(LayoutKind.Explicit, Pack = 1, Size = 35)]
+[StructLayout(LayoutKind.Explicit, Pack = 1, Size = MaxSize)]
 public readonly ref struct Branch
 {
+    public const int MaxSize = 35;
+
     [FieldOffset(0)]
     private readonly MerkleNodeHeader _header;
 
@@ -38,11 +40,33 @@ public readonly ref struct Branch
     // - `bool HasNibble(byte nibble)` to lookup a single nibble at a time
     public bool HasNibble(byte nibble) => (_nibbleBitSet & (1 << nibble)) != 0;
 
+    public Branch(MerkleNodeHeader header, ushort nibbleBitSet, Keccak keccak)
+    {
+        if (header.NodeType != NodeType.Branch)
+        {
+            throw new ArgumentException($"Expected Header with {nameof(Merkle.NodeType)} {nameof(NodeType.Branch)}, got {header.NodeType}");
+        }
+
+        _header = header;
+        _nibbleBitSet = nibbleBitSet;
+        _keccak = keccak;
+    }
+
     public Branch(ushort nibbleBitSet, Keccak keccak)
     {
         _header = new MerkleNodeHeader(NodeType.Branch);
         _nibbleBitSet = nibbleBitSet;
         _keccak = keccak;
+    }
+
+    public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Branch branch)
+    {
+        MerkleNodeHeader.ReadFrom(source, out var header);
+        var nibbleBitSet = BitConverter.ToUInt16(source.Slice(1));
+        var keccak = new Keccak(source.Slice(3));
+        branch = new Branch(header, nibbleBitSet, keccak);
+
+        return source.Slice(MaxSize);
     }
 }
 
@@ -63,5 +87,14 @@ public readonly struct MerkleNodeHeader
     public MerkleNodeHeader(NodeType nodeType, bool isDirty = true)
     {
         _header = (byte)((byte)nodeType << 1 | (isDirty ? IsDirtyMask : 0));
+    }
+
+    public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out MerkleNodeHeader header)
+    {
+        var isDirty = (source[0] & IsDirtyMask) != 0;
+        var nodeType = (NodeType)((source[0] & NodeTypeMask) >> 1);
+        header = new MerkleNodeHeader(nodeType, isDirty);
+
+        return source.Slice(1);
     }
 }
