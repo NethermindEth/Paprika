@@ -48,7 +48,21 @@ public class NodeTests
 
         for (byte nibble = 0; nibble < 16; nibble++)
         {
-            Assert.That(branch.HasNibble(nibble), Is.EqualTo(false));
+            Assert.That(branch.HasNibble(nibble), Is.Not.True);
+        }
+    }
+
+    [Test]
+    public void Branch_some_nibbles()
+    {
+        ushort nibbles = 0b0110_1001_0101_1010;
+        var branch = new Branch(nibbles, Values.Key0);
+
+        var expected = new byte[] { 1, 3, 4, 6, 8, 11, 13, 14 };
+
+        foreach (var nibble in expected)
+        {
+            Assert.That(branch.HasNibble(nibble), $"Nibble {nibble} was expected to be set, but it's not");
         }
     }
 
