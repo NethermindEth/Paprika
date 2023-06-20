@@ -30,7 +30,7 @@ public class NodeTests
     }
 
     [Test]
-    public void Branch_no_nibbles()
+    public void Branch_properties()
     {
         ushort nibbles = 0b0000_0000_0000_0000;
         var branch = new Branch(nibbles, Values.Key0);
@@ -38,6 +38,14 @@ public class NodeTests
         Assert.That(branch.NodeType, Is.EqualTo(NodeType.Branch));
         Assert.That(branch.IsDirty, Is.EqualTo(true));
         Assert.That(branch.Keccak, Is.EqualTo(Values.Key0));
+    }
+
+    [Test]
+    public void Branch_no_nibbles()
+    {
+        ushort nibbles = 0b0000_0000_0000_0000;
+        var branch = new Branch(nibbles, Values.Key0);
+
         for (byte nibble = 0; nibble < 16; nibble++)
         {
             Assert.That(branch.HasNibble(nibble), Is.EqualTo(false));
