@@ -1,5 +1,4 @@
 using System.Reflection.Emit;
-using System.Runtime.InteropServices;
 using NUnit.Framework;
 using Paprika.Merkle;
 
@@ -8,10 +7,11 @@ namespace Paprika.Tests.Merkle;
 public class NodeTests
 {
     [Test]
-    public void Node_header_size()
+    [TestCase(typeof(MerkleNodeHeader), 1)]
+    [TestCase(typeof(Branch), 35)]
+    public void Struct_size(Type type, int expectedSize)
     {
-        var expectedSizeInBytes = 1;
-        Assert.That(Marshal.SizeOf<MerkleNodeHeader>(), Is.EqualTo(expectedSizeInBytes));
+        Assert.That(GetTypeSize(type), Is.EqualTo(expectedSize));
     }
 
     [Test]
@@ -30,12 +30,6 @@ public class NodeTests
     }
 
     [Test]
-    public void Branch_size()
-    {
-        Assert.That(GetTypeSize(typeof(Branch)), Is.EqualTo(35));
-    }
-
-    [Test]
     public void Branch_no_nibbles()
     {
         ushort nibbles = 0b0000_0000_0000_0000;
@@ -50,7 +44,7 @@ public class NodeTests
     }
 
 
-    private int GetTypeSize(Type type)
+    private static int GetTypeSize(Type type)
     {
         var dm = new DynamicMethod("$", typeof(int), Type.EmptyTypes);
         ILGenerator il = dm.GetILGenerator();
