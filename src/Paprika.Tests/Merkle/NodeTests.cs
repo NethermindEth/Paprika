@@ -37,12 +37,12 @@ public class NodeTests
 
         Assert.That(branch.NodeType, Is.EqualTo(NodeType.Branch));
         Assert.That(branch.IsDirty, Is.EqualTo(true));
+        Assert.That(branch.Keccak, Is.EqualTo(Values.Key0));
         for (byte nibble = 0; nibble < 16; nibble++)
         {
             Assert.That(branch.HasNibble(nibble), Is.EqualTo(false));
         }
     }
-
 
     private static int GetTypeSize(Type type)
     {
