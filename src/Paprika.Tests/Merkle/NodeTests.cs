@@ -1,5 +1,6 @@
 using System.Reflection.Emit;
 using NUnit.Framework;
+using Paprika.Crypto;
 using Paprika.Merkle;
 
 namespace Paprika.Tests.Merkle;
@@ -41,7 +42,6 @@ public class NodeTests
         _ = MerkleNodeHeader.ReadFrom(encoded, out var header);
         Assert.That(header.IsDirty, Is.EqualTo(isDirty));
         Assert.That(header.NodeType, Is.EqualTo(nodeType));
-
 
         Span<byte> buffer = stackalloc byte[MerkleNodeHeader.MaxSize];
         _ = header.WriteTo(buffer);
@@ -85,33 +85,34 @@ public class NodeTests
         }
     }
 
+    private static object[] _branchReadWriteCases = {
+        new object[] { (ushort) 0b0110_1001_0101_1010, new byte[] { 1, 3, 4, 6, 8, 11, 13, 14 },Values.Key0 },
+    };
+
     [Test]
-    public void Branch_read_from()
+    [TestCaseSource(nameof(_branchReadWriteCases))]
+    public void Branch_read_write(ushort nibbleBitSet, byte[] nibbles, Keccak keccak)
     {
-        Span<byte> buffer = stackalloc byte[Branch.MaxSize];
+        Span<byte> encoded = stackalloc byte[Branch.MaxSize];
         // Header
-        buffer[0] = 0b0101;
-
+        encoded[0] = 0b0101;
         // Nibble BitSet
-        var nibbles = new byte[] { 1, 3, 4, 6, 8, 11, 13, 14 };
-
-        // TODO: Be careful with endianness
-        buffer[2] = 0b0110_1001;
-        buffer[1] = 0b0101_1010;
-
+        BitConverter.TryWriteBytes(encoded.Slice(1), nibbleBitSet);
         // Keccak
-        var keccak = Values.Key0;
-        keccak.Span.CopyTo(buffer.Slice(3));
+        keccak.Span.CopyTo(encoded.Slice(3));
 
-        var _ = Branch.ReadFrom(buffer, out var branch);
-
-        Assert.That(branch.NodeType, Is.EqualTo(NodeType.Branch));
+        _ = Branch.ReadFrom(encoded, out var branch);
         Assert.That(branch.IsDirty, Is.True);
         Assert.That(branch.Keccak, Is.EqualTo(keccak));
         foreach (var nibble in nibbles)
         {
             Assert.That(branch.HasNibble(nibble), $"Nibble {nibble} was expected to be set, but it's not");
         }
+
+        Span<byte> buffer = stackalloc byte[Branch.MaxSize];
+        _ = branch.WriteTo(buffer);
+
+        Assert.That(buffer.SequenceEqual(encoded));
     }
 
     private static int GetTypeSize(Type type)

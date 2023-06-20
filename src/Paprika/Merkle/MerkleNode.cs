@@ -19,6 +19,7 @@ public ref struct MerkleNode
 public readonly ref struct Branch
 {
     public const int MaxSize = 35;
+    private const int NibbleBitSetSize = sizeof(ushort);
 
     [FieldOffset(0)]
     private readonly MerkleNodeHeader _header;
@@ -57,6 +58,19 @@ public readonly ref struct Branch
         _header = new MerkleNodeHeader(NodeType.Branch);
         _nibbleBitSet = nibbleBitSet;
         _keccak = keccak;
+    }
+
+    public Span<byte> WriteTo(Span<byte> output)
+    {
+        var leftover = _header.WriteTo(output);
+
+        BitConverter.TryWriteBytes(leftover, _nibbleBitSet);
+        leftover = leftover.Slice(NibbleBitSetSize);
+
+        Keccak.Span.CopyTo(leftover);
+        leftover = leftover.Slice(Keccak.Size);
+
+        return leftover;
     }
 
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Branch branch)
