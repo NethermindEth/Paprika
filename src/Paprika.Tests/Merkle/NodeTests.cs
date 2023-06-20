@@ -30,6 +30,22 @@ public class NodeTests
     }
 
     [Test]
+    [TestCase(new byte[]{ 0b0000 }, false, NodeType.Leaf)]
+    [TestCase(new byte[]{ 0b0010 }, false, NodeType.Extension)]
+    [TestCase(new byte[]{ 0b0100 }, false, NodeType.Branch)]
+
+    [TestCase(new byte[]{ 0b0001 }, true, NodeType.Leaf)]
+    [TestCase(new byte[]{ 0b0011 }, true, NodeType.Extension)]
+    [TestCase(new byte[]{ 0b0101 }, true, NodeType.Branch)]
+    public void Node_header_read_from(byte[] source, bool isDirty, NodeType nodeType)
+    {
+        var _ = MerkleNodeHeader.ReadFrom(source, out var header);
+
+        Assert.That(header.IsDirty, Is.EqualTo(isDirty));
+        Assert.That(header.NodeType, Is.EqualTo(nodeType));
+    }
+
+    [Test]
     public void Branch_properties()
     {
         ushort nibbles = 0b0000_0000_0000_0000;
