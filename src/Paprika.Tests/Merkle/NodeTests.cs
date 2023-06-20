@@ -46,6 +46,23 @@ public class NodeTests
     }
 
     [Test]
+    [TestCase( NodeType.Leaf, false, new byte[]{ 0b0000 })]
+    [TestCase( NodeType.Extension, false, new byte[]{ 0b0010 })]
+    [TestCase( NodeType.Branch, false, new byte[]{ 0b0100 })]
+    [TestCase(NodeType.Leaf, true, new byte[]{ 0b0001 })]
+    [TestCase(NodeType.Extension, true, new byte[]{ 0b0011 })]
+    [TestCase(NodeType.Branch, true, new byte[]{ 0b0101 })]
+    public void Node_header_write_to(NodeType nodeType, bool isDirty, byte[] expected)
+    {
+        var header = new MerkleNodeHeader(nodeType, isDirty);
+        Span<byte> output = stackalloc byte[MerkleNodeHeader.MaxSize];
+
+        header.WriteTo(output);
+
+        Assert.That(output.SequenceEqual(expected));
+    }
+
+    [Test]
     public void Branch_properties()
     {
         ushort nibbles = 0b0000_0000_0000_0000;
@@ -109,7 +126,6 @@ public class NodeTests
         {
             Assert.That(branch.HasNibble(nibble), $"Nibble {nibble} was expected to be set, but it's not");
         }
-
     }
 
     private static int GetTypeSize(Type type)

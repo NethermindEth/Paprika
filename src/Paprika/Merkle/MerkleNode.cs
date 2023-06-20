@@ -70,10 +70,10 @@ public readonly ref struct Branch
     }
 }
 
-[StructLayout(LayoutKind.Explicit, Pack = 1, Size = Size)]
+[StructLayout(LayoutKind.Explicit, Pack = 1, Size = MaxSize)]
 public readonly struct MerkleNodeHeader
 {
-    private const int Size = sizeof(byte);
+    public const int MaxSize = sizeof(byte);
 
     private const byte IsDirtyMask = 0b0001;
     private const byte NodeTypeMask = 0b0110;
@@ -87,6 +87,12 @@ public readonly struct MerkleNodeHeader
     public MerkleNodeHeader(NodeType nodeType, bool isDirty = true)
     {
         _header = (byte)((byte)nodeType << 1 | (isDirty ? IsDirtyMask : 0));
+    }
+
+    public Span<byte> WriteTo(Span<byte> output)
+    {
+        output[0] = _header;
+        return output.Slice(1);
     }
 
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out MerkleNodeHeader header)
