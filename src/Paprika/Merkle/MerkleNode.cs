@@ -106,7 +106,7 @@ public readonly struct MerkleNodeHeader
     public Span<byte> WriteTo(Span<byte> output)
     {
         output[0] = _header;
-        return output.Slice(1);
+        return output.Slice(MaxSize);
     }
 
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out MerkleNodeHeader header)
@@ -115,6 +115,6 @@ public readonly struct MerkleNodeHeader
         var nodeType = (NodeType)((source[0] & NodeTypeMask) >> 1);
         header = new MerkleNodeHeader(nodeType, isDirty);
 
-        return source.Slice(1);
+        return source.Slice(MaxSize);
     }
 }
