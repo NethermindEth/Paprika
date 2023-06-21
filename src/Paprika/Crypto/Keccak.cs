@@ -67,6 +67,18 @@ public readonly struct Keccak : IEquatable<Keccak>
         Bytes = As<byte, Vector256<byte>>(ref MemoryMarshal.GetReference(bytes));
     }
 
+    public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> bytes, out Keccak keccak)
+    {
+        keccak = new Keccak(bytes);
+        return bytes.Slice(Size);
+    }
+
+    public Span<byte> WriteTo(Span<byte> output)
+    {
+        Bytes.CopyTo(output);
+        return output.Slice(Size);
+    }
+
     [DebuggerStepThrough]
     public static Keccak Compute(ReadOnlySpan<byte> input)
     {

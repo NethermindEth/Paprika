@@ -70,8 +70,7 @@ public readonly ref struct Branch
         BinaryPrimitives.WriteUInt16LittleEndian(leftover, _nibbleBitSet);
         leftover = leftover.Slice(NibbleBitSetSize);
 
-        Keccak.Span.CopyTo(leftover);
-        leftover = leftover.Slice(Keccak.Size);
+        leftover = _keccak.WriteTo(leftover);
 
         return leftover;
     }
@@ -83,8 +82,7 @@ public readonly ref struct Branch
         var nibbleBitSet = BinaryPrimitives.ReadUInt16LittleEndian(leftover);
         leftover = leftover.Slice(2);
 
-        var keccak = new Keccak(leftover);
-        leftover.Slice(Keccak.Size);
+        leftover = Keccak.ReadFrom(leftover, out var keccak);
 
         branch = new Branch(header, nibbleBitSet, keccak);
 
