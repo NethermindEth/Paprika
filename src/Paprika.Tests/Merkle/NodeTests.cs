@@ -33,16 +33,16 @@ public class NodeTests
     }
 
     [Test]
-    [TestCase( NodeType.Leaf, false)]
-    [TestCase( NodeType.Extension, false)]
-    [TestCase( NodeType.Branch, false)]
+    [TestCase(NodeType.Leaf, false)]
+    [TestCase(NodeType.Extension, false)]
+    [TestCase(NodeType.Branch, false)]
     [TestCase(NodeType.Leaf, true)]
     [TestCase(NodeType.Extension, true)]
     [TestCase(NodeType.Branch, true)]
     public void Node_header_read_write(NodeType nodeType, bool isDirty)
     {
         var expected = new MerkleNodeHeader(nodeType, isDirty);
-        Span<byte> buffer = stackalloc byte[MerkleNodeHeader.MaxSize];
+        Span<byte> buffer = stackalloc byte[MerkleNodeHeader.Size];
 
         _ = expected.WriteTo(buffer);
         _ = MerkleNodeHeader.ReadFrom(buffer, out var actual);
@@ -87,10 +87,11 @@ public class NodeTests
         }
     }
 
-    private static object[] _branchReadWriteCases = {
-        new object[] { (ushort) 0b0110_1001_0101_1010, Values.Key0 },
-        new object[] { (ushort) 0b1001_0110_1010_0101, Values.Key1A },
-        new object[] { (ushort) 0b0000_1000_0001_0000, Values.Key1B },
+    private static object[] _branchReadWriteCases =
+    {
+        new object[] { (ushort)0b0110_1001_0101_1010, Values.Key0 },
+        new object[] { (ushort)0b1001_0110_1010_0101, Values.Key1A },
+        new object[] { (ushort)0b0000_1000_0001_0000, Values.Key1B },
     };
 
     [Test]
@@ -100,7 +101,7 @@ public class NodeTests
         var branch = new Branch(nibbleBitSet, keccak);
 
         Span<byte> encoded = stackalloc byte[Branch.MaxByteLength];
-        _  = branch.WriteTo(encoded);
+        _ = branch.WriteTo(encoded);
         _ = Branch.ReadFrom(encoded, out var decoded);
 
         Assert.That(decoded.Equals(branch), $"Expected {branch.ToString()}, got {decoded.ToString()}");
@@ -119,6 +120,27 @@ public class NodeTests
         Assert.That(leaf.NodeType, Is.EqualTo(NodeType.Leaf));
         Assert.That(leaf.NibblePath.Equals(path), $"Expected {path.ToString()}, got {leaf.NibblePath.ToString()}");
         Assert.That(leaf.Keccak, Is.EqualTo(keccak));
+    }
+
+    private static object[] _leafReadWriteCases =
+    {
+        new object[] { new byte[] { 0x1, 0x2 }, Values.Key0 },
+        new object[] { new byte[] { 0xA, 0xB, 0xC, 0xD }, Values.Key1A },
+        new object[] { new byte[] { 0xB, 0xC, 0xD, 0xE }, Values.Key1B },
+        new object[] { new byte[] { 0x2, 0x4, 0x6, 0x8, 0xA, 0xC, 0xE }, Values.Key0 },
+    };
+
+    [Test]
+    [TestCaseSource(nameof(_leafReadWriteCases))]
+    public void Leaf_read_write(byte[] pathBytes, Keccak keccak)
+    {
+        var leaf = new Leaf(NibblePath.FromKey(pathBytes), keccak);
+
+        Span<byte> encoded = stackalloc byte[leaf.MaxByteLength];
+        _ = leaf.WriteTo(encoded);
+        _ = Leaf.ReadFrom(encoded, out var decoded);
+
+        Assert.That(decoded.Equals(leaf), $"Expected {leaf.ToString()}, got {leaf.ToString()}");
     }
 
     private static int GetSizeOfType(Type type)

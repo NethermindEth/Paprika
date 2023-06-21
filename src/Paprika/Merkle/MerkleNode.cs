@@ -106,7 +106,7 @@ public readonly ref struct Branch
 
 public readonly ref struct Leaf
 {
-    public int MaxByteLength => MerkleNodeHeader.MaxSize + _path.MaxByteLength + Keccak.Size;
+    public int MaxByteLength => MerkleNodeHeader.Size + _path.MaxByteLength + Keccak.Size;
 
     private readonly MerkleNodeHeader _header;
     private readonly NibblePath _path;
@@ -135,12 +135,8 @@ public readonly ref struct Leaf
     public Span<byte> WriteTo(Span<byte> output)
     {
         var leftover = _header.WriteTo(output);
-
         leftover = _path.WriteToWithLeftover(leftover);
-
-        // TODO: Add `WriteToWithLeftover` to Keccak
-        _keccak.Span.CopyTo(leftover);
-        leftover = leftover.Slice(Keccak.Size);
+        leftover = _keccak.WriteTo(leftover);
 
         return leftover;
     }
@@ -149,10 +145,7 @@ public readonly ref struct Leaf
     {
         var leftover = MerkleNodeHeader.ReadFrom(source, out var header);
         leftover = NibblePath.ReadFrom(leftover, out var path);
-
-        // TODO: Add `ReadFromWithLeftover` to Keccak
-        var keccak = new Keccak(leftover);
-        leftover = leftover.Slice(Keccak.Size);
+        leftover = Keccak.ReadFrom(leftover, out var keccak);
 
         leaf = new Leaf(header, path, keccak);
         return leftover;
@@ -171,10 +164,10 @@ public readonly ref struct Leaf
         $"}}";
 }
 
-[StructLayout(LayoutKind.Explicit, Pack = 1, Size = MaxSize)]
+[StructLayout(LayoutKind.Explicit, Pack = 1, Size = Size)]
 public readonly struct MerkleNodeHeader
 {
-    public const int MaxSize = sizeof(byte);
+    public const int Size = sizeof(byte);
 
     private const byte IsDirtyMask = 0b0001;
     private const byte NodeTypeMask = 0b0110;
@@ -193,7 +186,7 @@ public readonly struct MerkleNodeHeader
     public Span<byte> WriteTo(Span<byte> output)
     {
         output[0] = _header;
-        return output.Slice(MaxSize);
+        return output.Slice(Size);
     }
 
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out MerkleNodeHeader header)
@@ -202,7 +195,7 @@ public readonly struct MerkleNodeHeader
         var nodeType = (NodeType)((source[0] & NodeTypeMask) >> 1);
         header = new MerkleNodeHeader(nodeType, isDirty);
 
-        return source.Slice(MaxSize);
+        return source.Slice(Size);
     }
 
     public bool Equals(in MerkleNodeHeader other)
