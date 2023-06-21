@@ -164,6 +164,58 @@ public readonly ref struct Leaf
         $"}}";
 }
 
+public readonly ref struct Extension
+{
+    public int MaxByteLength => MerkleNodeHeader.Size + _path.MaxByteLength;
+
+    private readonly MerkleNodeHeader _header;
+    private readonly NibblePath _path;
+
+    public bool IsDirty => _header.IsDirty;
+    public NodeType NodeType => NodeType.Extension;
+
+    public NibblePath NibblePath => _path;
+
+    public Extension(MerkleNodeHeader header, NibblePath path)
+    {
+        _header = header;
+        _path = path;
+    }
+
+    public Extension(NibblePath path)
+    {
+        _header = new MerkleNodeHeader(NodeType.Extension);
+        _path = path;
+    }
+
+    public Span<byte> WriteTo(Span<byte> output)
+    {
+        var leftover = _header.WriteTo(output);
+        leftover = _path.WriteToWithLeftover(leftover);
+
+        return leftover;
+    }
+
+    public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Extension extension)
+    {
+        var leftover = MerkleNodeHeader.ReadFrom(source, out var header);
+        leftover = NibblePath.ReadFrom(leftover, out var path);
+
+        extension = new Extension(header, path);
+        return leftover;
+    }
+
+    public bool Equals(in Extension other) =>
+        _header.Equals(other._header)
+        && _path.Equals(other._path);
+
+    public override string ToString() =>
+        $"{nameof(Extension)} {{ " +
+        $"{nameof(_header)}: {_header.ToString()}, " +
+        $"{nameof(_path)}: {_path.ToString()}, " +
+        $"}}";
+}
+
 [StructLayout(LayoutKind.Explicit, Pack = 1, Size = Size)]
 public readonly struct MerkleNodeHeader
 {

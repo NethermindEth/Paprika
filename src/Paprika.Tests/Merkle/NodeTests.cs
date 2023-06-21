@@ -143,6 +143,41 @@ public class NodeTests
         Assert.That(decoded.Equals(leaf), $"Expected {leaf.ToString()}, got {leaf.ToString()}");
     }
 
+
+    [Test]
+    public void Extension_properties()
+    {
+        ReadOnlySpan<byte> bytes = new byte[] { 0xA, 0x9, 0x6, 0x3 };
+        var path = NibblePath.FromKey(bytes);
+
+        var extension = new Extension(path);
+
+        Assert.That(extension.IsDirty, Is.True);
+        Assert.That(extension.NodeType, Is.EqualTo(NodeType.Extension));
+        Assert.That(extension.NibblePath.Equals(path), $"Expected {path.ToString()}, got {extension.NibblePath.ToString()}");
+    }
+
+    private static object[] _extensionReadWriteCases =
+    {
+        new object[] { new byte[] { 0x0, 0x0 } },
+        new object[] { new byte[] { 0xD, 0xC, 0xB, 0xA } },
+        new object[] { new byte[] { 0xC, 0xB, 0xA, 0xF } },
+        new object[] { Enumerable.Repeat((byte)0xF, 32).ToArray() },
+    };
+
+    [Test]
+    [TestCaseSource(nameof(_extensionReadWriteCases))]
+    public void Extension_read_write(byte[] pathBytes)
+    {
+        var extension = new Extension(NibblePath.FromKey(pathBytes));
+
+        Span<byte> encoded = stackalloc byte[extension.MaxByteLength];
+        _ = extension.WriteTo(encoded);
+        _ = Extension.ReadFrom(encoded, out var decoded);
+
+        Assert.That(decoded.Equals(extension), $"Expected {extension.ToString()}, got {extension.ToString()}");
+    }
+
     private static int GetSizeOfType(Type type)
     {
         var dm = new DynamicMethod("$", typeof(int), Type.EmptyTypes);
