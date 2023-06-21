@@ -31,21 +31,21 @@ public class NodeTests
     }
 
     [Test]
-    [TestCase( NodeType.Leaf, false, new byte[]{ 0b0000 })]
-    [TestCase( NodeType.Extension, false, new byte[]{ 0b0010 })]
-    [TestCase( NodeType.Branch, false, new byte[]{ 0b0100 })]
-    [TestCase(NodeType.Leaf, true, new byte[]{ 0b0001 })]
-    [TestCase(NodeType.Extension, true, new byte[]{ 0b0011 })]
-    [TestCase(NodeType.Branch, true, new byte[]{ 0b0101 })]
-    public void Node_header_read_write(NodeType nodeType, bool isDirty, byte[] encoded)
+    [TestCase( NodeType.Leaf, false)]
+    [TestCase( NodeType.Extension, false)]
+    [TestCase( NodeType.Branch, false)]
+    [TestCase(NodeType.Leaf, true)]
+    [TestCase(NodeType.Extension, true)]
+    [TestCase(NodeType.Branch, true)]
+    public void Node_header_read_write(NodeType nodeType, bool isDirty)
     {
-        _ = MerkleNodeHeader.ReadFrom(encoded, out var header);
-        Assert.That(header.IsDirty, Is.EqualTo(isDirty));
-        Assert.That(header.NodeType, Is.EqualTo(nodeType));
-
+        var expected = new MerkleNodeHeader(nodeType, isDirty);
         Span<byte> buffer = stackalloc byte[MerkleNodeHeader.MaxSize];
-        _ = header.WriteTo(buffer);
-        Assert.That(buffer.SequenceEqual(encoded));
+
+        _ = expected.WriteTo(buffer);
+        _ = MerkleNodeHeader.ReadFrom(buffer, out var actual);
+
+        Assert.That(actual.Equals(expected), $"Expected {expected.ToString()}, got {actual.ToString()}");
     }
 
     [Test]
