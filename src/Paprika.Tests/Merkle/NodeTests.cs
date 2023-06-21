@@ -10,7 +10,7 @@ public class NodeTests
 {
     [Test]
     [TestCase(typeof(Node.Header), 1)]
-    [TestCase(typeof(Node.Branch), 35)]
+    [TestCase(typeof(Node.Branch), 64)]
     [TestCase(typeof(Node.Leaf), 64)]
     [TestCase(typeof(Node.Extension), 32)]
     public void Struct_size(Type type, int expectedSize)
@@ -101,7 +101,7 @@ public class NodeTests
     {
         var branch = new Node.Branch(nibbleBitSet, keccak);
 
-        Span<byte> encoded = stackalloc byte[Node.Branch.Size];
+        Span<byte> encoded = stackalloc byte[branch.MaxByteLength];
         _ = branch.WriteTo(encoded);
         _ = Node.Branch.ReadFrom(encoded, out var decoded);
 
@@ -214,7 +214,7 @@ public class NodeTests
         var keccak = Values.Key0;
 
         var branch = new Node.Branch(nibbleBitSet, keccak);
-        Span<byte> buffer = stackalloc byte[Node.Branch.Size];
+        Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
         _ = branch.WriteTo(buffer);
         _ = Node.ReadFrom(buffer, out var nodeType, out _, out _, out var actual);
 

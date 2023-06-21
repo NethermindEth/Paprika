@@ -197,19 +197,13 @@ public static class Node
             $"}}";
     }
 
-    [StructLayout(LayoutKind.Explicit, Pack = 1, Size = Size)]
     public readonly ref struct Branch
     {
-        public const int Size = 35;
+        public int MaxByteLength => 35;
         private const int NibbleBitSetSize = sizeof(ushort);
 
-        [FieldOffset(0)]
         public readonly Header Header;
-
-        [FieldOffset(1)]
         public readonly ushort NibbleBitSet;
-
-        [FieldOffset(3)]
         public readonly Keccak Keccak;
 
         // TODO: What interface do we want to expose for nibbles?
