@@ -14,6 +14,32 @@ public static class Node
         Branch,
     }
 
+    public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Type nodeType, out Leaf leaf, out Extension extension, out Branch branch)
+    {
+        leaf = new Leaf();
+        extension = new Extension();
+        branch = new Branch();
+
+        // TODO: It would be nice to not read the header twice:
+        // - Once to get the header
+        // - Again to read each Node type
+        Header.ReadFrom(source, out var header);
+        switch (header.NodeType)
+        {
+            case Type.Leaf:
+                nodeType = Type.Leaf;
+                return Leaf.ReadFrom(source, out leaf);
+            case Type.Extension:
+                nodeType = Type.Extension;
+                return Extension.ReadFrom(source, out extension);
+            case Type.Branch:
+                nodeType = Type.Branch;
+                return Branch.ReadFrom(source, out branch);
+            default:
+                throw new ArgumentOutOfRangeException($"Could not decode {nameof(Header)}");
+        }
+    }
+
     private static void ValidateHeaderNodeType(Header header, Type expected)
     {
         if (header.NodeType != expected)

@@ -178,6 +178,21 @@ public class NodeTests
         Assert.That(decoded.Equals(extension), $"Expected {extension.ToString()}, got {extension.ToString()}");
     }
 
+    [Test]
+    public void Node_read_leaf()
+    {
+        var nibblePath = NibblePath.FromKey(new byte[] { 0x1, 0x2 });
+        var keccak = Values.Key0;
+
+        var leaf = new Node.Leaf(nibblePath, keccak);
+        Span<byte> buffer = stackalloc byte[leaf.MaxByteLength];
+        _ = leaf.WriteTo(buffer);
+        _ = Node.ReadFrom(buffer, out var nodeType, out var actual, out _, out _);
+
+        Assert.That(nodeType, Is.EqualTo(Node.Type.Leaf));
+        Assert.That(actual.Equals(leaf));
+    }
+
     private static int GetSizeOfType(Type type)
     {
         var dm = new DynamicMethod("$", typeof(int), Type.EmptyTypes);
