@@ -14,7 +14,7 @@ public class NodeTests
     [TestCase(typeof(Leaf), 64)]
     public void Struct_size(Type type, int expectedSize)
     {
-        Assert.That(GetTypeSize(type), Is.EqualTo(expectedSize));
+        Assert.That(GetSizeOfType(type), Is.EqualTo(expectedSize));
     }
 
     [Test]
@@ -24,7 +24,7 @@ public class NodeTests
     [TestCase(NodeType.Leaf, false)]
     [TestCase(NodeType.Extension, true)]
     [TestCase(NodeType.Extension, false)]
-    public void Node_header_data(NodeType nodeType, bool isDirty)
+    public void Node_header_properties(NodeType nodeType, bool isDirty)
     {
         var header = new MerkleNodeHeader(nodeType, isDirty);
 
@@ -121,7 +121,7 @@ public class NodeTests
         Assert.That(leaf.Keccak, Is.EqualTo(keccak));
     }
 
-    private static int GetTypeSize(Type type)
+    private static int GetSizeOfType(Type type)
     {
         var dm = new DynamicMethod("$", typeof(int), Type.EmptyTypes);
         ILGenerator il = dm.GetILGenerator();
