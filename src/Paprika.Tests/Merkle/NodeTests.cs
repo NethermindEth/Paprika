@@ -222,6 +222,18 @@ public class NodeTests
         Assert.That(actual.Equals(branch));
     }
 
+    [Test]
+    public void Node_read_invalid_header()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+        {
+            Span<byte> header = stackalloc byte[Node.Header.Size];
+            header[0] = 0b1111_1111;
+
+            _ = Node.ReadFrom(header, out _, out _, out _, out _);
+        });
+    }
+
     private static int GetSizeOfType(Type type)
     {
         var dm = new DynamicMethod("$", typeof(int), Type.EmptyTypes);
