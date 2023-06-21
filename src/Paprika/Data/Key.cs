@@ -1,4 +1,5 @@
-﻿using Paprika.Crypto;
+﻿using System.Diagnostics;
+using Paprika.Crypto;
 using Paprika.Store;
 
 namespace Paprika.Data;
@@ -85,6 +86,7 @@ public readonly ref struct Key
     public static Key KeccakOrRlp(NibblePath path) =>
         new(path, DataType.KeccakOrRlp, ReadOnlySpan<byte>.Empty);
 
+    [DebuggerStepThrough]
     public Key SliceFrom(int nibbles) => new(Path.SliceFrom(nibbles), Type, AdditionalKey);
 
     public bool Equals(in Key key)

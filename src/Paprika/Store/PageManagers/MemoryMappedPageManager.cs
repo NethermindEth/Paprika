@@ -71,8 +71,9 @@ public class MemoryMappedPageManager : PointerPageManager
             {
                 // a regular address to write
                 _pendingWrites.Add(WriteAt(addr).AsTask());
-                await AwaitWrites();
             }
+
+            await AwaitWrites();
         }
 
         if (options != CommitOptions.DangerNoFlush && options != CommitOptions.DangerNoWrite)
@@ -83,9 +84,8 @@ public class MemoryMappedPageManager : PointerPageManager
 
     private ValueTask WriteAt(DbAddress addr)
     {
-        var offset = addr.Raw * Page.PageSize;
         var page = GetAt(addr);
-        return RandomAccess.WriteAsync(_file.SafeFileHandle, Own(page).Memory, offset);
+        return RandomAccess.WriteAsync(_file.SafeFileHandle, Own(page).Memory, addr.FileOffset);
     }
 
     private async Task AwaitWrites()

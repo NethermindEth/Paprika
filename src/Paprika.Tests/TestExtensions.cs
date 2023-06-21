@@ -105,4 +105,11 @@ public static class TestExtensions
         read.TryGet(hash, storageCell, batch, out var value).Should().BeTrue(because);
         value.SequenceEqual(expected).Should().BeTrue();
     }
+
+    public static Keccak NextKeccak(this Random random)
+    {
+        Keccak keccak = default;
+        random.NextBytes(keccak.BytesAsSpan);
+        return keccak;
+    }
 }

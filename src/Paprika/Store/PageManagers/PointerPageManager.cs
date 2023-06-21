@@ -21,10 +21,7 @@ public abstract unsafe class PointerPageManager : IPageManager
 
         Debug.Assert(address.IsValidPageAddress, "The address page is invalid and breaches max page count");
 
-        // Long here is required! Otherwise int overflow will turn it to negative value!
-        // ReSharper disable once SuggestVarOrType_BuiltInTypes
-        long offset = ((long)(int)address) * Page.PageSize;
-        return new Page((byte*)Ptr + offset);
+        return new Page((byte*)Ptr + address.FileOffset);
     }
 
     public DbAddress GetAddress(in Page page)
