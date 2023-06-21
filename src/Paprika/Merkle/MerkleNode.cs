@@ -11,7 +11,15 @@ public static class Node
     {
         Leaf,
         Extension,
-        Branch
+        Branch,
+    }
+
+    private static void ValidateHeaderNodeType(Header header, Type expected)
+    {
+        if (header.NodeType != expected)
+        {
+            throw new ArgumentException($"Expected Header with {nameof(Type)} {expected}, got {header.NodeType}");
+        }
     }
 
     [StructLayout(LayoutKind.Explicit, Pack = 1, Size = Size)]
@@ -70,11 +78,7 @@ public static class Node
 
         private Leaf(Header header, NibblePath path, Keccak keccak)
         {
-            if (header.NodeType != Type.Leaf)
-            {
-                throw new ArgumentException($"Expected Header with {nameof(Type)} {nameof(Type.Leaf)}, got {header.NodeType}");
-            }
-
+            ValidateHeaderNodeType(header, Type.Leaf);
             Header = header;
             Path = path;
             Keccak = keccak;
@@ -128,10 +132,7 @@ public static class Node
 
         private Extension(Header header, NibblePath path)
         {
-            if (header.NodeType != Type.Extension)
-            {
-                throw new ArgumentException($"Expected Header with {nameof(Type)} {nameof(Type.Extension)}, got {header.NodeType}");
-            }
+            ValidateHeaderNodeType(header, Type.Extension);
             Header = header;
             Path = path;
         }
@@ -194,11 +195,7 @@ public static class Node
 
         private Branch(Header header, ushort nibbleBitSet, Keccak keccak)
         {
-            if (header.NodeType != Type.Branch)
-            {
-                throw new ArgumentException($"Expected Header with {nameof(Type)} {nameof(Type.Branch)}, got {header.NodeType}");
-            }
-
+            ValidateHeaderNodeType(header, Type.Branch);
             Header = header;
             NibbleBitSet = nibbleBitSet;
             Keccak = keccak;
