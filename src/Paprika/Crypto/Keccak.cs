@@ -36,7 +36,7 @@ public readonly struct Keccak : IEquatable<Keccak>
     /// <returns>
     ///     <string>0x0000000000000000000000000000000000000000000000000000000000000000</string>
     /// </returns>
-    public static Keccak Zero { get; } = default;
+    public static Keccak Zero => default;
 
     public Keccak(byte[]? bytes)
     {

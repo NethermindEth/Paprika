@@ -418,6 +418,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _db.ReportCommit(watch.Elapsed);
         }
 
+        [DebuggerStepThrough]
         public override Page GetAt(DbAddress address) => _db.GetAt(address);
 
         public override DbAddress GetAddress(Page page) => _db.GetAddress(page);

@@ -1,5 +1,6 @@
 ﻿using System.Buffers;
 using System.Diagnostics;
+using System.IO.Hashing;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
@@ -614,6 +615,11 @@ public readonly ref struct NibbleBasedMap
                 $"{nameof(Type)}: {Type}, {nameof(Prefix)}: {Prefix}, {nameof(ItemAddress)}: {ItemAddress}";
         }
     }
+
+    public override string ToString() =>
+        $"{nameof(Count)}: {Count}, " +
+        $"{nameof(CapacityLeft)}: {CapacityLeft}, " +
+        $"Hash of content: {XxHash32.HashToUInt32(_raw)}";
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Header

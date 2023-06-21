@@ -26,6 +26,14 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     public uint Raw => _value;
 
     /// <summary>
+    /// Gets the offset in the file.
+    /// </summary>
+    /// <remarks>
+    /// Long here is required! Otherwise int overflow will turn it to negative value!
+    /// </remarks>
+    public long FileOffset => (long)_value * Store.Page.PageSize;
+
+    /// <summary>
     /// Creates a database address that represents a jump to another database <see cref="Store.Page"/>.
     /// </summary>
     /// <param name="page">The page to go to.</param>

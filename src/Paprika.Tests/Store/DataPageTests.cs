@@ -86,23 +86,19 @@ public class DataPageTests : BasePageTests
         var batch = NewBatch(BatchId);
         var dataPage = new DataPage(page);
 
-        const int count = 1063;
+        const int count = 128 * 1024;
+        const int seed = 13;
 
-        for (int i = 0; i < count; i++)
+        var random = new Random(seed);
+        for (var i = 0; i < count; i++)
         {
-            var key = GetKey(i);
-            dataPage = dataPage.SetAccount(key, GetValue(i), batch);
+            dataPage = dataPage.SetAccount(random.NextKeccak(), GetValue(i), batch);
         }
 
-        for (int i = 0; i < count; i++)
+        random = new Random(seed);
+        for (var i = 0; i < count; i++)
         {
-            var key = GetKey(i);
-            if (i == 811)
-            {
-                Debugger.Break();
-            }
-
-            dataPage.ShouldHaveAccount(key, GetValue(i), batch, i);
+            dataPage.ShouldHaveAccount(random.NextKeccak(), GetValue(i), batch, i);
         }
     }
 

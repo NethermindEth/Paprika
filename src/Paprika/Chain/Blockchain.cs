@@ -78,7 +78,8 @@ public class Blockchain : IAsyncDisposable
             });
         }
 
-        var genesis = new Block(GenesisHash, new ReadOnlyBatchCountingRefs(db.BeginReadOnlyBatch()), GenesisHash, 0, this);
+        var genesis = new Block(GenesisHash, new ReadOnlyBatchCountingRefs(db.BeginReadOnlyBatch()), GenesisHash, 0,
+            this);
 
         _blocksByNumber[0] = new[] { genesis };
         _blocksByHash[GenesisHash] = genesis;
@@ -136,14 +137,24 @@ public class Blockchain : IAsyncDisposable
 
                 timer.Stop();
 
+                // measure
+                var count = flushed.Count;
+
+                if (count == 0)
+                {
+                    // nothing
+                    continue;
+                }
+
                 var flushWatch = Stopwatch.StartNew();
                 _db.Flush();
                 _flusherFlushInMs.Record((int)flushWatch.ElapsedMilliseconds);
 
-                // measure
-                var count = flushed.Count;
+                if (timer.ElapsedMilliseconds > 0)
+                {
+                    _flusherBlockPerS.Record((int)(count * 1000 / timer.ElapsedMilliseconds));
+                }
 
-                _flusherBlockPerS.Record((int)(count * 1000 / timer.ElapsedMilliseconds));
                 _flusherQueueCount.Subtract(count);
 
                 // publish the reader to the blocks following up the flushed one
@@ -288,7 +299,8 @@ public class Blockchain : IAsyncDisposable
         // one of: Block as the parent, or IReadOnlyBatch if flushed
         private RefCountingDisposable _previous;
 
-        public Block(Keccak parentHash, RefCountingDisposable parent, Keccak hash, uint blockNumber, Blockchain blockchain)
+        public Block(Keccak parentHash, RefCountingDisposable parent, Keccak hash, uint blockNumber,
+            Blockchain blockchain)
         {
             _previous = parent;
             _blockchain = blockchain;

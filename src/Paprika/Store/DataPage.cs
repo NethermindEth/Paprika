@@ -82,6 +82,7 @@ public readonly unsafe struct DataPage : IPage
         {
             // the page is from another batch, meaning, it's readonly. Copy
             var writable = ctx.Batch.GetWritableCopy(_page);
+
             return new DataPage(writable).Set(ctx);
         }
 
@@ -93,9 +94,10 @@ public readonly unsafe struct DataPage : IPage
             var nibble = path.FirstNibble;
             ref var address = ref Data.Buckets[nibble];
 
-            // the bucket is not null and represents a page jump, follow it but only if it was written this tx
+            // the bucket is not null and represents a jump to another page
             if (address.IsNull == false)
             {
+                // first try to find whether the page provides the in-page hash map
                 if (TryGetHashingInPageMap(ctx.Key, out var hashingMap))
                 {
                     if (hashingMap.TrySet(ctx.Hash, ctx.Key, ctx.Data))
@@ -318,7 +320,8 @@ public readonly unsafe struct DataPage : IPage
                 // it's ok to use item.Key, the enumerator does not changes the additional key bytes
                 var key = Key.StorageTreeStorageCell(item.Key);
 
-                dataPage = new DataPage(dataPage.Set(new SetContext(HashingMap.GetHash(key), key, item.RawData, ctx.Batch)));
+                dataPage = new DataPage(dataPage.Set(new SetContext(HashingMap.GetHash(key), key, item.RawData,
+                    ctx.Batch)));
 
                 // fast delete by enumerator item
                 map.Delete(item);
