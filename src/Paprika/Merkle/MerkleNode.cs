@@ -80,7 +80,7 @@ public readonly ref struct Branch
         var leftover = MerkleNodeHeader.ReadFrom(source, out var header);
 
         var nibbleBitSet = BinaryPrimitives.ReadUInt16LittleEndian(leftover);
-        leftover = leftover.Slice(2);
+        leftover = leftover.Slice(NibbleBitSetSize);
 
         leftover = Keccak.ReadFrom(leftover, out var keccak);
 
