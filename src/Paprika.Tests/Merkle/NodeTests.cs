@@ -98,7 +98,7 @@ public class NodeTests
     {
         var branch = new Branch(nibbleBitSet, keccak);
 
-        Span<byte> encoded = stackalloc byte[Branch.MaxSize];
+        Span<byte> encoded = stackalloc byte[Branch.MaxByteLength];
         _  = branch.WriteTo(encoded);
         _ = Branch.ReadFrom(encoded, out var decoded);
 

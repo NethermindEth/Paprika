@@ -16,10 +16,11 @@ public ref struct MerkleNode
 
 }
 
-[StructLayout(LayoutKind.Explicit, Pack = 1, Size = MaxSize)]
+[StructLayout(LayoutKind.Explicit, Pack = 1, Size = 35)]
 public readonly ref struct Branch
 {
-    public const int MaxSize = 35;
+    public static int MaxByteLength => 35;
+
     private const int NibbleBitSetSize = sizeof(ushort);
 
     [FieldOffset(0)]
@@ -76,12 +77,17 @@ public readonly ref struct Branch
 
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Branch branch)
     {
-        MerkleNodeHeader.ReadFrom(source, out var header);
-        var nibbleBitSet = BitConverter.ToUInt16(source.Slice(1));
-        var keccak = new Keccak(source.Slice(3));
+        var leftover = MerkleNodeHeader.ReadFrom(source, out var header);
+
+        var nibbleBitSet = BitConverter.ToUInt16(leftover);
+        leftover = leftover.Slice(2);
+
+        var keccak = new Keccak(leftover);
+        leftover.Slice(Keccak.Size);
+
         branch = new Branch(header, nibbleBitSet, keccak);
 
-        return source.Slice(MaxSize);
+        return leftover;
     }
 
     public bool Equals(in Branch other)
