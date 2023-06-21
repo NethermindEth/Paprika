@@ -1,6 +1,7 @@
 using System.Reflection.Emit;
 using NUnit.Framework;
 using Paprika.Crypto;
+using Paprika.Data;
 using Paprika.Merkle;
 
 namespace Paprika.Tests.Merkle;
@@ -102,6 +103,21 @@ public class NodeTests
         _ = Branch.ReadFrom(encoded, out var decoded);
 
         Assert.That(decoded.Equals(branch), $"Expected {branch.ToString()}, got {decoded.ToString()}");
+    }
+
+    [Test]
+    public void Leaf_properties()
+    {
+        ReadOnlySpan<byte> bytes = new byte[] { 0xA, 0x9, 0x6, 0x3 };
+        var path = NibblePath.FromKey(bytes);
+        var keccak = Values.Key0;
+
+        var leaf = new Leaf(path, keccak);
+
+        Assert.That(leaf.IsDirty, Is.True);
+        Assert.That(leaf.NodeType, Is.EqualTo(NodeType.Leaf));
+        Assert.That(leaf.NibblePath.Equals(path), $"Expected {path.ToString()}, got {leaf.NibblePath.ToString()}");
+        Assert.That(leaf.Keccak, Is.EqualTo(keccak));
     }
 
     private static int GetTypeSize(Type type)

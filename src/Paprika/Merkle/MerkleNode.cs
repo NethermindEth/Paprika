@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
+using Paprika.Data;
 
 namespace Paprika.Merkle;
 
@@ -94,6 +95,73 @@ public readonly ref struct Branch
         $"{nameof(Branch)} {{ " +
         $"{nameof(_header)}: {_header.ToString()}, " +
         $"{nameof(_nibbleBitSet)}: {_nibbleBitSet}, " +
+        $"{nameof(_keccak)}: {_keccak} " +
+        $"}}";
+}
+
+public readonly ref struct Leaf
+{
+    public int MaxByteLength => MerkleNodeHeader.MaxSize + _path.MaxByteLength + Keccak.Size;
+
+    private readonly MerkleNodeHeader _header; // 1
+    private readonly NibblePath _path; // 10
+    private readonly Keccak _keccak; // 32
+
+    public bool IsDirty => _header.IsDirty;
+    public NodeType NodeType => NodeType.Leaf;
+
+    public NibblePath NibblePath => _path;
+    public Keccak Keccak => _keccak;
+
+    public Leaf(MerkleNodeHeader header, NibblePath path, Keccak keccak)
+    {
+        _header = header;
+        _path = path;
+        _keccak = keccak;
+    }
+
+    public Leaf(NibblePath path, Keccak keccak)
+    {
+        _header = new MerkleNodeHeader(NodeType.Leaf);
+        _path = path;
+        _keccak = keccak;
+    }
+
+    public Span<byte> WriteTo(Span<byte> output)
+    {
+        var leftover = _header.WriteTo(output);
+
+        leftover = _path.WriteToWithLeftover(leftover);
+
+        // TODO: Add `WriteToWithLeftover` to Keccak
+        _keccak.Span.CopyTo(leftover);
+        leftover = leftover.Slice(Keccak.Size);
+
+        return leftover;
+    }
+
+    public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Leaf leaf)
+    {
+        var leftover = MerkleNodeHeader.ReadFrom(source, out var header);
+        leftover = NibblePath.ReadFrom(leftover, out var path);
+
+        // TODO: Add `ReadFromWithLeftover` to Keccak
+        var keccak = new Keccak(leftover);
+        leftover = leftover.Slice(Keccak.Size);
+
+        leaf = new Leaf(header, path, keccak);
+        return leftover;
+    }
+
+    public bool Equals(in Leaf other) =>
+        _header.Equals(other._header)
+        && _path.Equals(other._path)
+        && _keccak.Equals(other._keccak);
+
+    public override string ToString() =>
+        $"{nameof(Leaf)} {{ " +
+        $"{nameof(_header)}: {_header.ToString()}, " +
+        $"{nameof(_path)}: {_path.ToString()}, " +
         $"{nameof(_keccak)}: {_keccak} " +
         $"}}";
 }
