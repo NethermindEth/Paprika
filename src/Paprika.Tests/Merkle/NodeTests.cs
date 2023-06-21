@@ -207,6 +207,21 @@ public class NodeTests
         Assert.That(actual.Equals(extension));
     }
 
+    [Test]
+    public void Node_read_branch()
+    {
+        ushort nibbleBitSet = 0b1100_0011_0101_1010;
+        var keccak = Values.Key0;
+
+        var branch = new Node.Branch(nibbleBitSet, keccak);
+        Span<byte> buffer = stackalloc byte[Node.Branch.Size];
+        _ = branch.WriteTo(buffer);
+        _ = Node.ReadFrom(buffer, out var nodeType, out _, out _, out var actual);
+
+        Assert.That(nodeType, Is.EqualTo(Node.Type.Branch));
+        Assert.That(actual.Equals(branch));
+    }
+
     private static int GetSizeOfType(Type type)
     {
         var dm = new DynamicMethod("$", typeof(int), Type.EmptyTypes);
