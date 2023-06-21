@@ -193,6 +193,20 @@ public class NodeTests
         Assert.That(actual.Equals(leaf));
     }
 
+    [Test]
+    public void Node_read_extension()
+    {
+        var nibblePath = NibblePath.FromKey(new byte[] { 0x1, 0x2 });
+
+        var extension = new Node.Extension(nibblePath);
+        Span<byte> buffer = stackalloc byte[extension.MaxByteLength];
+        _ = extension.WriteTo(buffer);
+        _ = Node.ReadFrom(buffer, out var nodeType, out _, out var actual, out _);
+
+        Assert.That(nodeType, Is.EqualTo(Node.Type.Extension));
+        Assert.That(actual.Equals(extension));
+    }
+
     private static int GetSizeOfType(Type type)
     {
         var dm = new DynamicMethod("$", typeof(int), Type.EmptyTypes);
