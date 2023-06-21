@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -66,7 +67,7 @@ public readonly ref struct Branch
     {
         var leftover = _header.WriteTo(output);
 
-        BitConverter.TryWriteBytes(leftover, _nibbleBitSet);
+        BinaryPrimitives.WriteUInt16LittleEndian(leftover, _nibbleBitSet);
         leftover = leftover.Slice(NibbleBitSetSize);
 
         Keccak.Span.CopyTo(leftover);
@@ -79,7 +80,7 @@ public readonly ref struct Branch
     {
         var leftover = MerkleNodeHeader.ReadFrom(source, out var header);
 
-        var nibbleBitSet = BitConverter.ToUInt16(leftover);
+        var nibbleBitSet = BinaryPrimitives.ReadUInt16LittleEndian(leftover);
         leftover = leftover.Slice(2);
 
         var keccak = new Keccak(leftover);
