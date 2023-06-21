@@ -69,7 +69,7 @@ public readonly struct Keccak : IEquatable<Keccak>
 
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> bytes, out Keccak keccak)
     {
-        keccak = new Keccak(bytes);
+        keccak = new Keccak(bytes.Slice(0, Size));
         return bytes.Slice(Size);
     }
 
