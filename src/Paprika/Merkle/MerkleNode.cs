@@ -108,9 +108,9 @@ public readonly ref struct Leaf
 {
     public int MaxByteLength => MerkleNodeHeader.MaxSize + _path.MaxByteLength + Keccak.Size;
 
-    private readonly MerkleNodeHeader _header; // 1
-    private readonly NibblePath _path; // 10
-    private readonly Keccak _keccak; // 32
+    private readonly MerkleNodeHeader _header;
+    private readonly NibblePath _path;
+    private readonly Keccak _keccak;
 
     public bool IsDirty => _header.IsDirty;
     public NodeType NodeType => NodeType.Leaf;

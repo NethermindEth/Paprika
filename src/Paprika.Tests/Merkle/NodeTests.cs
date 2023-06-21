@@ -11,6 +11,7 @@ public class NodeTests
     [Test]
     [TestCase(typeof(MerkleNodeHeader), 1)]
     [TestCase(typeof(Branch), 35)]
+    [TestCase(typeof(Leaf), 64)]
     public void Struct_size(Type type, int expectedSize)
     {
         Assert.That(GetTypeSize(type), Is.EqualTo(expectedSize));
