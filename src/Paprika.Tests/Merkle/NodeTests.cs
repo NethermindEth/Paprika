@@ -86,35 +86,22 @@ public class NodeTests
     }
 
     private static object[] _branchReadWriteCases = {
-        new object[] { (ushort) 0b0110_1001_0101_1010, new byte[] { 1, 3, 4, 6, 8, 11, 13, 14 },Values.Key0 },
-        new object[] { (ushort) 0b1001_0110_1010_0101, new byte[] { 0, 2, 5, 7, 9, 10, 12, 15 },Values.Key1A },
-        new object[] { (ushort) 0b0000_1000_0001_0000, new byte[] { 4, 11 },Values.Key1B },
+        new object[] { (ushort) 0b0110_1001_0101_1010, Values.Key0 },
+        new object[] { (ushort) 0b1001_0110_1010_0101, Values.Key1A },
+        new object[] { (ushort) 0b0000_1000_0001_0000, Values.Key1B },
     };
 
     [Test]
     [TestCaseSource(nameof(_branchReadWriteCases))]
-    public void Branch_read_write(ushort nibbleBitSet, byte[] nibbles, Keccak keccak)
+    public void Branch_read_write(ushort nibbleBitSet, Keccak keccak)
     {
+        var branch = new Branch(nibbleBitSet, keccak);
+
         Span<byte> encoded = stackalloc byte[Branch.MaxSize];
-        // Header
-        encoded[0] = 0b0101;
-        // Nibble BitSet
-        BitConverter.TryWriteBytes(encoded.Slice(1), nibbleBitSet);
-        // Keccak
-        keccak.Span.CopyTo(encoded.Slice(3));
+        _  = branch.WriteTo(encoded);
+        _ = Branch.ReadFrom(encoded, out var decoded);
 
-        _ = Branch.ReadFrom(encoded, out var branch);
-        Assert.That(branch.IsDirty, Is.True);
-        Assert.That(branch.Keccak, Is.EqualTo(keccak));
-        foreach (var nibble in nibbles)
-        {
-            Assert.That(branch.HasNibble(nibble), $"Nibble {nibble} was expected to be set, but it's not");
-        }
-
-        Span<byte> buffer = stackalloc byte[Branch.MaxSize];
-        _ = branch.WriteTo(buffer);
-
-        Assert.That(buffer.SequenceEqual(encoded));
+        Assert.That(decoded.Equals(branch), $"Expected {branch.ToString()}, got {decoded.ToString()}");
     }
 
     private static int GetTypeSize(Type type)

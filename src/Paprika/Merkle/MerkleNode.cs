@@ -82,6 +82,20 @@ public readonly ref struct Branch
 
         return source.Slice(MaxSize);
     }
+
+    public bool Equals(in Branch other)
+    {
+        return _header.Equals(other._header)
+               && _nibbleBitSet.Equals(other._nibbleBitSet)
+               && _keccak.Equals(other._keccak);
+    }
+
+    public override string ToString() =>
+        $"{nameof(Branch)} {{ " +
+        $"{nameof(_header)}: {_header.ToString()}, " +
+        $"{nameof(_nibbleBitSet)}: {_nibbleBitSet}, " +
+        $"{nameof(_keccak)}: {_keccak} " +
+        $"}}";
 }
 
 [StructLayout(LayoutKind.Explicit, Pack = 1, Size = MaxSize)]
@@ -117,4 +131,15 @@ public readonly struct MerkleNodeHeader
 
         return source.Slice(MaxSize);
     }
+
+    public bool Equals(in MerkleNodeHeader other)
+    {
+        return _header.Equals(other._header);
+    }
+
+    public override string ToString() =>
+        $"{nameof(MerkleNodeHeader)} {{ " +
+        $"{nameof(IsDirty)}: {IsDirty}, " +
+        $"{nameof(NodeType)}: {NodeType} " +
+        $"}}";
 }
