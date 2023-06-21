@@ -9,44 +9,44 @@ namespace Paprika.Tests.Merkle;
 public class NodeTests
 {
     [Test]
-    [TestCase(typeof(MerkleNodeHeader), 1)]
-    [TestCase(typeof(Branch), 35)]
-    [TestCase(typeof(Leaf), 64)]
-    [TestCase(typeof(Extension), 32)]
+    [TestCase(typeof(Node.Header), 1)]
+    [TestCase(typeof(Node.Branch), 35)]
+    [TestCase(typeof(Node.Leaf), 64)]
+    [TestCase(typeof(Node.Extension), 32)]
     public void Struct_size(Type type, int expectedSize)
     {
         Assert.That(GetSizeOfType(type), Is.EqualTo(expectedSize));
     }
 
     [Test]
-    [TestCase(NodeType.Branch, true)]
-    [TestCase(NodeType.Branch, false)]
-    [TestCase(NodeType.Leaf, true)]
-    [TestCase(NodeType.Leaf, false)]
-    [TestCase(NodeType.Extension, true)]
-    [TestCase(NodeType.Extension, false)]
-    public void Node_header_properties(NodeType nodeType, bool isDirty)
+    [TestCase(Node.Type.Branch, true)]
+    [TestCase(Node.Type.Branch, false)]
+    [TestCase(Node.Type.Leaf, true)]
+    [TestCase(Node.Type.Leaf, false)]
+    [TestCase(Node.Type.Extension, true)]
+    [TestCase(Node.Type.Extension, false)]
+    public void Header_properties(Node.Type nodeType, bool isDirty)
     {
-        var header = new MerkleNodeHeader(nodeType, isDirty);
+        var header = new Node.Header(nodeType, isDirty);
 
         Assert.That(header.NodeType, Is.EqualTo(nodeType));
         Assert.That(header.IsDirty, Is.EqualTo(isDirty));
     }
 
     [Test]
-    [TestCase(NodeType.Leaf, false)]
-    [TestCase(NodeType.Extension, false)]
-    [TestCase(NodeType.Branch, false)]
-    [TestCase(NodeType.Leaf, true)]
-    [TestCase(NodeType.Extension, true)]
-    [TestCase(NodeType.Branch, true)]
-    public void Node_header_read_write(NodeType nodeType, bool isDirty)
+    [TestCase(Node.Type.Leaf, false)]
+    [TestCase(Node.Type.Extension, false)]
+    [TestCase(Node.Type.Branch, false)]
+    [TestCase(Node.Type.Leaf, true)]
+    [TestCase(Node.Type.Extension, true)]
+    [TestCase(Node.Type.Branch, true)]
+    public void Node_header_read_write(Node.Type nodeType, bool isDirty)
     {
-        var expected = new MerkleNodeHeader(nodeType, isDirty);
-        Span<byte> buffer = stackalloc byte[MerkleNodeHeader.Size];
+        var expected = new Node.Header(nodeType, isDirty);
+        Span<byte> buffer = stackalloc byte[Node.Header.Size];
 
         _ = expected.WriteTo(buffer);
-        _ = MerkleNodeHeader.ReadFrom(buffer, out var actual);
+        _ = Node.Header.ReadFrom(buffer, out var actual);
 
         Assert.That(actual.Equals(expected), $"Expected {expected.ToString()}, got {actual.ToString()}");
     }
@@ -55,10 +55,10 @@ public class NodeTests
     public void Branch_properties()
     {
         ushort nibbles = 0b0000_0000_0000_0000;
-        var branch = new Branch(nibbles, Values.Key0);
+        var branch = new Node.Branch(nibbles, Values.Key0);
 
-        Assert.That(branch.NodeType, Is.EqualTo(NodeType.Branch));
-        Assert.That(branch.IsDirty, Is.EqualTo(true));
+        Assert.That(branch.Header.NodeType, Is.EqualTo(Node.Type.Branch));
+        Assert.That(branch.Header.IsDirty, Is.True);
         Assert.That(branch.Keccak, Is.EqualTo(Values.Key0));
     }
 
@@ -66,7 +66,7 @@ public class NodeTests
     public void Branch_no_nibbles()
     {
         ushort nibbles = 0b0000_0000_0000_0000;
-        var branch = new Branch(nibbles, Values.Key0);
+        var branch = new Node.Branch(nibbles, Values.Key0);
 
         for (byte nibble = 0; nibble < 16; nibble++)
         {
@@ -78,7 +78,7 @@ public class NodeTests
     public void Branch_some_nibbles()
     {
         ushort nibbles = 0b0110_1001_0101_1010;
-        var branch = new Branch(nibbles, Values.Key0);
+        var branch = new Node.Branch(nibbles, Values.Key0);
 
         var expected = new byte[] { 1, 3, 4, 6, 8, 11, 13, 14 };
 
@@ -99,11 +99,11 @@ public class NodeTests
     [TestCaseSource(nameof(_branchReadWriteCases))]
     public void Branch_read_write(ushort nibbleBitSet, Keccak keccak)
     {
-        var branch = new Branch(nibbleBitSet, keccak);
+        var branch = new Node.Branch(nibbleBitSet, keccak);
 
-        Span<byte> encoded = stackalloc byte[Branch.MaxByteLength];
+        Span<byte> encoded = stackalloc byte[Node.Branch.Size];
         _ = branch.WriteTo(encoded);
-        _ = Branch.ReadFrom(encoded, out var decoded);
+        _ = Node.Branch.ReadFrom(encoded, out var decoded);
 
         Assert.That(decoded.Equals(branch), $"Expected {branch.ToString()}, got {decoded.ToString()}");
     }
@@ -115,11 +115,11 @@ public class NodeTests
         var path = NibblePath.FromKey(bytes);
         var keccak = Values.Key0;
 
-        var leaf = new Leaf(path, keccak);
+        var leaf = new Node.Leaf(path, keccak);
 
-        Assert.That(leaf.IsDirty, Is.True);
-        Assert.That(leaf.NodeType, Is.EqualTo(NodeType.Leaf));
-        Assert.That(leaf.NibblePath.Equals(path), $"Expected {path.ToString()}, got {leaf.NibblePath.ToString()}");
+        Assert.That(leaf.Header.IsDirty, Is.True);
+        Assert.That(leaf.Header.NodeType, Is.EqualTo(Node.Type.Leaf));
+        Assert.That(leaf.Path.Equals(path), $"Expected {path.ToString()}, got {leaf.Path.ToString()}");
         Assert.That(leaf.Keccak, Is.EqualTo(keccak));
     }
 
@@ -135,15 +135,14 @@ public class NodeTests
     [TestCaseSource(nameof(_leafReadWriteCases))]
     public void Leaf_read_write(byte[] pathBytes, Keccak keccak)
     {
-        var leaf = new Leaf(NibblePath.FromKey(pathBytes), keccak);
+        var leaf = new Node.Leaf(NibblePath.FromKey(pathBytes), keccak);
 
         Span<byte> encoded = stackalloc byte[leaf.MaxByteLength];
         _ = leaf.WriteTo(encoded);
-        _ = Leaf.ReadFrom(encoded, out var decoded);
+        _ = Node.Leaf.ReadFrom(encoded, out var decoded);
 
         Assert.That(decoded.Equals(leaf), $"Expected {leaf.ToString()}, got {leaf.ToString()}");
     }
-
 
     [Test]
     public void Extension_properties()
@@ -151,11 +150,11 @@ public class NodeTests
         ReadOnlySpan<byte> bytes = new byte[] { 0xA, 0x9, 0x6, 0x3 };
         var path = NibblePath.FromKey(bytes);
 
-        var extension = new Extension(path);
+        var extension = new Node.Extension(path);
 
-        Assert.That(extension.IsDirty, Is.True);
-        Assert.That(extension.NodeType, Is.EqualTo(NodeType.Extension));
-        Assert.That(extension.NibblePath.Equals(path), $"Expected {path.ToString()}, got {extension.NibblePath.ToString()}");
+        Assert.That(extension.Header.IsDirty, Is.True);
+        Assert.That(extension.Header.NodeType, Is.EqualTo(Node.Type.Extension));
+        Assert.That(extension.Path.Equals(path), $"Expected {path.ToString()}, got {extension.Path.ToString()}");
     }
 
     private static object[] _extensionReadWriteCases =
@@ -170,11 +169,11 @@ public class NodeTests
     [TestCaseSource(nameof(_extensionReadWriteCases))]
     public void Extension_read_write(byte[] pathBytes)
     {
-        var extension = new Extension(NibblePath.FromKey(pathBytes));
+        var extension = new Node.Extension(NibblePath.FromKey(pathBytes));
 
         Span<byte> encoded = stackalloc byte[extension.MaxByteLength];
         _ = extension.WriteTo(encoded);
-        _ = Extension.ReadFrom(encoded, out var decoded);
+        _ = Node.Extension.ReadFrom(encoded, out var decoded);
 
         Assert.That(decoded.Equals(extension), $"Expected {extension.ToString()}, got {extension.ToString()}");
     }

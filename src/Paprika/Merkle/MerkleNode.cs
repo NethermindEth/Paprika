@@ -5,259 +5,250 @@ using Paprika.Data;
 
 namespace Paprika.Merkle;
 
-public enum NodeType : byte
+public static class Node
 {
-    Leaf,
-    Extension,
-    Branch
-}
-
-public ref struct MerkleNode
-{
-
-}
-
-[StructLayout(LayoutKind.Explicit, Pack = 1, Size = 35)]
-public readonly ref struct Branch
-{
-    public static int MaxByteLength => 35;
-
-    private const int NibbleBitSetSize = sizeof(ushort);
-
-    [FieldOffset(0)]
-    private readonly MerkleNodeHeader _header;
-
-    [FieldOffset(1)]
-    private readonly ushort _nibbleBitSet;
-
-    [FieldOffset(3)]
-    private readonly Keccak _keccak;
-
-    public bool IsDirty => _header.IsDirty;
-    public NodeType NodeType => NodeType.Branch;
-    public Keccak Keccak => _keccak;
-
-    // TODO: What interface do we want to expose for nibbles?
-    // Options:
-    // - `IEnumerable<byte>` with all nibbles is not possible
-    // - `byte[]` with all nibbles
-    // - `bool HasNibble(byte nibble)` to lookup a single nibble at a time
-    public bool HasNibble(byte nibble) => (_nibbleBitSet & (1 << nibble)) != 0;
-
-    public Branch(MerkleNodeHeader header, ushort nibbleBitSet, Keccak keccak)
+    public enum Type : byte
     {
-        if (header.NodeType != NodeType.Branch)
+        Leaf,
+        Extension,
+        Branch
+    }
+
+    [StructLayout(LayoutKind.Explicit, Pack = 1, Size = Size)]
+    public readonly struct Header
+    {
+        public const int Size = sizeof(byte);
+
+        private const byte IsDirtyMask = 0b0001;
+        private const byte NodeTypeMask = 0b0110;
+
+        [FieldOffset(0)]
+        private readonly byte _header;
+
+        public bool IsDirty => (_header & IsDirtyMask) != 0;
+        public Type NodeType => (Type)((_header & NodeTypeMask) >> 1);
+
+        public Header(Type nodeType, bool isDirty = true)
         {
-            throw new ArgumentException($"Expected Header with {nameof(Merkle.NodeType)} {nameof(NodeType.Branch)}, got {header.NodeType}");
+            _header = (byte)((byte)nodeType << 1 | (isDirty ? IsDirtyMask : 0));
         }
 
-        _header = header;
-        _nibbleBitSet = nibbleBitSet;
-        _keccak = keccak;
+        public Span<byte> WriteTo(Span<byte> output)
+        {
+            output[0] = _header;
+            return output.Slice(Size);
+        }
+
+        public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Header header)
+        {
+            var isDirty = (source[0] & IsDirtyMask) != 0;
+            var nodeType = (Type)((source[0] & NodeTypeMask) >> 1);
+            header = new Header(nodeType, isDirty);
+
+            return source.Slice(Size);
+        }
+
+        public bool Equals(in Header other)
+        {
+            return _header.Equals(other._header);
+        }
+
+        public override string ToString() =>
+            $"{nameof(Header)} {{ " +
+            $"{nameof(IsDirty)}: {IsDirty}, " +
+            $"{nameof(Type)}: {NodeType} " +
+            $"}}";
     }
 
-    public Branch(ushort nibbleBitSet, Keccak keccak)
+    public readonly ref struct Leaf
     {
-        _header = new MerkleNodeHeader(NodeType.Branch);
-        _nibbleBitSet = nibbleBitSet;
-        _keccak = keccak;
+        public int MaxByteLength => Header.Size + Path.MaxByteLength + Keccak.Size;
+
+        public readonly Header Header;
+        public readonly NibblePath Path;
+        public readonly Keccak Keccak;
+
+        private Leaf(Header header, NibblePath path, Keccak keccak)
+        {
+            if (header.NodeType != Type.Leaf)
+            {
+                throw new ArgumentException($"Expected Header with {nameof(Type)} {nameof(Type.Leaf)}, got {header.NodeType}");
+            }
+
+            Header = header;
+            Path = path;
+            Keccak = keccak;
+        }
+
+        public Leaf(NibblePath path, Keccak keccak)
+        {
+            Header = new Header(Type.Leaf);
+            Path = path;
+            Keccak = keccak;
+        }
+
+        public Span<byte> WriteTo(Span<byte> output)
+        {
+            var leftover = Header.WriteTo(output);
+            leftover = Path.WriteToWithLeftover(leftover);
+            leftover = Keccak.WriteTo(leftover);
+
+            return leftover;
+        }
+
+        public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Leaf leaf)
+        {
+            var leftover = Header.ReadFrom(source, out var header);
+            leftover = NibblePath.ReadFrom(leftover, out var path);
+            leftover = Keccak.ReadFrom(leftover, out var keccak);
+
+            leaf = new Leaf(header, path, keccak);
+            return leftover;
+        }
+
+        public bool Equals(in Leaf other) =>
+            Header.Equals(other.Header)
+            && Path.Equals(other.Path)
+            && Keccak.Equals(other.Keccak);
+
+        public override string ToString() =>
+            $"{nameof(Leaf)} {{ " +
+            $"{nameof(Header)}: {Header.ToString()}, " +
+            $"{nameof(Path)}: {Path.ToString()}, " +
+            $"{nameof(Keccak)}: {Keccak} " +
+            $"}}";
     }
 
-    public Span<byte> WriteTo(Span<byte> output)
+    public readonly ref struct Extension
     {
-        var leftover = _header.WriteTo(output);
+        public int MaxByteLength => Header.Size + Path.MaxByteLength;
 
-        BinaryPrimitives.WriteUInt16LittleEndian(leftover, _nibbleBitSet);
-        leftover = leftover.Slice(NibbleBitSetSize);
+        public readonly Header Header;
+        public readonly NibblePath Path;
 
-        leftover = _keccak.WriteTo(leftover);
+        private Extension(Header header, NibblePath path)
+        {
+            if (header.NodeType != Type.Extension)
+            {
+                throw new ArgumentException($"Expected Header with {nameof(Type)} {nameof(Type.Extension)}, got {header.NodeType}");
+            }
+            Header = header;
+            Path = path;
+        }
 
-        return leftover;
+        public Extension(NibblePath path)
+        {
+            Header = new Header(Type.Extension);
+            Path = path;
+        }
+
+        public Span<byte> WriteTo(Span<byte> output)
+        {
+            var leftover = Header.WriteTo(output);
+            leftover = Path.WriteToWithLeftover(leftover);
+
+            return leftover;
+        }
+
+        public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Extension extension)
+        {
+            var leftover = Header.ReadFrom(source, out var header);
+            leftover = NibblePath.ReadFrom(leftover, out var path);
+
+            extension = new Extension(header, path);
+            return leftover;
+        }
+
+        public bool Equals(in Extension other) =>
+            Header.Equals(other.Header)
+            && Path.Equals(other.Path);
+
+        public override string ToString() =>
+            $"{nameof(Extension)} {{ " +
+            $"{nameof(Header)}: {Header.ToString()}, " +
+            $"{nameof(Path)}: {Path.ToString()}, " +
+            $"}}";
     }
 
-    public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Branch branch)
+    [StructLayout(LayoutKind.Explicit, Pack = 1, Size = Size)]
+    public readonly ref struct Branch
     {
-        var leftover = MerkleNodeHeader.ReadFrom(source, out var header);
+        public const int Size = 35;
+        private const int NibbleBitSetSize = sizeof(ushort);
 
-        var nibbleBitSet = BinaryPrimitives.ReadUInt16LittleEndian(leftover);
-        leftover = leftover.Slice(NibbleBitSetSize);
+        [FieldOffset(0)]
+        public readonly Header Header;
 
-        leftover = Keccak.ReadFrom(leftover, out var keccak);
+        [FieldOffset(1)]
+        public readonly ushort NibbleBitSet;
 
-        branch = new Branch(header, nibbleBitSet, keccak);
+        [FieldOffset(3)]
+        public readonly Keccak Keccak;
 
-        return leftover;
+        // TODO: What interface do we want to expose for nibbles?
+        // Options:
+        // - `IEnumerable<byte>` with all nibbles is not possible
+        // - `byte[]` with all nibbles
+        // - `bool HasNibble(byte nibble)` to lookup a single nibble at a time
+        public bool HasNibble(byte nibble) => (NibbleBitSet & (1 << nibble)) != 0;
+
+        private Branch(Header header, ushort nibbleBitSet, Keccak keccak)
+        {
+            if (header.NodeType != Type.Branch)
+            {
+                throw new ArgumentException($"Expected Header with {nameof(Type)} {nameof(Type.Branch)}, got {header.NodeType}");
+            }
+
+            Header = header;
+            NibbleBitSet = nibbleBitSet;
+            Keccak = keccak;
+        }
+
+        public Branch(ushort nibbleBitSet, Keccak keccak)
+        {
+            Header = new Header(Type.Branch);
+            NibbleBitSet = nibbleBitSet;
+            Keccak = keccak;
+        }
+
+        public Span<byte> WriteTo(Span<byte> output)
+        {
+            var leftover = Header.WriteTo(output);
+
+            BinaryPrimitives.WriteUInt16LittleEndian(leftover, NibbleBitSet);
+            leftover = leftover.Slice(NibbleBitSetSize);
+
+            leftover = Keccak.WriteTo(leftover);
+
+            return leftover;
+        }
+
+        public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Branch branch)
+        {
+            var leftover = Header.ReadFrom(source, out var header);
+
+            var nibbleBitSet = BinaryPrimitives.ReadUInt16LittleEndian(leftover);
+            leftover = leftover.Slice(NibbleBitSetSize);
+
+            leftover = Keccak.ReadFrom(leftover, out var keccak);
+
+            branch = new Branch(header, nibbleBitSet, keccak);
+
+            return leftover;
+        }
+
+        public bool Equals(in Branch other)
+        {
+            return Header.Equals(other.Header)
+                   && NibbleBitSet.Equals(other.NibbleBitSet)
+                   && Keccak.Equals(other.Keccak);
+        }
+
+        public override string ToString() =>
+            $"{nameof(Branch)} {{ " +
+            $"{nameof(Header)}: {Header.ToString()}, " +
+            $"{nameof(NibbleBitSet)}: {NibbleBitSet}, " +
+            $"{nameof(Keccak)}: {Keccak} " +
+            $"}}";
     }
-
-    public bool Equals(in Branch other)
-    {
-        return _header.Equals(other._header)
-               && _nibbleBitSet.Equals(other._nibbleBitSet)
-               && _keccak.Equals(other._keccak);
-    }
-
-    public override string ToString() =>
-        $"{nameof(Branch)} {{ " +
-        $"{nameof(_header)}: {_header.ToString()}, " +
-        $"{nameof(_nibbleBitSet)}: {_nibbleBitSet}, " +
-        $"{nameof(_keccak)}: {_keccak} " +
-        $"}}";
-}
-
-public readonly ref struct Leaf
-{
-    public int MaxByteLength => MerkleNodeHeader.Size + _path.MaxByteLength + Keccak.Size;
-
-    private readonly MerkleNodeHeader _header;
-    private readonly NibblePath _path;
-    private readonly Keccak _keccak;
-
-    public bool IsDirty => _header.IsDirty;
-    public NodeType NodeType => NodeType.Leaf;
-
-    public NibblePath NibblePath => _path;
-    public Keccak Keccak => _keccak;
-
-    public Leaf(MerkleNodeHeader header, NibblePath path, Keccak keccak)
-    {
-        _header = header;
-        _path = path;
-        _keccak = keccak;
-    }
-
-    public Leaf(NibblePath path, Keccak keccak)
-    {
-        _header = new MerkleNodeHeader(NodeType.Leaf);
-        _path = path;
-        _keccak = keccak;
-    }
-
-    public Span<byte> WriteTo(Span<byte> output)
-    {
-        var leftover = _header.WriteTo(output);
-        leftover = _path.WriteToWithLeftover(leftover);
-        leftover = _keccak.WriteTo(leftover);
-
-        return leftover;
-    }
-
-    public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Leaf leaf)
-    {
-        var leftover = MerkleNodeHeader.ReadFrom(source, out var header);
-        leftover = NibblePath.ReadFrom(leftover, out var path);
-        leftover = Keccak.ReadFrom(leftover, out var keccak);
-
-        leaf = new Leaf(header, path, keccak);
-        return leftover;
-    }
-
-    public bool Equals(in Leaf other) =>
-        _header.Equals(other._header)
-        && _path.Equals(other._path)
-        && _keccak.Equals(other._keccak);
-
-    public override string ToString() =>
-        $"{nameof(Leaf)} {{ " +
-        $"{nameof(_header)}: {_header.ToString()}, " +
-        $"{nameof(_path)}: {_path.ToString()}, " +
-        $"{nameof(_keccak)}: {_keccak} " +
-        $"}}";
-}
-
-public readonly ref struct Extension
-{
-    public int MaxByteLength => MerkleNodeHeader.Size + _path.MaxByteLength;
-
-    private readonly MerkleNodeHeader _header;
-    private readonly NibblePath _path;
-
-    public bool IsDirty => _header.IsDirty;
-    public NodeType NodeType => NodeType.Extension;
-
-    public NibblePath NibblePath => _path;
-
-    public Extension(MerkleNodeHeader header, NibblePath path)
-    {
-        _header = header;
-        _path = path;
-    }
-
-    public Extension(NibblePath path)
-    {
-        _header = new MerkleNodeHeader(NodeType.Extension);
-        _path = path;
-    }
-
-    public Span<byte> WriteTo(Span<byte> output)
-    {
-        var leftover = _header.WriteTo(output);
-        leftover = _path.WriteToWithLeftover(leftover);
-
-        return leftover;
-    }
-
-    public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Extension extension)
-    {
-        var leftover = MerkleNodeHeader.ReadFrom(source, out var header);
-        leftover = NibblePath.ReadFrom(leftover, out var path);
-
-        extension = new Extension(header, path);
-        return leftover;
-    }
-
-    public bool Equals(in Extension other) =>
-        _header.Equals(other._header)
-        && _path.Equals(other._path);
-
-    public override string ToString() =>
-        $"{nameof(Extension)} {{ " +
-        $"{nameof(_header)}: {_header.ToString()}, " +
-        $"{nameof(_path)}: {_path.ToString()}, " +
-        $"}}";
-}
-
-[StructLayout(LayoutKind.Explicit, Pack = 1, Size = Size)]
-public readonly struct MerkleNodeHeader
-{
-    public const int Size = sizeof(byte);
-
-    private const byte IsDirtyMask = 0b0001;
-    private const byte NodeTypeMask = 0b0110;
-
-    [FieldOffset(0)]
-    private readonly byte _header;
-
-    public bool IsDirty => (_header & IsDirtyMask) != 0;
-    public NodeType NodeType => (NodeType)((_header & NodeTypeMask) >> 1);
-
-    public MerkleNodeHeader(NodeType nodeType, bool isDirty = true)
-    {
-        _header = (byte)((byte)nodeType << 1 | (isDirty ? IsDirtyMask : 0));
-    }
-
-    public Span<byte> WriteTo(Span<byte> output)
-    {
-        output[0] = _header;
-        return output.Slice(Size);
-    }
-
-    public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out MerkleNodeHeader header)
-    {
-        var isDirty = (source[0] & IsDirtyMask) != 0;
-        var nodeType = (NodeType)((source[0] & NodeTypeMask) >> 1);
-        header = new MerkleNodeHeader(nodeType, isDirty);
-
-        return source.Slice(Size);
-    }
-
-    public bool Equals(in MerkleNodeHeader other)
-    {
-        return _header.Equals(other._header);
-    }
-
-    public override string ToString() =>
-        $"{nameof(MerkleNodeHeader)} {{ " +
-        $"{nameof(IsDirty)}: {IsDirty}, " +
-        $"{nameof(NodeType)}: {NodeType} " +
-        $"}}";
 }
