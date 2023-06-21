@@ -129,7 +129,7 @@ public static class Program
                     ctx.Refresh();
                 }));
 
-            await using (var blockchain = new Blockchain(db, FlushEvery, 1000, reporter.Observe))
+            await using (var blockchain = new Blockchain(db, null, FlushEvery, 1000, reporter.Observe))
             {
                 counter = Writer(blockchain, bigStorageAccount, random, layout[writing]);
             }
