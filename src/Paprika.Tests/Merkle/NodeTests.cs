@@ -188,9 +188,11 @@ public class NodeTests
 
         var leaf = new Node.Leaf(nibblePath, keccak);
         Span<byte> buffer = stackalloc byte[leaf.MaxByteLength];
-        _ = leaf.WriteWithLeftover(buffer);
-        _ = Node.ReadFrom(buffer, out var nodeType, out var actual, out _, out _);
 
+        var encoded = leaf.WriteTo(buffer);
+        var leftover = Node.ReadFrom(encoded, out var nodeType, out var actual, out _, out _);
+
+        Assert.That(leftover.Length, Is.Zero);
         Assert.That(nodeType, Is.EqualTo(Node.Type.Leaf));
         Assert.That(actual.Equals(leaf));
     }
@@ -202,9 +204,11 @@ public class NodeTests
 
         var extension = new Node.Extension(nibblePath);
         Span<byte> buffer = stackalloc byte[extension.MaxByteLength];
-        _ = extension.WriteWithLeftover(buffer);
-        _ = Node.ReadFrom(buffer, out var nodeType, out _, out var actual, out _);
 
+        var encoded = extension.WriteTo(buffer);
+        var leftover = Node.ReadFrom(encoded, out var nodeType, out _, out var actual, out _);
+
+        Assert.That(leftover.Length, Is.Zero);
         Assert.That(nodeType, Is.EqualTo(Node.Type.Extension));
         Assert.That(actual.Equals(extension));
     }
@@ -217,9 +221,11 @@ public class NodeTests
 
         var branch = new Node.Branch(nibbleBitSet, keccak);
         Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
-        _ = branch.WriteWithLeftover(buffer);
-        _ = Node.ReadFrom(buffer, out var nodeType, out _, out _, out var actual);
 
+        var encoded = branch.WriteTo(buffer);
+        var leftover = Node.ReadFrom(encoded, out var nodeType, out _, out _, out var actual);
+
+        Assert.That(leftover.Length, Is.Zero);
         Assert.That(nodeType, Is.EqualTo(Node.Type.Branch));
         Assert.That(actual.Equals(branch));
     }
