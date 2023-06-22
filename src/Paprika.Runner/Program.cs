@@ -35,7 +35,6 @@ public static class Program
     private const int UseStorageEveryNAccounts = 10;
     private const bool UseBigStorageAccount = false;
     private const int BigStorageAccountSlotCount = 1_000_000;
-    private static readonly UInt256[] BigStorageAccountValues = new UInt256[BigStorageAccountSlotCount];
 
     public static async Task Main(String[] args)
     {
@@ -87,9 +86,8 @@ public static class Program
                 ? PagedDb.MemoryMappedDb(DbFileSize, MaxReorgDepth, dataPath)
                 : PagedDb.NativeMemoryDb(DbFileSize, MaxReorgDepth);
 
-            // consts
-            var random = PrepareStableRandomSource();
-            var bigStorageAccount = GetAccountKey(random, RandomSampleSize - Keccak.Size);
+            var random = BuildRandom();
+            var bigStorageAccount = GetBigAccountKey();
 
             Console.WriteLine();
             Console.WriteLine("Writing:");
@@ -107,8 +105,6 @@ public static class Program
             }
 
             var counter = 0;
-
-
 
             // ReSharper disable once MethodSupportsCancellation
 #pragma warning disable CS4014
@@ -137,16 +133,13 @@ public static class Program
             // waiting for finalization
             var read = db.BeginReadOnlyBatch();
 
-            // reading
-            // Console.WriteLine();
-            // Console.WriteLine("Reading and asserting values...");
-
             var readingStopWatch = Stopwatch.StartNew();
+            random = BuildRandom();
 
             var logReadEvery = counter / NumberOfLogs;
             for (var i = 0; i < counter; i++)
             {
-                var key = GetAccountKey(random, i);
+                var key = random.NextKeccak();
                 var actual = read.GetAccount(key);
 
                 var expected = GetAccountValue(i);
@@ -173,7 +166,7 @@ public static class Program
                 {
                     var index = i % BigStorageAccountSlotCount;
                     var storageAddress = GetStorageAddress(index);
-                    var expectedStorageValue = BigStorageAccountValues[index];
+                    var expectedStorageValue = GetBigAccountValue(index);
                     var actualStorage = read.GetStorage(bigStorageAccount, storageAddress);
 
                     if (actualStorage != expectedStorageValue)
@@ -225,7 +218,9 @@ public static class Program
             .Expand());
     }
 
-    private static int Writer(Blockchain blockchain, Keccak bigStorageAccount, byte[] random,
+    private static Random BuildRandom() => new(RandomSeed);
+
+    private static int Writer(Blockchain blockchain, Keccak bigStorageAccount, Random random,
         Layout reporting)
     {
         var counter = 0;
@@ -247,7 +242,7 @@ public static class Program
 
             for (var account = 0; account < AccountsPerBlock; account++)
             {
-                var key = GetAccountKey(random, counter);
+                var key = random.NextKeccak();
 
                 worldState.SetAccount(key, GetAccountValue(counter));
 
@@ -268,8 +263,7 @@ public static class Program
 
                     var index = counter % BigStorageAccountSlotCount;
                     var storageAddress = GetStorageAddress(index);
-                    var storageValue = GetBigAccountStorageValue(counter);
-                    BigStorageAccountValues[index] = storageValue;
+                    var storageValue = GetBigAccountValue(counter);
 
                     worldState.SetStorage(bigStorageAccount, storageAddress, storageValue);
                 }
@@ -319,15 +313,11 @@ public static class Program
 
     private static UInt256 GetStorageValue(int counter) => (UInt256)counter + 100000;
 
-    private static UInt256 GetBigAccountStorageValue(int counter) => (UInt256)counter + 123456;
-
-    private static Keccak GetAccountKey(Span<byte> accountsBytes, int counter)
+    private static Keccak GetBigAccountKey()
     {
-        // do the rolling over account bytes, so each is different but they don't occupy that much memory
-        // it's not de Bruijn, but it's as best as possible.
-
         Keccak key = default;
-        accountsBytes.Slice(counter, Keccak.Size).CopyTo(key.BytesAsSpan);
+        var random = new Random(17);
+        random.NextBytes(key.BytesAsSpan);
         return key;
     }
 
@@ -336,17 +326,10 @@ public static class Program
         // do the rolling over account bytes, so each is different but they don't occupy that much memory
         // it's not de Bruijn, but it's as best as possible.
         Keccak key = default;
-
         BinaryPrimitives.WriteInt32LittleEndian(key.BytesAsSpan, counter);
         return key;
     }
 
-    private static byte[] PrepareStableRandomSource()
-    {
-        Console.WriteLine("Preparing random accounts addresses...");
-        var accounts = GC.AllocateArray<byte>(RandomSampleSize);
-        new Random(RandomSeed).NextBytes(accounts);
-        Console.WriteLine("Accounts prepared");
-        return accounts;
-    }
+    private static UInt256 GetBigAccountValue(int counter) =>
+        new((ulong)(counter * 2246822519U), (ulong)(counter * 374761393U));
 }
