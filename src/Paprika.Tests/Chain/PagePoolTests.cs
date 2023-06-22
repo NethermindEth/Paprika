@@ -2,6 +2,7 @@
 using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Chain;
+using Paprika.Store;
 
 namespace Paprika.Tests.Chain;
 
@@ -17,7 +18,7 @@ public class PagePoolTests
         pool.Return(initial);
 
         // dummy loop
-        for (int i = 0; i < 100; i++)
+        for (int i = 0; i < 1000; i++)
         {
             var page = pool.Rent();
             BinaryPrimitives.WriteInt64BigEndian(page.Span, i);
@@ -26,7 +27,7 @@ public class PagePoolTests
             pool.Return(page);
         }
 
-        pool.AllocatedPages.Should().Be(1);
+        pool.AllocatedMB.Should().Be(0, "No megabytes should be reported, it's one page only");
     }
 
     [Test]

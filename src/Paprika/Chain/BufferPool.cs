@@ -32,7 +32,7 @@ public class BufferPool : IDisposable
             "The amount of MB allocated in the pool");
     }
 
-    public int AllocatedPages => _allocatedMB.Read();
+    public int AllocatedMB => _allocatedMB.Read();
 
     public unsafe Page Rent(bool clear = true)
     {
