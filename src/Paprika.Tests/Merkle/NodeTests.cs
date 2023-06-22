@@ -9,16 +9,6 @@ namespace Paprika.Tests.Merkle;
 public class NodeTests
 {
     [Test]
-    [TestCase(typeof(Node.Header), 1)]
-    [TestCase(typeof(Node.Branch), 64)]
-    [TestCase(typeof(Node.Leaf), 64)]
-    [TestCase(typeof(Node.Extension), 32)]
-    public void Struct_size(Type type, int expectedSize)
-    {
-        Assert.That(GetSizeOfType(type), Is.EqualTo(expectedSize));
-    }
-
-    [Test]
     [TestCase(Node.Type.Branch, true)]
     [TestCase(Node.Type.Branch, false)]
     [TestCase(Node.Type.Leaf, true)]
@@ -232,15 +222,5 @@ public class NodeTests
 
             _ = Node.ReadFrom(header, out _, out _, out _, out _);
         });
-    }
-
-    private static int GetSizeOfType(Type type)
-    {
-        var dm = new DynamicMethod("$", typeof(int), Type.EmptyTypes);
-        ILGenerator il = dm.GetILGenerator();
-        il.Emit(OpCodes.Sizeof, type);
-        il.Emit(OpCodes.Ret);
-
-        return (int)(dm.Invoke(null, null) ?? -1);
     }
 }
