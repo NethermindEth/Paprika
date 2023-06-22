@@ -55,17 +55,28 @@ public static class Node
         public const int Size = sizeof(byte);
 
         private const byte IsDirtyMask = 0b0001;
+        private const int DirtyMaskShift = 0;
+        private const byte Dirty = 0b0001;
+        private const byte NotDirty = 0b0000;
+
         private const byte NodeTypeMask = 0b0110;
+        private const int NodeTypeMaskShift = 1;
+
+        private const byte MetadataMask = 0b1111_0000;
+        private const int MetadataMaskShift = 4;
 
         [FieldOffset(0)]
         private readonly byte _header;
 
-        public bool IsDirty => (_header & IsDirtyMask) != 0;
-        public Type NodeType => (Type)((_header & NodeTypeMask) >> IsDirtyMask);
+        public bool IsDirty => (_header & IsDirtyMask) >> DirtyMaskShift == Dirty;
+        public Type NodeType => (Type)((_header & NodeTypeMask) >> NodeTypeMaskShift);
+        public byte Metadata => (byte)((_header & MetadataMask) >> MetadataMaskShift);
 
-        public Header(Type nodeType, bool isDirty = true)
+        public Header(Type nodeType, bool isDirty = true, byte metadata = 0b0000)
         {
-            _header = (byte)((byte)nodeType << IsDirtyMask | (isDirty ? IsDirtyMask : 0));
+            _header = (byte)(metadata << MetadataMaskShift);
+            _header |= (byte)((byte)nodeType << NodeTypeMaskShift);
+            _header |= isDirty ? Dirty : NotDirty;
         }
 
         public Span<byte> WriteTo(Span<byte> output)
@@ -218,6 +229,10 @@ public static class Node
 
     public readonly ref struct Branch
     {
+        // TODO: We want to allow nullable Keccak s
+        // That means, the Header will contain some extra information, and based
+        // on the Header, we will know if the Branch has a Keccak or not
+
         public int MaxByteLength => 35;
         private const int NibbleBitSetSize = sizeof(ushort);
 

@@ -8,18 +8,19 @@ namespace Paprika.Tests.Merkle;
 public class NodeTests
 {
     [Test]
-    [TestCase(Node.Type.Branch, true)]
-    [TestCase(Node.Type.Branch, false)]
-    [TestCase(Node.Type.Leaf, true)]
-    [TestCase(Node.Type.Leaf, false)]
-    [TestCase(Node.Type.Extension, true)]
-    [TestCase(Node.Type.Extension, false)]
-    public void Header_properties(Node.Type nodeType, bool isDirty)
+    [TestCase(Node.Type.Branch, true, 0b0000)]
+    [TestCase(Node.Type.Branch, false, 0b0101)]
+    [TestCase(Node.Type.Leaf, true, 0b0000)]
+    [TestCase(Node.Type.Leaf, false, 0b0000)]
+    [TestCase(Node.Type.Extension, true, 0b0000)]
+    [TestCase(Node.Type.Extension, false, 0b0000)]
+    public void Header_properties(Node.Type nodeType, bool isDirty, byte metadata)
     {
-        var header = new Node.Header(nodeType, isDirty);
+        var header = new Node.Header(nodeType, isDirty, metadata);
 
         Assert.That(header.NodeType, Is.EqualTo(nodeType));
         Assert.That(header.IsDirty, Is.EqualTo(isDirty));
+        Assert.That(header.Metadata, Is.EqualTo(metadata));
     }
 
     [Test]
