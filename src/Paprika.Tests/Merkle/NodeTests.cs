@@ -1,4 +1,3 @@
-using System.Reflection.Emit;
 using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -44,7 +43,7 @@ public class NodeTests
     [Test]
     public void Branch_properties()
     {
-        ushort nibbles = 0b0000_0000_0000_0000;
+        ushort nibbles = 0b0000_0000_0000_0011;
         var branch = new Node.Branch(nibbles, Values.Key0);
 
         Assert.That(branch.Header.NodeType, Is.EqualTo(Node.Type.Branch));
@@ -55,12 +54,23 @@ public class NodeTests
     [Test]
     public void Branch_no_nibbles()
     {
-        ushort nibbles = 0b0000_0000_0000_0000;
-        var branch = new Node.Branch(nibbles, Values.Key0);
-
-        for (byte nibble = 0; nibble < 16; nibble++)
+        Assert.Throws<ArgumentException>(() =>
         {
-            Assert.That(branch.HasNibble(nibble), Is.Not.True);
+            ushort nibbles = 0b0000_0000_0000_0000;
+            _ = new Node.Branch(nibbles, Values.Key0);
+        });
+    }
+
+    [Test]
+    public void Branch_one_nibble()
+    {
+        for (var i = 0; i < 16; i++)
+        {
+            Assert.Throws<ArgumentException>(() =>
+            {
+                ushort nibbles = (ushort)(0b0000_0000_0000_00001 << i);
+                _ = new Node.Branch(nibbles, Values.Key0);
+            });
         }
     }
 

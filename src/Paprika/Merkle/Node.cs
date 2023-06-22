@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -217,15 +218,26 @@ public static class Node
         {
             ValidateHeaderNodeType(header, Type.Branch);
             Header = header;
-            NibbleBitSet = nibbleBitSet;
+            NibbleBitSet = ValidateNibbleBitSet(nibbleBitSet);
             Keccak = keccak;
         }
 
         public Branch(ushort nibbleBitSet, Keccak keccak)
         {
             Header = new Header(Type.Branch);
-            NibbleBitSet = nibbleBitSet;
+            NibbleBitSet = ValidateNibbleBitSet(nibbleBitSet);
             Keccak = keccak;
+        }
+
+        private static ushort ValidateNibbleBitSet(ushort nibbleBitSet)
+        {
+            var count = BitOperations.PopCount(nibbleBitSet);
+            if (count < 2)
+            {
+                throw new ArgumentException("At least two nibbles should be set, but only {count} were found", nameof(nibbleBitSet));
+            }
+
+            return nibbleBitSet;
         }
 
         public Span<byte> WriteTo(Span<byte> output)
