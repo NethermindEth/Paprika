@@ -100,13 +100,14 @@ public class NodeTests
     [TestCaseSource(nameof(_branchReadWriteCases))]
     public void Branch_read_write(ushort nibbleBitSet, Keccak keccak)
     {
-        var branch = new Node.Branch(nibbleBitSet, keccak);
+        var expected = new Node.Branch(nibbleBitSet, keccak);
+        Span<byte> buffer = stackalloc byte[expected.MaxByteLength];
 
-        Span<byte> encoded = stackalloc byte[branch.MaxByteLength];
-        _ = branch.WriteWithLeftover(encoded);
-        _ = Node.Branch.ReadFrom(encoded, out var decoded);
+        var encoded = expected.WriteTo(buffer);
+        var leftover = Node.Branch.ReadFrom(encoded, out var actual);
 
-        Assert.That(decoded.Equals(branch), $"Expected {branch.ToString()}, got {decoded.ToString()}");
+        Assert.That(leftover.Length, Is.Zero);
+        Assert.That(actual.Equals(expected), $"Expected {expected.ToString()}, got {actual.ToString()}");
     }
 
     [Test]
