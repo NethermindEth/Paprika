@@ -313,8 +313,6 @@ public static class Program
 
     private static UInt256 GetStorageValue(int counter) => (UInt256)counter + 100000;
 
-    private static UInt256 GetBigAccountStorageValue(int counter) => (UInt256)counter + 123456;
-
     private static Keccak GetBigAccountKey()
     {
         Keccak key = default;
