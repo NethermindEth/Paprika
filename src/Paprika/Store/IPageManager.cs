@@ -12,9 +12,7 @@ public interface IPageManager : IDisposable, IPageResolver
     /// <summary>
     /// Flushes all the mapped pages.
     /// </summary>
-    /// <param name="addresses"></param>
-    /// <param name="options"></param>
-    ValueTask FlushPages(IReadOnlyCollection<DbAddress> addresses, CommitOptions options);
+    ValueTask FlushPages(ICollection<DbAddress> addresses, CommitOptions options);
 
     ValueTask FlushRootPage(DbAddress rootPage, CommitOptions options);
 

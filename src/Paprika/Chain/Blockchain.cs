@@ -29,7 +29,7 @@ public class Blockchain : IAsyncDisposable
     public static readonly Keccak GenesisHash = Keccak.Zero;
 
     // allocate 1024 pages (4MB) at once
-    private readonly PagePool _pool = new(1024);
+    private readonly BufferPool _pool = new(1024);
 
     // It's unlikely that there will be many blocks per number as it would require the network to be heavily fragmented. 
     private readonly ConcurrentDictionary<uint, Block[]> _blocksByNumber = new();
@@ -93,9 +93,9 @@ public class Blockchain : IAsyncDisposable
             "The number of blocks stored by the flushing task in one second");
         _flusherBlockApplicationInMs = _meter.CreateHistogram<int>("Block data application in ms", "ms",
             "The amortized time it takes for one block to apply on PagedDb");
-        _flusherFlushInMs = _meter.CreateHistogram<int>("Flush buffers in ms", "ms",
+        _flusherFlushInMs = _meter.CreateHistogram<int>("FSYNC time", "ms",
             "The time it took to synchronize the file");
-        _flusherQueueCount = _meter.CreateAtomicObservableGauge("Flusher queue count", "Blocks",
+        _flusherQueueCount = _meter.CreateAtomicObservableGauge("Flusher queue size", "Blocks",
             "The number of the blocks in the flush queue");
     }
 
@@ -347,7 +347,7 @@ public class Blockchain : IAsyncDisposable
             _blockchain._blocksByHash.TryAdd(Hash, this);
         }
 
-        private PagePool Pool => _blockchain._pool;
+        private BufferPool Pool => _blockchain._pool;
 
         public UInt256 GetStorage(in Keccak account, in Keccak address)
         {

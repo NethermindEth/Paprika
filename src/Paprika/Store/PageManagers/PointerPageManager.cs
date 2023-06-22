@@ -33,7 +33,7 @@ public abstract unsafe class PointerPageManager : IPageManager
 
     public virtual Page GetAtForWriting(DbAddress address, bool reused) => GetAt(address);
 
-    public abstract ValueTask FlushPages(IReadOnlyCollection<DbAddress> addresses, CommitOptions options);
+    public abstract ValueTask FlushPages(ICollection<DbAddress> addresses, CommitOptions options);
 
     public abstract ValueTask FlushRootPage(DbAddress rootPage, CommitOptions options);
 
