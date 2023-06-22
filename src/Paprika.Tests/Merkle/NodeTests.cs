@@ -34,9 +34,10 @@ public class NodeTests
         var expected = new Node.Header(nodeType, isDirty);
         Span<byte> buffer = stackalloc byte[Node.Header.Size];
 
-        _ = expected.WriteWithLeftover(buffer);
-        _ = Node.Header.ReadFrom(buffer, out var actual);
+        var encoded = expected.WriteTo(buffer);
+        var leftover = Node.Header.ReadFrom(encoded, out var actual);
 
+        Assert.That(leftover.Length, Is.Zero);
         Assert.That(actual.Equals(expected), $"Expected {expected.ToString()}, got {actual.ToString()}");
     }
 

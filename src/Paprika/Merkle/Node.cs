@@ -68,6 +68,12 @@ public static class Node
             _header = (byte)((byte)nodeType << IsDirtyMask | (isDirty ? IsDirtyMask : 0));
         }
 
+        public Span<byte> WriteTo(Span<byte> output)
+        {
+            var leftover = WriteWithLeftover(output);
+            return output.Slice(0, output.Length - leftover.Length);
+        }
+
         public Span<byte> WriteWithLeftover(Span<byte> output)
         {
             output[0] = _header;
