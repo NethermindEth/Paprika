@@ -31,14 +31,14 @@ public class NodeTests
     [TestCase(Node.Type.Branch, true)]
     public void Node_header_read_write(Node.Type nodeType, bool isDirty)
     {
-        var expected = new Node.Header(nodeType, isDirty);
+        var header = new Node.Header(nodeType, isDirty);
         Span<byte> buffer = stackalloc byte[Node.Header.Size];
 
-        var encoded = expected.WriteTo(buffer);
-        var leftover = Node.Header.ReadFrom(encoded, out var actual);
+        var encoded = header.WriteTo(buffer);
+        var leftover = Node.Header.ReadFrom(encoded, out var decoded);
 
         Assert.That(leftover.Length, Is.Zero);
-        Assert.That(actual.Equals(expected), $"Expected {expected.ToString()}, got {actual.ToString()}");
+        Assert.That(decoded.Equals(header), $"Expected {header.ToString()}, got {decoded.ToString()}");
     }
 
     [Test]
@@ -100,21 +100,20 @@ public class NodeTests
     [TestCaseSource(nameof(_branchReadWriteCases))]
     public void Branch_read_write(ushort nibbleBitSet, Keccak keccak)
     {
-        var expected = new Node.Branch(nibbleBitSet, keccak);
-        Span<byte> buffer = stackalloc byte[expected.MaxByteLength];
+        var branch = new Node.Branch(nibbleBitSet, keccak);
+        Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
 
-        var encoded = expected.WriteTo(buffer);
-        var leftover = Node.Branch.ReadFrom(encoded, out var actual);
+        var encoded = branch.WriteTo(buffer);
+        var leftover = Node.Branch.ReadFrom(encoded, out var decoded);
 
         Assert.That(leftover.Length, Is.Zero);
-        Assert.That(actual.Equals(expected), $"Expected {expected.ToString()}, got {actual.ToString()}");
+        Assert.That(decoded.Equals(branch), $"Expected {branch.ToString()}, got {decoded.ToString()}");
     }
 
     [Test]
     public void Leaf_properties()
     {
-        ReadOnlySpan<byte> bytes = new byte[] { 0xA, 0x9, 0x6, 0x3 };
-        var path = NibblePath.FromKey(bytes);
+        var path = NibblePath.FromKey(new byte[] { 0xA, 0x9, 0x6, 0x3 });
         var keccak = Values.Key0;
 
         var leaf = new Node.Leaf(path, keccak);
@@ -137,21 +136,20 @@ public class NodeTests
     [TestCaseSource(nameof(_leafReadWriteCases))]
     public void Leaf_read_write(byte[] pathBytes, Keccak keccak)
     {
-        var expected = new Node.Leaf(NibblePath.FromKey(pathBytes), keccak);
-        Span<byte> buffer = stackalloc byte[expected.MaxByteLength];
+        var leaf = new Node.Leaf(NibblePath.FromKey(pathBytes), keccak);
+        Span<byte> buffer = stackalloc byte[leaf.MaxByteLength];
 
-        var encoded = expected.WriteTo(buffer);
-        var leftover = Node.Leaf.ReadFrom(encoded, out var actual);
+        var encoded = leaf.WriteTo(buffer);
+        var leftover = Node.Leaf.ReadFrom(encoded, out var decoded);
 
         Assert.That(leftover.Length, Is.Zero);
-        Assert.That(actual.Equals(expected), $"Expected {expected.ToString()}, got {actual.ToString()}");
+        Assert.That(decoded.Equals(leaf), $"Expected {leaf.ToString()}, got {decoded.ToString()}");
     }
 
     [Test]
     public void Extension_properties()
     {
-        ReadOnlySpan<byte> bytes = new byte[] { 0xA, 0x9, 0x6, 0x3 };
-        var path = NibblePath.FromKey(bytes);
+        var path = NibblePath.FromKey(new byte[] { 0xA, 0x9, 0x6, 0x3 });
 
         var extension = new Node.Extension(path);
 
