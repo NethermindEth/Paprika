@@ -12,13 +12,13 @@ public interface IReporter
 
 public class StatisticsReporter : IReporter
 {
-    private readonly Dictionary<int, Level> _levels = new();
+    public readonly SortedDictionary<int, Level> Levels = new();
 
     public void Report(int level, int emptyBuckets, int filledBuckets, int entriesPerPage)
     {
-        if (_levels.TryGetValue(level, out var lvl) == false)
+        if (Levels.TryGetValue(level, out var lvl) == false)
         {
-            lvl = _levels[level] = new Level();
+            lvl = Levels[level] = new Level();
         }
 
         try
@@ -33,7 +33,7 @@ public class StatisticsReporter : IReporter
         }
     }
 
-    private class Level
+    public class Level
     {
         public readonly IntHistogram ChildCount = new(1000, 5);
         public readonly IntHistogram Entries = new(1000, 5);

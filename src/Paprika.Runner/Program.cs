@@ -14,7 +14,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 5_000 : 3_000;
+    private const int BlockCount = PersistentDb ? 25_000 : 3_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
     private const int FinalizeEvery = 32;
@@ -183,8 +183,23 @@ public static class Program
             // the final report
             ReportReading(counter);
 
-            var statistics = new StatisticsReporter();
-            read.Report(statistics);
+            var stats = new StatisticsReporter();
+            read.Report(stats);
+            var table = new Table();
+
+            table.AddColumn(new TableColumn("Level of Paprika tree"));
+            table.AddColumn(new TableColumn("Child page count"));
+            table.AddColumn(new TableColumn("Entries in page"));
+
+            foreach (var (key, level) in stats.Levels)
+            {
+                table.AddRow(
+                    new Text(key.ToString()),
+                    new Text(level.ChildCount.GetValueAtPercentile(90).ToString()),
+                    new Text(level.Entries.GetValueAtPercentile(90).ToString()));
+            }
+
+            layout[info].Update(new Panel(table.Expand()).Header("Paprika tree statistics").Expand());
 
             spectre.Cancel();
             await reportingTask;
