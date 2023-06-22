@@ -61,11 +61,11 @@ public static class Node
         private readonly byte _header;
 
         public bool IsDirty => (_header & IsDirtyMask) != 0;
-        public Type NodeType => (Type)((_header & NodeTypeMask) >> 1);
+        public Type NodeType => (Type)((_header & NodeTypeMask) >> IsDirtyMask);
 
         public Header(Type nodeType, bool isDirty = true)
         {
-            _header = (byte)((byte)nodeType << 1 | (isDirty ? IsDirtyMask : 0));
+            _header = (byte)((byte)nodeType << IsDirtyMask | (isDirty ? IsDirtyMask : 0));
         }
 
         public Span<byte> WriteTo(Span<byte> output)
