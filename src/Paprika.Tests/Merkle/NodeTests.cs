@@ -90,6 +90,15 @@ public class NodeTests
         }
     }
 
+    [Test]
+    public void Branch_no_keccak()
+    {
+        ushort nibbles = 0b0110_1001_0101_1010;
+        var branch = new Node.Branch(nibbles);
+
+        Assert.That(branch.Keccak, Is.EqualTo(Keccak.Zero));
+    }
+
     private static object[] _branchReadWriteCases =
     {
         new object[] { (ushort)0b0110_1001_0101_1010, Values.Key0 },
@@ -107,6 +116,23 @@ public class NodeTests
         var encoded = branch.WriteTo(buffer);
         var leftover = Node.Branch.ReadFrom(encoded, out var decoded);
 
+        Assert.That(leftover.Length, Is.Zero);
+        Assert.That(decoded.Equals(branch), $"Expected {branch.ToString()}, got {decoded.ToString()}");
+    }
+
+    [Test]
+    [TestCase((ushort)0b0110_1001_0101_1010)]
+    [TestCase((ushort)0b1001_0110_1010_0101)]
+    [TestCase((ushort)0b0000_1000_0001_0000)]
+    public void Branch_read_write_no_keccak(ushort nibbleBitSet)
+    {
+        var branch = new Node.Branch(nibbleBitSet);
+        Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
+
+        var encoded = branch.WriteTo(buffer);
+        var leftover = Node.Branch.ReadFrom(encoded, out var decoded);
+
+        Assert.That(encoded.Length, Is.LessThan(buffer.Length));
         Assert.That(leftover.Length, Is.Zero);
         Assert.That(decoded.Equals(branch), $"Expected {branch.ToString()}, got {decoded.ToString()}");
     }

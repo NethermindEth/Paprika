@@ -41,12 +41,14 @@ public static class Node
         }
     }
 
-    private static void ValidateHeaderNodeType(Header header, Type expected)
+    private static Header ValidateHeaderNodeType(Header header, Type expected)
     {
         if (header.NodeType != expected)
         {
             throw new ArgumentException($"Expected Header with {nameof(Type)} {expected}, got {header.NodeType}");
         }
+
+        return header;
     }
 
     [StructLayout(LayoutKind.Explicit, Pack = 1, Size = Size)]
@@ -232,12 +234,12 @@ public static class Node
 
     public readonly ref struct Branch
     {
-        // TODO: We want to allow nullable Keccak s
-        // That means, the Header will contain some extra information, and based
-        // on the Header, we will know if the Branch has a Keccak or not
-
         public int MaxByteLength => 35;
         private const int NibbleBitSetSize = sizeof(ushort);
+
+        private const int HeaderMetadataKeccakMask = 0b0001;
+        private const int NoKeccak = 0;
+        private const int HasKeccak = 1;
 
         public readonly Header Header;
         public readonly ushort NibbleBitSet;
@@ -252,17 +254,30 @@ public static class Node
 
         private Branch(Header header, ushort nibbleBitSet, Keccak keccak)
         {
-            ValidateHeaderNodeType(header, Type.Branch);
-            Header = header;
+            Header = ValidateHeaderKeccak(ValidateHeaderNodeType(header, Type.Branch), shouldHaveKeccak: true);
             NibbleBitSet = ValidateNibbleBitSet(nibbleBitSet);
             Keccak = keccak;
         }
 
+        private Branch(Header header, ushort nibbleBitSet)
+        {
+            Header = ValidateHeaderKeccak(header, shouldHaveKeccak: false);
+            NibbleBitSet = ValidateNibbleBitSet(nibbleBitSet);
+            Keccak = default;
+        }
+
         public Branch(ushort nibbleBitSet, Keccak keccak)
         {
-            Header = new Header(Type.Branch);
+            Header = new Header(Type.Branch, metadata: HasKeccak);
             NibbleBitSet = ValidateNibbleBitSet(nibbleBitSet);
             Keccak = keccak;
+        }
+
+        public Branch(ushort nibbleBitSet)
+        {
+            Header = new Header(Type.Branch, metadata: NoKeccak);
+            NibbleBitSet = ValidateNibbleBitSet(nibbleBitSet);
+            Keccak = default;
         }
 
         private static ushort ValidateNibbleBitSet(ushort nibbleBitSet)
@@ -275,6 +290,22 @@ public static class Node
 
             return nibbleBitSet;
         }
+
+        private static Header ValidateHeaderKeccak(Header header, bool shouldHaveKeccak)
+        {
+            var expected = shouldHaveKeccak ? HasKeccak : NoKeccak;
+            var actual = (header.Metadata & HeaderMetadataKeccakMask);
+
+            if (actual != expected)
+            {
+                throw new ArgumentException($"{nameof(Header)} expected to have {nameof(Keccak)} = {shouldHaveKeccak}, got {!shouldHaveKeccak}");
+            }
+
+            return header;
+        }
+
+        private static bool HeaderHasKeccak(Header header) =>
+            (header.Metadata & HeaderMetadataKeccakMask) == HasKeccak;
 
         public Span<byte> WriteTo(Span<byte> output)
         {
@@ -289,7 +320,10 @@ public static class Node
             BinaryPrimitives.WriteUInt16LittleEndian(leftover, NibbleBitSet);
             leftover = leftover.Slice(NibbleBitSetSize);
 
-            leftover = Keccak.WriteToWithLeftover(leftover);
+            if (HeaderHasKeccak(Header))
+            {
+                leftover = Keccak.WriteToWithLeftover(leftover);
+            }
 
             return leftover;
         }
@@ -301,9 +335,15 @@ public static class Node
             var nibbleBitSet = BinaryPrimitives.ReadUInt16LittleEndian(leftover);
             leftover = leftover.Slice(NibbleBitSetSize);
 
-            leftover = Keccak.ReadFrom(leftover, out var keccak);
-
-            branch = new Branch(header, nibbleBitSet, keccak);
+            if (HeaderHasKeccak(header))
+            {
+                leftover = Keccak.ReadFrom(leftover, out var keccak);
+                branch = new Branch(header, nibbleBitSet, keccak);
+            }
+            else
+            {
+                branch = new Branch(header, nibbleBitSet);
+            }
 
             return leftover;
         }
