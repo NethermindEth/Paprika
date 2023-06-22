@@ -10,39 +10,40 @@ namespace Paprika.Chain;
 /// <summary>
 /// A simple page pool, that creates slabs of pages and allows for their reuse.
 /// </summary>
-public class PagePool : IDisposable
+public class BufferPool : IDisposable
 {
     private readonly int _pagesInOneSlab;
     private readonly bool _assertCountOnDispose;
     private readonly ConcurrentQueue<Page> _pool = new();
     private readonly ConcurrentQueue<IntPtr> _slabs = new();
 
-    private readonly MetricsExtensions.IAtomicIntGauge _allocatedPages;
+    private readonly MetricsExtensions.IAtomicIntGauge _allocatedMB;
 
     // metrics
     private readonly Meter _meter;
 
-    public PagePool(int pagesInOneSlab, bool assertCountOnDispose = true)
+    public BufferPool(int pagesInOneSlab, bool assertCountOnDispose = true)
     {
         _pagesInOneSlab = pagesInOneSlab;
         _assertCountOnDispose = assertCountOnDispose;
 
-        _meter = new Meter("Paprika.Chain.PagePool");
-        _allocatedPages = _meter.CreateAtomicObservableGauge("Allocated Pages", "4kb page",
-            "the number of pages allocated in the page pool");
+        _meter = new Meter("Paprika.Chain.BufferPool");
+        _allocatedMB = _meter.CreateAtomicObservableGauge("Total buffers' size", "MB",
+            "The amount of MB allocated in the pool");
     }
 
-    public int AllocatedPages => _allocatedPages.Read();
+    public int AllocatedPages => _allocatedMB.Read();
 
     public unsafe Page Rent(bool clear = true)
     {
         Page pooled;
         while (_pool.TryDequeue(out pooled) == false)
         {
-            _allocatedPages.Add(_pagesInOneSlab);
+            var allocSize = _pagesInOneSlab * Page.PageSize;
 
-            var allocSize = (UIntPtr)(_pagesInOneSlab * Page.PageSize);
-            var slab = (byte*)NativeMemory.AlignedAlloc(allocSize, (UIntPtr)Page.PageSize);
+            _allocatedMB.Add(allocSize / 1024 / 1024);
+
+            var slab = (byte*)NativeMemory.AlignedAlloc((UIntPtr)allocSize, Page.PageSize);
 
             _slabs.Enqueue(new IntPtr(slab));
 

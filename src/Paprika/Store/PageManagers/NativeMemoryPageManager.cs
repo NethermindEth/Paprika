@@ -18,7 +18,7 @@ public unsafe class NativeMemoryPageManager : PointerPageManager
 
     public override void Dispose() => NativeMemory.AlignedFree(_ptr);
 
-    public override ValueTask FlushPages(IReadOnlyCollection<DbAddress> addresses, CommitOptions options) => ValueTask.CompletedTask;
+    public override ValueTask FlushPages(ICollection<DbAddress> addresses, CommitOptions options) => ValueTask.CompletedTask;
 
     public override ValueTask FlushRootPage(DbAddress rootPage, CommitOptions options) => ValueTask.CompletedTask;
 }

@@ -1,5 +1,6 @@
 ﻿using System.Buffers;
 using System.IO.MemoryMappedFiles;
+using System.Runtime.InteropServices;
 
 namespace Paprika.Store.PageManagers;
 
@@ -20,6 +21,7 @@ public class MemoryMappedPageManager : PointerPageManager
     private readonly Stack<PageMemoryOwner> _owners = new();
     private readonly List<PageMemoryOwner> _ownersUsed = new();
     private readonly List<Task> _pendingWrites = new();
+    private DbAddress[] _toWrite = new DbAddress[1];
 
     public unsafe MemoryMappedPageManager(ulong size, byte historyDepth, string dir) : base(size)
     {
@@ -59,26 +61,38 @@ public class MemoryMappedPageManager : PointerPageManager
 
     protected override unsafe void* Ptr => _ptr;
 
-    public override async ValueTask FlushPages(IReadOnlyCollection<DbAddress> dbAddresses, CommitOptions options)
+    public override async ValueTask FlushPages(ICollection<DbAddress> dbAddresses, CommitOptions options)
     {
         if (options != CommitOptions.DangerNoWrite)
         {
-            // TODO: remove alloc
-            var addresses = dbAddresses.ToArray();
-            Array.Sort(addresses, (a, b) => a.Raw.CompareTo(b.Raw));
-
-            foreach (var addr in addresses)
-            {
-                // a regular address to write
-                _pendingWrites.Add(WriteAt(addr).AsTask());
-            }
-
+            ScheduleWrites(dbAddresses);
             await AwaitWrites();
         }
 
         if (options != CommitOptions.DangerNoFlush && options != CommitOptions.DangerNoWrite)
         {
             _file.Flush(true);
+        }
+    }
+
+    private void ScheduleWrites(ICollection<DbAddress> dbAddresses)
+    {
+        var count = dbAddresses.Count;
+
+        if (_toWrite.Length < count)
+        {
+            Array.Resize(ref _toWrite, count);
+        }
+
+        dbAddresses.CopyTo(_toWrite, 0);
+        var span = _toWrite.AsSpan(0, count);
+
+        // raw sorting, to make writes ordered
+        MemoryMarshal.Cast<DbAddress, uint>(span).Sort();
+
+        foreach (var addr in span)
+        {
+            _pendingWrites.Add(WriteAt(addr).AsTask());
         }
     }
 

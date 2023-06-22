@@ -10,7 +10,7 @@ public class PagePoolTests
     [Test]
     public void Simple_reuse()
     {
-        using var pool = new PagePool(1);
+        using var pool = new BufferPool(1);
 
         // lease and return
         var initial = pool.Rent();
@@ -33,7 +33,7 @@ public class PagePoolTests
     public void Rented_is_clear()
     {
         const int index = 5;
-        using var pool = new PagePool(1);
+        using var pool = new BufferPool(1);
 
         // lease and return
         var initial = pool.Rent();
@@ -51,7 +51,7 @@ public class PagePoolTests
     public void Big_pool()
     {
         const int pageCount = 1024;
-        using var pool = new PagePool(pageCount, assertCountOnDispose: false);
+        using var pool = new BufferPool(pageCount, assertCountOnDispose: false);
 
         var set = new HashSet<UIntPtr>();
 
