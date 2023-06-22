@@ -24,15 +24,15 @@ public class NodeTests
     }
 
     [Test]
-    [TestCase(Node.Type.Leaf, false)]
-    [TestCase(Node.Type.Extension, false)]
-    [TestCase(Node.Type.Branch, false)]
-    [TestCase(Node.Type.Leaf, true)]
-    [TestCase(Node.Type.Extension, true)]
-    [TestCase(Node.Type.Branch, true)]
-    public void Node_header_read_write(Node.Type nodeType, bool isDirty)
+    [TestCase(Node.Type.Leaf, false, 0b0000)]
+    [TestCase(Node.Type.Extension, false, 0b0000)]
+    [TestCase(Node.Type.Branch, false, 0b0000)]
+    [TestCase(Node.Type.Leaf, true, 0b0000)]
+    [TestCase(Node.Type.Extension, true, 0b0000)]
+    [TestCase(Node.Type.Branch, true, 0b0001)]
+    public void Node_header_read_write(Node.Type nodeType, bool isDirty, byte metadata)
     {
-        var header = new Node.Header(nodeType, isDirty);
+        var header = new Node.Header(nodeType, isDirty, metadata);
         Span<byte> buffer = stackalloc byte[Node.Header.Size];
 
         var encoded = header.WriteTo(buffer);

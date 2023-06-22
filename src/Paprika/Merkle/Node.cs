@@ -79,6 +79,11 @@ public static class Node
             _header |= isDirty ? Dirty : NotDirty;
         }
 
+        private Header(byte header)
+        {
+            _header = header;
+        }
+
         public Span<byte> WriteTo(Span<byte> output)
         {
             var leftover = WriteToWithLeftover(output);
@@ -93,10 +98,7 @@ public static class Node
 
         public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Header header)
         {
-            var isDirty = (source[0] & IsDirtyMask) != 0;
-            var nodeType = (Type)((source[0] & NodeTypeMask) >> 1);
-            header = new Header(nodeType, isDirty);
-
+            header = new Header(source[0]);
             return source.Slice(Size);
         }
 
@@ -108,8 +110,9 @@ public static class Node
         public override string ToString() =>
             $"{nameof(Header)} {{ " +
             $"{nameof(IsDirty)}: {IsDirty}, " +
-            $"{nameof(Type)}: {NodeType} " +
-            $"}}";
+            $"{nameof(Type)}: {NodeType}, " +
+            $"{nameof(Metadata)}: 0b{Convert.ToString(Metadata, 2).PadLeft(4, '0')}" +
+            $" }}";
     }
 
     public readonly ref struct Leaf
