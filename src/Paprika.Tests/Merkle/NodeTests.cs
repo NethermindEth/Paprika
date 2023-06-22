@@ -223,6 +223,32 @@ public class NodeTests
     }
 
     [Test]
+    public void Node_read_sequential()
+    {
+        var nibblePath = NibblePath.FromKey(new byte[] { 0x1, 0x2, 0x4, 0x5 });
+        var nibbleBitSet = (ushort)0b0000_0011;
+        var keccak = Values.Key0;
+
+        var leaf = new Node.Leaf(nibblePath, keccak);
+        var extension = new Node.Extension(nibblePath);
+        var branch = new Node.Branch(nibbleBitSet, keccak);
+
+        Span<byte> buffer = new byte[leaf.MaxByteLength + extension.MaxByteLength + branch.MaxByteLength];
+
+        var writeLeftover = leaf.WriteTo(buffer);
+        writeLeftover = extension.WriteTo(writeLeftover);
+        _ = branch.WriteTo(writeLeftover);
+
+        var readLeftover = Node.ReadFrom(buffer, out _, out var actualLeaf, out _, out _);
+        readLeftover = Node.ReadFrom(readLeftover, out _, out _, out var actualExtension, out _);
+        _ = Node.ReadFrom(readLeftover, out _, out _, out _, out var actualBranch);
+
+        Assert.That(actualLeaf.Equals(leaf));
+        Assert.That(actualExtension.Equals(extension));
+        Assert.That(actualBranch.Equals(branch));
+    }
+
+    [Test]
     public void Node_read_invalid_header()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() =>
