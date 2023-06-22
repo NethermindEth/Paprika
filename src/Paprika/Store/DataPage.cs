@@ -38,7 +38,7 @@ public readonly unsafe struct DataPage : IPage
     {
         private const int Size = Page.PageSize - PageHeader.Size;
 
-        private const int BucketCount = 16;
+        public const int BucketCount = 16;
 
         /// <summary>
         /// The size of the raw byte data held in this page. Must be long aligned.
@@ -246,6 +246,34 @@ public readonly unsafe struct DataPage : IPage
 
         result = default;
         return false;
+    }
+
+    public void Report(IReporter reporter, IPageResolver resolver, int level)
+    {
+        var emptyBuckets = 0;
+
+        foreach (var bucket in Data.Buckets)
+        {
+            if (bucket.IsNull)
+            {
+                emptyBuckets++;
+            }
+            else
+            {
+                new DataPage(resolver.GetAt(bucket)).Report(reporter, resolver, level + 1);
+            }
+        }
+
+        if (emptyBuckets == 0)
+        {
+            // all filled
+            reporter.Report(level, 0, Payload.BucketCount, new HashingMap(Data.DataSpan).Count);
+        }
+        else
+        {
+            reporter.Report(level, emptyBuckets, Payload.BucketCount - emptyBuckets,
+                new NibbleBasedMap(Data.DataSpan).Count);
+        }
     }
 
     private static bool TryFindExistingStorageTreeForCellOf(in NibbleBasedMap map, in Key key,

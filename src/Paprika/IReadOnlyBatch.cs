@@ -1,6 +1,4 @@
-﻿using Nethermind.Int256;
-using Paprika.Crypto;
-using Paprika.Data;
+﻿using Paprika.Data;
 using Paprika.Store;
 
 namespace Paprika;
@@ -16,4 +14,6 @@ public interface IReadOnlyBatch : IDisposable
     /// <param name="result"></param>
     /// <returns></returns>
     bool TryGet(in Key key, out ReadOnlySpan<byte> result);
+
+    void Report(IReporter reporter);
 }
