@@ -35,7 +35,6 @@ public static class Program
     private const int UseStorageEveryNAccounts = 10;
     private const bool UseBigStorageAccount = false;
     private const int BigStorageAccountSlotCount = 1_000_000;
-    private static readonly UInt256[] BigStorageAccountValues = new UInt256[BigStorageAccountSlotCount];
 
     public static async Task Main(String[] args)
     {
@@ -167,7 +166,7 @@ public static class Program
                 {
                     var index = i % BigStorageAccountSlotCount;
                     var storageAddress = GetStorageAddress(index);
-                    var expectedStorageValue = BigStorageAccountValues[index];
+                    var expectedStorageValue = GetBigAccountValue(index);
                     var actualStorage = read.GetStorage(bigStorageAccount, storageAddress);
 
                     if (actualStorage != expectedStorageValue)
@@ -264,8 +263,7 @@ public static class Program
 
                     var index = counter % BigStorageAccountSlotCount;
                     var storageAddress = GetStorageAddress(index);
-                    var storageValue = GetBigAccountStorageValue(counter);
-                    BigStorageAccountValues[index] = storageValue;
+                    var storageValue = GetBigAccountValue(counter);
 
                     worldState.SetStorage(bigStorageAccount, storageAddress, storageValue);
                 }
@@ -333,4 +331,7 @@ public static class Program
         BinaryPrimitives.WriteInt32LittleEndian(key.BytesAsSpan, counter);
         return key;
     }
+
+    private static UInt256 GetBigAccountValue(int counter) =>
+        new((ulong)(counter * 2246822519U), (ulong)(counter * 374761393U));
 }
