@@ -144,7 +144,7 @@ public class NodeTests
         var leftover = Node.Leaf.ReadFrom(encoded, out var actual);
 
         Assert.That(leftover.Length, Is.Zero);
-        Assert.That(actual.Equals(expected), $"Expected {expected.ToString()}, got {expected.ToString()}");
+        Assert.That(actual.Equals(expected), $"Expected {expected.ToString()}, got {actual.ToString()}");
     }
 
     [Test]
