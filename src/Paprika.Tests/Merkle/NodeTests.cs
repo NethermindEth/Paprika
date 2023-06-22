@@ -243,9 +243,9 @@ public class NodeTests
 
         Span<byte> buffer = new byte[leaf.MaxByteLength + extension.MaxByteLength + branch.MaxByteLength];
 
-        var writeLeftover = leaf.WriteWithLeftover(buffer);
-        writeLeftover = extension.WriteWithLeftover(writeLeftover);
-        _ = branch.WriteWithLeftover(writeLeftover);
+        var writeLeftover = leaf.WriteToWithLeftover(buffer);
+        writeLeftover = extension.WriteToWithLeftover(writeLeftover);
+        _ = branch.WriteToWithLeftover(writeLeftover);
 
         var readLeftover = Node.ReadFrom(buffer, out _, out var actualLeaf, out _, out _);
         readLeftover = Node.ReadFrom(readLeftover, out _, out _, out var actualExtension, out _);

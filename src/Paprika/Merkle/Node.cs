@@ -70,11 +70,11 @@ public static class Node
 
         public Span<byte> WriteTo(Span<byte> output)
         {
-            var leftover = WriteWithLeftover(output);
+            var leftover = WriteToWithLeftover(output);
             return output.Slice(0, output.Length - leftover.Length);
         }
 
-        public Span<byte> WriteWithLeftover(Span<byte> output)
+        public Span<byte> WriteToWithLeftover(Span<byte> output)
         {
             output[0] = _header;
             return output.Slice(Size);
@@ -126,15 +126,15 @@ public static class Node
 
         public Span<byte> WriteTo(Span<byte> output)
         {
-            var leftover = WriteWithLeftover(output);
+            var leftover = WriteToWithLeftover(output);
             return output.Slice(0, output.Length - leftover.Length);
         }
 
-        public Span<byte> WriteWithLeftover(Span<byte> output)
+        public Span<byte> WriteToWithLeftover(Span<byte> output)
         {
-            var leftover = Header.WriteWithLeftover(output);
+            var leftover = Header.WriteToWithLeftover(output);
             leftover = Path.WriteToWithLeftover(leftover);
-            leftover = Keccak.WriteTo(leftover);
+            leftover = Keccak.WriteToWithLeftover(leftover);
 
             return leftover;
         }
@@ -184,13 +184,13 @@ public static class Node
 
         public Span<byte> WriteTo(Span<byte> output)
         {
-            var leftover = WriteWithLeftover(output);
+            var leftover = WriteToWithLeftover(output);
             return output.Slice(0, output.Length - leftover.Length);
         }
 
-        public Span<byte> WriteWithLeftover(Span<byte> output)
+        public Span<byte> WriteToWithLeftover(Span<byte> output)
         {
-            var leftover = Header.WriteWithLeftover(output);
+            var leftover = Header.WriteToWithLeftover(output);
             leftover = Path.WriteToWithLeftover(leftover);
 
             return leftover;
@@ -260,18 +260,18 @@ public static class Node
 
         public Span<byte> WriteTo(Span<byte> output)
         {
-            var leftover = WriteWithLeftover(output);
+            var leftover = WriteToWithLeftover(output);
             return output.Slice(0, output.Length - leftover.Length);
         }
 
-        public Span<byte> WriteWithLeftover(Span<byte> output)
+        public Span<byte> WriteToWithLeftover(Span<byte> output)
         {
-            var leftover = Header.WriteWithLeftover(output);
+            var leftover = Header.WriteToWithLeftover(output);
 
             BinaryPrimitives.WriteUInt16LittleEndian(leftover, NibbleBitSet);
             leftover = leftover.Slice(NibbleBitSetSize);
 
-            leftover = Keccak.WriteTo(leftover);
+            leftover = Keccak.WriteToWithLeftover(leftover);
 
             return leftover;
         }

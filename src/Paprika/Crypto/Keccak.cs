@@ -73,7 +73,7 @@ public readonly struct Keccak : IEquatable<Keccak>
         return bytes.Slice(Size);
     }
 
-    public Span<byte> WriteTo(Span<byte> output)
+    public Span<byte> WriteToWithLeftover(Span<byte> output)
     {
         Bytes.CopyTo(output);
         return output.Slice(Size);
