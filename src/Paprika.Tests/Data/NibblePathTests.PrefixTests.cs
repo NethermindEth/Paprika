@@ -1,4 +1,5 @@
-﻿using NUnit.Framework;
+﻿using FluentAssertions;
+using NUnit.Framework;
 using Paprika.Data;
 
 namespace Paprika.Tests.Data;
@@ -28,8 +29,9 @@ public class NibblePathHexPrefixTests
         Span<byte> destination = stackalloc byte[path.HexEncodedLength];
 
         path.HexEncode(destination, flag);
-        Assert.AreEqual(1, destination.Length);
-        Assert.AreEqual(byte1, destination[0]);
+
+        destination.Length.Should().Be(1);
+        destination[0].Should().Be(byte1);
     }
 
     [TestCase(false, (byte)3, (byte)7, (byte)13, (byte)19, (byte)125)]
@@ -52,9 +54,8 @@ public class NibblePathHexPrefixTests
         Span<byte> destination = stackalloc byte[path.HexEncodedLength];
         path.HexEncode(destination, flag);
 
-        Assert.AreEqual(2, path.HexEncodedLength);
-        Assert.AreEqual(byte1, destination[0]);
-        Assert.AreEqual(byte2, destination[1]);
+        path.HexEncodedLength.Should().Be(2);
+        destination.ToArray().Should().BeEquivalentTo(new[] { byte1, byte2 });
     }
 
     [TestCase(false, (byte)3, (byte)7, (byte)0, (byte)55)]
@@ -77,9 +78,8 @@ public class NibblePathHexPrefixTests
 
         path.HexEncode(destination, flag);
 
-        Assert.AreEqual(2, path.HexEncodedLength);
-        Assert.AreEqual(byte1, destination[0]);
-        Assert.AreEqual(byte2, destination[1]);
+        path.HexEncodedLength.Should().Be(2);
+        destination.ToArray().Should().BeEquivalentTo(new[] { byte1, byte2 });
     }
 
     // [TestCase(false, (byte)3, (byte)7, (byte)0, (byte)55)]

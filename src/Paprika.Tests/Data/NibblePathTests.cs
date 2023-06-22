@@ -23,7 +23,7 @@ public class NibblePathTests
 
         NibblePath.ReadFrom(destination, out var parsed);
 
-        Assert.IsTrue(parsed.Equals(path));
+        parsed.Equals(path).Should().BeTrue();
     }
 
     [Test]
@@ -63,8 +63,8 @@ public class NibblePathTests
 
     private static void AssertDiffAt(in NibblePath path1, in NibblePath path2, int diffAt)
     {
-        Assert.AreEqual(diffAt, path1.FindFirstDifferentNibble(path2));
-        Assert.AreEqual(diffAt, path2.FindFirstDifferentNibble(path1));
+        path1.FindFirstDifferentNibble(path2).Should().Be(diffAt);
+        path2.FindFirstDifferentNibble(path1).Should().Be(diffAt);
     }
 
     [Test]
@@ -155,35 +155,35 @@ public class NibblePathTests
         var sliced = original.SliceFrom(sliceFrom);
         var expected = NibblePath.FromKey(span.Slice(sliceFrom / 2), 0);
 
-        Assert.IsTrue(expected.Equals(sliced));
+        expected.Equals(sliced).Should().BeTrue();
     }
 
     [Test]
     public void ToString_even_even()
     {
         var path = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56, 0x78 });
-        Assert.AreEqual("12345678", path.ToString());
+        path.ToString().Should().Be("12345678");
     }
 
     [Test]
     public void ToString_odd_odd()
     {
         var path = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56, 0x78 }, 1);
-        Assert.AreEqual("2345678", path.ToString());
+        path.ToString().Should().Be("2345678");
     }
 
     [Test]
     public void ToString_odd_even()
     {
         var path = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56, 0x78 }, 1).SliceTo(6);
-        Assert.AreEqual("234567", path.ToString());
+        path.ToString().Should().Be("234567");
     }
 
     [Test]
     public void ToString_even_odd()
     {
         var path = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56, 0x78 }).SliceTo(7);
-        Assert.AreEqual("1234567", path.ToString());
+        path.ToString().Should().Be("1234567");
     }
 
     [TestCase(0, false, 1)]
@@ -193,7 +193,7 @@ public class NibblePathTests
     public void NibbleAt(int at, bool odd, byte result)
     {
         var path = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56 }, odd ? 1 : 0);
-        Assert.AreEqual(result, path.GetAt(at));
+        path.GetAt(at).Should().Be(result);
     }
 
     [TestCase(0, 4)]
