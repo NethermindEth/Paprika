@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
@@ -43,10 +44,7 @@ public static class Node
 
     private static Header ValidateHeaderNodeType(Header header, Type expected)
     {
-        if (header.NodeType != expected)
-        {
-            throw new ArgumentException($"Expected Header with {nameof(Type)} {expected}, got {header.NodeType}");
-        }
+        Debug.Assert(header.NodeType == expected, $"Expected {nameof(Header)} with {nameof(Type)} {expected}, got {header.NodeType}");
 
         return header;
     }
@@ -294,12 +292,9 @@ public static class Node
         private static Header ValidateHeaderKeccak(Header header, bool shouldHaveKeccak)
         {
             var expected = shouldHaveKeccak ? HasKeccak : NoKeccak;
-            var actual = (header.Metadata & HeaderMetadataKeccakMask);
+            var actual = header.Metadata & HeaderMetadataKeccakMask;
 
-            if (actual != expected)
-            {
-                throw new ArgumentException($"{nameof(Header)} expected to have {nameof(Keccak)} = {shouldHaveKeccak}, got {!shouldHaveKeccak}");
-            }
+            Debug.Assert(actual == expected, $"Expected {nameof(Header)} to have {nameof(Keccak)} = {shouldHaveKeccak}, got {!shouldHaveKeccak}");
 
             return header;
         }
