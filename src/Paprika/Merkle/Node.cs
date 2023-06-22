@@ -124,6 +124,12 @@ public static class Node
             Keccak = keccak;
         }
 
+        public Span<byte> WriteTo(Span<byte> output)
+        {
+            var leftover = WriteWithLeftover(output);
+            return output.Slice(0, output.Length - leftover.Length);
+        }
+
         public Span<byte> WriteWithLeftover(Span<byte> output)
         {
             var leftover = Header.WriteWithLeftover(output);

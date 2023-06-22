@@ -137,13 +137,14 @@ public class NodeTests
     [TestCaseSource(nameof(_leafReadWriteCases))]
     public void Leaf_read_write(byte[] pathBytes, Keccak keccak)
     {
-        var leaf = new Node.Leaf(NibblePath.FromKey(pathBytes), keccak);
+        var expected = new Node.Leaf(NibblePath.FromKey(pathBytes), keccak);
+        Span<byte> buffer = stackalloc byte[expected.MaxByteLength];
 
-        Span<byte> encoded = stackalloc byte[leaf.MaxByteLength];
-        _ = leaf.WriteWithLeftover(encoded);
-        _ = Node.Leaf.ReadFrom(encoded, out var decoded);
+        var encoded = expected.WriteTo(buffer);
+        var leftover = Node.Leaf.ReadFrom(encoded, out var actual);
 
-        Assert.That(decoded.Equals(leaf), $"Expected {leaf.ToString()}, got {leaf.ToString()}");
+        Assert.That(leftover.Length, Is.Zero);
+        Assert.That(actual.Equals(expected), $"Expected {expected.ToString()}, got {expected.ToString()}");
     }
 
     [Test]
