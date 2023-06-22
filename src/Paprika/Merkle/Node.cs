@@ -232,7 +232,7 @@ public static class Node
 
     public readonly ref struct Branch
     {
-        public int MaxByteLength => 35;
+        public int MaxByteLength => Header.Size + sizeof(ushort) + (HeaderHasKeccak(Header) ? Keccak.Size : 0);
         private const int NibbleBitSetSize = sizeof(ushort);
 
         private const int HeaderMetadataKeccakMask = 0b0001;

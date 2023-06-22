@@ -132,9 +132,24 @@ public class NodeTests
         var encoded = branch.WriteTo(buffer);
         var leftover = Node.Branch.ReadFrom(encoded, out var decoded);
 
-        Assert.That(encoded.Length, Is.LessThan(buffer.Length));
         Assert.That(leftover.Length, Is.Zero);
         Assert.That(decoded.Equals(branch), $"Expected {branch.ToString()}, got {decoded.ToString()}");
+    }
+
+    [Test]
+    public void Branch_no_keccak_encoded_smaller_than_with_keccak()
+    {
+        ushort nibbles = 0b0110_1001_0101_1010;
+        var noKeccak = new Node.Branch(nibbles);
+        var hasKeccak = new Node.Branch(nibbles, Values.Key0);
+
+        Span<byte> noKeccakBuffer = stackalloc byte[noKeccak.MaxByteLength];
+        var encodedNoKeccak = noKeccak.WriteTo(noKeccakBuffer);
+
+        Span<byte> hasKeccakBuffer = stackalloc byte[hasKeccak.MaxByteLength];
+        var encodedHasKeccak = hasKeccak.WriteTo(hasKeccakBuffer);
+
+        Assert.That(encodedNoKeccak.Length, Is.LessThan(encodedHasKeccak.Length));
     }
 
     [Test]
