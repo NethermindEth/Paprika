@@ -1,12 +1,14 @@
 ﻿using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using HdrHistogram;
 using Nethermind.Int256;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Store;
 using Paprika.Tests;
 using Spectre.Console;
+using Spectre.Console.Rendering;
 
 [assembly: ExcludeFromCodeCoverage]
 
@@ -26,7 +28,7 @@ public static class Program
     private const long DbFileSize = PersistentDb ? 256 * Gb : 16 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
 
-    private static readonly TimeSpan FlushEvery = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan FlushEvery = TimeSpan.FromSeconds(30);
 
     private const int LogEvery = BlockCount / NumberOfLogs;
 
@@ -195,8 +197,8 @@ public static class Program
             {
                 table.AddRow(
                     new Text(key.ToString()),
-                    new Text(level.ChildCount.GetValueAtPercentile(90).ToString()),
-                    new Text(level.Entries.GetValueAtPercentile(90).ToString()));
+                    Report(level.ChildCount),
+                    Report(level.Entries));
             }
 
             layout[info].Update(new Panel(table.Expand()).Header("Paprika tree statistics").Expand());
@@ -236,6 +238,17 @@ public static class Program
     }
 
     private static Random BuildRandom() => new(RandomSeed);
+
+    private static IRenderable Report(HistogramBase histogram)
+    {
+        var table = new Table();
+        table.AddColumns("P50", "P90", "P95");
+        table.AddRow(
+            histogram.GetValueAtPercentile(50).ToString(),
+            histogram.GetValueAtPercentile(90).ToString(),
+            histogram.GetValueAtPercentile(95).ToString());
+        return table.Expand();
+    }
 
     private static int Writer(Blockchain blockchain, Keccak bigStorageAccount, Random random,
         Layout reporting)
