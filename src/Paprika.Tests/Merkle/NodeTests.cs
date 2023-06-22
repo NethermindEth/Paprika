@@ -34,7 +34,7 @@ public class NodeTests
         var expected = new Node.Header(nodeType, isDirty);
         Span<byte> buffer = stackalloc byte[Node.Header.Size];
 
-        _ = expected.WriteTo(buffer);
+        _ = expected.WriteWithLeftover(buffer);
         _ = Node.Header.ReadFrom(buffer, out var actual);
 
         Assert.That(actual.Equals(expected), $"Expected {expected.ToString()}, got {actual.ToString()}");
@@ -102,7 +102,7 @@ public class NodeTests
         var branch = new Node.Branch(nibbleBitSet, keccak);
 
         Span<byte> encoded = stackalloc byte[branch.MaxByteLength];
-        _ = branch.WriteTo(encoded);
+        _ = branch.WriteWithLeftover(encoded);
         _ = Node.Branch.ReadFrom(encoded, out var decoded);
 
         Assert.That(decoded.Equals(branch), $"Expected {branch.ToString()}, got {decoded.ToString()}");
@@ -138,7 +138,7 @@ public class NodeTests
         var leaf = new Node.Leaf(NibblePath.FromKey(pathBytes), keccak);
 
         Span<byte> encoded = stackalloc byte[leaf.MaxByteLength];
-        _ = leaf.WriteTo(encoded);
+        _ = leaf.WriteWithLeftover(encoded);
         _ = Node.Leaf.ReadFrom(encoded, out var decoded);
 
         Assert.That(decoded.Equals(leaf), $"Expected {leaf.ToString()}, got {leaf.ToString()}");
@@ -172,7 +172,7 @@ public class NodeTests
         var extension = new Node.Extension(NibblePath.FromKey(pathBytes));
 
         Span<byte> encoded = stackalloc byte[extension.MaxByteLength];
-        _ = extension.WriteTo(encoded);
+        _ = extension.WriteWithLeftover(encoded);
         _ = Node.Extension.ReadFrom(encoded, out var decoded);
 
         Assert.That(decoded.Equals(extension), $"Expected {extension.ToString()}, got {extension.ToString()}");
@@ -186,7 +186,7 @@ public class NodeTests
 
         var leaf = new Node.Leaf(nibblePath, keccak);
         Span<byte> buffer = stackalloc byte[leaf.MaxByteLength];
-        _ = leaf.WriteTo(buffer);
+        _ = leaf.WriteWithLeftover(buffer);
         _ = Node.ReadFrom(buffer, out var nodeType, out var actual, out _, out _);
 
         Assert.That(nodeType, Is.EqualTo(Node.Type.Leaf));
@@ -200,7 +200,7 @@ public class NodeTests
 
         var extension = new Node.Extension(nibblePath);
         Span<byte> buffer = stackalloc byte[extension.MaxByteLength];
-        _ = extension.WriteTo(buffer);
+        _ = extension.WriteWithLeftover(buffer);
         _ = Node.ReadFrom(buffer, out var nodeType, out _, out var actual, out _);
 
         Assert.That(nodeType, Is.EqualTo(Node.Type.Extension));
@@ -215,7 +215,7 @@ public class NodeTests
 
         var branch = new Node.Branch(nibbleBitSet, keccak);
         Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
-        _ = branch.WriteTo(buffer);
+        _ = branch.WriteWithLeftover(buffer);
         _ = Node.ReadFrom(buffer, out var nodeType, out _, out _, out var actual);
 
         Assert.That(nodeType, Is.EqualTo(Node.Type.Branch));
@@ -235,9 +235,9 @@ public class NodeTests
 
         Span<byte> buffer = new byte[leaf.MaxByteLength + extension.MaxByteLength + branch.MaxByteLength];
 
-        var writeLeftover = leaf.WriteTo(buffer);
-        writeLeftover = extension.WriteTo(writeLeftover);
-        _ = branch.WriteTo(writeLeftover);
+        var writeLeftover = leaf.WriteWithLeftover(buffer);
+        writeLeftover = extension.WriteWithLeftover(writeLeftover);
+        _ = branch.WriteWithLeftover(writeLeftover);
 
         var readLeftover = Node.ReadFrom(buffer, out _, out var actualLeaf, out _, out _);
         readLeftover = Node.ReadFrom(readLeftover, out _, out _, out var actualExtension, out _);

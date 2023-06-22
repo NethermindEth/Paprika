@@ -68,7 +68,7 @@ public static class Node
             _header = (byte)((byte)nodeType << IsDirtyMask | (isDirty ? IsDirtyMask : 0));
         }
 
-        public Span<byte> WriteTo(Span<byte> output)
+        public Span<byte> WriteWithLeftover(Span<byte> output)
         {
             output[0] = _header;
             return output.Slice(Size);
@@ -118,9 +118,9 @@ public static class Node
             Keccak = keccak;
         }
 
-        public Span<byte> WriteTo(Span<byte> output)
+        public Span<byte> WriteWithLeftover(Span<byte> output)
         {
-            var leftover = Header.WriteTo(output);
+            var leftover = Header.WriteWithLeftover(output);
             leftover = Path.WriteToWithLeftover(leftover);
             leftover = Keccak.WriteTo(leftover);
 
@@ -170,9 +170,9 @@ public static class Node
             Path = path;
         }
 
-        public Span<byte> WriteTo(Span<byte> output)
+        public Span<byte> WriteWithLeftover(Span<byte> output)
         {
-            var leftover = Header.WriteTo(output);
+            var leftover = Header.WriteWithLeftover(output);
             leftover = Path.WriteToWithLeftover(leftover);
 
             return leftover;
@@ -240,9 +240,9 @@ public static class Node
             return nibbleBitSet;
         }
 
-        public Span<byte> WriteTo(Span<byte> output)
+        public Span<byte> WriteWithLeftover(Span<byte> output)
         {
-            var leftover = Header.WriteTo(output);
+            var leftover = Header.WriteWithLeftover(output);
 
             BinaryPrimitives.WriteUInt16LittleEndian(leftover, NibbleBitSet);
             leftover = leftover.Slice(NibbleBitSetSize);
