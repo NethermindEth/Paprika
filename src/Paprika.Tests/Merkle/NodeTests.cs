@@ -173,12 +173,13 @@ public class NodeTests
     public void Extension_read_write(byte[] pathBytes)
     {
         var extension = new Node.Extension(NibblePath.FromKey(pathBytes));
+        Span<byte> buffer = stackalloc byte[extension.MaxByteLength];
 
-        Span<byte> encoded = stackalloc byte[extension.MaxByteLength];
-        _ = extension.WriteWithLeftover(encoded);
-        _ = Node.Extension.ReadFrom(encoded, out var decoded);
+        var encoded = extension.WriteTo(buffer);
+        var leftover = Node.Extension.ReadFrom(encoded, out var decoded);
 
-        Assert.That(decoded.Equals(extension), $"Expected {extension.ToString()}, got {extension.ToString()}");
+        Assert.That(leftover.Length, Is.Zero);
+        Assert.That(decoded.Equals(extension), $"Expected {extension.ToString()}, got {decoded.ToString()}");
     }
 
     [Test]
