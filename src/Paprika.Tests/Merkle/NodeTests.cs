@@ -149,6 +149,7 @@ public class NodeTests
         Span<byte> hasKeccakBuffer = stackalloc byte[hasKeccak.MaxByteLength];
         var encodedHasKeccak = hasKeccak.WriteTo(hasKeccakBuffer);
 
+        Assert.That(noKeccak.MaxByteLength, Is.LessThan(hasKeccak.MaxByteLength));
         Assert.That(encodedNoKeccak.Length, Is.LessThan(encodedHasKeccak.Length));
     }
 
