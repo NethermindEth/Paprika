@@ -16,7 +16,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 25_000 : 3_000;
+    private const int BlockCount = PersistentDb ? 20_000 : 3_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
     private const int FinalizeEvery = 32;
@@ -197,11 +197,16 @@ public static class Program
             {
                 table.AddRow(
                     new Text(key.ToString()),
-                    Report(level.ChildCount),
-                    Report(level.Entries));
+                    WriteHistogram(level.ChildCount),
+                    WriteHistogram(level.Entries));
             }
 
-            layout[info].Update(new Panel(table.Expand()).Header("Paprika tree statistics").Expand());
+            var mb = (long)stats.PageCount * Page.PageSize / 1024 / 1024;
+            var report = new Layout().SplitRows(
+                new Layout(new Paragraph($"General stats:\n1. Size of this Paprika tree: {mb}MB")).Size(3),
+                new Layout(table.Expand()));
+
+            layout[info].Update(new Panel(report).Header("Paprika tree statistics").Expand());
 
             spectre.Cancel();
             await reportingTask;
@@ -239,15 +244,15 @@ public static class Program
 
     private static Random BuildRandom() => new(RandomSeed);
 
-    private static IRenderable Report(HistogramBase histogram)
+    private static IRenderable WriteHistogram(HistogramBase histogram)
     {
-        var table = new Table();
-        table.AddColumns("P50", "P90", "P95");
-        table.AddRow(
-            histogram.GetValueAtPercentile(50).ToString(),
-            histogram.GetValueAtPercentile(90).ToString(),
-            histogram.GetValueAtPercentile(95).ToString());
-        return table.Expand();
+        string Percentile(int percentile, string color)
+        {
+            var value = histogram.GetValueAtPercentile(percentile);
+            return $"[{color}]P{percentile}: {value,2}[/] ";
+        }
+
+        return new Markup(Percentile(50, "green") + Percentile(90, "yellow") + Percentile(95, "red"));
     }
 
     private static int Writer(Blockchain blockchain, Keccak bigStorageAccount, Random random,

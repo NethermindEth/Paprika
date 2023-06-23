@@ -267,11 +267,11 @@ public readonly unsafe struct DataPage : IPage
         if (emptyBuckets == 0)
         {
             // all filled
-            reporter.Report(level, 0, Payload.BucketCount, new HashingMap(Data.DataSpan).Count);
+            reporter.Report(level, Payload.BucketCount, new HashingMap(Data.DataSpan).Count);
         }
         else
         {
-            reporter.Report(level, emptyBuckets, Payload.BucketCount - emptyBuckets,
+            reporter.Report(level, Payload.BucketCount - emptyBuckets,
                 new NibbleBasedMap(Data.DataSpan).Count);
         }
     }

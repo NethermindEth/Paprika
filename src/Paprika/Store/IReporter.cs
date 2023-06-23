@@ -7,30 +7,25 @@ namespace Paprika.Store;
 /// </summary>
 public interface IReporter
 {
-    void Report(int level, int emptyBuckets, int filledBuckets, int entriesPerPage);
+    void Report(int level, int filledBuckets, int entriesPerPage);
 }
 
 public class StatisticsReporter : IReporter
 {
     public readonly SortedDictionary<int, Level> Levels = new();
+    public int PageCount = 0;
 
-    public void Report(int level, int emptyBuckets, int filledBuckets, int entriesPerPage)
+    public void Report(int level, int filledBuckets, int entriesPerPage)
     {
         if (Levels.TryGetValue(level, out var lvl) == false)
         {
             lvl = Levels[level] = new Level();
         }
 
-        try
-        {
-            lvl.ChildCount.RecordValue(filledBuckets);
-            lvl.Entries.RecordValue(entriesPerPage);
-        }
-        catch (Exception e)
-        {
-            Console.WriteLine(e);
-            throw;
-        }
+        PageCount++;
+
+        lvl.ChildCount.RecordValue(filledBuckets);
+        lvl.Entries.RecordValue(entriesPerPage);
     }
 
     public class Level
