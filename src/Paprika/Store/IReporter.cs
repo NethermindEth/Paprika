@@ -1,4 +1,5 @@
-﻿using HdrHistogram;
+﻿using System.Runtime.InteropServices;
+using HdrHistogram;
 
 namespace Paprika.Store;
 
@@ -7,15 +8,23 @@ namespace Paprika.Store;
 /// </summary>
 public interface IReporter
 {
-    void Report(int level, int filledBuckets, int entriesPerPage);
+    void ReportDataUsage(int level, int filledBuckets, int entriesPerPage);
+
+    /// <summary>
+    /// Reports how many batches ago the page was updated.
+    /// </summary>
+    void ReportPage(uint ageInBatches, PageType type);
 }
 
 public class StatisticsReporter : IReporter
 {
     public readonly SortedDictionary<int, Level> Levels = new();
+    public readonly Dictionary<PageType, int> PageTypes = new();
     public int PageCount = 0;
 
-    public void Report(int level, int filledBuckets, int entriesPerPage)
+    public readonly IntHistogram PageAge = new(1_000_000_000, 5);
+
+    public void ReportDataUsage(int level, int filledBuckets, int entriesPerPage)
     {
         if (Levels.TryGetValue(level, out var lvl) == false)
         {
@@ -26,6 +35,13 @@ public class StatisticsReporter : IReporter
 
         lvl.ChildCount.RecordValue(filledBuckets);
         lvl.Entries.RecordValue(entriesPerPage);
+    }
+
+    public void ReportPage(uint ageInBatches, PageType type)
+    {
+        PageAge.RecordValue(ageInBatches);
+        var value = PageTypes.GetValueOrDefault(type);
+        PageTypes[type] = value + 1;
     }
 
     public class Level

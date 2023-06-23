@@ -16,7 +16,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 20_000 : 3_000;
+    private const int BlockCount = PersistentDb ? 10_000 : 3_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
     private const int FinalizeEvery = 32;
@@ -81,7 +81,8 @@ public static class Program
             }
 
             Console.WriteLine("Initializing db of size {0}GB", DbFileSize / Gb);
-            Console.WriteLine("Starting benchmark. Flush buffer every: {0}ms", ((int)FlushEvery.TotalMilliseconds).ToString());
+            Console.WriteLine("Starting benchmark. Flush buffer every: {0}ms",
+                ((int)FlushEvery.TotalMilliseconds).ToString());
 
             PagedDb db = PersistentDb
                 ? PagedDb.MemoryMappedDb(DbFileSize, MaxReorgDepth, dataPath)
@@ -147,8 +148,9 @@ public static class Program
 
                 if (actual != expected)
                 {
-                    throw new InvalidOperationException($"Invalid account state for account number {i} with address {key.ToString()}. " +
-                                                        $"The expected value is {expected} while the actual is {actual}!");
+                    throw new InvalidOperationException(
+                        $"Invalid account state for account number {i} with address {key.ToString()}. " +
+                        $"The expected value is {expected} while the actual is {actual}!");
                 }
 
                 if (UseStorageEveryNAccounts > 0 && i % UseStorageEveryNAccounts == 0)
@@ -185,6 +187,9 @@ public static class Program
             // the final report
             ReportReading(counter);
 
+            // statistics
+            layout[info].Update(new Panel("Gathering statistics...").Header("Paprika tree statistics").Expand());
+
             var stats = new StatisticsReporter();
             read.Report(stats);
             var table = new Table();
@@ -202,9 +207,18 @@ public static class Program
             }
 
             var mb = (long)stats.PageCount * Page.PageSize / 1024 / 1024;
-            var report = new Layout().SplitRows(
-                new Layout(new Paragraph($"General stats:\n1. Size of this Paprika tree: {mb}MB")).Size(3),
-                new Layout(table.Expand()));
+
+            var types = string.Join(", ", stats.PageTypes.Select(kvp => $"{kvp.Key}: {kvp.Value}"));
+            var report = new Layout()
+                .SplitRows(
+                    new Layout(
+                            new Rows(
+                                new Text("General stats:"),
+                                new Text($"1. Size of this Paprika tree: {mb}MB"),
+                                new Text($"2. Types of pages: {types}"),
+                                WriteHistogram(stats.PageAge, "2. Age of pages: ")))
+                        .Size(5),
+                    new Layout(table.Expand()));
 
             layout[info].Update(new Panel(report).Header("Paprika tree statistics").Expand());
 
@@ -244,7 +258,7 @@ public static class Program
 
     private static Random BuildRandom() => new(RandomSeed);
 
-    private static IRenderable WriteHistogram(HistogramBase histogram)
+    private static IRenderable WriteHistogram(HistogramBase histogram, string prefix = "")
     {
         string Percentile(int percentile, string color)
         {
@@ -252,7 +266,7 @@ public static class Program
             return $"[{color}]P{percentile}: {value,2}[/] ";
         }
 
-        return new Markup(Percentile(50, "green") + Percentile(90, "yellow") + Percentile(95, "red"));
+        return new Markup(prefix + Percentile(50, "green") + Percentile(90, "yellow") + Percentile(95, "red"));
     }
 
     private static int Writer(Blockchain blockchain, Keccak bigStorageAccount, Random random,
