@@ -16,7 +16,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 10_000 : 3_000;
+    private const int BlockCount = PersistentDb ? 25_000 : 3_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
     private const int FinalizeEvery = 32;
@@ -28,7 +28,7 @@ public static class Program
     private const long DbFileSize = PersistentDb ? 256 * Gb : 16 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
 
-    private static readonly TimeSpan FlushEvery = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan FlushEvery = TimeSpan.FromSeconds(5);
 
     private const int LogEvery = BlockCount / NumberOfLogs;
 
