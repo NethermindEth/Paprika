@@ -1,7 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
-using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store.PageManagers;
@@ -44,7 +43,9 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     private readonly Counter<long> _writes;
     private readonly Counter<long> _commits;
     private readonly Histogram<float> _commitDuration;
-    private readonly Histogram<int> _commitPageCount;
+    private readonly Histogram<int> _commitPageCountTotal;
+    private readonly Histogram<int> _commitPageCountReused;
+    private readonly Histogram<int> _commitPageCountNewlyAllocated;
     private readonly MetricsExtensions.IAtomicIntGauge _dbSize;
 
     // pool
@@ -76,7 +77,11 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         _writes = _meter.CreateCounter<long>("Writes", "Writes", "The number of writes db handles");
         _commits = _meter.CreateCounter<long>("Commits", "Commits", "The number of batch commits db handles");
         _commitDuration = _meter.CreateHistogram<float>("Commit duration", "ms", "The time it takes to perform a commit");
-        _commitPageCount = _meter.CreateHistogram<int>("Commit page count", "pages",
+        _commitPageCountTotal = _meter.CreateHistogram<int>("Commit page count (total)", "pages",
+            "The number of pages flushed during the commit");
+        _commitPageCountReused = _meter.CreateHistogram<int>("Commit page count (reused)", "pages",
+            "The number of pages flushed during the commit");
+        _commitPageCountNewlyAllocated = _meter.CreateHistogram<int>("Commit page count (new)", "pages",
             "The number of pages flushed during the commit");
     }
 
@@ -96,7 +101,12 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
     private void ReportDbSize(int megabytes) => _dbSize.Set(megabytes);
 
-    private void ReportPageCountPerCommit(int pageCount) => _commitPageCount.Record(pageCount);
+    private void ReportPageCountPerCommit(int totalPageCount, int reused, int newlyAllocated)
+    {
+        _commitPageCountTotal.Record(totalPageCount);
+        _commitPageCountReused.Record(reused);
+        _commitPageCountNewlyAllocated.Record(newlyAllocated);
+    }
 
     private void RootInit()
     {
@@ -143,7 +153,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         lock (_batchLock)
         {
             var batchId = Root.Header.BatchId;
-            var batch = new ReadOnlyBatch(this, batchId, Root.Data.AccountPages.ToArray(), Root.Data.Metadata);
+            var batch = new ReadOnlyBatch(this, batchId, Root.Data.AccountPages.ToArray(), Root.Data.Metadata, Root.Data.NextFreePage);
             _batchesReadOnly.Add(batch);
             return batch;
         }
@@ -234,11 +244,14 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         private bool _disposed;
 
         private readonly DbAddress[] _rootDataPages;
+        private readonly DbAddress _nextFreePage;
 
-        public ReadOnlyBatch(PagedDb db, uint batchId, DbAddress[] rootDataPages, Metadata metadata)
+        public ReadOnlyBatch(PagedDb db, uint batchId, DbAddress[] rootDataPages, Metadata metadata,
+            DbAddress nextFreePage)
         {
             _db = db;
             _rootDataPages = rootDataPages;
+            _nextFreePage = nextFreePage;
             BatchId = batchId;
             Metadata = metadata;
         }
@@ -278,6 +291,13 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 {
                     new DataPage(GetAt(addr)).Report(reporter, this, 1);
                 }
+            }
+
+            for (uint i = _db._historyDepth; i < _nextFreePage.Raw; i++)
+            {
+                ref readonly var header = ref GetAt(DbAddress.Page(i)).Header;
+                var pageBatchId = header.BatchId;
+                reporter.ReportPage(BatchId - pageBatchId, header.PageType);
             }
         }
 
@@ -401,13 +421,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public void Report(IReporter reporter)
         {
-            foreach (var addr in _root.Data.AccountPages)
-            {
-                if (addr.IsNull == false)
-                {
-                    new DataPage(GetAt(addr)).Report(reporter, this, 1);
-                }
-            }
+            throw new NotImplementedException();
         }
 
         public async ValueTask Commit(CommitOptions options)
@@ -419,7 +433,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             // memoize the abandoned so that it's preserved for future uses 
             MemoizeAbandoned();
 
-            _db.ReportPageCountPerCommit(_written.Count);
+            _db.ReportPageCountPerCommit(_written.Count, _metrics.PagesReused, _metrics.PagesAllocated);
 
             await _db._manager.FlushPages(_written, options);
 
