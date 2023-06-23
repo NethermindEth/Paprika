@@ -1,12 +1,14 @@
 ﻿using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using HdrHistogram;
 using Nethermind.Int256;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Store;
 using Paprika.Tests;
 using Spectre.Console;
+using Spectre.Console.Rendering;
 
 [assembly: ExcludeFromCodeCoverage]
 
@@ -14,8 +16,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 25_000 : 3_000;
-    private const int RandomSampleSize = 260_000_000;
+    private const int BlockCount = PersistentDb ? 20_000 : 3_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
     private const int FinalizeEvery = 32;
@@ -27,7 +28,7 @@ public static class Program
     private const long DbFileSize = PersistentDb ? 256 * Gb : 16 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
 
-    private static readonly TimeSpan FlushEvery = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan FlushEvery = TimeSpan.FromSeconds(30);
 
     private const int LogEvery = BlockCount / NumberOfLogs;
 
@@ -131,7 +132,7 @@ public static class Program
             }
 
             // waiting for finalization
-            var read = db.BeginReadOnlyBatch();
+            using var read = db.BeginReadOnlyBatch();
 
             var readingStopWatch = Stopwatch.StartNew();
             random = BuildRandom();
@@ -184,6 +185,29 @@ public static class Program
             // the final report
             ReportReading(counter);
 
+            var stats = new StatisticsReporter();
+            read.Report(stats);
+            var table = new Table();
+
+            table.AddColumn(new TableColumn("Level of Paprika tree"));
+            table.AddColumn(new TableColumn("Child page count"));
+            table.AddColumn(new TableColumn("Entries in page"));
+
+            foreach (var (key, level) in stats.Levels)
+            {
+                table.AddRow(
+                    new Text(key.ToString()),
+                    WriteHistogram(level.ChildCount),
+                    WriteHistogram(level.Entries));
+            }
+
+            var mb = (long)stats.PageCount * Page.PageSize / 1024 / 1024;
+            var report = new Layout().SplitRows(
+                new Layout(new Paragraph($"General stats:\n1. Size of this Paprika tree: {mb}MB")).Size(3),
+                new Layout(table.Expand()));
+
+            layout[info].Update(new Panel(report).Header("Paprika tree statistics").Expand());
+
             spectre.Cancel();
             await reportingTask;
 
@@ -219,6 +243,17 @@ public static class Program
     }
 
     private static Random BuildRandom() => new(RandomSeed);
+
+    private static IRenderable WriteHistogram(HistogramBase histogram)
+    {
+        string Percentile(int percentile, string color)
+        {
+            var value = histogram.GetValueAtPercentile(percentile);
+            return $"[{color}]P{percentile}: {value,2}[/] ";
+        }
+
+        return new Markup(Percentile(50, "green") + Percentile(90, "yellow") + Percentile(95, "red"));
+    }
 
     private static int Writer(Blockchain blockchain, Keccak bigStorageAccount, Random random,
         Layout reporting)

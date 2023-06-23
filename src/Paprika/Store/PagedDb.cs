@@ -270,6 +270,17 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             return new DataPage(GetAt(addr)).TryGet(hash, sliced, this, out result);
         }
 
+        public void Report(IReporter reporter)
+        {
+            foreach (var addr in _rootDataPages)
+            {
+                if (addr.IsNull == false)
+                {
+                    new DataPage(GetAt(addr)).Report(reporter, this, 1);
+                }
+            }
+        }
+
         public uint BatchId { get; }
 
         public Page GetAt(DbAddress address) => _db._manager.GetAt(address);
@@ -385,6 +396,17 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             if (_disposed)
             {
                 throw new ObjectDisposedException("This batch has been disposed already.");
+            }
+        }
+
+        public void Report(IReporter reporter)
+        {
+            foreach (var addr in _root.Data.AccountPages)
+            {
+                if (addr.IsNull == false)
+                {
+                    new DataPage(GetAt(addr)).Report(reporter, this, 1);
+                }
             }
         }
 

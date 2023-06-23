@@ -278,6 +278,9 @@ public class Blockchain : IAsyncDisposable
                 Dispose();
             }
         }
+
+        public void Report(IReporter reporter) =>
+            throw new NotImplementedException("One should not report over a block");
     }
 
     /// <summary>

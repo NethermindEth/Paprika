@@ -84,6 +84,15 @@ public readonly ref struct HashingMap
         return false;
     }
 
+    public int Count
+    {
+        get
+        {
+            var indexOf = _hashes.IndexOf(NoHash);
+            return indexOf == IndexOfNotFound ? _hashes.Length : indexOf;
+        }
+    }
+
     private Span<byte> GetEntry(int position) => _entries.Slice(position * EntrySize, EntrySize);
 
     public bool TrySet(uint hash, in Key key, ReadOnlySpan<byte> value)
