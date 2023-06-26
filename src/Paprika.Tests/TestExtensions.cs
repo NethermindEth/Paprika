@@ -21,17 +21,16 @@ public static class TestExtensions
 
     public static void ShouldHaveAccount(this IReadOnlyBatch read, in Keccak key, in Account expected)
     {
-        Span<byte> payload = stackalloc byte[Serializer.BalanceNonceMaxByteCount];
-        var raw = Serializer.WriteAccount(payload, expected);
+        var raw = expected.WriteTo(stackalloc byte[Account.MaxByteCount]);
 
         read.TryGet(Key.Account(key), out var value).Should().BeTrue();
-        value.SequenceEqual(raw);
+        value.SequenceEqual(raw).Should().BeTrue();
     }
 
     public static Account GetAccount(this IReadOnlyBatch read, in Keccak key)
     {
         read.TryGet(Key.Account(key), out var value).Should().BeTrue($"Key: {key.ToString()} should exist.");
-        Serializer.ReadAccount(value, out var account);
+        Account.ReadFrom(value, out var account);
         return account;
     }
 

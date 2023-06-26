@@ -1,58 +1,23 @@
 ﻿using Nethermind.Int256;
-using Paprika.Crypto;
 
 namespace Paprika.Data;
 
 public static class Serializer
 {
-    private const int Uint256Size = 32;
+    public const int Uint256Size = 32;
     private const int Uint256PrefixSize = 1;
-    private const int MaxUint256SizeWithPrefix = Uint256Size + Uint256PrefixSize;
+    public const int MaxUint256SizeWithPrefix = Uint256Size + Uint256PrefixSize;
     private const bool BigEndian = true;
-    private const int MaxNibblePathLength = Keccak.Size + 1;
-
-    private static Span<byte> WriteToWithLeftover(Span<byte> destination, UInt256 value)
-    {
-        var uint256 = destination.Slice(1, Uint256Size);
-        value.ToBigEndian(uint256);
-        var firstNonZero = uint256.IndexOfAnyExcept((byte)0);
-
-        if (firstNonZero == -1)
-        {
-            // only zeros, special case
-            destination[0] = 0;
-            return destination.Slice(1);
-        }
-
-        var nonZeroBytes = (byte)(Uint256Size - firstNonZero);
-        destination[0] = nonZeroBytes;
-
-        // this will be usually the case, no need to check with if
-        // move to first non zero
-        uint256.Slice(firstNonZero).CopyTo(uint256);
-
-        return destination.Slice(Uint256PrefixSize + nonZeroBytes);
-    }
-
-    private static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out UInt256 value)
-    {
-        var nonZeroBytes = source[0];
-        Span<byte> uint256 = stackalloc byte[Uint256Size];
-
-        source.Slice(Uint256PrefixSize, nonZeroBytes).CopyTo(uint256.Slice(Uint256Size - nonZeroBytes));
-        value = new UInt256(uint256, BigEndian);
-        return source.Slice(nonZeroBytes + Uint256PrefixSize);
-    }
 
     public const int StorageValueMaxByteCount = MaxUint256SizeWithPrefix;
-
 
     /// <summary>
     /// Writes the storage value.
     /// </summary>
     public static Span<byte> WriteStorageValue(Span<byte> destination, in UInt256 value)
     {
-        return destination.Slice(0, destination.Length - WriteToWithLeftover(destination, value).Length);
+        value.WriteWithLeftover(destination, out var length);
+        return destination.Slice(0, length);
     }
 
     /// <summary>
@@ -63,28 +28,38 @@ public static class Serializer
         ReadFrom(source, out value);
     }
 
-    public const int BalanceNonceMaxByteCount = MaxUint256SizeWithPrefix + // balance
-                                                MaxUint256SizeWithPrefix; // nonce
+    private const int NotFound = -1;
 
     /// <summary>
-    /// Serializes the account balance and nonce.
+    /// Writes <paramref name="value"/> without encoding the length, returning the leftover.
+    /// The caller should store length elsewhere.
     /// </summary>
-    /// <returns>The actual payload written.</returns>
-    public static Span<byte> WriteAccount(Span<byte> destination, in Account account)
+    public static Span<byte> WriteWithLeftover(this UInt256 value, Span<byte> destination, out int length)
     {
-        var leftover = WriteToWithLeftover(destination, account.Balance);
-        leftover = WriteToWithLeftover(leftover, account.Nonce);
+        var slice = destination.Slice(0, Uint256Size);
+        value.ToBigEndian(slice);
+        var firstNonZero = slice.IndexOfAnyExcept((byte)0);
 
-        return destination.Slice(0, destination.Length - leftover.Length);
+        if (firstNonZero == NotFound)
+        {
+            // all zeros
+            length = 0;
+            return destination;
+        }
+
+        // some non-zeroes
+        length = Uint256Size - firstNonZero;
+
+        // move left
+        destination.Slice(firstNonZero, length).CopyTo(destination.Slice(0, length));
+        return destination.Slice(length);
     }
 
-    /// <summary>
-    /// Reads the account balance and nonce.
-    /// </summary>
-    public static void ReadAccount(ReadOnlySpan<byte> source, out Account account)
+    public static void ReadFrom(ReadOnlySpan<byte> source, out UInt256 value)
     {
-        var span = ReadFrom(source, out var balance);
-        ReadFrom(span, out var nonce);
-        account = new Account(balance, nonce);
+        Span<byte> uint256 = stackalloc byte[Uint256Size];
+
+        source.CopyTo(uint256.Slice(Uint256Size - source.Length));
+        value = new UInt256(uint256, BigEndian);
     }
 }
