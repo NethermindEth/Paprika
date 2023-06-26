@@ -25,10 +25,10 @@ public static class Program
 
     private const int NumberOfLogs = PersistentDb ? 100 : 10;
 
-    private const long DbFileSize = PersistentDb ? 256 * Gb : 16 * Gb;
+    private const long DbFileSize = PersistentDb ? 64 * Gb : 16 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
 
-    private static readonly TimeSpan FlushEvery = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan FlushEvery = TimeSpan.FromSeconds(10);
 
     private const int LogEvery = BlockCount / NumberOfLogs;
 

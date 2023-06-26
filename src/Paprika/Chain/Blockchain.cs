@@ -53,7 +53,8 @@ public class Blockchain : IAsyncDisposable
 
     private static readonly TimeSpan DefaultFlushDelay = TimeSpan.FromSeconds(1);
 
-    public Blockchain(PagedDb db, IPreCommitBehavior? preCommit = null, TimeSpan? minFlushDelay = null, int? finalizationQueueLimit = null, Action? beforeMetricsDisposed = null)
+    public Blockchain(PagedDb db, IPreCommitBehavior? preCommit = null, TimeSpan? minFlushDelay = null,
+        int? finalizationQueueLimit = null, Action? beforeMetricsDisposed = null)
     {
         _db = db;
         _preCommit = preCommit;
@@ -77,12 +78,6 @@ public class Blockchain : IAsyncDisposable
                 FullMode = BoundedChannelFullMode.Wait,
             });
         }
-
-        var genesis = new Block(GenesisHash, new ReadOnlyBatchCountingRefs(db.BeginReadOnlyBatch()), GenesisHash, 0,
-            this);
-
-        _blocksByNumber[0] = new[] { genesis };
-        _blocksByHash[GenesisHash] = genesis;
 
         _flusher = FlusherTask();
 
@@ -195,11 +190,22 @@ public class Blockchain : IAsyncDisposable
 
     public IWorldState StartNew(Keccak parentKeccak, Keccak blockKeccak, uint blockNumber)
     {
-        if (!_blocksByHash.TryGetValue(parentKeccak, out var parent))
-            throw new Exception("The parent block must exist");
+        if (_blocksByHash.TryGetValue(parentKeccak, out var parent))
+        {
+            return new Block(parentKeccak, parent, blockKeccak, blockNumber, this);
+        }
 
-        // not added to dictionaries until Commit
-        return new Block(parentKeccak, parent, blockKeccak, blockNumber, this);
+        using var batch = new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch());
+        batch.Lease(); // add one for this using
+
+        var parentBlockNumber = blockNumber - 1;
+        if (batch.Metadata.BlockNumber == parentBlockNumber)
+        {
+            // block does the leasing itself
+            return new Block(parentKeccak, batch, blockKeccak, blockNumber, this);
+        }
+
+        throw new Exception("There is no parent and the db is not aligned with the parent number");
     }
 
     public void Finalize(Keccak keccak)
@@ -411,7 +417,8 @@ public class Blockchain : IAsyncDisposable
             Set(Key.StorageCell(path, address), payload);
         }
 
-        public bool TryGet(in Key key, out ReadOnlySpanOwner<byte> result) => throw new NotImplementedException("Not implemented yet");
+        public bool TryGet(in Key key, out ReadOnlySpanOwner<byte> result) =>
+            throw new NotImplementedException("Not implemented yet");
 
         public void Set(in Key key, in ReadOnlySpan<byte> payload)
         {
