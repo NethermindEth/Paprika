@@ -139,6 +139,25 @@ public class HashingMapTests
 
         map.TryGet(hash, key, out _).Should().BeFalse();
     }
+
+    [Test]
+    public void Biggest_value()
+    {
+        Span<byte> span = stackalloc byte[HashingMap.MinSize];
+        var map = new HashingMap(span);
+
+        Span<byte> data = stackalloc byte[32];
+        data.Fill(0x71);
+
+        Keccak keccak = default;
+        keccak.BytesAsSpan.Fill(0xFF);
+
+        var key = Key.StorageCell(NibblePath.FromKey(keccak), keccak);
+        var hash = HashingMap.GetHash(key);
+
+        map.SetAssert(hash, key, data);
+        map.GetAssert(hash, key, data);
+    }
 }
 
 static class HashingMapTestExtensions

@@ -28,7 +28,7 @@ public readonly ref struct HashingMap
     private const int MaxValueLength = 32;
 
     // NibblePath.FullKeccakByteLength + TypeBytes + LengthPrefix + Keccak.Size + LengthPrefix + MaxValueLength;
-    private const int EntrySize = 88;
+    private const int EntrySize = 100;
     private const int HashSize = sizeof(uint);
     private const int TotalEntrySize = EntrySize + HashSize;
     private const int IndexOfNotFound = -1;
