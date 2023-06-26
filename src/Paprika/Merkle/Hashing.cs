@@ -36,13 +36,13 @@ public static partial class Node
                 + Rlp.LengthOfKeccakRlp; // StorageRootHash
 
             Span<byte> rlpBuffer = new byte[Rlp.LengthOfSequence(contentLength)];
-            RlpStream rlpStream = new(rlpBuffer);
+            var rlpStream = new RlpStream(rlpBuffer);
 
-            rlpStream.StartSequence(contentLength);
-            rlpStream.Encode(account.Nonce);
-            rlpStream.Encode(account.Balance);
-            rlpStream.Encode(storageRootHash);
-            rlpStream.Encode(codeHash);
+            rlpStream.StartSequence(contentLength)
+                .Encode(account.Nonce)
+                .Encode(account.Balance)
+                .Encode(storageRootHash)
+                .Encode(codeHash);
 
             return rlpStream;
         }

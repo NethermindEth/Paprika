@@ -17,7 +17,7 @@ public ref struct RlpStream
         Data = data;
     }
 
-    public void StartSequence(int contentLength)
+    public RlpStream StartSequence(int contentLength)
     {
         byte prefix;
         if (contentLength < 56)
@@ -31,6 +31,8 @@ public ref struct RlpStream
             WriteByte(prefix);
             WriteEncodedLength(contentLength);
         }
+
+        return this;
     }
 
     public void WriteByte(byte byteToWrite)
@@ -78,7 +80,7 @@ public ref struct RlpStream
         }
     }
 
-    public void Encode(in UInt256 value)
+    public RlpStream Encode(in UInt256 value)
     {
         if (value.IsZero)
         {
@@ -91,15 +93,19 @@ public ref struct RlpStream
             value.ToBigEndian(bytes);
             Encode(bytes.WithoutLeadingZeros());
         }
+
+        return this;
     }
 
-    public void Encode(in Keccak keccak)
+    public RlpStream Encode(in Keccak keccak)
     {
         // TODO: If keccak is a known one like `Keccak.OfAnEmptyString` or `Keccak.OfAnEmptySequenceRlp`
         // we can cache those `Rlp`s to be reused
 
         WriteByte(160);
         Write(keccak.BytesAsSpan);
+
+        return this;
     }
 
     private void WriteEncodedLength(int value)
