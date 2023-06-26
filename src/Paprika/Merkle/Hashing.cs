@@ -62,7 +62,7 @@ public static partial class Node
             rlp.Encode(hexPath);
             rlp.Encode(value);
 
-            return RLP.KeccakOrRlp.WrapRlp(rlp.Data);
+            return rlp.ToKeccakOrRlp();
         }
     }
 }

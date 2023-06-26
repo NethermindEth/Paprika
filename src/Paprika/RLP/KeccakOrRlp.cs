@@ -2,7 +2,7 @@ using Paprika.Crypto;
 
 namespace Paprika.RLP;
 
-public ref struct KeccakOrRlp
+public readonly ref struct KeccakOrRlp
 {
     public enum Type : byte
     {
@@ -10,29 +10,38 @@ public ref struct KeccakOrRlp
         Rlp = 1,
     }
 
-    public Type DataType { get; }
-    public Span<byte> Data { get; }
+    public readonly Type DataType;
+    private readonly Keccak _keccak;
 
-    public KeccakOrRlp(Type dataType, Span<byte> data)
+    public Span<byte> AsSpan() => _keccak.BytesAsSpan;
+
+    private KeccakOrRlp(Type dataType, scoped Span<byte> data)
     {
         DataType = dataType;
-        Data = data;
+        _keccak = new Keccak(data);
     }
 
-    public static KeccakOrRlp WrapRlp(Span<byte> data)
+    public static KeccakOrRlp FromSpan(scoped Span<byte> data)
     {
-        var destination = new byte[32];
+        Span<byte> output = stackalloc byte[Keccak.Size];
 
         if (data.Length < 32)
         {
-            destination[0] = (byte)data.Length;
-            data.CopyTo(destination[1..]);
-            return new KeccakOrRlp(Type.Rlp, destination);
+            output[0] = (byte)data.Length;
+            data.CopyTo(output[1..]);
+            return new KeccakOrRlp(Type.Rlp, output);
         }
         else
         {
-            KeccakHash.ComputeHash(data, destination);
-            return new KeccakOrRlp(Type.Keccak, destination);
+            KeccakHash.ComputeHash(data, output);
+            return new KeccakOrRlp(Type.Keccak, output);
         }
+    }
+}
+
+public static class RlpStreamExtensions {
+    public static KeccakOrRlp ToKeccakOrRlp(this scoped RlpStream stream)
+    {
+        return KeccakOrRlp.FromSpan(stream.Data);
     }
 }

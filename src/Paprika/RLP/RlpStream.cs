@@ -40,7 +40,7 @@ public ref struct RlpStream
         Data[Position++] = byteToWrite;
     }
 
-    public void Write(in ReadOnlySpan<byte> bytesToWrite)
+    public void Write(scoped ReadOnlySpan<byte> bytesToWrite)
     {
         bytesToWrite.CopyTo(Data.Slice(Position, bytesToWrite.Length));
         Position += bytesToWrite.Length;
@@ -54,7 +54,7 @@ public ref struct RlpStream
 
     public void EncodeEmptyArray() => WriteByte(EmptyArrayByte);
 
-    public void Encode(in ReadOnlySpan<byte> input)
+    public RlpStream Encode(scoped ReadOnlySpan<byte> input)
     {
         if (input.Length == 0)
         {
@@ -78,6 +78,8 @@ public ref struct RlpStream
             WriteEncodedLength(input.Length);
             Write(input);
         }
+
+        return this;
     }
 
     public RlpStream Encode(in UInt256 value)
@@ -88,8 +90,7 @@ public ref struct RlpStream
         }
         else
         {
-            // TODO: Cannot use stackalloc here for some reason
-            Span<byte> bytes = new byte[32];
+            Span<byte> bytes = stackalloc byte[32];
             value.ToBigEndian(bytes);
             Encode(bytes.WithoutLeadingZeros());
         }

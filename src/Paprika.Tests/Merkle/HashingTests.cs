@@ -43,6 +43,6 @@ public class HashingTests
         var expectedHash = new Keccak(Convert.FromHexString(hexString));
 
         Assert.That(computedHash.DataType, Is.EqualTo(KeccakOrRlp.Type.Keccak));
-        Assert.That(new Keccak(computedHash.Data), Is.EqualTo(expectedHash));
+        Assert.That(new Keccak(computedHash.AsSpan()), Is.EqualTo(expectedHash));
     }
 }
