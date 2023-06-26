@@ -8,34 +8,33 @@ public static partial class Node
 {
     public ref partial struct Leaf
     {
-        public static KeccakOrRlp KeccakOrRlp(NibblePath nibblePath, Account account) =>
-            KeccakOrRlp(nibblePath, account, Keccak.OfAnEmptyString, Keccak.EmptyTreeHash);
+        public static void KeccakOrRlp(NibblePath nibblePath, Account account, out KeccakOrRlp result) =>
+            KeccakOrRlp(nibblePath, account, Keccak.OfAnEmptyString, Keccak.EmptyTreeHash, out result);
 
-        public static KeccakOrRlp KeccakOrRlp(
+        public static void KeccakOrRlp(
             NibblePath nibblePath,
             Account account,
             Keccak codeHash,
-            Keccak storageRootHash
+            Keccak storageRootHash,
+            out KeccakOrRlp result
         )
         {
+            /*
             // Stage 1: value = RLP(accountBalance, accountNonce, codeHash, storageRootHash)
             var rlpStream = RlpOfAccount(account, codeHash, storageRootHash);
 
             // Stage 2: res = KeccakOrRlp(nibblePath, value)
             var result = Encode(nibblePath, rlpStream.Data);
+            */
 
-            return result;
-        }
-
-        private static RlpStream RlpOfAccount(Account account, Keccak codeHash, Keccak storageRootHash)
-        {
+            // Stage 1: value = RLP(accountBalance, accountNonce, codeHash, storageRootHash)
             var contentLength =
                 Rlp.LengthOf(account.Balance)
                 + Rlp.LengthOf(account.Nonce)
                 + Rlp.LengthOfKeccakRlp // CodeHash
                 + Rlp.LengthOfKeccakRlp; // StorageRootHash
 
-            Span<byte> rlpBuffer = new byte[Rlp.LengthOfSequence(contentLength)];
+            Span<byte> rlpBuffer = stackalloc byte[Rlp.LengthOfSequence(contentLength)];
             var rlpStream = new RlpStream(rlpBuffer);
 
             rlpStream.StartSequence(contentLength)
@@ -44,25 +43,21 @@ public static partial class Node
                 .Encode(storageRootHash)
                 .Encode(codeHash);
 
-            return rlpStream;
-        }
+            // Stage 2: res = KeccakOrRlp(nibblePath, value)
+            Span<byte> hexPath = stackalloc byte[nibblePath.HexEncodedLength];
+            nibblePath.HexEncode(hexPath, true);
 
-        private static KeccakOrRlp Encode(NibblePath path, Span<byte> value)
-        {
-            Span<byte> hexPath = new byte[path.HexEncodedLength];
-            path.HexEncode(hexPath, true);
-
-            var contentLength = Rlp.LengthOf(hexPath) + Rlp.LengthOf(value);
-            var totalLength = Rlp.LengthOfSequence(contentLength);
+            var contentLength2 = Rlp.LengthOf(hexPath) + Rlp.LengthOf(rlpBuffer);
+            var totalLength = Rlp.LengthOfSequence(contentLength2);
 
             Span<byte> data = new byte[totalLength];
             RlpStream rlp = new(data);
 
-            rlp.StartSequence(contentLength);
+            rlp.StartSequence(contentLength2);
             rlp.Encode(hexPath);
-            rlp.Encode(value);
+            rlp.Encode(rlpBuffer);
 
-            return rlp.ToKeccakOrRlp();
+            result = rlp.ToKeccakOrRlp();
         }
     }
 }

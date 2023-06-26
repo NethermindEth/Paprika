@@ -39,7 +39,7 @@ public class HashingTests
     {
         var account = new Account(balance, nonce);
 
-        var computedHash = Node.Leaf.KeccakOrRlp(NibblePath.FromKey(key), account);
+        Node.Leaf.KeccakOrRlp(NibblePath.FromKey(key), account, out var computedHash);
         var expectedHash = new Keccak(Convert.FromHexString(hexString));
 
         Assert.That(computedHash.DataType, Is.EqualTo(KeccakOrRlp.Type.Keccak));
