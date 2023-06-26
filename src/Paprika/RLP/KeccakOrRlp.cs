@@ -39,7 +39,8 @@ public readonly ref struct KeccakOrRlp
     }
 }
 
-public static class RlpStreamExtensions {
+public static class RlpStreamExtensions
+{
     public static KeccakOrRlp ToKeccakOrRlp(this scoped RlpStream stream)
     {
         return KeccakOrRlp.FromSpan(stream.Data);
