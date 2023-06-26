@@ -11,7 +11,7 @@ public static partial class Node
         public static void KeccakOrRlp(NibblePath nibblePath, Account account, out KeccakOrRlp result) =>
             KeccakOrRlp(nibblePath, account, Keccak.OfAnEmptyString, Keccak.EmptyTreeHash, out result);
 
-        public static void KeccakOrRlp(
+        private static void KeccakOrRlp(
             NibblePath nibblePath,
             Account account,
             Keccak codeHash,
@@ -19,45 +19,34 @@ public static partial class Node
             out KeccakOrRlp result
         )
         {
-            /*
-            // Stage 1: value = RLP(accountBalance, accountNonce, codeHash, storageRootHash)
-            var rlpStream = RlpOfAccount(account, codeHash, storageRootHash);
-
-            // Stage 2: res = KeccakOrRlp(nibblePath, value)
-            var result = Encode(nibblePath, rlpStream.Data);
-            */
-
-            // Stage 1: value = RLP(accountBalance, accountNonce, codeHash, storageRootHash)
-            var contentLength =
+            // Stage 1: accountRlp = RLP(accountBalance, accountNonce, codeHash, storageRootHash)
+            var accountRlpLength =
                 Rlp.LengthOf(account.Balance)
                 + Rlp.LengthOf(account.Nonce)
                 + Rlp.LengthOfKeccakRlp // CodeHash
                 + Rlp.LengthOfKeccakRlp; // StorageRootHash
 
-            Span<byte> rlpBuffer = stackalloc byte[Rlp.LengthOfSequence(contentLength)];
-            var rlpStream = new RlpStream(rlpBuffer);
-
-            rlpStream.StartSequence(contentLength)
+            Span<byte> accountRlp = stackalloc byte[Rlp.LengthOfSequence(accountRlpLength)];
+            new RlpStream(accountRlp)
+                .StartSequence(accountRlpLength)
                 .Encode(account.Nonce)
                 .Encode(account.Balance)
                 .Encode(storageRootHash)
                 .Encode(codeHash);
 
-            // Stage 2: res = KeccakOrRlp(nibblePath, value)
+            // Stage 2: result = KeccakOrRlp(nibblePath, accountRlp)
             Span<byte> hexPath = stackalloc byte[nibblePath.HexEncodedLength];
             nibblePath.HexEncode(hexPath, true);
 
-            var contentLength2 = Rlp.LengthOf(hexPath) + Rlp.LengthOf(rlpBuffer);
-            var totalLength = Rlp.LengthOfSequence(contentLength2);
+            var encodedLength = Rlp.LengthOf(hexPath) + Rlp.LengthOf(accountRlp);
+            var totalLength = Rlp.LengthOfSequence(encodedLength);
 
-            Span<byte> data = new byte[totalLength];
-            RlpStream rlp = new(data);
-
-            rlp.StartSequence(contentLength2);
-            rlp.Encode(hexPath);
-            rlp.Encode(rlpBuffer);
-
-            result = rlp.ToKeccakOrRlp();
+            Span<byte> accountAndPathRlp = stackalloc byte[totalLength];
+            result = new RlpStream(accountAndPathRlp)
+                .StartSequence(encodedLength)
+                .Encode(hexPath)
+                .Encode(accountRlp)
+                .ToKeccakOrRlp();
         }
     }
 }
