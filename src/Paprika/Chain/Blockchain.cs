@@ -384,7 +384,7 @@ public class Blockchain : IAsyncDisposable
             if (owner.Span.IsEmpty)
                 return default;
 
-            Serializer.ReadAccount(owner.Span, out var result);
+            Account.ReadFrom(owner.Span, out var result);
             return result;
         }
 
@@ -398,9 +398,7 @@ public class Blockchain : IAsyncDisposable
             _bloom.Set(BloomForAccountOperation(key));
 
             var path = NibblePath.FromKey(key);
-
-            Span<byte> payload = stackalloc byte[Serializer.BalanceNonceMaxByteCount];
-            payload = Serializer.WriteAccount(payload, account);
+            var payload = account.WriteTo(stackalloc byte[Account.MaxByteCount]);
 
             Set(Key.Account(path), payload);
         }
