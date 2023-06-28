@@ -7,7 +7,7 @@ using Paprika.Data;
 
 namespace Paprika.Merkle;
 
-public static class Node
+public static partial class Node
 {
     public enum Type : byte
     {
@@ -115,7 +115,7 @@ public static class Node
             $" }}";
     }
 
-    public readonly ref struct Leaf
+    public readonly ref partial struct Leaf
     {
         public int MaxByteLength => Header.Size + Path.MaxByteLength + Keccak.Size;
 
