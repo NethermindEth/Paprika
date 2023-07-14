@@ -467,12 +467,18 @@ public class Blockchain : IAsyncDisposable
             map.TrySet(key, payload);
         }
 
-        bool ICommit.TryGet(in Key key, out ReadOnlySpanOwner<byte> result) =>
-            throw new NotImplementedException("Not implemented yet");
+        bool ICommit.TryGet(in Key key, out ReadOnlySpanOwner<byte> result)
+        {
+            result = TryGetLocalNoLease(GetBloom(key), key, out var succeeded);
+            return succeeded;
+        }
 
         void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload) => SetImpl(key, payload);
 
-        IKeyEnumerator ICommit.GetEnumerator() => throw new NotImplementedException("Not implemented yet");
+        IKeyEnumerator ICommit.GetEnumerator()
+        {
+            throw new NotImplementedException("Not implemented yet");
+        }
 
         private ReadOnlySpanOwner<byte> Get(int bloom, in Key key)
         {
