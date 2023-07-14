@@ -3,6 +3,10 @@ using Paprika.Store;
 
 namespace Paprika.Chain;
 
+/// <summary>
+/// Provides a component that combined <see cref="NibbleBasedMap"/> that can be wrapped over a <see cref="Page"/>
+/// that comes from <see cref="BufferPool"/>. 
+/// </summary>
 public readonly struct InBlockMap
 {
     private readonly Page _page;

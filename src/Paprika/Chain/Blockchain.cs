@@ -18,16 +18,8 @@ namespace Paprika.Chain;
 /// For the finalized blocks, they are queued to a <see cref="Channel"/> that is consumed by a flushing mechanism
 /// using the <see cref="PagedDb"/>.
 /// </summary>
-/// <remarks>
-/// The current implementation assumes a single threaded access. For multi-threaded, some adjustments will be required.
-/// The following should be covered:
-/// 1. reading a state at a given time based on the root. Should never fail.
-/// 2. TBD
-/// </remarks>
 public class Blockchain : IAsyncDisposable
 {
-    public static readonly Keccak GenesisHash = Keccak.Zero;
-
     // allocate 1024 pages (4MB) at once
     private readonly BufferPool _pool = new(1024);
 
@@ -290,7 +282,7 @@ public class Blockchain : IAsyncDisposable
     }
 
     /// <summary>
-    /// Represents a block that is a result of ExecutionPayload, storing it in a in-memory trie
+    /// Represents a block that is a result of ExecutionPayload.
     /// </summary>
     private class Block : RefCountingDisposable, IWorldState, ICommit
     {
@@ -298,14 +290,28 @@ public class Blockchain : IAsyncDisposable
         public Keccak ParentHash { get; }
         public uint BlockNumber { get; }
 
+        /// <summary>
+        /// A simple bloom filter to assert whether the given key was set in a given block,
+        /// used to speed up getting the keys.
+        /// </summary>
         private readonly BloomFilter _bloom;
 
         private readonly Blockchain _blockchain;
 
+        /// <summary>
+        /// All the pages rented for this block from the <see cref="BufferPool"/>.
+        /// </summary>
         private readonly List<Page> _pages = new();
+
+        /// <summary>
+        /// The maps mapping keys to values, written in this block.
+        /// </summary>
         private readonly List<InBlockMap> _maps = new();
 
-        // one of: Block as the parent, or IReadOnlyBatch if flushed
+        /// <summary>
+        /// The previous can point to either another <see cref="Block"/> as the parent,
+        /// or <see cref="IReadOnlyBatch"/> if the parent has been already applied to the state after finalization.
+        /// </summary>
         private RefCountingDisposable _previous;
 
         public Block(Keccak parentHash, RefCountingDisposable parent, Keccak hash, uint blockNumber,

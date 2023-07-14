@@ -22,6 +22,7 @@ public interface IWorldState : IDisposable
 
     /// <summary>
     /// Commits the block to the chain allowing to build upon it.
+    /// Also runs the <see cref="IPreCommitBehavior"/> that the blockchain was configured with.
     /// </summary>
     void Commit();
 }

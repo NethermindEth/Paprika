@@ -17,11 +17,11 @@ public interface IPreCommitBehavior
 }
 
 /// <summary>
-/// The set of changes applied by <see cref="IWorldState"/>.
-/// Allows for additional modifications of the data just before the commit.
+/// Provides the set of changes applied onto <see cref="IWorldState"/>,
+/// allowing for additional modifications of the data just before the commit.
 /// </summary>
 /// <remarks>
-/// To access all the keys use the enumerator:
+/// Use Enumerator to access all the keys
 ///
 /// public static void Foreach(this ICommit commit)
 /// {
@@ -34,7 +34,7 @@ public interface IPreCommitBehavior
 public interface ICommit
 {
     /// <summary>
-    /// Tries to retrieve the result stored under the given key.
+    /// Tries to retrieve the result stored under the given key only from this commit.
     /// </summary>
     /// <returns>
     /// Whether the retrieval was successful.
