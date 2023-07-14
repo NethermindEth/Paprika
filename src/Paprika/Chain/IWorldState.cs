@@ -12,13 +12,13 @@ public interface IWorldState : IDisposable
     Keccak ParentHash { get; }
     uint BlockNumber { get; }
 
-    public UInt256 GetStorage(in Keccak account, in Keccak address);
+    public UInt256 GetStorage(in Keccak address, in Keccak storage);
 
-    public void SetAccount(in Keccak key, in Account account);
+    public void SetAccount(in Keccak address, in Account account);
 
-    public Account GetAccount(in Keccak account);
+    public Account GetAccount(in Keccak address);
 
-    public void SetStorage(in Keccak key, in Keccak address, UInt256 value);
+    public void SetStorage(in Keccak address, in Keccak storage, UInt256 value);
 
     /// <summary>
     /// Commits the block to the chain allowing to build upon it.

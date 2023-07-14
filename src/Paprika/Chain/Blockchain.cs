@@ -364,10 +364,10 @@ public class Blockchain : IAsyncDisposable
 
         private BufferPool Pool => _blockchain._pool;
 
-        public UInt256 GetStorage(in Keccak account, in Keccak address)
+        public UInt256 GetStorage(in Keccak address, in Keccak storage)
         {
-            var bloom = BloomForStorageOperation(account, address);
-            var key = Key.StorageCell(NibblePath.FromKey(account), address);
+            var key = Key.StorageCell(NibblePath.FromKey(address), storage);
+            var bloom = GetBloom(key);
 
             using var owner = Get(bloom, key);
 
@@ -379,10 +379,10 @@ public class Blockchain : IAsyncDisposable
             return value;
         }
 
-        public Account GetAccount(in Keccak account)
+        public Account GetAccount(in Keccak address)
         {
-            var bloom = BloomForAccountOperation(account);
-            var key = Key.Account(NibblePath.FromKey(account));
+            var key = Key.Account(NibblePath.FromKey(address));
+            var bloom = GetBloom(key);
 
             using var owner = Get(bloom, key);
 
@@ -394,37 +394,54 @@ public class Blockchain : IAsyncDisposable
             return result;
         }
 
-        private static int BloomForStorageOperation(in Keccak key, in Keccak address) =>
-            key.GetHashCode() ^ address.GetHashCode();
-
-        private static int BloomForAccountOperation(in Keccak key) => key.GetHashCode();
-
-        public void SetAccount(in Keccak key, in Account account)
+        private static int GetBloom(in Key key)
         {
-            _bloom.Set(BloomForAccountOperation(key));
+            var code = new HashCode();
+            code.Add(key.Type);
 
-            var path = NibblePath.FromKey(key);
-            var payload = account.WriteTo(stackalloc byte[Account.MaxByteCount]);
+            if (key.Type == DataType.Account)
+            {
+                key.Path.AddToHashCode(ref code);
+            }
+            else if (key.Type == DataType.StorageCell)
+            {
+                key.Path.AddToHashCode(ref code);
+                code.AddBytes(key.AdditionalKey);
+            }
+            else
+            {
+                throw new NotImplementedException("Not implemented yet");
+            }
 
-            Set(Key.Account(path), payload);
+            return code.ToHashCode();
         }
 
-        public void SetStorage(in Keccak key, in Keccak address, UInt256 value)
+        public void SetAccount(in Keccak address, in Account account)
         {
-            _bloom.Set(BloomForStorageOperation(key, address));
+            var path = NibblePath.FromKey(address);
+            var key = Key.Account(path);
 
-            var path = NibblePath.FromKey(key);
+            _bloom.Set(GetBloom(key));
+
+            var payload = account.WriteTo(stackalloc byte[Account.MaxByteCount]);
+
+            SetImpl(key, payload);
+        }
+
+        public void SetStorage(in Keccak address, in Keccak storage, UInt256 value)
+        {
+            var path = NibblePath.FromKey(address);
+            var key = Key.StorageCell(path, storage);
+
+            _bloom.Set(GetBloom(key));
 
             Span<byte> payload = stackalloc byte[Serializer.StorageValueMaxByteCount];
             payload = Serializer.WriteStorageValue(payload, value);
 
-            Set(Key.StorageCell(path, address), payload);
+            SetImpl(key, payload);
         }
 
-        public bool TryGet(in Key key, out ReadOnlySpanOwner<byte> result) =>
-            throw new NotImplementedException("Not implemented yet");
-
-        public void Set(in Key key, in ReadOnlySpan<byte> payload)
+        private void SetImpl(in Key key, in ReadOnlySpan<byte> payload)
         {
             InBlockMap map;
 
@@ -450,7 +467,12 @@ public class Blockchain : IAsyncDisposable
             map.TrySet(key, payload);
         }
 
-        public IKeyEnumerator GetEnumerator() => throw new NotImplementedException("Not implemented yet");
+        bool ICommit.TryGet(in Key key, out ReadOnlySpanOwner<byte> result) =>
+            throw new NotImplementedException("Not implemented yet");
+
+        void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload) => SetImpl(key, payload);
+
+        IKeyEnumerator ICommit.GetEnumerator() => throw new NotImplementedException("Not implemented yet");
 
         private ReadOnlySpanOwner<byte> Get(int bloom, in Key key)
         {
@@ -487,19 +509,9 @@ public class Blockchain : IAsyncDisposable
             // The reason for that is that the caller did not .Dispose the reference held,
             // therefore the lease counter is up to date!
 
-            if (_bloom.IsSet(bloom))
-            {
-                // go from last to youngest to find the recent value
-                for (int i = _maps.Count - 1; i >= 0; i--)
-                {
-                    if (_maps[i].TryGet(key, out var span))
-                    {
-                        // return with owned lease
-                        succeeded = true;
-                        return new ReadOnlySpanOwner<byte>(span, this);
-                    }
-                }
-            }
+            var owner = TryGetLocalNoLease(bloom, key, out succeeded);
+            if (succeeded)
+                return owner;
 
             // this asset should be no longer leased
             ReleaseLeaseOnce();
@@ -531,6 +543,29 @@ public class Blockchain : IAsyncDisposable
             }
 
             throw new Exception($"The type of previous is not handled: {previous.GetType()}");
+        }
+
+        /// <summary>
+        /// Tries to get the key only from this block, acquiring no lease as it assumes that the lease is taken.
+        /// </summary>
+        private ReadOnlySpanOwner<byte> TryGetLocalNoLease(int bloom, in Key key, out bool succeeded)
+        {
+            if (_bloom.IsSet(bloom))
+            {
+                // go from last to youngest to find the recent value
+                for (int i = _maps.Count - 1; i >= 0; i--)
+                {
+                    if (_maps[i].TryGet(key, out var span))
+                    {
+                        // return with owned lease
+                        succeeded = true;
+                        return new ReadOnlySpanOwner<byte>(span, this);
+                    }
+                }
+            }
+
+            succeeded = false;
+            return default;
         }
 
         protected override void CleanUp()
