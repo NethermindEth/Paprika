@@ -11,7 +11,7 @@ namespace Paprika.Data;
 /// <remarks>
 /// Use factory methods to create one.
 /// </remarks>
-public readonly ref struct Key
+public readonly ref partial struct Key
 {
     public readonly NibblePath Path;
     public readonly DataType Type;
@@ -78,13 +78,6 @@ public readonly ref struct Key
     public static Key StorageTreeStorageCell(Key originalKey) =>
         new(NibblePath.FromKey(originalKey.AdditionalKey), DataType.StorageTreeStorageCell,
             ReadOnlySpan<byte>.Empty);
-
-    /// <summary>
-    /// Builds the key responsible for storing the encoded RLP or Keccak (if len(RLP) >= 32) for
-    /// a node with the given <see cref="NibblePath"/>.
-    /// </summary>
-    public static Key KeccakOrRlp(NibblePath path) =>
-        new(path, DataType.KeccakOrRlp, ReadOnlySpan<byte>.Empty);
 
     [DebuggerStepThrough]
     public Key SliceFrom(int nibbles) => new(Path.SliceFrom(nibbles), Type, AdditionalKey);

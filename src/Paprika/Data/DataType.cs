@@ -37,10 +37,9 @@ public enum DataType : byte
     StorageTreeStorageCell = 5,
 
     /// <summary>
-    /// [pathToNode, 6]-> the node hash. Please, mind the fact that storage trie can use this internally as well,
-    /// with no need of the path.
+    /// As enums cannot be partial, this is for storing the Merkle.
     /// </summary>
-    KeccakOrRlp = 6,
+    Merkle = 6,
 
     Deleted = 7,
     // one bit more is possible as delete is now a data type

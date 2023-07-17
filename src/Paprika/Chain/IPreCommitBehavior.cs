@@ -36,39 +36,18 @@ public interface ICommit
     /// <summary>
     /// Tries to retrieve the result stored under the given key only from this commit.
     /// </summary>
-    /// <returns>
-    /// Whether the retrieval was successful.
-    /// </returns>
     /// <remarks>
     /// If successful, returns a result as an owner. Must be disposed properly.
     /// </remarks>
-    public bool TryGet(in Key key, out ReadOnlySpanOwner<byte> result);
+    public ReadOnlySpanOwner<byte> Get(in Key key);
 
     /// <summary>
     /// Sets the value under the given key.
     /// </summary>
     void Set(in Key key, in ReadOnlySpan<byte> payload);
 
-    /// <summary>
-    /// Gets the enumerator for the keys in the given commit.
-    /// </summary>
-    /// <returns></returns>
-    IKeyEnumerator GetEnumerator();
+    void Visit(CommitAction action);
 }
 
-/// <summary>
-/// The <see cref="Key"/> enumerator.
-/// </summary>
-public interface IKeyEnumerator : IDisposable
-{
-    /// <summary>
-    /// The current key.
-    /// </summary>
-    ref readonly Key Current { get; }
-
-    /// <summary>
-    /// Moves to the next.
-    /// </summary>
-    public bool MoveNext();
-}
+public delegate void CommitAction(in Key key, ICommit commit);
 
