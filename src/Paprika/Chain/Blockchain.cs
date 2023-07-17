@@ -308,6 +308,9 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private readonly List<InBlockMap> _maps = new();
 
+
+        private readonly List<InBlockMap> _preCommitMaps = new();
+
         /// <summary>
         /// The previous can point to either another <see cref="Block"/> as the parent,
         /// or <see cref="IReadOnlyBatch"/> if the parent has been already applied to the state after finalization.
@@ -408,9 +411,13 @@ public class Blockchain : IAsyncDisposable
                 key.Path.AddToHashCode(ref code);
                 code.AddBytes(key.AdditionalKey);
             }
+            else if (key.Type == DataType.Merkle)
+            {
+                key.Path.AddToHashCode(ref code);
+            }
             else
             {
-                throw new NotImplementedException("Not implemented yet");
+                throw new NotImplementedException("Not implemented yet!");
             }
 
             return code.ToHashCode();
@@ -421,11 +428,9 @@ public class Blockchain : IAsyncDisposable
             var path = NibblePath.FromKey(address);
             var key = Key.Account(path);
 
-            _bloom.Set(GetBloom(key));
-
             var payload = account.WriteTo(stackalloc byte[Account.MaxByteCount]);
 
-            SetImpl(key, payload);
+            SetImpl(key, payload, _maps);
         }
 
         public void SetStorage(in Keccak address, in Keccak storage, UInt256 value)
@@ -433,26 +438,26 @@ public class Blockchain : IAsyncDisposable
             var path = NibblePath.FromKey(address);
             var key = Key.StorageCell(path, storage);
 
-            _bloom.Set(GetBloom(key));
-
             Span<byte> payload = stackalloc byte[Serializer.StorageValueMaxByteCount];
             payload = Serializer.WriteStorageValue(payload, value);
 
-            SetImpl(key, payload);
+            SetImpl(key, payload, _maps);
         }
 
-        private void SetImpl(in Key key, in ReadOnlySpan<byte> payload)
+        private void SetImpl(in Key key, in ReadOnlySpan<byte> payload, List<InBlockMap> maps)
         {
+            _bloom.Set(GetBloom(key));
+
             InBlockMap map;
 
-            if (_maps.Count == 0)
+            if (maps.Count == 0)
             {
                 map = new InBlockMap(Rent());
-                _maps.Add(map);
+                maps.Add(map);
             }
             else
             {
-                map = _maps[^1];
+                map = maps[^1];
             }
 
             if (map.TrySet(key, payload))
@@ -462,14 +467,14 @@ public class Blockchain : IAsyncDisposable
 
             // not enough space, allocate one more
             map = new InBlockMap(Rent());
-            _maps.Add(map);
+            maps.Add(map);
 
             map.TrySet(key, payload);
         }
 
         ReadOnlySpanOwner<byte> ICommit.Get(in Key key) => Get(GetBloom(key), key);
 
-        void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload) => SetImpl(key, payload);
+        void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload) => SetImpl(key, payload, _preCommitMaps);
 
         void ICommit.Visit(CommitAction action)
         {
@@ -570,6 +575,17 @@ public class Blockchain : IAsyncDisposable
                         return new ReadOnlySpanOwner<byte>(span, this);
                     }
                 }
+
+                // then pre-commit maps
+                for (int i = _preCommitMaps.Count - 1; i >= 0; i--)
+                {
+                    if (_preCommitMaps[i].TryGet(key, out var span))
+                    {
+                        // return with owned lease
+                        succeeded = true;
+                        return new ReadOnlySpanOwner<byte>(span, this);
+                    }
+                }
             }
 
             succeeded = false;
@@ -591,7 +607,14 @@ public class Blockchain : IAsyncDisposable
 
         public void Apply(IBatch batch)
         {
+            // values
             foreach (var map in _maps)
+            {
+                map.Apply(batch);
+            }
+
+            // pre-commit values
+            foreach (var map in _preCommitMaps)
             {
                 map.Apply(batch);
             }

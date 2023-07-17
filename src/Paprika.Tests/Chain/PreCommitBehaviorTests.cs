@@ -4,7 +4,6 @@ using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store;
-
 using static Paprika.Tests.Values;
 
 namespace Paprika.Tests.Chain;
@@ -19,7 +18,7 @@ public class PreCommitBehaviorTests
     private static readonly Account Account2 = new(Balance2, Nonce2);
 
     [Test]
-    public async Task Multiple_accounts_enumerated()
+    public async Task Multiple_keys_enumerated()
     {
         using var db = PagedDb.NativeMemoryDb(SmallDb);
 
@@ -36,6 +35,47 @@ public class PreCommitBehaviorTests
         block.Commit();
     }
 
+    [Test]
+    public async Task Get_set_work_only_in_pre_commit_hook()
+    {
+        using var db = PagedDb.NativeMemoryDb(SmallDb);
+
+        await using var blockchain = new Blockchain(db, new SetGetPreCommitBehavior());
+
+        using var block = blockchain.StartNew(Keccak.Zero, BlockKeccak, 1);
+
+        // no values as they are added in the hook only
+
+        block.Commit();
+    }
+
+    /// <summary>
+    /// Asserts that the given set of keys was written
+    /// </summary>
+    class SetGetPreCommitBehavior : IPreCommitBehavior
+    {
+        public static Key AssignedKey => Key.Merkle(NibblePath.FromKey(Key2));
+
+        public static ReadOnlySpan<byte> Value => new byte[29];
+
+        public void BeforeCommit(ICommit commit)
+        {
+            commit.Set(AssignedKey, Value);
+
+            commit.Visit(OnKey);
+
+            using var owner = commit.Get(AssignedKey);
+
+            owner.IsEmpty.Should().BeFalse();
+            owner.Span.SequenceEqual(Value).Should().BeTrue();
+        }
+
+        private static void OnKey(in Key key, ICommit commit) => throw new Exception("Should not be called at all!");
+    }
+
+    /// <summary>
+    /// Asserts that the given set of keys was written
+    /// </summary>
     class AssertingKeysPreCommit : IPreCommitBehavior
     {
         private readonly HashSet<Keccak> _keccaks;
@@ -52,6 +92,7 @@ public class PreCommitBehaviorTests
             _found.Clear();
 
             commit.Visit(OnKey);
+
             _keccaks.SetEquals(_found).Should().BeTrue();
         }
 
