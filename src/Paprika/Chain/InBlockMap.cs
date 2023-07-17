@@ -33,4 +33,11 @@ public readonly struct InBlockMap
             batch.SetRaw(item.Key, item.RawData);
         }
     }
+
+    public NibbleBasedMap.NibbleEnumerator GetEnumerator()
+    {
+        var map = new NibbleBasedMap(_page.Span);
+        return map.EnumerateAll();
+    }
 }
+

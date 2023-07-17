@@ -471,27 +471,14 @@ public class Blockchain : IAsyncDisposable
 
         void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload) => SetImpl(key, payload);
 
-        IKeyEnumerator ICommit.GetEnumerator()
+        void ICommit.Visit(CommitAction action)
         {
-            return new KeyEnumerator(this);
-        }
-
-        class KeyEnumerator : IKeyEnumerator
-        {
-            private readonly Block _block;
-
-            public KeyEnumerator(Block block)
+            foreach (var map in _maps)
             {
-                _block = block;
-            }
-
-            public ref readonly Key Current => throw new NotImplementedException();
-
-            public bool MoveNext() => false;
-
-            public void Dispose()
-            {
-
+                foreach (var item in map)
+                {
+                    action(item.Key, this);
+                }
             }
         }
 

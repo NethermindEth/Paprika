@@ -10,22 +10,25 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         // Foreach key in the commit:
         //      > Set each intermediate Merkle node as 'Dirty'
         // Modify any intermediate Merkle node if there were any inserts (7 cases)
-        foreach (var key in commit)
-        {
-            if (key.Type == DataType.Account)
-            {
-                MarkAccountPathDirty(in key.Path, commit);
-            }
-            else
-            {
-                throw new Exception("Not implemented for other types now.");
-            }
-        }
+        commit.Visit(OnKey);
+
 
         // ComputeKeccak("");
 
         // Recompute the Keccak of all Merkle nodes
         // The root Merkle node should exist on the Empty Path (''), and it's Keccak is the Merkle Root Hash
+    }
+
+    private void OnKey(in Key key, ICommit commit)
+    {
+        if (key.Type == DataType.Account)
+        {
+            MarkAccountPathDirty(in key.Path, commit);
+        }
+        else
+        {
+            throw new Exception("Not implemented for other types now.");
+        }
     }
 
     private static void MarkAccountPathDirty(in NibblePath path, ICommit commit)

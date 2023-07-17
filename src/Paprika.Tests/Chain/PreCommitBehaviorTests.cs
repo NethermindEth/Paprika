@@ -19,7 +19,7 @@ public class PreCommitBehaviorTests
     private static readonly Account Account2 = new(Balance2, Nonce2);
 
     [Test]
-    public async Task Single_account()
+    public async Task Multiple_accounts_enumerated()
     {
         using var db = PagedDb.NativeMemoryDb(SmallDb);
 
@@ -39,33 +39,34 @@ public class PreCommitBehaviorTests
     class AssertingKeysPreCommit : IPreCommitBehavior
     {
         private readonly HashSet<Keccak> _keccaks;
+        private readonly HashSet<Keccak> _found;
 
         public AssertingKeysPreCommit(HashSet<Keccak> keccaks)
         {
             _keccaks = keccaks;
+            _found = new HashSet<Keccak>();
         }
 
         public void BeforeCommit(ICommit commit)
         {
-            foreach (var key in commit)
+            _found.Clear();
+
+            commit.Visit(OnKey);
+            _keccaks.SetEquals(_found).Should().BeTrue();
+        }
+
+        private void OnKey(in Key key, ICommit commit)
+        {
+            key.Type.Should().Be(DataType.Account);
+
+            foreach (var k in _keccaks)
             {
-                key.Type.Should().Be(DataType.Account);
-
-                Keccak? found = null;
-                foreach (var k in _keccaks)
+                if (NibblePath.FromKey(k).Equals(key.Path))
                 {
-                    if (NibblePath.FromKey(k).Equals(key.Path))
-                    {
-                        found = k;
-                        break;
-                    }
+                    _found.Add(k);
+                    break;
                 }
-
-                found.Should().NotBeNull();
-                _keccaks.Remove(found.Value);
             }
-
-            _keccaks.Should().BeEmpty();
         }
     }
 }
