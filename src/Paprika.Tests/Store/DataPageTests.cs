@@ -181,7 +181,7 @@ public class DataPageTests : BasePageTests
         const int count = 200;
 
         // set the empty path which may happen on var-length scenarios
-        var keccakKey = Key.KeccakOrRlp(NibblePath.Empty);
+        var keccakKey = Key.Account(NibblePath.Empty);
         var keccakHash = HashingMap.GetHash(keccakKey);
         dataPage = dataPage.Set(new SetContext(keccakHash, keccakKey, Span<byte>.Empty, batch)).Cast<DataPage>();
 

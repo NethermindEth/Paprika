@@ -36,13 +36,10 @@ public interface ICommit
     /// <summary>
     /// Tries to retrieve the result stored under the given key only from this commit.
     /// </summary>
-    /// <returns>
-    /// Whether the retrieval was successful.
-    /// </returns>
     /// <remarks>
     /// If successful, returns a result as an owner. Must be disposed properly.
     /// </remarks>
-    public bool TryGet(in Key key, out ReadOnlySpanOwner<byte> result);
+    public ReadOnlySpanOwner<byte> Get(in Key key);
 
     /// <summary>
     /// Sets the value under the given key.

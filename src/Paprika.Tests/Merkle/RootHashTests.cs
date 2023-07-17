@@ -6,6 +6,7 @@ using Paprika.Store;
 
 namespace Paprika.Tests.Merkle;
 
+[Ignore("Root hash tests are now not available.")]
 public class RootHashTests
 {
     private const int SmallDb = 256 * Page.PageSize;

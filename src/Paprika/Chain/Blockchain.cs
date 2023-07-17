@@ -342,11 +342,11 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         public void Commit()
         {
-            // acquires one more lease for this block as it is stored in the blockchain
-            AcquireLease();
-
             // run pre-commit
             _blockchain._preCommit?.BeforeCommit(this);
+
+            // acquires one more lease for this block as it is stored in the blockchain
+            AcquireLease();
 
             // set to blocks in number and in blocks by hash
             _blockchain._blocksByNumber.AddOrUpdate(BlockNumber,
@@ -467,17 +467,32 @@ public class Blockchain : IAsyncDisposable
             map.TrySet(key, payload);
         }
 
-        bool ICommit.TryGet(in Key key, out ReadOnlySpanOwner<byte> result)
-        {
-            result = TryGetLocalNoLease(GetBloom(key), key, out var succeeded);
-            return succeeded;
-        }
+        ReadOnlySpanOwner<byte> ICommit.Get(in Key key) => Get(GetBloom(key), key);
 
         void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload) => SetImpl(key, payload);
 
         IKeyEnumerator ICommit.GetEnumerator()
         {
-            throw new NotImplementedException("Not implemented yet");
+            return new KeyEnumerator(this);
+        }
+
+        class KeyEnumerator : IKeyEnumerator
+        {
+            private readonly Block _block;
+
+            public KeyEnumerator(Block block)
+            {
+                _block = block;
+            }
+
+            public ref readonly Key Current => throw new NotImplementedException();
+
+            public bool MoveNext() => false;
+
+            public void Dispose()
+            {
+
+            }
         }
 
         private ReadOnlySpanOwner<byte> Get(int bloom, in Key key)
