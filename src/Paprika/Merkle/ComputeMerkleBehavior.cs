@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Paprika.Chain;
 using Paprika.Data;
 
@@ -53,23 +54,83 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         //          2. create the branch on the nibble
         //          3. put two leaves in there
 
+
+        // root exists, use regular algorithm
         for (int i = 0; i < path.Length; i++)
         {
             var slice = path.SliceTo(i);
             var key = Key.Merkle(slice);
 
-            var owner = commit.Get(key);
+            var leftoverPath = path.SliceFrom(i);
+            
+            using var owner = commit.Get(key);
+            
+            if (owner.IsEmpty)
+            {
+                commit.SetLeaf(key, leftoverPath);
+                return;
+            }
 
-            var notExist = owner.Span.IsEmpty;
-            if (notExist)
+            // read the existing one
+            Node.ReadFrom(owner.Span, out var type, out var leaf, out var ext, out var branch);
+            switch (type)
             {
-                // no value at the node, set leaf
+                case Node.Type.Leaf:
+                {
+                    var diffAt = leaf.Path.FindFirstDifferentNibble(leftoverPath);
+                    if (diffAt == leaf.Path.Length)
+                    {
+                        // update in place, nothing to do from from the Merkle pov
+                    }
+                    else if (diffAt == 0)
+                    {
+                        // create branch, truncate both leaves, add them at the end
+                    }
+                    else
+                    {
+                        // create extension->branch-> leaves
+                    }
+                    break;
+                }
+                case Node.Type.Extension:
+                {
+                    var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
+                    if (diffAt == 0)
+                    {
+                        if (ext.Path.Length == 1)
+                        {
+                            // create branch instead of ext
+                            // put the ext.branch underneath
+                            // put leaf underneath
+                        }
+                        
+                        // if extension would be empty, follow with the next branch + leaf
+                        // if extension truncate both leaves, add them at the end
+                    }
+                    else
+                    {
+                        // create extension->branch-> leaves
+                    }
+                    
+                }
+                    break;
+                    break;
+                case Node.Type.Branch:
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
             }
-            else
-            {
-                // there's value, make it
-            }
+            // there's value, make it
 
         }
+    }
+}
+
+file static class CommitExtensions
+{
+    public static void SetLeaf(this ICommit commit, in Key key, in NibblePath leafPath)
+    {
+        var leaf = new Node.Leaf(leafPath);
+        commit.Set(key, leaf.WriteTo(stackalloc byte[leaf.MaxByteLength]));
     }
 }

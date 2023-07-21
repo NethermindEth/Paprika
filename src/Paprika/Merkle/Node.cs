@@ -117,25 +117,23 @@ public static partial class Node
 
     public readonly ref partial struct Leaf
     {
-        public int MaxByteLength => Header.Size + Path.MaxByteLength + Keccak.Size;
+        public int MaxByteLength => Header.Size + Path.MaxByteLength;
 
         public readonly Header Header;
         public readonly NibblePath Path;
-        public readonly Keccak Keccak;
 
-        private Leaf(Header header, NibblePath path, Keccak keccak)
+        private Leaf(Header header, NibblePath path)
         {
             ValidateHeaderNodeType(header, Type.Leaf);
             Header = header;
             Path = path;
-            Keccak = keccak;
         }
 
-        public Leaf(NibblePath path, Keccak keccak)
+        public Leaf(NibblePath path)
         {
-            Header = new Header(Type.Leaf);
+            // leaves shall never be marked as dirty or not. This information will be held by branch
+            Header = new Header(Type.Leaf, false);
             Path = path;
-            Keccak = keccak;
         }
 
         public Span<byte> WriteTo(Span<byte> output)
@@ -148,7 +146,6 @@ public static partial class Node
         {
             var leftover = Header.WriteToWithLeftover(output);
             leftover = Path.WriteToWithLeftover(leftover);
-            leftover = Keccak.WriteToWithLeftover(leftover);
 
             return leftover;
         }
@@ -157,22 +154,19 @@ public static partial class Node
         {
             var leftover = Header.ReadFrom(source, out var header);
             leftover = NibblePath.ReadFrom(leftover, out var path);
-            leftover = Keccak.ReadFrom(leftover, out var keccak);
 
-            leaf = new Leaf(header, path, keccak);
+            leaf = new Leaf(header, path);
             return leftover;
         }
 
         public bool Equals(in Leaf other) =>
             Header.Equals(other.Header)
-            && Path.Equals(other.Path)
-            && Keccak.Equals(other.Keccak);
+            && Path.Equals(other.Path);
 
         public override string ToString() =>
             $"{nameof(Leaf)} {{ " +
             $"{nameof(Header)}: {Header.ToString()}, " +
             $"{nameof(Path)}: {Path.ToString()}, " +
-            $"{nameof(Keccak)}: {Keccak} " +
             $"}}";
     }
 
@@ -243,11 +237,6 @@ public static partial class Node
         public readonly ushort NibbleBitSet;
         public readonly Keccak Keccak;
 
-        // TODO: What interface do we want to expose for nibbles?
-        // Options:
-        // - `IEnumerable<byte>` with all nibbles is not possible
-        // - `byte[]` with all nibbles
-        // - `bool HasNibble(byte nibble)` to lookup a single nibble at a time
         public bool HasNibble(byte nibble) => (NibbleBitSet & (1 << nibble)) != 0;
 
         private Branch(Header header, ushort nibbleBitSet, Keccak keccak)
