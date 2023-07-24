@@ -1,3 +1,4 @@
+using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -46,7 +47,7 @@ public class NodeTests
     public void Branch_properties()
     {
         ushort nibbles = 0b0000_0000_0000_0011;
-        var branch = new Node.Branch(nibbles, Values.Key0);
+        var branch = new Node.Branch(new NibbleSet.Readonly(nibbles), Values.Key0);
 
         Assert.That(branch.Header.NodeType, Is.EqualTo(Node.Type.Branch));
         Assert.That(branch.Header.IsDirty, Is.True);
@@ -59,7 +60,7 @@ public class NodeTests
         Assert.Throws<ArgumentException>(() =>
         {
             ushort nibbles = 0b0000_0000_0000_0000;
-            _ = new Node.Branch(nibbles, Values.Key0);
+            _ = new Node.Branch(new NibbleSet.Readonly(nibbles), Values.Key0);
         });
     }
 
@@ -71,7 +72,7 @@ public class NodeTests
             Assert.Throws<ArgumentException>(() =>
             {
                 ushort nibbles = (ushort)(0b0000_0000_0000_00001 << i);
-                _ = new Node.Branch(nibbles, Values.Key0);
+                _ = new Node.Branch(new NibbleSet.Readonly(nibbles), Values.Key0);
             });
         }
     }
@@ -80,13 +81,13 @@ public class NodeTests
     public void Branch_some_nibbles()
     {
         ushort nibbles = 0b0110_1001_0101_1010;
-        var branch = new Node.Branch(nibbles, Values.Key0);
+        var branch = new Node.Branch(new NibbleSet.Readonly(nibbles), Values.Key0);
 
         var expected = new byte[] { 1, 3, 4, 6, 8, 11, 13, 14 };
 
         foreach (var nibble in expected)
         {
-            Assert.That(branch.HasNibble(nibble), $"Nibble {nibble} was expected to be set, but it's not");
+            Assert.That(branch.Children[nibble], $"Nibble {nibble} was expected to be set, but it's not");
         }
     }
 
@@ -94,7 +95,7 @@ public class NodeTests
     public void Branch_no_keccak()
     {
         ushort nibbles = 0b0110_1001_0101_1010;
-        var branch = new Node.Branch(nibbles);
+        var branch = new Node.Branch(new NibbleSet.Readonly(nibbles), default(NibbleSet.Readonly));
 
         Assert.That(branch.Keccak, Is.EqualTo(Keccak.Zero));
     }
@@ -110,7 +111,7 @@ public class NodeTests
     [TestCaseSource(nameof(_branchReadWriteCases))]
     public void Branch_read_write(ushort nibbleBitSet, Keccak keccak)
     {
-        var branch = new Node.Branch(nibbleBitSet, keccak);
+        var branch = new Node.Branch(new NibbleSet.Readonly(nibbleBitSet), keccak);
         Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
 
         var encoded = branch.WriteTo(buffer);
@@ -126,7 +127,7 @@ public class NodeTests
     [TestCase((ushort)0b0000_1000_0001_0000)]
     public void Branch_read_write_no_keccak(ushort nibbleBitSet)
     {
-        var branch = new Node.Branch(nibbleBitSet);
+        var branch = new Node.Branch(new NibbleSet.Readonly(nibbleBitSet), default(Keccak));
         Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
 
         var encoded = branch.WriteTo(buffer);
@@ -139,9 +140,9 @@ public class NodeTests
     [Test]
     public void Branch_no_keccak_encoded_smaller_than_with_keccak()
     {
-        ushort nibbles = 0b0110_1001_0101_1010;
-        var noKeccak = new Node.Branch(nibbles);
-        var hasKeccak = new Node.Branch(nibbles, Values.Key0);
+        const ushort nibbles = 0b0110_1001_0101_1010;
+        var noKeccak = new Node.Branch(new NibbleSet.Readonly(nibbles), default(NibbleSet.Readonly));
+        var hasKeccak = new Node.Branch(new NibbleSet.Readonly(nibbles), Values.Key0);
 
         Span<byte> noKeccakBuffer = stackalloc byte[noKeccak.MaxByteLength];
         var encodedNoKeccak = noKeccak.WriteTo(noKeccakBuffer);
@@ -157,11 +158,9 @@ public class NodeTests
     public void Leaf_properties()
     {
         var path = NibblePath.FromKey(new byte[] { 0xA, 0x9, 0x6, 0x3 });
-        var keccak = Values.Key0;
 
         var leaf = new Node.Leaf(path);
 
-        Assert.That(leaf.Header.IsDirty, Is.True);
         Assert.That(leaf.Header.NodeType, Is.EqualTo(Node.Type.Leaf));
         Assert.That(leaf.Path.Equals(path), $"Expected {path.ToString()}, got {leaf.Path.ToString()}");
     }
@@ -257,10 +256,10 @@ public class NodeTests
     [Test]
     public void Node_read_branch()
     {
-        ushort nibbleBitSet = 0b1100_0011_0101_1010;
+        const ushort nibbleBitSet = 0b1100_0011_0101_1010;
         var keccak = Values.Key0;
 
-        var branch = new Node.Branch(nibbleBitSet, keccak);
+        var branch = new Node.Branch(new NibbleSet.Readonly(nibbleBitSet), keccak);
         Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
 
         var encoded = branch.WriteTo(buffer);
@@ -275,12 +274,12 @@ public class NodeTests
     public void Node_read_sequential()
     {
         var nibblePath = NibblePath.FromKey(new byte[] { 0x1, 0x2, 0x4, 0x5 });
-        var nibbleBitSet = (ushort)0b0000_0011;
+        const ushort nibbleBitSet = (ushort)0b0000_0011;
         var keccak = Values.Key0;
 
         var leaf = new Node.Leaf(nibblePath);
         var extension = new Node.Extension(nibblePath);
-        var branch = new Node.Branch(nibbleBitSet, keccak);
+        var branch = new Node.Branch(new NibbleSet.Readonly(nibbleBitSet), keccak);
 
         Span<byte> buffer = new byte[leaf.MaxByteLength + extension.MaxByteLength + branch.MaxByteLength];
 

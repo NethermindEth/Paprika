@@ -86,7 +86,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
                             // TODO: dirty bits needed!
                             // create branch, truncate both leaves, add them at the end
-                            commit.SetBranch(key, new NibbleSet(nibbleA, nibbleB));
+                            commit.SetBranch(key, new NibbleSet(nibbleA, nibbleB), new NibbleSet(nibbleA, nibbleB));
 
                             // nibbleA
                             var written = path.SliceTo(i + 1).WriteTo(span);
@@ -149,9 +149,9 @@ public static class CommitExtensions
         commit.Set(key, leaf.WriteTo(stackalloc byte[leaf.MaxByteLength]));
     }
 
-    public static void SetBranch(this ICommit commit, in Key key, NibbleSet children)
+    public static void SetBranch(this ICommit commit, in Key key, NibbleSet children, NibbleSet dirtyChildren)
     {
-        var branch = new Node.Branch(children);
+        var branch = new Node.Branch(children, dirtyChildren);
         commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
     }
 }
