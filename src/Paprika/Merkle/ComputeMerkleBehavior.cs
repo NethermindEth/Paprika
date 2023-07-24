@@ -123,7 +123,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
     }
 }
 
-file static class CommitExtensions
+public static class CommitExtensions
 {
     public static void SetLeaf(this ICommit commit, in Key key, in NibblePath leafPath)
     {
