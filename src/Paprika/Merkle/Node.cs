@@ -239,6 +239,8 @@ public static partial class Node
 
         public bool HasNibble(byte nibble) => (NibbleBitSet & (1 << nibble)) != 0;
 
+        public static void SetNibble(ref ushort nibbleSet, byte nibble) => nibbleSet |= (ushort)(1 << nibble);
+
         private Branch(Header header, ushort nibbleBitSet, Keccak keccak)
         {
             Header = ValidateHeaderKeccak(ValidateHeaderNodeType(header, Type.Branch), shouldHaveKeccak: true);

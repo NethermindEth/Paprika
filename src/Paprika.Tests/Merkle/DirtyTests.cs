@@ -5,7 +5,6 @@ using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Utils;
-
 using static Paprika.Tests.Values;
 
 namespace Paprika.Tests.Merkle;
@@ -30,7 +29,7 @@ public class DirtyTests
 
         var merkle = new ComputeMerkleBehavior();
         var commit = new Commit();
-        
+
         commit.Set(account, new byte[] { 1 });
 
         merkle.BeforeCommit(commit);
@@ -46,31 +45,29 @@ public class DirtyTests
         Keccak key0 = new(new byte[]
             { 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
 
-        const int SplitOnNibble = 1;
-        
         // ReSharper disable once InlineTemporaryVariable, this is a copy
         Keccak key1 = key0;
-        key1.BytesAsSpan[0] = 1;
-        
+        key1.BytesAsSpan[0] = 0x10;
+
         var a0 = Key.Account(key0);
         var a1 = Key.Account(key1);
 
         var merkle = new ComputeMerkleBehavior();
         var commit = new Commit();
-        
+
         commit.Set(a0, new byte[] { 1 });
         commit.Set(a1, new byte[] { 2 });
 
         merkle.BeforeCommit(commit);
 
         commit.StartAssert();
-        
-        var path0 = NibblePath.FromKey(key0);
-        var path1 = NibblePath.FromKey(key1);
-        
-        commit.SetLeaf(Key.Merkle(path0.SliceTo(SplitOnNibble)), path0.SliceFrom(SplitOnNibble));
-        commit.SetLeaf(Key.Merkle(path1.SliceTo(SplitOnNibble)), path1.SliceFrom(SplitOnNibble));
-        
+
+        const int splitOnNibble = 1;
+
+        commit.SetLeafWithSplitOn(NibblePath.FromKey(key0), splitOnNibble);
+        commit.SetLeafWithSplitOn(NibblePath.FromKey(key1), splitOnNibble);
+        commit.SetBranch(Key.Merkle(NibblePath.Empty), 0x01 | 0x02);
+
         commit.ShouldBeEmpty();
     }
 
@@ -94,6 +91,7 @@ public class DirtyTests
             {
                 return new ReadOnlySpanOwner<byte>(value, null);
             }
+
             if (_after.TryGetValue(k, out value))
             {
                 return new ReadOnlySpanOwner<byte>(value, null);
@@ -109,7 +107,7 @@ public class DirtyTests
             var bytes = GetKey(key);
             if (_asserting == false)
             {
-                _after[bytes] = payload.ToArray();    
+                _after[bytes] = payload.ToArray();
             }
             else
             {
@@ -134,5 +132,13 @@ public class DirtyTests
         {
             _asserting = true;
         }
+    }
+}
+
+public static class CommitExtensions
+{
+    public static void SetLeafWithSplitOn(this ICommit commit, in NibblePath key, int splitOnNibble)
+    {
+        commit.SetLeaf(Key.Merkle(key.SliceTo(splitOnNibble)), key.SliceFrom(splitOnNibble));
     }
 }

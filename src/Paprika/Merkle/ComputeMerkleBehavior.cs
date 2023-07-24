@@ -51,6 +51,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         //          2. create the branch on the nibble
         //          3. put two leaves in there
 
+        Span<byte> span = stackalloc byte[33];
+
         for (int i = 0; i < path.Length; i++)
         {
             var slice = path.SliceTo(i);
@@ -75,16 +77,40 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         var diffAt = leaf.Path.FindFirstDifferentNibble(leftoverPath);
                         if (diffAt == leaf.Path.Length)
                         {
-                            // update in place, nothing to do from from the Merkle pov
+                            // update in place, mark in parent as dirty, beside that, do from from the Merkle pov
                         }
                         else if (diffAt == 0)
                         {
+                            var nibbleA = leaf.Path.GetAt(0);
+                            var nibbleB = leftoverPath.GetAt(0);
+
                             // create branch, truncate both leaves, add them at the end
+                            ushort nibbleSet = 0;
+
+                            // TODO: extract NibbleSet component to make it easier to build
+                            Node.Branch.SetNibble(ref nibbleSet, nibbleA);
+                            Node.Branch.SetNibble(ref nibbleSet, nibbleB);
+
+                            // TODO: dirty bits needed!
+                            commit.SetBranch(key, nibbleSet);
+
+                            // nibbleA
+                            var written = path.SliceTo(i + 1).WriteTo(span);
+                            NibblePath.ReadFrom(written, out var pathA);
+                            pathA.UnsafeSetAt(i, 0, nibbleA);
+
+                            commit.SetLeaf(Key.Merkle(pathA), leaf.Path.SliceFrom(1));
+
+                            // nibbleB, set the newly set leaf, slice to the next nibble
+                            commit.SetLeaf(Key.Merkle(path.SliceTo(i + 1)), leftoverPath.SliceFrom(1));
+
+                            return;
                         }
                         else
                         {
                             // create extension->branch-> leaves
                         }
+
                         break;
                     }
                 case Node.Type.Extension:
@@ -99,7 +125,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                                 // TODO: create branch instead of ext
                                 // put the ext.branch underneath
                                 // put leaf underneath
-
                             }
 
                             // if extension would be empty, follow with the next branch + leaf
@@ -109,7 +134,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         {
                             // create extension->branch-> leaves
                         }
-
                     }
                     break;
                     break;
@@ -129,5 +153,11 @@ public static class CommitExtensions
     {
         var leaf = new Node.Leaf(leafPath);
         commit.Set(key, leaf.WriteTo(stackalloc byte[leaf.MaxByteLength]));
+    }
+
+    public static void SetBranch(this ICommit commit, in Key key, ushort childNibblesBitSet)
+    {
+        var branch = new Node.Branch(childNibblesBitSet);
+        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
     }
 }
