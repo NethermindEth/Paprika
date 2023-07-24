@@ -39,24 +39,29 @@ public class DirtyTests
         commit.ShouldBeEmpty();
     }
 
-    [Test(Description = "Two accounts, sharing first nibble. The root is a branch with two nibbles set to leafs.")]
-    public void Two_accounts_sharing_nibble()
+    [Test(Description = "Three accounts, sharing first nibble. The root is a branch with nibbles set for leafs.")]
+    public void Three_accounts_sharing_nibble()
     {
         Keccak key0 = new(new byte[]
             { 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
 
         // ReSharper disable once InlineTemporaryVariable, this is a copy
-        Keccak key1 = key0;
+        var key1 = key0;
         key1.BytesAsSpan[0] = 0x10;
+        
+        var key2 = key0;
+        key2.BytesAsSpan[0] = 0x20;
 
         var a0 = Key.Account(key0);
         var a1 = Key.Account(key1);
+        var a2 = Key.Account(key2);
 
         var merkle = new ComputeMerkleBehavior();
         var commit = new Commit();
 
         commit.Set(a0, new byte[] { 1 });
         commit.Set(a1, new byte[] { 2 });
+        commit.Set(a2, new byte[] { 3 });
 
         merkle.BeforeCommit(commit);
 
@@ -66,7 +71,11 @@ public class DirtyTests
 
         commit.SetLeafWithSplitOn(NibblePath.FromKey(key0), splitOnNibble);
         commit.SetLeafWithSplitOn(NibblePath.FromKey(key1), splitOnNibble);
-        commit.SetBranch(Key.Merkle(NibblePath.Empty), new NibbleSet(0x01, 0x00), new NibbleSet(0x01, 0x00));
+        commit.SetLeafWithSplitOn(NibblePath.FromKey(key2), splitOnNibble);
+
+        commit.SetBranch(Key.Merkle(NibblePath.Empty), 
+            new NibbleSet(0, 1, 2),
+            new NibbleSet(0, 1, 2));
 
         commit.ShouldBeEmpty();
     }

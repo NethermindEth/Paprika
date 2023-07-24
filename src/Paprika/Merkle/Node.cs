@@ -233,7 +233,7 @@ public static partial class Node
 
         private const int HeaderMetadataKeccakMask = 0b0001;
         private const int NoKeccak = 0;
-        private const int HasKeccak = 1;
+        private const int KeccakSet = 1;
 
         public readonly Header Header;
         public readonly NibbleSet.Readonly Children;
@@ -258,7 +258,7 @@ public static partial class Node
 
         public Branch(NibbleSet.Readonly children, Keccak keccak)
         {
-            Header = new Header(Type.Branch, metadata: HasKeccak);
+            Header = new Header(Type.Branch, metadata: KeccakSet);
 
             Assert(children);
 
@@ -287,7 +287,7 @@ public static partial class Node
 
         private static Header ValidateHeaderKeccak(Header header, bool shouldHaveKeccak)
         {
-            var expected = shouldHaveKeccak ? HasKeccak : NoKeccak;
+            var expected = shouldHaveKeccak ? KeccakSet : NoKeccak;
             var actual = header.Metadata & HeaderMetadataKeccakMask;
 
             Debug.Assert(actual == expected,
@@ -296,8 +296,10 @@ public static partial class Node
             return header;
         }
 
+        public bool HasKeccak => HeaderHasKeccak(Header);
+        
         private static bool HeaderHasKeccak(Header header) =>
-            (header.Metadata & HeaderMetadataKeccakMask) == HasKeccak;
+            (header.Metadata & HeaderMetadataKeccakMask) == KeccakSet;
 
         public Span<byte> WriteTo(Span<byte> output)
         {

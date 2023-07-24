@@ -24,6 +24,13 @@ public struct NibbleSet
         _value = (ushort)((1 << nibbleA) |
                           (1 << nibbleB));
     }
+    
+    public NibbleSet(byte nibbleA, byte nibbleB, byte nibbleC)
+    {
+        _value = (ushort)((1 << nibbleA) |
+                          (1 << nibbleB) |
+                          (1 << nibbleC));
+    }
 
     public NibbleSet(ushort rawValue)
     {
@@ -85,5 +92,13 @@ public struct NibbleSet
         }
 
         public override int GetHashCode() => _value.GetHashCode();
+
+        public Readonly Set(byte nibble)
+        {
+            return new NibbleSet(_value)
+            {
+                [nibble] = true
+            };
+        }
     }
 }
