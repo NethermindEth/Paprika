@@ -230,7 +230,7 @@ public static partial class Node
         public int MaxByteLength => Header.Size +
                                     NibbleSet.MaxByteSize +
                                     (HeaderHasKeccak(Header) ? Keccak.Size : NibbleSet.MaxByteSize);
-        
+
         private const int HeaderMetadataKeccakMask = 0b0001;
         private const int NoKeccak = 0;
         private const int HasKeccak = 1;
@@ -259,9 +259,9 @@ public static partial class Node
         public Branch(NibbleSet.Readonly children, Keccak keccak)
         {
             Header = new Header(Type.Branch, metadata: HasKeccak);
-            
+
             Assert(children);
-            
+
             Children = children;
             Keccak = keccak;
         }
@@ -277,9 +277,9 @@ public static partial class Node
         public Branch(NibbleSet.Readonly children, NibbleSet.Readonly dirty)
         {
             Header = new Header(Type.Branch, metadata: NoKeccak);
-            
+
             Assert(children);
-            
+
             Children = children;
             Dirty = dirty;
             Keccak = default;

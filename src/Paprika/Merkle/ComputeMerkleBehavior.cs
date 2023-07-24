@@ -75,11 +75,14 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                 case Node.Type.Leaf:
                     {
                         var diffAt = leaf.Path.FindFirstDifferentNibble(leftoverPath);
+
                         if (diffAt == leaf.Path.Length)
                         {
                             // update in place, mark in parent as dirty, beside that, do from from the Merkle pov
+                            return;
                         }
-                        else if (diffAt == 0)
+
+                        if (diffAt == 0)
                         {
                             var nibbleA = leaf.Path.GetAt(0);
                             var nibbleB = leftoverPath.GetAt(0);
@@ -100,11 +103,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
                             return;
                         }
-                        else
-                        {
-                            // create extension->branch-> leaves
-                        }
 
+                        // create extension->branch-> leaves
                         break;
                     }
                 case Node.Type.Extension:

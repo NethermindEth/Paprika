@@ -9,7 +9,7 @@ namespace Paprika.Merkle;
 public struct NibbleSet
 {
     public const int MaxByteSize = 2;
-    
+
     private ushort _value;
 
     public bool HasNibble(byte nibble) => (_value & (1 << nibble)) != 0;
@@ -18,10 +18,10 @@ public struct NibbleSet
     {
         _value = (ushort)(1 << nibbleA);
     }
-    
+
     public NibbleSet(byte nibbleA, byte nibbleB)
     {
-        _value = (ushort)((1 << nibbleA) | 
+        _value = (ushort)((1 << nibbleA) |
                           (1 << nibbleB));
     }
 
@@ -62,7 +62,7 @@ public struct NibbleSet
 
         public bool this[byte nibble] => new NibbleSet(_value)[nibble];
         public int SetCount => new NibbleSet(_value).SetCount;
-        
+
         public static implicit operator ushort(Readonly set) => set._value;
 
         public Span<byte> WriteToWithLeftover(Span<byte> destination)
