@@ -1,6 +1,7 @@
 ﻿using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Chain;
+using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Utils;
@@ -36,6 +37,40 @@ public class DirtyTests
 
         commit.StartAssert();
         commit.SetLeaf(Key.Merkle(NibblePath.Empty), NibblePath.FromKey(Key2));
+        commit.ShouldBeEmpty();
+    }
+
+    [Test(Description = "Two accounts, sharing first nibble. The root is a branch with two nibbles set to leafs.")]
+    public void Two_accounts_sharing_nibble()
+    {
+        Keccak key0 = new(new byte[]
+            { 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
+
+        const int SplitOnNibble = 1;
+        
+        // ReSharper disable once InlineTemporaryVariable, this is a copy
+        Keccak key1 = key0;
+        key1.BytesAsSpan[0] = 1;
+        
+        var a0 = Key.Account(key0);
+        var a1 = Key.Account(key1);
+
+        var merkle = new ComputeMerkleBehavior();
+        var commit = new Commit();
+        
+        commit.Set(a0, new byte[] { 1 });
+        commit.Set(a1, new byte[] { 2 });
+
+        merkle.BeforeCommit(commit);
+
+        commit.StartAssert();
+        
+        var path0 = NibblePath.FromKey(key0);
+        var path1 = NibblePath.FromKey(key1);
+        
+        commit.SetLeaf(Key.Merkle(path0.SliceTo(SplitOnNibble)), path0.SliceFrom(SplitOnNibble));
+        commit.SetLeaf(Key.Merkle(path1.SliceTo(SplitOnNibble)), path1.SliceFrom(SplitOnNibble));
+        
         commit.ShouldBeEmpty();
     }
 
