@@ -66,7 +66,7 @@ public class DirtyTests
 
         commit.SetLeafWithSplitOn(NibblePath.FromKey(key0), splitOnNibble);
         commit.SetLeafWithSplitOn(NibblePath.FromKey(key1), splitOnNibble);
-        commit.SetBranch(Key.Merkle(NibblePath.Empty), 0x01 | 0x02);
+        commit.SetBranch(Key.Merkle(NibblePath.Empty), new NibbleSet(0x01, 0x00));
 
         commit.ShouldBeEmpty();
     }

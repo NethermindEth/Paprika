@@ -84,15 +84,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                             var nibbleA = leaf.Path.GetAt(0);
                             var nibbleB = leftoverPath.GetAt(0);
 
-                            // create branch, truncate both leaves, add them at the end
-                            ushort nibbleSet = 0;
-
-                            // TODO: extract NibbleSet component to make it easier to build
-                            Node.Branch.SetNibble(ref nibbleSet, nibbleA);
-                            Node.Branch.SetNibble(ref nibbleSet, nibbleB);
-
                             // TODO: dirty bits needed!
-                            commit.SetBranch(key, nibbleSet);
+                            // create branch, truncate both leaves, add them at the end
+                            commit.SetBranch(key, new NibbleSet(nibbleA, nibbleB));
 
                             // nibbleA
                             var written = path.SliceTo(i + 1).WriteTo(span);
@@ -155,9 +149,9 @@ public static class CommitExtensions
         commit.Set(key, leaf.WriteTo(stackalloc byte[leaf.MaxByteLength]));
     }
 
-    public static void SetBranch(this ICommit commit, in Key key, ushort childNibblesBitSet)
+    public static void SetBranch(this ICommit commit, in Key key, NibbleSet children)
     {
-        var branch = new Node.Branch(childNibblesBitSet);
+        var branch = new Node.Branch(children);
         commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
     }
 }
