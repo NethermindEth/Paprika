@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Paprika.Chain;
 using Paprika.Data;
 
@@ -8,9 +7,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 {
     public void BeforeCommit(ICommit commit)
     {
-        // Foreach key in the commit:
-        //      > Set each intermediate Merkle node as 'Dirty'
-        // Modify any intermediate Merkle node if there were any inserts (7 cases)
+        // run the visitor on the commit
         commit.Visit(OnKey);
 
 
@@ -20,7 +17,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         // The root Merkle node should exist on the Empty Path (''), and it's Keccak is the Merkle Root Hash
     }
 
-    private void OnKey(in Key key, ICommit commit)
+    private static void OnKey(in Key key, ICommit commit)
     {
         if (key.Type == DataType.Account)
         {
@@ -54,17 +51,15 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         //          2. create the branch on the nibble
         //          3. put two leaves in there
 
-
-        // root exists, use regular algorithm
         for (int i = 0; i < path.Length; i++)
         {
             var slice = path.SliceTo(i);
             var key = Key.Merkle(slice);
 
             var leftoverPath = path.SliceFrom(i);
-            
+
             using var owner = commit.Get(key);
-            
+
             if (owner.IsEmpty)
             {
                 commit.SetLeaf(key, leftoverPath);
@@ -76,43 +71,46 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
             switch (type)
             {
                 case Node.Type.Leaf:
-                {
-                    var diffAt = leaf.Path.FindFirstDifferentNibble(leftoverPath);
-                    if (diffAt == leaf.Path.Length)
                     {
-                        // update in place, nothing to do from from the Merkle pov
-                    }
-                    else if (diffAt == 0)
-                    {
-                        // create branch, truncate both leaves, add them at the end
-                    }
-                    else
-                    {
-                        // create extension->branch-> leaves
-                    }
-                    break;
-                }
-                case Node.Type.Extension:
-                {
-                    var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
-                    if (diffAt == 0)
-                    {
-                        if (ext.Path.Length == 1)
+                        var diffAt = leaf.Path.FindFirstDifferentNibble(leftoverPath);
+                        if (diffAt == leaf.Path.Length)
                         {
-                            // create branch instead of ext
-                            // put the ext.branch underneath
-                            // put leaf underneath
+                            // update in place, nothing to do from from the Merkle pov
                         }
-                        
-                        // if extension would be empty, follow with the next branch + leaf
-                        // if extension truncate both leaves, add them at the end
+                        else if (diffAt == 0)
+                        {
+                            // create branch, truncate both leaves, add them at the end
+                        }
+                        else
+                        {
+                            // create extension->branch-> leaves
+                        }
+                        break;
                     }
-                    else
+                case Node.Type.Extension:
                     {
-                        // create extension->branch-> leaves
+                        var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
+                        if (diffAt == 0)
+                        {
+                            if (ext.Path.Length == 1)
+                            {
+                                // before E->B
+                                // after  B->B
+                                // TODO: create branch instead of ext
+                                // put the ext.branch underneath
+                                // put leaf underneath
+
+                            }
+
+                            // if extension would be empty, follow with the next branch + leaf
+                            // if extension truncate both leaves, add them at the end
+                        }
+                        else
+                        {
+                            // create extension->branch-> leaves
+                        }
+
                     }
-                    
-                }
                     break;
                     break;
                 case Node.Type.Branch:
@@ -121,7 +119,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                     throw new ArgumentOutOfRangeException();
             }
             // there's value, make it
-
         }
     }
 }

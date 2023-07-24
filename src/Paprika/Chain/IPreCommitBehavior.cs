@@ -49,5 +49,8 @@ public interface ICommit
     void Visit(CommitAction action);
 }
 
+/// <summary>
+/// A delegate to be called on the each key that that the commit contains.
+/// </summary>
 public delegate void CommitAction(in Key key, ICommit commit);
 

@@ -159,12 +159,11 @@ public class NodeTests
         var path = NibblePath.FromKey(new byte[] { 0xA, 0x9, 0x6, 0x3 });
         var keccak = Values.Key0;
 
-        var leaf = new Node.Leaf(path, keccak);
+        var leaf = new Node.Leaf(path);
 
         Assert.That(leaf.Header.IsDirty, Is.True);
         Assert.That(leaf.Header.NodeType, Is.EqualTo(Node.Type.Leaf));
         Assert.That(leaf.Path.Equals(path), $"Expected {path.ToString()}, got {leaf.Path.ToString()}");
-        Assert.That(leaf.Keccak, Is.EqualTo(keccak));
     }
 
     private static object[] _leafReadWriteCases =
@@ -179,7 +178,7 @@ public class NodeTests
     [TestCaseSource(nameof(_leafReadWriteCases))]
     public void Leaf_read_write(byte[] pathBytes, Keccak keccak)
     {
-        var leaf = new Node.Leaf(NibblePath.FromKey(pathBytes), keccak);
+        var leaf = new Node.Leaf(NibblePath.FromKey(pathBytes));
         Span<byte> buffer = stackalloc byte[leaf.MaxByteLength];
 
         var encoded = leaf.WriteTo(buffer);
@@ -227,9 +226,8 @@ public class NodeTests
     public void Node_read_leaf()
     {
         var nibblePath = NibblePath.FromKey(new byte[] { 0x1, 0x2 });
-        var keccak = Values.Key0;
 
-        var leaf = new Node.Leaf(nibblePath, keccak);
+        var leaf = new Node.Leaf(nibblePath);
         Span<byte> buffer = stackalloc byte[leaf.MaxByteLength];
 
         var encoded = leaf.WriteTo(buffer);
@@ -280,7 +278,7 @@ public class NodeTests
         var nibbleBitSet = (ushort)0b0000_0011;
         var keccak = Values.Key0;
 
-        var leaf = new Node.Leaf(nibblePath, keccak);
+        var leaf = new Node.Leaf(nibblePath);
         var extension = new Node.Extension(nibblePath);
         var branch = new Node.Branch(nibbleBitSet, keccak);
 

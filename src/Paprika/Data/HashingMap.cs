@@ -59,9 +59,12 @@ public readonly ref struct HashingMap
 
             var entry = GetEntry(offset);
 
+            var length = key.Path.MaxByteLength + TypeBytes + LengthOfLength + key.AdditionalKey.Length;
+
             // ReSharper disable once StackAllocInsideLoop, highly unlikely as this should be only one hit
-            var prefix = WritePrefix(key,
-                stackalloc byte[key.Path.MaxByteLength + TypeBytes + LengthOfLength + key.AdditionalKey.Length]);
+#pragma warning disable CA2014
+            var prefix = WritePrefix(key, stackalloc byte[length]);
+#pragma warning restore CA2014
 
             if (entry.StartsWith(prefix))
             {

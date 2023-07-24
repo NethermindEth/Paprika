@@ -46,4 +46,17 @@ public class KeyTests
         Key.StorageCell(Path0, Values.Key1A).Equals(Key.StorageCell(Path0, Values.Key1B)).Should()
             .BeFalse($"Same {Path} & {Type} but different {AdditionalKey}");
     }
+
+    [Test]
+    public void Serialization_Account() => ReadWriteAssert(Key.Account(NibblePath.Empty));
+
+    [Test]
+    public void Serialization_Storage() => ReadWriteAssert(Key.StorageCell(Path0, Values.Key1A));
+
+    private static void ReadWriteAssert(in Key expected)
+    {
+        var written = expected.WriteTo(stackalloc byte[expected.MaxByteLength]);
+        Key.ReadFrom(written, out var actual);
+        actual.Equals(expected).Should().BeTrue();
+    }
 }
