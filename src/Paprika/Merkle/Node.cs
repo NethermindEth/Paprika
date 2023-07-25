@@ -297,7 +297,7 @@ public static partial class Node
         }
 
         public bool HasKeccak => HeaderHasKeccak(Header);
-        
+
         private static bool HeaderHasKeccak(Header header) =>
             (header.Metadata & HeaderMetadataKeccakMask) == KeccakSet;
 

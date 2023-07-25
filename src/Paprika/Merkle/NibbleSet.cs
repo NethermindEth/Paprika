@@ -24,7 +24,7 @@ public struct NibbleSet
         _value = (ushort)((1 << nibbleA) |
                           (1 << nibbleB));
     }
-    
+
     public NibbleSet(byte nibbleA, byte nibbleB, byte nibbleC)
     {
         _value = (ushort)((1 << nibbleA) |

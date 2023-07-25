@@ -64,6 +64,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
             if (owner.IsEmpty)
             {
+                // no value set now, create one
                 commit.SetLeaf(key, leftoverPath);
                 return;
             }
@@ -73,80 +74,85 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
             switch (type)
             {
                 case Node.Type.Leaf:
-                {
-                    var diffAt = leaf.Path.FindFirstDifferentNibble(leftoverPath);
-
-                    if (diffAt == leaf.Path.Length)
                     {
-                        // update in place, mark in parent as dirty, beside that, do from from the Merkle pov
-                        return;
-                    }
+                        var diffAt = leaf.Path.FindFirstDifferentNibble(leftoverPath);
 
-                    if (diffAt == 0)
-                    {
-                        var nibbleA = leaf.Path.GetAt(0);
-                        var nibbleB = leftoverPath.GetAt(0);
+                        if (diffAt == leaf.Path.Length)
+                        {
+                            // update in place, mark in parent as dirty, beside that, do from from the Merkle pov
+                            return;
+                        }
+
+                        if (diffAt > 0)
+                        {
+                            // diff is not on the 0th position, so it will be a branch but preceded with an extension
+                            commit.SetExtension(key, leftoverPath.SliceTo(diffAt));
+                        }
+
+                        var nibbleA = leaf.Path.GetAt(diffAt);
+                        var nibbleB = leftoverPath.GetAt(diffAt);
 
                         // create branch, truncate both leaves, add them at the end
-                        commit.SetBranch(key, new NibbleSet(nibbleA, nibbleB), new NibbleSet(nibbleA, nibbleB));
+                        var branchKey = Key.Merkle(path.SliceTo(i + diffAt));
+                        commit.SetBranch(branchKey,
+                            new NibbleSet(nibbleA, nibbleB),
+                            new NibbleSet(nibbleA, nibbleB));
 
                         // nibbleA
-                        var written = path.SliceTo(i + 1).WriteTo(span);
+                        var written = path.SliceTo(i + 1 + diffAt).WriteTo(span);
                         NibblePath.ReadFrom(written, out var pathA);
-                        pathA.UnsafeSetAt(i, 0, nibbleA);
+                        pathA.UnsafeSetAt(i + diffAt, 0, nibbleA);
 
-                        commit.SetLeaf(Key.Merkle(pathA), leaf.Path.SliceFrom(1));
+                        commit.SetLeaf(Key.Merkle(pathA), leaf.Path.SliceFrom(diffAt + 1));
 
                         // nibbleB, set the newly set leaf, slice to the next nibble
-                        commit.SetLeaf(Key.Merkle(path.SliceTo(i + 1)), leftoverPath.SliceFrom(1));
+                        var pathB = path.SliceTo(i + 1 + diffAt);
+                        commit.SetLeaf(Key.Merkle(pathB), leftoverPath.SliceFrom(diffAt + 1));
 
                         return;
                     }
-
-                    // create extension->branch-> leaves
-                    break;
-                }
                 case Node.Type.Extension:
-                {
-                    var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
-                    if (diffAt == 0)
                     {
-                        if (ext.Path.Length == 1)
+                        var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
+                        if (diffAt == 0)
                         {
-                            // before E->B
-                            // after  B->B
-                            // TODO: create branch instead of ext
-                            // put the ext.branch underneath
-                            // put leaf underneath
-                        }
+                            if (ext.Path.Length == 1)
+                            {
+                                // before E->B
+                                // after  B->B
+                                // TODO: create branch instead of ext
+                                // put the ext.branch underneath
+                                // put leaf underneath
+                            }
 
-                        // if extension would be empty, follow with the next branch + leaf
-                        // if extension truncate both leaves, add them at the end
+                            // if extension would be empty, follow with the next branch + leaf
+                            // if extension truncate both leaves, add them at the end
+                        }
+                        else
+                        {
+                            // create extension->branch-> leaves
+                        }
                     }
-                    else
-                    {
-                        // create extension->branch-> leaves
-                    }
-                }
                     break;
                 case Node.Type.Branch:
-                {
-                    var nibble = path.GetAt(0);
-                    if (branch.HasKeccak)
                     {
-                        // branch has keccak, needs to be dirtied
-                        commit.SetBranch(key, branch.Children.Set(nibble), new NibbleSet(nibble));
-                    }
-                    else
-                    {
-                        if (branch.Children[nibble] && branch.Dirty[nibble])
+                        var nibble = path.GetAt(0);
+                        if (branch.HasKeccak)
                         {
-                            // everything set as needed, continue
-                            continue;
+                            // branch has keccak, this means it was not written yet, needs to be dirtied
+                            commit.SetBranch(key, branch.Children.Set(nibble), new NibbleSet(nibble));
                         }
-                        commit.SetBranch(key, branch.Children.Set(nibble), branch.Dirty.Set(nibble));
+                        else
+                        {
+                            if (branch.Children[nibble] && branch.Dirty[nibble])
+                            {
+                                // everything set as needed, continue
+                                continue;
+                            }
+
+                            commit.SetBranch(key, branch.Children.Set(nibble), branch.Dirty.Set(nibble));
+                        }
                     }
-                }
                     break;
                 default:
                     throw new ArgumentOutOfRangeException();
@@ -168,5 +174,11 @@ public static class CommitExtensions
     {
         var branch = new Node.Branch(children, dirtyChildren);
         commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
+    }
+
+    public static void SetExtension(this ICommit commit, in Key key, in NibblePath path)
+    {
+        var extension = new Node.Extension(path);
+        commit.Set(key, extension.WriteTo(stackalloc byte[extension.MaxByteLength]));
     }
 }

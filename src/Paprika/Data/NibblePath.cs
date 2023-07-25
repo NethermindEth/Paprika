@@ -82,7 +82,7 @@ public readonly ref struct NibblePath
     }
 
     /// <summary>
-    /// Writes the nibbles to the destination.
+    /// Writes the nibbles to the destination.  
     /// </summary>
     /// <param name="destination"></param>
     /// <returns>The actual bytes written.</returns>
@@ -100,6 +100,15 @@ public readonly ref struct NibblePath
         destination[0] = (byte)(odd | (Length << LengthShift));
 
         MemoryMarshal.CreateSpan(ref _span, lenght).CopyTo(destination.Slice(PreambleLength));
+
+        // clearing the oldest nibble, if needed
+        // yes, it can be branch free
+        if (((odd + Length) & 1) == 1)
+        {
+            ref var oldest = ref destination[lenght];
+            oldest = (byte)(oldest & 0b1111_0000);
+        }
+
         return lenght + PreambleLength;
     }
 

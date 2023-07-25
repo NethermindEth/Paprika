@@ -218,4 +218,18 @@ public class NibblePathTests
         left.Length.Should().Be(1);
         left[0].Should().Be(data);
     }
+
+    [Test]
+    public void Writing_path_with_last_nibble_skipped_should_not_care_about_the_rest()
+    {
+        const int length = 3;
+
+        var pathA = NibblePath.FromKey(new byte[] { 0x12, 0x3A }).SliceTo(length);
+        var pathB = NibblePath.FromKey(new byte[] { 0x12, 0x3B }).SliceTo(length);
+
+        var writtenA = pathA.WriteTo(stackalloc byte[pathA.MaxByteLength]);
+        var writtenB = pathB.WriteTo(stackalloc byte[pathB.MaxByteLength]);
+
+        writtenA.SequenceEqual(writtenB).Should().BeTrue();
+    }
 }

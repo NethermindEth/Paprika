@@ -39,7 +39,7 @@ public class DirtyTests
         commit.ShouldBeEmpty();
     }
 
-    [Test(Description = "Three accounts, sharing first nibble. The root is a branch with nibbles set for leafs.")]
+    [Test(Description = "Three accounts, diffing at first nibble. The root is a branch with nibbles set for leafs.")]
     public void Three_accounts_sharing_nibble()
     {
         Keccak key0 = new(new byte[]
@@ -48,7 +48,7 @@ public class DirtyTests
         // ReSharper disable once InlineTemporaryVariable, this is a copy
         var key1 = key0;
         key1.BytesAsSpan[0] = 0x10;
-        
+
         var key2 = key0;
         key2.BytesAsSpan[0] = 0x20;
 
@@ -73,9 +73,47 @@ public class DirtyTests
         commit.SetLeafWithSplitOn(NibblePath.FromKey(key1), splitOnNibble);
         commit.SetLeafWithSplitOn(NibblePath.FromKey(key2), splitOnNibble);
 
-        commit.SetBranch(Key.Merkle(NibblePath.Empty), 
+        commit.SetBranch(Key.Merkle(NibblePath.Empty),
             new NibbleSet(0, 1, 2),
             new NibbleSet(0, 1, 2));
+
+        commit.ShouldBeEmpty();
+    }
+
+    [Test(Description = "Two accounts, sharing first nibble. The root is an extension -> branch -> with nibbles set for leafs.")]
+    public void Two_accounts_starting_with_same_nibble()
+    {
+        Keccak key0 = new(new byte[]
+            { 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
+
+        // ReSharper disable once InlineTemporaryVariable, this is a copy
+        var key1 = key0;
+        key1.BytesAsSpan[0] = 0x07; // set the next nibble
+
+        var a0 = Key.Account(key0);
+        var a1 = Key.Account(key1);
+
+        var merkle = new ComputeMerkleBehavior();
+        var commit = new Commit();
+
+        commit.Set(a0, new byte[] { 1 });
+        commit.Set(a1, new byte[] { 2 });
+
+        merkle.BeforeCommit(commit);
+
+        commit.StartAssert();
+
+        const int splitOnNibble = 2;
+
+        var branchPath = NibblePath.FromKey(key0).SliceTo(1);
+        commit.SetBranch(Key.Merkle(branchPath),
+            new NibbleSet(0, 7),
+            new NibbleSet(0, 7));
+
+        commit.SetLeafWithSplitOn(NibblePath.FromKey(key0), splitOnNibble);
+        commit.SetLeafWithSplitOn(NibblePath.FromKey(key1), splitOnNibble);
+
+        commit.SetExtension(Key.Merkle(NibblePath.Empty), NibblePath.FromKey(key0).SliceTo(1));
 
         commit.ShouldBeEmpty();
     }
@@ -120,8 +158,8 @@ public class DirtyTests
             }
             else
             {
-                _after.Remove(bytes, out var existing).Should().BeTrue();
-                payload.SequenceEqual(existing).Should().BeTrue();
+                _after.Remove(bytes, out var existing).Should().BeTrue($"key {key.ToString()} should exist");
+                payload.SequenceEqual(existing).Should().BeTrue("The value should be equal");
             }
         }
 
