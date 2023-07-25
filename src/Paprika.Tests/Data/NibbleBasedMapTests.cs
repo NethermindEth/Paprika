@@ -7,10 +7,10 @@ namespace Paprika.Tests.Data;
 
 public class NibbleBasedMapTests
 {
-    private static NibblePath Key0 => NibblePath.FromKey(new byte[] { 0x12, 0x34, 0x56, 0x78, 0x90 });
+    private static NibblePath Key0 => NibblePath.FromKey(new byte[] { 0x12, 0x34, 0x56, 0x78, 0xAB });
     private static ReadOnlySpan<byte> Data0 => new byte[] { 23 };
 
-    private static NibblePath Key1 => NibblePath.FromKey(new byte[] { 0x12, 0x34, 0x56, 0x78, 0x99 });
+    private static NibblePath Key1 => NibblePath.FromKey(new byte[] { 0x12, 0x34, 0x56, 0x78, 0xCD });
     private static ReadOnlySpan<byte> Data1 => new byte[] { 29, 31 };
 
     private static NibblePath Key2 => NibblePath.FromKey(new byte[] { 19, 21, 23, 29, 23 });
@@ -59,7 +59,7 @@ public class NibbleBasedMapTests
 
         map.SetAssert(key0, Data0);
         map.SetAssert(key1, Data1);
-
+        
         Console.WriteLine($"Expected keys: {key0.Path.ToString()} and {key1.Path.ToString()}");
         Console.WriteLine("Actual: ");
 
