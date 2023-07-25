@@ -116,7 +116,7 @@ public readonly ref struct NibbleBasedMap
         public const byte AllNibbles = byte.MaxValue;
 
         /// <summary>The map being enumerated.</summary>
-        private NibbleBasedMap _map;
+        private readonly NibbleBasedMap _map;
 
         /// <summary>
         /// The nibble being enumerated.

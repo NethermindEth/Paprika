@@ -114,29 +114,33 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                 case Node.Type.Extension:
                     {
                         var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
+                        if (diffAt == ext.Path.Length)
+                        {
+                            // the path overlaps with what is there, move forward
+                            i += ext.Path.Length - 1;
+                            continue;
+                        }
+
                         if (diffAt == 0)
                         {
                             if (ext.Path.Length == 1)
                             {
                                 // before E->B
                                 // after  B->B
-                                // TODO: create branch instead of ext
                                 // put the ext.branch underneath
                                 // put leaf underneath
+                                throw new NotImplementedException("E->B should become B->B now");
                             }
 
-                            // if extension would be empty, follow with the next branch + leaf
-                            // if extension truncate both leaves, add them at the end
+                            throw new NotImplementedException("Truncate E by 1 from the start.");
                         }
-                        else
-                        {
-                            // create extension->branch-> leaves
-                        }
+
+                        throw new NotImplementedException("Other cases");
                     }
                     break;
                 case Node.Type.Branch:
                     {
-                        var nibble = path.GetAt(0);
+                        var nibble = path.GetAt(i);
                         if (branch.HasKeccak)
                         {
                             // branch has keccak, this means it was not written yet, needs to be dirtied
