@@ -59,7 +59,7 @@ public class NibbleBasedMapTests
 
         map.SetAssert(key0, Data0);
         map.SetAssert(key1, Data1);
-        
+
         Console.WriteLine($"Expected keys: {key0.Path.ToString()} and {key1.Path.ToString()}");
         Console.WriteLine("Actual: ");
 

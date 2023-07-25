@@ -127,9 +127,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                             {
                                 // before E->B
                                 // after  B->B
-                                // put the ext.branch underneath
-                                // put leaf underneath
-                                throw new NotImplementedException("E->B should become B->B now");
+                                var set = new NibbleSet(ext.Path.GetAt(0), leftoverPath.GetAt(0));
+                                commit.SetBranch(key, set, set);
+                                commit.SetLeaf(Key.Merkle(path.SliceTo(i + 1)), path.SliceFrom(i + 1));
+
+                                return;
                             }
 
                             throw new NotImplementedException("Truncate E by 1 from the start.");
