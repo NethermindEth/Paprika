@@ -249,6 +249,37 @@ public class DirtyTests
         commit.ShouldBeEmpty();
     }
 
+    [Test]
+    public void Extension_split_in_the_middle()
+    {
+        Keccak key0 = Keccak.Zero;
+
+        // ReSharper disable once InlineTemporaryVariable, this is a copy
+        var key1 = key0;
+        key1.BytesAsSpan[2] = 0x10; // make it branch on the nibbles[4]
+
+        var key2 = key0;
+        key2.BytesAsSpan[1] = 0x10; // make it branch on the nibbles[2]
+
+        var a0 = Key.Account(key0);
+        var a1 = Key.Account(key1);
+        var a2 = Key.Account(key2);
+
+        var merkle = new ComputeMerkleBehavior();
+        var commit = new Commit();
+
+        commit.Set(a0, new byte[] { 1 });
+        commit.Set(a1, new byte[] { 2 });
+        commit.Set(a2, new byte[] { 3 });
+
+        merkle.BeforeCommit(commit);
+
+        commit.StartAssert();
+
+
+        commit.ShouldBeEmpty();
+    }
+
     class Commit : ICommit
     {
         private readonly Dictionary<byte[], byte[]> _before = new(new BytesEqualityComparer());

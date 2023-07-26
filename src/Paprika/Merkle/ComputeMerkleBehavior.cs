@@ -157,9 +157,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         // this means that E0->B0 will turn into E1->B1->E2->B0
 
                         throw new NotImplementedException("Other cases");
-                        // E-> B0
-                        // E-> B1 -> B0
-                        //        -> L
                     }
                 case Node.Type.Branch:
                     {
