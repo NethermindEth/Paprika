@@ -131,29 +131,28 @@ public readonly ref struct NibblePath
     /// </summary>
     public NibblePath SliceTo(int length) => new(ref _span, _odd, (byte)length);
 
-    public byte GetAt(int nibble)
-    {
-        ref var b = ref Unsafe.Add(ref _span, (nibble + _odd) / 2);
-        return (byte)((b >> GetShift(nibble)) & NibbleMask);
-    }
+    public byte GetAt(int nibble) => (byte)((GetRefAt(nibble) >> GetShift(nibble)) & NibbleMask);
 
-    private int GetShift(int nibble)
-    {
-        return (1 - ((nibble + _odd) & OddBit)) * NibbleShift;
-    }
+    private int GetShift(int nibble) => (1 - ((nibble + _odd) & OddBit)) * NibbleShift;
 
     /// <summary>
-    /// Moves into arbitrary direction. 
+    /// Sets a <paramref name="value"/> of the nibble at the given <paramref name="nibble"/> location.
+    /// This is unsafe. Use only for owned memory. 
     /// </summary>
     public void UnsafeSetAt(int nibble, byte countOdd, byte value)
     {
-        ref var b = ref Unsafe.Add(ref _span, (nibble + _odd) / 2);
+        ref var b = ref GetRefAt(nibble);
         var shift = GetShift(nibble + countOdd);
         var mask = NibbleMask << shift;
 
         b = (byte)((b & ~mask) | (value << shift));
     }
 
+    private ref byte GetRefAt(int nibble) => ref Unsafe.Add(ref _span, (nibble + _odd) / 2);
+
+    /// <summary>
+    /// Copies the path in an unsafe manner, by reusing the reference but changing the count.
+    /// </summary>
     public NibblePath CopyWithUnsafePointerMoveBack(int nibbleCount)
     {
         var odd = (byte)((_odd ^ nibbleCount) & 1);
@@ -161,6 +160,28 @@ public readonly ref struct NibblePath
         var count = shiftBack / 2;
 
         return new NibblePath(ref Unsafe.Add(ref _span, count), odd, (byte)(Length + nibbleCount));
+    }
+
+    /// <summary>
+    /// Appends a <paramref name="nibble"/> to the end of the path,
+    /// using the <paramref name="workingSet"/> as the underlying memory for the new new <see cref="NibblePath"/>.
+    /// </summary>
+    /// <remarks>
+    /// The copy is required as the original path can be based on the readonly memory.
+    /// </remarks>
+    /// <returns>The newly copied nibble path.</returns>
+    public NibblePath AppendNibble(byte nibble, Span<byte> workingSet)
+    {
+        if (workingSet.Length <= MaxByteLength)
+        {
+            throw new ArgumentException("Not enough memory to append");
+        }
+
+        WriteTo(workingSet);
+
+        var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(Length + 1));
+        appended.UnsafeSetAt(Length, 0, nibble);
+        return appended;
     }
 
     public byte FirstNibble => (byte)((_span >> ((1 - _odd) * NibbleShift)) & NibbleMask);

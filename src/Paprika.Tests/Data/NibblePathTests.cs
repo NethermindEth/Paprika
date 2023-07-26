@@ -232,4 +232,26 @@ public class NibblePathTests
 
         writtenA.SequenceEqual(writtenB).Should().BeTrue();
     }
+
+    [TestCase(0, 4)]
+    [TestCase(0, 3)]
+    [TestCase(1, 3)]
+    [TestCase(1, 2)]
+    public void AppendNibble(int from, int length)
+    {
+        const byte first = 0xDC;
+        const byte second = 0xBA;
+        const byte nibble = 0xF;
+
+        Span<byte> span = stackalloc byte[2] { first, second };
+
+        var path = NibblePath.FromKey(span, from).SliceTo(length);
+        var appended = path.AppendNibble(nibble, stackalloc byte[path.MaxByteLength + 1]);
+
+        appended.Length.Should().Be((byte)(length + 1));
+        appended.FindFirstDifferentNibble(path).Should().Be(length);
+        appended.GetAt(length).Should().Be(nibble);
+
+        Console.WriteLine(path.ToString());
+    }
 }
