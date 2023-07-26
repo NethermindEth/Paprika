@@ -74,9 +74,7 @@ public class DirtyTests
         commit.SetLeafWithSplitOn(NibblePath.FromKey(key1), splitOnNibble);
         commit.SetLeafWithSplitOn(NibblePath.FromKey(key2), splitOnNibble);
 
-        commit.SetBranch(Key.Merkle(NibblePath.Empty),
-            new NibbleSet(0, 1, 2),
-            new NibbleSet(0, 1, 2));
+        commit.SetBranchAllDirty(Key.Merkle(NibblePath.Empty), new NibbleSet(0, 1, 2));
 
         commit.ShouldBeEmpty();
     }
@@ -113,9 +111,7 @@ public class DirtyTests
         const int splitOnNibble = 2;
 
         var branchPath = NibblePath.FromKey(key0).SliceTo(1);
-        commit.SetBranch(Key.Merkle(branchPath),
-            new NibbleSet(0, 7, 0xA),
-            new NibbleSet(0, 7, 0xA));
+        commit.SetBranchAllDirty(Key.Merkle(branchPath), new NibbleSet(0, 7, 0xA));
 
         commit.SetLeafWithSplitOn(NibblePath.FromKey(key0), splitOnNibble);
         commit.SetLeafWithSplitOn(NibblePath.FromKey(key1), splitOnNibble);
@@ -163,8 +159,8 @@ public class DirtyTests
         var childA = NibblePath.FromKey(key0);
         var childB = NibblePath.FromKey(key1);
         const int branchAt = 3;
-        var set = new NibbleSet(childA.GetAt(branchAt), childB.GetAt(branchAt));
-        commit.SetBranch(Key.Merkle(childA.SliceTo(branchAt)), set, set);
+        commit.SetBranchAllDirty(Key.Merkle(childA.SliceTo(branchAt)),
+            new NibbleSet(childA.GetAt(branchAt), childB.GetAt(branchAt)));
         commit.SetLeafWithSplitOn(childA, branchAt + 1);
         commit.SetLeafWithSplitOn(childB, branchAt + 1);
 
@@ -201,13 +197,9 @@ public class DirtyTests
 
         commit.StartAssert();
 
-        commit.SetBranch(Key.Merkle(NibblePath.Empty),
-            new NibbleSet(0, 3),
-            new NibbleSet(0, 3));
+        commit.SetBranchAllDirty(Key.Merkle(NibblePath.Empty), new NibbleSet(0, 3));
 
-        commit.SetBranch(Key.Merkle(NibblePath.FromKey(key0).SliceTo(1)),
-            new NibbleSet(0, 7),
-            new NibbleSet(0, 7));
+        commit.SetBranchAllDirty(Key.Merkle(NibblePath.FromKey(key0).SliceTo(1)), new NibbleSet(0, 7));
 
         commit.SetLeafWithSplitOn(NibblePath.FromKey(key0), 2);
         commit.SetLeafWithSplitOn(NibblePath.FromKey(key1), 2);
@@ -219,7 +211,8 @@ public class DirtyTests
     [Test(Description = "Split extension into a branch on the first nibble.")]
     public void Extension_split_last_nibble()
     {
-        Keccak key0 = new(new byte[] { 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
+        Keccak key0 = new(new byte[]
+            { 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
 
         // ReSharper disable once InlineTemporaryVariable, this is a copy
         var key1 = key0;
@@ -245,13 +238,9 @@ public class DirtyTests
 
         commit.SetExtension(Key.Merkle(NibblePath.Empty), NibblePath.FromKey(key0).SliceTo(1));
 
-        commit.SetBranch(Key.Merkle(NibblePath.FromKey(key0).SliceTo(1)),
-            new NibbleSet(0, 0x0B),
-            new NibbleSet(0, 0x0B));
+        commit.SetBranchAllDirty(Key.Merkle(NibblePath.FromKey(key0).SliceTo(1)), new NibbleSet(0, 0x0B));
 
-        commit.SetBranch(Key.Merkle(NibblePath.FromKey(key0).SliceTo(2)),
-            new NibbleSet(0, 0x0A),
-            new NibbleSet(0, 0x0A));
+        commit.SetBranchAllDirty(Key.Merkle(NibblePath.FromKey(key0).SliceTo(2)), new NibbleSet(0, 0x0A));
 
         commit.SetLeafWithSplitOn(NibblePath.FromKey(key0), 3);
         commit.SetLeafWithSplitOn(NibblePath.FromKey(key1), 3);

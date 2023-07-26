@@ -203,6 +203,12 @@ public static class CommitExtensions
         commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
     }
 
+    public static void SetBranchAllDirty(this ICommit commit, in Key key, NibbleSet.Readonly children)
+    {
+        var branch = new Node.Branch(children, children);
+        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
+    }
+
     public static void SetExtension(this ICommit commit, in Key key, in NibblePath path)
     {
         var extension = new Node.Extension(path);
