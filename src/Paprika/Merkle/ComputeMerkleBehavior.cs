@@ -134,12 +134,33 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                             }
                         }
 
+                        var lastNibblePos = ext.Path.Length - 1;
+                        if (diffAt == lastNibblePos)
+                        {
+                            // the last nibble is different
+                            // 1. trim the end of the extension.path by 1
+                            // 2. add a branch at the end with nibbles set to the last and the leaf
+                            // 3. add a new leaf
+
+                            commit.SetExtension(key, ext.Path.SliceTo(lastNibblePos));
+
+                            var splitAt = i + ext.Path.Length - 1;
+                            var set = new NibbleSet(path.GetAt(splitAt), ext.Path.GetAt(lastNibblePos));
+
+                            commit.SetBranch(Key.Merkle(path.SliceTo(splitAt)), set, set);
+                            commit.SetLeaf(Key.Merkle(path.SliceTo(splitAt + 1)), path.SliceFrom(splitAt + 1));
+
+                            return;
+                        }
+
+                        // the diff is not at the 0th nibble, it's not a full match as well
+                        // this means that E0->B0 will turn into E1->B1->E2->B0
+
                         throw new NotImplementedException("Other cases");
                         // E-> B0
                         // E-> B1 -> B0
                         //        -> L
                     }
-                    break;
                 case Node.Type.Branch:
                     {
                         var nibble = path.GetAt(i);

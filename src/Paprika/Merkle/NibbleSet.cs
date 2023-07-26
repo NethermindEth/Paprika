@@ -1,5 +1,6 @@
 ﻿using System.Buffers.Binary;
 using System.Numerics;
+using System.Text;
 
 namespace Paprika.Merkle;
 
@@ -32,7 +33,7 @@ public struct NibbleSet
                           (1 << nibbleC));
     }
 
-    public NibbleSet(ushort rawValue)
+    private NibbleSet(ushort rawValue)
     {
         _value = rawValue;
     }
@@ -57,6 +58,28 @@ public struct NibbleSet
 
     public static implicit operator ushort(NibbleSet set) => set._value;
     public static implicit operator Readonly(NibbleSet set) => new(set._value);
+
+    public override string ToString()
+    {
+        if (_value == 0)
+            return "{}";
+
+        var sb = new StringBuilder();
+        sb.Append('{');
+
+        for (byte i = 0; i < 16; i++)
+        {
+            if (this[i])
+            {
+                sb.Append($"{i:X},");
+            }
+        }
+
+        sb.Remove(sb.Length - 1, 1);
+        sb.Append('}');
+
+        return sb.ToString();
+    }
 
     public readonly struct Readonly : IEquatable<Readonly>
     {
@@ -100,5 +123,7 @@ public struct NibbleSet
                 [nibble] = true
             };
         }
+
+        public override string ToString() => new NibbleSet(_value).ToString();
     }
 }

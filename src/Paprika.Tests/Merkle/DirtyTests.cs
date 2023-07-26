@@ -216,6 +216,50 @@ public class DirtyTests
         commit.ShouldBeEmpty();
     }
 
+    [Test(Description = "Split extension into a branch on the first nibble.")]
+    public void Extension_split_last_nibble()
+    {
+        Keccak key0 = new(new byte[] { 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
+
+        // ReSharper disable once InlineTemporaryVariable, this is a copy
+        var key1 = key0;
+        key1.BytesAsSpan[1] = 0xA0; // make it branch on the nibbles[2]
+
+        var key2 = key0;
+        key2.BytesAsSpan[0] = 0x0B; // make it branch on the nibbles[1]
+
+        var a0 = Key.Account(key0);
+        var a1 = Key.Account(key1);
+        var a2 = Key.Account(key2);
+
+        var merkle = new ComputeMerkleBehavior();
+        var commit = new Commit();
+
+        commit.Set(a0, new byte[] { 1 });
+        commit.Set(a1, new byte[] { 2 });
+        commit.Set(a2, new byte[] { 3 });
+
+        merkle.BeforeCommit(commit);
+
+        commit.StartAssert();
+
+        commit.SetExtension(Key.Merkle(NibblePath.Empty), NibblePath.FromKey(key0).SliceTo(1));
+
+        commit.SetBranch(Key.Merkle(NibblePath.FromKey(key0).SliceTo(1)),
+            new NibbleSet(0, 0x0B),
+            new NibbleSet(0, 0x0B));
+
+        commit.SetBranch(Key.Merkle(NibblePath.FromKey(key0).SliceTo(2)),
+            new NibbleSet(0, 0x0A),
+            new NibbleSet(0, 0x0A));
+
+        commit.SetLeafWithSplitOn(NibblePath.FromKey(key0), 3);
+        commit.SetLeafWithSplitOn(NibblePath.FromKey(key1), 3);
+        commit.SetLeafWithSplitOn(NibblePath.FromKey(key2), 2);
+
+        commit.ShouldBeEmpty();
+    }
+
     class Commit : ICommit
     {
         private readonly Dictionary<byte[], byte[]> _before = new(new BytesEqualityComparer());
@@ -277,7 +321,7 @@ public class DirtyTests
 
         void ICommit.Visit(CommitAction action)
         {
-            foreach (var (k, _) in _before)
+            foreach (var (k, v) in _before)
             {
                 Key.ReadFrom(k, out var key);
                 action(key, this);
