@@ -31,26 +31,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
     private static void MarkAccountPathDirty(in NibblePath path, ICommit commit)
     {
-        // Tree evolution, respectively for inserts, if your insert KEY and it
-        // 1. meets an extension:
-        //      a. and they differ at the 0th nibble:
-        //          1. branch on the 0th nibble of extension
-        //          2. add leaf with KEY with trimmed start by 1 nibble
-        //      b. and they differ in the middle or in the end
-        //          1. trim extension till before they differ
-        //          2. insert the branch
-        //          3. put two leaves in the branch
-        // 2. meets a branch:
-        //      a. follow the branch, adding the children if needed
-        // 3. meets a leaf:
-        //      a. KEY and leaf differ at the 0th nibble:
-        //          1. branch on the 0th nibble of the leaf
-        //          2. add leaf with KEY with trimmed start by 1 nibble
-        //      b. differ in the middle or the end:
-        //          1. create an extension from the prefix
-        //          2. create the branch on the nibble
-        //          3. put two leaves in there
-
         Span<byte> span = stackalloc byte[33];
 
         for (int i = 0; i < path.Length; i++)
@@ -98,7 +78,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                             new NibbleSet(nibbleA, nibbleB),
                             new NibbleSet(nibbleA, nibbleB));
 
-                        // nibbleA
+                        // nibbleA, deep copy to write in an unsafe manner
                         var written = path.SliceTo(i + 1 + diffAt).WriteTo(span);
                         NibblePath.ReadFrom(written, out var pathA);
                         pathA.UnsafeSetAt(i + diffAt, 0, nibbleA);
@@ -125,19 +105,39 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         {
                             if (ext.Path.Length == 1)
                             {
-                                // before E->B
-                                // after  B->B
+                                // special case of an extension being only 1 nibble long
+                                // 1. replace an extension with a branch
+                                // 2. leave the next branch as is
+                                // 3. add a new leaf
                                 var set = new NibbleSet(ext.Path.GetAt(0), leftoverPath.GetAt(0));
                                 commit.SetBranch(key, set, set);
                                 commit.SetLeaf(Key.Merkle(path.SliceTo(i + 1)), path.SliceFrom(i + 1));
-
                                 return;
                             }
 
-                            throw new NotImplementedException("Truncate E by 1 from the start.");
+                            {
+                                // the extension is at least 2 nibbles long
+                                // 1. replace it with a branch
+                                // 2. create a new, shorter extension that the branch points to
+                                // 3. create a new leaf
+
+                                var ext0Th = ext.Path.GetAt(0);
+
+                                var set = new NibbleSet(ext0Th, leftoverPath.GetAt(0));
+                                commit.SetBranch(key, set, set);
+
+                                commit.SetExtension(Key.Merkle(key.Path.AppendNibble(ext0Th, span)),
+                                    ext.Path.SliceFrom(1));
+
+                                commit.SetLeaf(Key.Merkle(path.SliceTo(i + 1)), path.SliceFrom(i + 1));
+                                return;
+                            }
                         }
 
                         throw new NotImplementedException("Other cases");
+                        // E-> B0
+                        // E-> B1 -> B0
+                        //        -> L
                     }
                     break;
                 case Node.Type.Branch:

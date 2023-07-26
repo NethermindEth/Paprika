@@ -1,4 +1,5 @@
-﻿using FluentAssertions;
+﻿using System.Text;
+using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
@@ -80,7 +81,8 @@ public class DirtyTests
         commit.ShouldBeEmpty();
     }
 
-    [Test(Description = "Three accounts, sharing first nibble. The root is an extension -> branch -> with nibbles set for leafs.")]
+    [Test(Description =
+        "Three accounts, sharing first nibble. The root is an extension -> branch -> with nibbles set for leafs.")]
     public void Three_accounts_starting_with_same_nibble()
     {
         Keccak key0 = new(new byte[]
@@ -120,6 +122,53 @@ public class DirtyTests
         commit.SetLeafWithSplitOn(NibblePath.FromKey(key2), splitOnNibble);
 
         commit.SetExtension(Key.Merkle(NibblePath.Empty), NibblePath.FromKey(key0).SliceTo(1));
+
+        commit.ShouldBeEmpty();
+    }
+
+    [Test()]
+    public void Long_extension_split_on_first()
+    {
+        Keccak key0 = new(new byte[]
+            { 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
+
+        var key1 = key0;
+        key1.BytesAsSpan[1] = 0x02; // extension with length of 2 as it start on the 1st byte
+
+        var key2 = key0;
+        key2.BytesAsSpan[0] = 0x20; // make the branch on the 0th
+
+        var a0 = Key.Account(key0);
+        var a1 = Key.Account(key1);
+        var a2 = Key.Account(key2);
+
+        var merkle = new ComputeMerkleBehavior();
+        var commit = new Commit();
+
+        commit.Set(a0, new byte[] { 1 });
+        commit.Set(a1, new byte[] { 2 });
+        commit.Set(a2, new byte[] { 3 });
+
+        merkle.BeforeCommit(commit);
+
+        commit.StartAssert();
+
+        var nibbles0Th = new NibbleSet(0, 2);
+        commit.SetBranch(Key.Merkle(NibblePath.Empty), nibbles0Th, nibbles0Th);
+
+        var extBase = NibblePath.FromKey(key0);
+        commit.SetExtension(Key.Merkle(extBase.SliceTo(1)), extBase.SliceFrom(1).SliceTo(2));
+
+        // most nested children
+        var childA = NibblePath.FromKey(key0);
+        var childB = NibblePath.FromKey(key1);
+        const int branchAt = 3;
+        var set = new NibbleSet(childA.GetAt(branchAt), childB.GetAt(branchAt));
+        commit.SetBranch(Key.Merkle(childA.SliceTo(branchAt)), set, set);
+        commit.SetLeafWithSplitOn(childA, branchAt + 1);
+        commit.SetLeafWithSplitOn(childB, branchAt + 1);
+
+        commit.SetLeafWithSplitOn(NibblePath.FromKey(key2), 1);
 
         commit.ShouldBeEmpty();
     }
@@ -178,7 +227,21 @@ public class DirtyTests
             _before[GetKey(key)] = value.ToArray();
         }
 
-        public void ShouldBeEmpty() => _after.Count.Should().Be(0);
+        public void ShouldBeEmpty()
+        {
+            if (_after.Count == 0)
+                return;
+
+            var sb = new StringBuilder();
+            sb.AppendLine("The commit should be empty, but it contains the following keys: ");
+            foreach (var (key, value) in _after)
+            {
+                Key.ReadFrom(key, out Key k);
+                sb.AppendLine($"- {k.ToString()}");
+            }
+
+            Assert.Fail(sb.ToString());
+        }
 
         ReadOnlySpanOwner<byte> ICommit.Get(in Key key)
         {
