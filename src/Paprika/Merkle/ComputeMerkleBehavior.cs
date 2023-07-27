@@ -69,8 +69,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                             commit.SetExtension(key, leftoverPath.SliceTo(diffAt));
                         }
 
-                        var nibbleA = leaf.Path.GetAt(diffAt);
-                        var nibbleB = leftoverPath.GetAt(diffAt);
+                        var nibbleA = leaf.Path[diffAt];
+                        var nibbleB = leftoverPath[diffAt];
 
                         // create branch, truncate both leaves, add them at the end
                         var branchKey = Key.Merkle(path.SliceTo(i + diffAt));
@@ -106,7 +106,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                                 // 1. replace an extension with a branch
                                 // 2. leave the next branch as is
                                 // 3. add a new leaf
-                                var set = new NibbleSet(ext.Path.GetAt(0), leftoverPath.GetAt(0));
+                                var set = new NibbleSet(ext.Path[0], leftoverPath[0]);
                                 commit.SetBranch(key, set, set);
                                 commit.SetLeaf(Key.Merkle(path.SliceTo(i + 1)), path.SliceFrom(i + 1));
                                 return;
@@ -118,9 +118,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                                 // 2. create a new, shorter extension that the branch points to
                                 // 3. create a new leaf
 
-                                var ext0Th = ext.Path.GetAt(0);
+                                var ext0Th = ext.Path[0];
 
-                                var set = new NibbleSet(ext0Th, leftoverPath.GetAt(0));
+                                var set = new NibbleSet(ext0Th, leftoverPath[0]);
                                 commit.SetBranch(key, set, set);
 
                                 commit.SetExtension(Key.Merkle(key.Path.CopyAndAppendNibble(ext0Th, span)),
@@ -142,7 +142,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                             commit.SetExtension(key, ext.Path.SliceTo(lastNibblePos));
 
                             var splitAt = i + ext.Path.Length - 1;
-                            var set = new NibbleSet(path.GetAt(splitAt), ext.Path.GetAt(lastNibblePos));
+                            var set = new NibbleSet(path[splitAt], ext.Path[lastNibblePos]);
 
                             commit.SetBranchAllDirty(Key.Merkle(path.SliceTo(splitAt)), set);
                             commit.SetLeaf(Key.Merkle(path.SliceTo(splitAt + 1)), path.SliceFrom(splitAt + 1));
@@ -152,17 +152,20 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
                         // the diff is not at the 0th nibble, it's not a full match as well
                         // this means that E0->B0 will turn into E1->B1->E2->B0
+                        //                                             ->L0
                         commit.SetExtension(key, ext.Path.SliceTo(diffAt));
-                        
+                        //commit.SetBranch(Key.Merkle(key.Path.CopyAndAppendNibble(ext.Path[diffAt], span)), );
+
+
                         // TBD
-                        
+
 
                         throw new NotImplementedException("Other cases");
                         return;
                     }
                 case Node.Type.Branch:
                     {
-                        var nibble = path.GetAt(i);
+                        var nibble = path[i];
                         if (branch.HasKeccak)
                         {
                             // branch has keccak, this means it was not written yet, needs to be dirtied

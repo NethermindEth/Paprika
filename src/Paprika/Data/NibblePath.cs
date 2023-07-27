@@ -131,6 +131,8 @@ public readonly ref struct NibblePath
     /// </summary>
     public NibblePath SliceTo(int length) => new(ref _span, _odd, (byte)length);
 
+    public byte this[int nibble] => GetAt(nibble);
+
     public byte GetAt(int nibble) => (byte)((GetRefAt(nibble) >> GetShift(nibble)) & NibbleMask);
 
     private int GetShift(int nibble) => (1 - ((nibble + _odd) & OddBit)) * NibbleShift;
