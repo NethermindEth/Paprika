@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
@@ -28,6 +29,19 @@ public readonly ref struct NibblePath
     private readonly byte _odd;
 
     public static NibblePath Empty => default;
+
+    public static NibblePath Parse(string hex)
+    {
+        var nibbles = new byte[(hex.Length + 1) / 2];
+        var path = FromKey(nibbles).SliceTo(hex.Length);
+
+        for (var i = 0; i < hex.Length; i++)
+        {
+            path.UnsafeSetAt(i, 0, byte.Parse(hex.AsSpan(i, 1), NumberStyles.HexNumber));
+        }
+
+        return path;
+    }
 
     public static NibblePath FromKey(ReadOnlySpan<byte> key, int nibbleFrom = 0)
     {
