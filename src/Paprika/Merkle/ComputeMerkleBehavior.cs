@@ -79,7 +79,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                             new NibbleSet(nibbleA, nibbleB));
 
                         // nibbleA, deep copy to write in an unsafe manner
-                        var pathA = path.SliceTo(i + diffAt).CopyAndAppendNibble(nibbleA, span);
+                        var pathA = path.SliceTo(i + diffAt).AppendNibble(nibbleA, span);
                         commit.SetLeaf(Key.Merkle(pathA), leaf.Path.SliceFrom(diffAt + 1));
 
                         // nibbleB, set the newly set leaf, slice to the next nibble
@@ -123,7 +123,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                                 var set = new NibbleSet(ext0Th, leftoverPath[0]);
                                 commit.SetBranch(key, set, set);
 
-                                commit.SetExtension(Key.Merkle(key.Path.CopyAndAppendNibble(ext0Th, span)),
+                                commit.SetExtension(Key.Merkle(key.Path.AppendNibble(ext0Th, span)),
                                     ext.Path.SliceFrom(1));
 
                                 commit.SetLeaf(Key.Merkle(path.SliceTo(i + 1)), path.SliceFrom(i + 1));
@@ -153,14 +153,24 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         // the diff is not at the 0th nibble, it's not a full match as well
                         // this means that E0->B0 will turn into E1->B1->E2->B0
                         //                                             ->L0
-                        commit.SetExtension(key, ext.Path.SliceTo(diffAt));
-                        //commit.SetBranch(Key.Merkle(key.Path.CopyAndAppendNibble(ext.Path[diffAt], span)), );
+                        var extPath = ext.Path.SliceTo(diffAt);
+                        commit.SetExtension(key, extPath);
 
-
-                        // TBD
-
-
-                        throw new NotImplementedException("Other cases");
+                        // B1
+                        var branch1 = key.Path.Append(extPath, span);
+                        var existingNibble = ext.Path[diffAt];
+                        var children = new NibbleSet(existingNibble, path[i + diffAt]);
+                        commit.SetBranchAllDirty(Key.Merkle(branch1), children);
+                        
+                        // E2
+                        var extension2 = branch1.AppendNibble(existingNibble, span);
+                        if (extension2.Length < key.Path.Length + ext.Path.Length)
+                        {
+                            // there are some bytes to be set in the extension path, create one
+                            var e2Path = ext.Path.SliceFrom(extension2.Length);
+                            commit.SetExtension(Key.Merkle(extension2), e2Path);
+                        }
+                        
                         return;
                     }
                 case Node.Type.Branch:

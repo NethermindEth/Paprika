@@ -256,10 +256,10 @@ public class DirtyTests
 
         // ReSharper disable once InlineTemporaryVariable, this is a copy
         var key1 = key0;
-        key1.BytesAsSpan[2] = 0x10; // make it branch on the nibbles[4]
+        key1.BytesAsSpan[2] = 0xA0; // make it branch on the nibbles[4]
 
         var key2 = key0;
-        key2.BytesAsSpan[1] = 0x10; // make it branch on the nibbles[2]
+        key2.BytesAsSpan[1] = 0xB0; // make it branch on the nibbles[2]
 
         var a0 = Key.Account(key0);
         var a1 = Key.Account(key1);
@@ -275,7 +275,24 @@ public class DirtyTests
         merkle.BeforeCommit(commit);
 
         commit.StartAssert();
+        
+        commit.SetBranchAllDirty(Key.Merkle(a2.Path.SliceTo(2)), new NibbleSet(0, 0xB));
+        
+        // 0x00B
+        commit.SetLeafWithSplitOn(a2.Path, 3);
+        
+        // 0x000
+        commit.SetExtension(Key.Merkle(a0.Path.SliceTo(3)), a0.Path.SliceFrom(3).SliceTo(1));
 
+        // 0x0000
+        const int branchSplitAt = 4;
+        commit.SetBranchAllDirty(Key.Merkle(a0.Path.SliceTo(branchSplitAt)), new NibbleSet(0, 0xA));
+        
+        // 0x00000
+        commit.SetLeafWithSplitOn(a0.Path, branchSplitAt + 1);
+        
+        // 0x0000A
+        commit.SetLeafWithSplitOn(a1.Path, branchSplitAt + 1);
 
         commit.ShouldBeEmpty();
     }

@@ -172,7 +172,7 @@ public readonly ref struct NibblePath
     /// The copy is required as the original path can be based on the readonly memory.
     /// </remarks>
     /// <returns>The newly copied nibble path.</returns>
-    public NibblePath CopyAndAppendNibble(byte nibble, Span<byte> workingSet)
+    public NibblePath AppendNibble(byte nibble, Span<byte> workingSet)
     {
         if (workingSet.Length <= MaxByteLength)
         {
@@ -183,6 +183,27 @@ public readonly ref struct NibblePath
 
         var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(Length + 1));
         appended.UnsafeSetAt(Length, 0, nibble);
+        return appended;
+    }
+
+    /// <summary>
+    /// Appends the <see cref="other"/> path using the <paramref name="workingSet"/> as the working memory.
+    /// </summary>
+    public NibblePath Append(in NibblePath other, Span<byte> workingSet)
+    {
+        if (workingSet.Length <= MaxByteLength)
+        {
+            throw new ArgumentException("Not enough memory to append");
+        }
+
+        WriteTo(workingSet);
+
+        var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(Length + other.Length));
+        for (int i = 0; i < other.Length; i++)
+        {
+            appended.UnsafeSetAt(Length + i, 0, other[i]);
+        }
+        
         return appended;
     }
 
@@ -201,7 +222,7 @@ public readonly ref struct NibblePath
 
         return source.Slice(0, GetSpanLength(length, odd) + PreambleLength);
     }
-
+    
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out NibblePath nibblePath)
     {
         var b = source[0];
