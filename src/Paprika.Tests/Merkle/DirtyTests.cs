@@ -2,7 +2,6 @@
 using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Chain;
-using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Utils;
@@ -45,9 +44,9 @@ public class DirtyTests
     [Test(Description = "Three accounts, diffing at first nibble. The root is a branch with nibbles set for leafs.")]
     public void Three_accounts_sharing_start_nibble()
     {
-        var key0 = NibblePath.Parse("A1234567");
-        var key1 = NibblePath.Parse("B1234567");
-        var key2 = NibblePath.Parse("C1234567");
+        var key0 = NibblePath.Parse("A0000001");
+        var key1 = NibblePath.Parse("B0000002");
+        var key2 = NibblePath.Parse("C0000003");
 
         var a0 = Key.Account(key0);
         var a1 = Key.Account(key1);
@@ -79,9 +78,9 @@ public class DirtyTests
         "Three accounts, sharing first nibble. The root is an extension -> branch -> with nibbles set for leafs.")]
     public void Three_accounts_starting_with_same_nibble()
     {
-        var key0 = NibblePath.Parse("00234567");
-        var key1 = NibblePath.Parse("07234567");
-        var key2 = NibblePath.Parse("0A234567");
+        var key0 = NibblePath.Parse("00000001");
+        var key1 = NibblePath.Parse("07000002");
+        var key2 = NibblePath.Parse("0A000003");
 
         var a0 = Key.Account(key0);
         var a1 = Key.Account(key1);
@@ -115,9 +114,9 @@ public class DirtyTests
     [Test]
     public void Long_extension_split_on_first()
     {
-        var key0 = NibblePath.Parse("00014567");
-        var key1 = NibblePath.Parse("00024567");
-        var key2 = NibblePath.Parse("20024567");
+        var key0 = NibblePath.Parse("00010001");
+        var key1 = NibblePath.Parse("00020002");
+        var key2 = NibblePath.Parse("20020003");
 
         var a0 = Key.Account(key0);
         var a1 = Key.Account(key1);
@@ -154,9 +153,9 @@ public class DirtyTests
     [Test(Description = "Split extension into a branch on the first nibble.")]
     public void Root_extension_split()
     {
-        var key0 = NibblePath.Parse("00034567");
-        var key1 = NibblePath.Parse("07034567");
-        var key2 = NibblePath.Parse("30034567");
+        var key0 = NibblePath.Parse("00030001");
+        var key1 = NibblePath.Parse("07030002");
+        var key2 = NibblePath.Parse("30030003");
 
         var a0 = Key.Account(key0);
         var a1 = Key.Account(key1);
@@ -187,9 +186,9 @@ public class DirtyTests
     [Test]
     public void Extension_split_last_nibble()
     {
-        var key0 = NibblePath.Parse("00034567");
-        var key1 = NibblePath.Parse("00A34567");
-        var key2 = NibblePath.Parse("0BA34567");
+        var key0 = NibblePath.Parse("00030001");
+        var key1 = NibblePath.Parse("00A30002");
+        var key2 = NibblePath.Parse("0BA30003");
 
         var a0 = Key.Account(key0);
         var a1 = Key.Account(key1);
@@ -222,9 +221,9 @@ public class DirtyTests
     [Test]
     public void Extension_split_in_the_middle()
     {
-        var key0 = NibblePath.Parse("00000000");
-        var key1 = NibblePath.Parse("0000A000");
-        var key2 = NibblePath.Parse("00B00000");
+        var key0 = NibblePath.Parse("00000001");
+        var key1 = NibblePath.Parse("0000A002");
+        var key2 = NibblePath.Parse("00B00003");
 
         var a0 = Key.Account(key0);
         var a1 = Key.Account(key1);
