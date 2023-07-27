@@ -275,22 +275,24 @@ public class DirtyTests
         merkle.BeforeCommit(commit);
 
         commit.StartAssert();
-        
+
+        commit.SetExtension(Key.Merkle(NibblePath.Empty), NibblePath.FromKey(key0).SliceTo(2));
+
         commit.SetBranchAllDirty(Key.Merkle(a2.Path.SliceTo(2)), new NibbleSet(0, 0xB));
-        
+
         // 0x00B
         commit.SetLeafWithSplitOn(a2.Path, 3);
-        
+
         // 0x000
         commit.SetExtension(Key.Merkle(a0.Path.SliceTo(3)), a0.Path.SliceFrom(3).SliceTo(1));
 
         // 0x0000
         const int branchSplitAt = 4;
         commit.SetBranchAllDirty(Key.Merkle(a0.Path.SliceTo(branchSplitAt)), new NibbleSet(0, 0xA));
-        
+
         // 0x00000
         commit.SetLeafWithSplitOn(a0.Path, branchSplitAt + 1);
-        
+
         // 0x0000A
         commit.SetLeafWithSplitOn(a1.Path, branchSplitAt + 1);
 

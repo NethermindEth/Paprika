@@ -159,9 +159,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         // B1
                         var branch1 = key.Path.Append(extPath, span);
                         var existingNibble = ext.Path[diffAt];
-                        var children = new NibbleSet(existingNibble, path[i + diffAt]);
+                        var addedNibble = path[i + diffAt];
+                        var children = new NibbleSet(existingNibble, addedNibble);
                         commit.SetBranchAllDirty(Key.Merkle(branch1), children);
-                        
+
                         // E2
                         var extension2 = branch1.AppendNibble(existingNibble, span);
                         if (extension2.Length < key.Path.Length + ext.Path.Length)
@@ -170,7 +171,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                             var e2Path = ext.Path.SliceFrom(extension2.Length);
                             commit.SetExtension(Key.Merkle(extension2), e2Path);
                         }
-                        
+
+                        // L0
+                        var leafPath = branch1.AppendNibble(addedNibble, span);
+                        commit.SetLeaf(Key.Merkle(leafPath), path.SliceFrom(leafPath.Length));
+
                         return;
                     }
                 case Node.Type.Branch:

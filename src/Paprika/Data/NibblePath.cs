@@ -203,7 +203,7 @@ public readonly ref struct NibblePath
         {
             appended.UnsafeSetAt(Length + i, 0, other[i]);
         }
-        
+
         return appended;
     }
 
@@ -222,7 +222,7 @@ public readonly ref struct NibblePath
 
         return source.Slice(0, GetSpanLength(length, odd) + PreambleLength);
     }
-    
+
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out NibblePath nibblePath)
     {
         var b = source[0];
