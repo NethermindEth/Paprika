@@ -246,7 +246,7 @@ public class NibblePathTests
         Span<byte> span = stackalloc byte[2] { first, second };
 
         var path = NibblePath.FromKey(span, from).SliceTo(length);
-        var appended = path.AppendNibble(nibble, stackalloc byte[path.MaxByteLength + 1]);
+        var appended = path.CopyAndAppendNibble(nibble, stackalloc byte[path.MaxByteLength + 1]);
 
         appended.Length.Should().Be((byte)(length + 1));
         appended.FindFirstDifferentNibble(path).Should().Be(length);

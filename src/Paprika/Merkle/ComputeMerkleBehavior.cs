@@ -79,10 +79,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                             new NibbleSet(nibbleA, nibbleB));
 
                         // nibbleA, deep copy to write in an unsafe manner
-                        var written = path.SliceTo(i + 1 + diffAt).WriteTo(span);
-                        NibblePath.ReadFrom(written, out var pathA);
-                        pathA.UnsafeSetAt(i + diffAt, 0, nibbleA);
-
+                        var pathA = path.SliceTo(i + diffAt).CopyAndAppendNibble(nibbleA, span);
                         commit.SetLeaf(Key.Merkle(pathA), leaf.Path.SliceFrom(diffAt + 1));
 
                         // nibbleB, set the newly set leaf, slice to the next nibble
@@ -126,7 +123,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                                 var set = new NibbleSet(ext0Th, leftoverPath.GetAt(0));
                                 commit.SetBranch(key, set, set);
 
-                                commit.SetExtension(Key.Merkle(key.Path.AppendNibble(ext0Th, span)),
+                                commit.SetExtension(Key.Merkle(key.Path.CopyAndAppendNibble(ext0Th, span)),
                                     ext.Path.SliceFrom(1));
 
                                 commit.SetLeaf(Key.Merkle(path.SliceTo(i + 1)), path.SliceFrom(i + 1));
@@ -147,7 +144,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                             var splitAt = i + ext.Path.Length - 1;
                             var set = new NibbleSet(path.GetAt(splitAt), ext.Path.GetAt(lastNibblePos));
 
-                            commit.SetBranch(Key.Merkle(path.SliceTo(splitAt)), set, set);
+                            commit.SetBranchAllDirty(Key.Merkle(path.SliceTo(splitAt)), set);
                             commit.SetLeaf(Key.Merkle(path.SliceTo(splitAt + 1)), path.SliceFrom(splitAt + 1));
 
                             return;
@@ -155,8 +152,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
                         // the diff is not at the 0th nibble, it's not a full match as well
                         // this means that E0->B0 will turn into E1->B1->E2->B0
+                        commit.SetExtension(key, ext.Path.SliceTo(diffAt));
+                        
+                        // TBD
+                        
 
                         throw new NotImplementedException("Other cases");
+                        return;
                     }
                 case Node.Type.Branch:
                     {

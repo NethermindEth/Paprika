@@ -170,7 +170,7 @@ public readonly ref struct NibblePath
     /// The copy is required as the original path can be based on the readonly memory.
     /// </remarks>
     /// <returns>The newly copied nibble path.</returns>
-    public NibblePath AppendNibble(byte nibble, Span<byte> workingSet)
+    public NibblePath CopyAndAppendNibble(byte nibble, Span<byte> workingSet)
     {
         if (workingSet.Length <= MaxByteLength)
         {
