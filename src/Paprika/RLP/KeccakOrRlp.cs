@@ -2,6 +2,10 @@ using Paprika.Crypto;
 
 namespace Paprika.RLP;
 
+/// <summary>
+/// Represents a result of encoding a node in Trie. If it's length is shorter than 32 bytes, then it's an RLP.
+/// If it's equal or bigger, then it's its Keccak.
+/// </summary>
 public readonly ref struct KeccakOrRlp
 {
     public enum Type : byte
@@ -20,6 +24,8 @@ public readonly ref struct KeccakOrRlp
         DataType = dataType;
         _keccak = new Keccak(data);
     }
+
+    public static implicit operator KeccakOrRlp(Keccak keccak) => new(Type.Keccak, keccak.BytesAsSpan);
 
     public static KeccakOrRlp FromSpan(scoped Span<byte> data)
     {

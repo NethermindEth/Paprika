@@ -1,53 +1,46 @@
+using FluentAssertions;
 using NUnit.Framework;
-using Paprika.Chain;
 using Paprika.Crypto;
+using Paprika.Data;
 using Paprika.Merkle;
-using Paprika.Store;
 
 namespace Paprika.Tests.Merkle;
 
-[Ignore("Root hash tests are now not available.")]
 public class RootHashTests
 {
-    private const int SmallDb = 256 * Page.PageSize;
-    private readonly Keccak _blockKeccak = Keccak.Compute("block"u8);
+    private Commit _commit = null!;
+    private ComputeMerkleBehavior _merkle = null!;
 
-    [Test]
-    public async Task Empty_database()
+    [SetUp]
+    public void SetUp()
     {
-        using var db = PagedDb.NativeMemoryDb(SmallDb);
-        await using var blockchain = new Blockchain(db, preCommit: new ComputeMerkleBehavior());
-
-        using var block = blockchain.StartNew(Keccak.Zero, _blockKeccak, 1);
-
-        block.Commit();
-
-        var rootHash = block.GetMerkleRootHash();
-        var expectedRootHash =
-            new Keccak(Convert.FromHexString("56E81F171BCC55A6FF8345E692C0F86E5B48E01B996CADC001622FB5E363B421"));
-
-        Assert.That(rootHash, Is.EqualTo(expectedRootHash));
+        _commit = new Commit();
+        _merkle = new ComputeMerkleBehavior(true);
     }
 
     [Test]
-    [Ignore("Not working yet")]
-    public async Task Single_account()
+    public void Empty_tree()
     {
-        using var db = PagedDb.NativeMemoryDb(SmallDb);
-        await using var blockchain = new Blockchain(db, preCommit: new ComputeMerkleBehavior());
+        AssertRoot("56E81F171BCC55A6FF8345E692C0F86E5B48E01B996CADC001622FB5E363B421");
+    }
 
+    private void AssertRoot(string hex)
+    {
+        _merkle.BeforeCommit(_commit);
+
+        var keccak = new Keccak(Convert.FromHexString(hex));
+
+        _merkle.RootHash.Should().Be(keccak);
+    }
+
+    [Test]
+    public void Single_account()
+    {
         var key = Values.Key0;
         var account = new Account(Values.Balance0, Values.Nonce0);
 
-        using var block = blockchain.StartNew(Keccak.Zero, _blockKeccak, 1);
+        _commit.Set(Key.Account(key), account.WriteTo(stackalloc byte[Account.MaxByteCount]));
 
-        block.SetAccount(key, account);
-        block.Commit();
-
-        var rootHash = block.GetMerkleRootHash();
-        var expectedRootHash =
-            new Keccak(Convert.FromHexString("E2533A0A0C4F1DDB72FEB7BFAAD12A83853447DEAAB6F28FA5C443DD2D37C3FB"));
-
-        Assert.That(rootHash, Is.EqualTo(expectedRootHash));
+        AssertRoot("E2533A0A0C4F1DDB72FEB7BFAAD12A83853447DEAAB6F28FA5C443DD2D37C3FB");
     }
 }

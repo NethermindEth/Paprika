@@ -1,20 +1,65 @@
+using System.Diagnostics;
 using Paprika.Chain;
+using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.RLP;
 
 namespace Paprika.Merkle;
 
 public class ComputeMerkleBehavior : IPreCommitBehavior
 {
+    private readonly bool _fullMerkle;
+
+    public ComputeMerkleBehavior(bool fullMerkle = false)
+    {
+        _fullMerkle = fullMerkle;
+    }
+
     public void BeforeCommit(ICommit commit)
     {
         // run the visitor on the commit
         commit.Visit(OnKey);
 
+        if (_fullMerkle)
+        {
+            var root = Key.Merkle(NibblePath.Empty);
+            var keccakOrRlp = Compute(root, commit, stackalloc byte[64]);
 
-        // ComputeKeccak("");
+            Debug.Assert(keccakOrRlp.DataType == KeccakOrRlp.Type.Keccak);
 
-        // Recompute the Keccak of all Merkle nodes
-        // The root Merkle node should exist on the Empty Path (''), and it's Keccak is the Merkle Root Hash
+            RootHash = new Keccak(keccakOrRlp.AsSpan());
+        }
+    }
+
+    public Keccak RootHash { get; private set; }
+
+    private static KeccakOrRlp Compute(in Key key, ICommit commit, Span<byte> span)
+    {
+        using var owner = commit.Get(key);
+        if (owner.IsEmpty)
+        {
+            // empty tree, return empty
+            return Keccak.EmptyTreeHash;
+        }
+
+        Node.ReadFrom(owner.Span, out var type, out var leaf, out var ext, out var branch);
+        switch (type)
+        {
+            case Node.Type.Leaf:
+                var leafPath = key.Path.Append(leaf.Path, span);
+                using (var leafData = commit.Get(Key.Account(leafPath)))
+                {
+                    Account.ReadFrom(leafData.Span, out var account);
+                    Node.Leaf.KeccakOrRlp(leaf.Path, account, out var keccakOrRlp);
+                    return keccakOrRlp;
+                }
+            case Node.Type.Extension:
+                throw new NotImplementedException("Extension is not implemented");
+            case Node.Type.Branch:
+                throw new NotImplementedException("Branch is not implemented");
+            default:
+                throw new ArgumentOutOfRangeException();
+        }
     }
 
     private static void OnKey(in Key key, ICommit commit)
