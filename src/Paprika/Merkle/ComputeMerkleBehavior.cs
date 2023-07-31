@@ -8,6 +8,14 @@ namespace Paprika.Merkle;
 
 public class ComputeMerkleBehavior : IPreCommitBehavior
 {
+    /// <summary>
+    /// The upper boundary of memory needed to write RLP of any Merkle node.
+    /// </summary>
+    /// <remarks>
+    /// Actually, it is lower, ~600 but let's wrap it nicely.
+    /// </remarks>
+    private const int MaxBufferNeeded = 1024;
+
     private readonly bool _fullMerkle;
 
     public ComputeMerkleBehavior(bool fullMerkle = false)
@@ -23,17 +31,17 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         if (_fullMerkle)
         {
             var root = Key.Merkle(NibblePath.Empty);
-            var keccakOrRlp = Compute(root, commit, stackalloc byte[64]);
+            var keccakOrRlp = Compute(root, commit, stackalloc byte[128]);
 
             Debug.Assert(keccakOrRlp.DataType == KeccakOrRlp.Type.Keccak);
 
-            RootHash = new Keccak(keccakOrRlp.AsSpan());
+            RootHash = new Keccak(keccakOrRlp.Span);
         }
     }
 
     public Keccak RootHash { get; private set; }
 
-    private static KeccakOrRlp Compute(in Key key, ICommit commit, Span<byte> span)
+    private static KeccakOrRlp Compute(in Key key, ICommit commit, Span<byte> leafSpan)
     {
         using var owner = commit.Get(key);
         if (owner.IsEmpty)
@@ -46,7 +54,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         switch (type)
         {
             case Node.Type.Leaf:
-                var leafPath = key.Path.Append(leaf.Path, span);
+                var leafPath = key.Path.Append(leaf.Path, leafSpan);
                 using (var leafData = commit.Get(Key.Account(leafPath)))
                 {
                     Account.ReadFrom(leafData.Span, out var account);
@@ -55,8 +63,52 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                 }
             case Node.Type.Extension:
                 throw new NotImplementedException("Extension is not implemented");
+
             case Node.Type.Branch:
-                throw new NotImplementedException("Branch is not implemented");
+                if (branch.HasKeccak)
+                {
+                    // return memoized value
+                    return branch.Keccak;
+                }
+
+                // TODO: replace with a pool
+                var bytes = new byte[MaxBufferNeeded];
+
+                // leave for length preamble
+                const int initialShift = Rlp.MaxLengthOfLength + 1;
+                var stream = new RlpStream(bytes)
+                {
+                    Position = initialShift
+                };
+
+                for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+                {
+                    if (branch.Children[i])
+                    {
+                        var childPath = key.Path.AppendNibble(i, leafSpan);
+                        var value = Compute(Key.Merkle(childPath), commit, leafSpan);
+
+                        // it's either Keccak or a span. Both are encoded the same ways
+                        stream.Encode(value.Span);
+                    }
+                    else
+                    {
+                        stream.EncodeEmptyArray();
+                    }
+                }
+
+                // no value at branch, write empty array
+                stream.EncodeEmptyArray();
+
+                // Write length of length in front of the payload, resetting the stream properly
+                var end = stream.Position;
+                var actualLength = end - initialShift;
+                var lengthOfLength = Rlp.LengthOfLength(actualLength) + 1;
+                var from = initialShift - lengthOfLength;
+                stream.Position = from;
+                stream.StartSequence(actualLength);
+
+                return KeccakOrRlp.FromSpan(bytes.AsSpan(from, end - from));
             default:
                 throw new ArgumentOutOfRangeException();
         }

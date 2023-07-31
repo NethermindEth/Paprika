@@ -8,6 +8,8 @@ namespace Paprika.RLP;
 /// </summary>
 public readonly ref struct KeccakOrRlp
 {
+    private const int NonKeccakOffset = 1;
+
     public enum Type : byte
     {
         Keccak = 0,
@@ -17,7 +19,9 @@ public readonly ref struct KeccakOrRlp
     public readonly Type DataType;
     private readonly Keccak _keccak;
 
-    public Span<byte> AsSpan() => _keccak.BytesAsSpan;
+    public Span<byte> Span => DataType == Type.Keccak
+        ? _keccak.BytesAsSpan
+        : _keccak.BytesAsSpan.Slice(NonKeccakOffset + _keccak.BytesAsSpan[0]);
 
     private KeccakOrRlp(Type dataType, scoped Span<byte> data)
     {
@@ -33,15 +37,14 @@ public readonly ref struct KeccakOrRlp
 
         if (data.Length < 32)
         {
+            // encode length as teh first byte
             output[0] = (byte)data.Length;
-            data.CopyTo(output[1..]);
+            data.CopyTo(output[NonKeccakOffset..]);
             return new KeccakOrRlp(Type.Rlp, output);
         }
-        else
-        {
-            KeccakHash.ComputeHash(data, output);
-            return new KeccakOrRlp(Type.Keccak, output);
-        }
+
+        KeccakHash.ComputeHash(data, output);
+        return new KeccakOrRlp(Type.Keccak, output);
     }
 }
 

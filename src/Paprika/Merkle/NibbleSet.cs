@@ -10,6 +10,7 @@ namespace Paprika.Merkle;
 public struct NibbleSet
 {
     public const int MaxByteSize = 2;
+    public const int NibbleCount = 16;
 
     private ushort _value;
 
