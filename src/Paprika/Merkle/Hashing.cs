@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.RLP;
@@ -11,6 +12,7 @@ public static partial class Node
         public static void KeccakOrRlp(NibblePath nibblePath, Account account, out KeccakOrRlp result) =>
             KeccakOrRlp(nibblePath, account, Keccak.OfAnEmptyString, Keccak.EmptyTreeHash, out result);
 
+        [SkipLocalsInit]
         private static void KeccakOrRlp(
             NibblePath nibblePath,
             Account account,

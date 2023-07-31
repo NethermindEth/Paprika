@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using Paprika.Chain;
 using Paprika.Crypto;
@@ -6,6 +7,14 @@ using Paprika.RLP;
 
 namespace Paprika.Merkle;
 
+/// <summary>
+/// This is the Merkle component that works with the Merkle-agnostic part of Paprika.
+///
+/// It splits the Merkle part into two areas:
+/// 1. building Merkle tree, that reads the data written in a given <see cref="ICommit"/> and applies it to create Merkle
+///  construct.
+/// 2. calls the computation of the Merkle RootHash when needed.
+/// </summary>
 public class ComputeMerkleBehavior : IPreCommitBehavior
 {
     /// <summary>
@@ -71,8 +80,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                     return branch.Keccak;
                 }
 
-                // TODO: replace with a pool
-                var bytes = new byte[MaxBufferNeeded];
+                var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
 
                 // leave for length preamble
                 const int initialShift = Rlp.MaxLengthOfLength + 1;
@@ -97,7 +105,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                     }
                 }
 
-                // no value at branch, write empty array
+                // no value at branch, write empty array at the end
                 stream.EncodeEmptyArray();
 
                 // Write length of length in front of the payload, resetting the stream properly
@@ -108,7 +116,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                 stream.Position = from;
                 stream.StartSequence(actualLength);
 
-                return KeccakOrRlp.FromSpan(bytes.AsSpan(from, end - from));
+                var result = KeccakOrRlp.FromSpan(bytes.AsSpan(from, end - from));
+
+                ArrayPool<byte>.Shared.Return(bytes);
+
+                return result;
             default:
                 throw new ArgumentOutOfRangeException();
         }
@@ -299,33 +311,5 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                     throw new ArgumentOutOfRangeException();
             }
         }
-    }
-}
-
-public static class CommitExtensions
-{
-    public static void SetLeaf(this ICommit commit, in Key key, in NibblePath leafPath)
-    {
-        var leaf = new Node.Leaf(leafPath);
-        commit.Set(key, leaf.WriteTo(stackalloc byte[leaf.MaxByteLength]));
-    }
-
-    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children,
-        NibbleSet.Readonly dirtyChildren)
-    {
-        var branch = new Node.Branch(children, dirtyChildren);
-        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
-    }
-
-    public static void SetBranchAllDirty(this ICommit commit, in Key key, NibbleSet.Readonly children)
-    {
-        var branch = new Node.Branch(children, children);
-        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
-    }
-
-    public static void SetExtension(this ICommit commit, in Key key, in NibblePath path)
-    {
-        var extension = new Node.Extension(path);
-        commit.Set(key, extension.WriteTo(stackalloc byte[extension.MaxByteLength]));
     }
 }
