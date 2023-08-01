@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -40,7 +41,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         if (_fullMerkle)
         {
             var root = Key.Merkle(NibblePath.Empty);
-            var keccakOrRlp = Compute(root, commit, stackalloc byte[128]);
+            var keccakOrRlp = Compute(root, commit);
 
             Debug.Assert(keccakOrRlp.DataType == KeccakOrRlp.Type.Keccak);
 
@@ -50,7 +51,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
     public Keccak RootHash { get; private set; }
 
-    private static KeccakOrRlp Compute(in Key key, ICommit commit, Span<byte> leafSpan)
+    [SkipLocalsInit]
+    private static KeccakOrRlp Compute(in Key key, ICommit commit)
     {
         using var owner = commit.Get(key);
         if (owner.IsEmpty)
@@ -63,6 +65,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         switch (type)
         {
             case Node.Type.Leaf:
+                Span<byte> leafSpan = stackalloc byte[128];
+
                 var leafPath = key.Path.Append(leaf.Path, leafSpan);
                 using (var leafData = commit.Get(Key.Account(leafPath)))
                 {
@@ -89,12 +93,14 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                     Position = initialShift
                 };
 
+                Span<byte> childSpan = stackalloc byte[key.Path.MaxByteLength + 1];
+
                 for (byte i = 0; i < NibbleSet.NibbleCount; i++)
                 {
                     if (branch.Children[i])
                     {
-                        var childPath = key.Path.AppendNibble(i, leafSpan);
-                        var value = Compute(Key.Merkle(childPath), commit, leafSpan);
+                        var childPath = key.Path.AppendNibble(i, childSpan);
+                        var value = Compute(Key.Merkle(childPath), commit);
 
                         // it's either Keccak or a span. Both are encoded the same ways
                         stream.Encode(value.Span);
