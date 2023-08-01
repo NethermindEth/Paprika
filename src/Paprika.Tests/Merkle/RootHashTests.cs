@@ -55,6 +55,23 @@ public class RootHashTests
         AssertRoot("73130daa1ae507554a72811c06e28d4fee671bfe2e1d0cef828a7fade54384f9", commit);
     }
 
+    [Test]
+    public void Extension()
+    {
+        var commit = new Commit();
+
+        var balanceA = Values.Balance0;
+        var nonceA = Values.Nonce0;
+
+        var balanceB = Values.Balance1;
+        var nonceB = Values.Nonce1;
+
+        commit.Set(Key.Account(Values.Key0), new Account(balanceA, nonceA).WriteTo(stackalloc byte[Account.MaxByteCount]));
+        commit.Set(Key.Account(Values.Key1), new Account(balanceB, nonceB).WriteTo(stackalloc byte[Account.MaxByteCount]));
+
+        AssertRoot("a624947d9693a5cba0701897b3a48cb9954c2f4fd54de36151800eb2c7f6bf50", commit);
+    }
+
     private static void AssertRoot(string hex, ICommit commit)
     {
         var merkle = new ComputeMerkleBehavior(true);

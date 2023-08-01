@@ -65,18 +65,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         switch (type)
         {
             case Node.Type.Leaf:
-                Span<byte> leafSpan = stackalloc byte[128];
-
-                var leafPath = key.Path.Append(leaf.Path, leafSpan);
-                using (var leafData = commit.Get(Key.Account(leafPath)))
-                {
-                    Account.ReadFrom(leafData.Span, out var account);
-                    Node.Leaf.KeccakOrRlp(leaf.Path, account, out var keccakOrRlp);
-                    return keccakOrRlp;
-                }
+                return EncodeLeaf(key, commit, leaf);
             case Node.Type.Extension:
-                throw new NotImplementedException("Extension is not implemented");
-
+                return EncodeExtension(key, commit, ext);
             case Node.Type.Branch:
                 if (branch.HasKeccak)
                 {
@@ -84,52 +75,95 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                     return branch.Keccak;
                 }
 
-                var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
-
-                // leave for length preamble
-                const int initialShift = Rlp.MaxLengthOfLength + 1;
-                var stream = new RlpStream(bytes)
-                {
-                    Position = initialShift
-                };
-
-                Span<byte> childSpan = stackalloc byte[key.Path.MaxByteLength + 1];
-
-                for (byte i = 0; i < NibbleSet.NibbleCount; i++)
-                {
-                    if (branch.Children[i])
-                    {
-                        var childPath = key.Path.AppendNibble(i, childSpan);
-                        var value = Compute(Key.Merkle(childPath), commit);
-
-                        // it's either Keccak or a span. Both are encoded the same ways
-                        stream.Encode(value.Span);
-                    }
-                    else
-                    {
-                        stream.EncodeEmptyArray();
-                    }
-                }
-
-                // no value at branch, write empty array at the end
-                stream.EncodeEmptyArray();
-
-                // Write length of length in front of the payload, resetting the stream properly
-                var end = stream.Position;
-                var actualLength = end - initialShift;
-                var lengthOfLength = Rlp.LengthOfLength(actualLength) + 1;
-                var from = initialShift - lengthOfLength;
-                stream.Position = from;
-                stream.StartSequence(actualLength);
-
-                var result = KeccakOrRlp.FromSpan(bytes.AsSpan(from, end - from));
-
-                ArrayPool<byte>.Shared.Return(bytes);
-
-                return result;
+                return EncodeBranch(key, commit, branch);
             default:
                 throw new ArgumentOutOfRangeException();
         }
+    }
+
+    private static KeccakOrRlp EncodeLeaf(Key key, ICommit commit, scoped in Node.Leaf leaf)
+    {
+        var leafPath =
+            key.Path.Append(leaf.Path, stackalloc byte[key.Path.MaxByteLength + leaf.Path.MaxByteLength + 1]);
+
+        using var leafData = commit.Get(Key.Account(leafPath));
+
+        Account.ReadFrom(leafData.Span, out var account);
+        Node.Leaf.KeccakOrRlp(leaf.Path, account, out var keccakOrRlp);
+
+        return keccakOrRlp;
+    }
+
+    private static KeccakOrRlp EncodeBranch(Key key, ICommit commit, scoped in Node.Branch branch)
+    {
+        var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
+
+        // leave for length preamble
+        const int initialShift = Rlp.MaxLengthOfLength + 1;
+        var stream = new RlpStream(bytes)
+        {
+            Position = initialShift
+        };
+
+        const int additionalBytesForNibbleAppending = 1;
+        Span<byte> childSpan = stackalloc byte[key.Path.MaxByteLength + additionalBytesForNibbleAppending];
+
+        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+        {
+            if (branch.Children[i])
+            {
+                var childPath = key.Path.AppendNibble(i, childSpan);
+                var value = Compute(Key.Merkle(childPath), commit);
+
+                // it's either Keccak or a span. Both are encoded the same ways
+                stream.Encode(value.Span);
+            }
+            else
+            {
+                stream.EncodeEmptyArray();
+            }
+        }
+
+        // no value at branch, write empty array at the end
+        stream.EncodeEmptyArray();
+
+        // Write length of length in front of the payload, resetting the stream properly
+        var end = stream.Position;
+        var actualLength = end - initialShift;
+        var lengthOfLength = Rlp.LengthOfLength(actualLength) + 1;
+        var from = initialShift - lengthOfLength;
+        stream.Position = from;
+        stream.StartSequence(actualLength);
+
+        var result = KeccakOrRlp.FromSpan(bytes.AsSpan(from, end - from));
+
+        ArrayPool<byte>.Shared.Return(bytes);
+
+        return result;
+    }
+
+    private static KeccakOrRlp EncodeExtension(in Key key, ICommit commit, scoped in Node.Extension ext)
+    {
+        Span<byte> span = stackalloc byte[Math.Max(ext.Path.HexEncodedLength, key.Path.MaxByteLength + 1)];
+
+        // retrieve the children keccak-or-rlp
+        var branchKeccakOrRlp = Compute(Key.Merkle(key.Path.Append(ext.Path, span)), commit);
+
+        ext.Path.HexEncode(span, false);
+        span = span.Slice(0, ext.Path.HexEncodedLength); // trim the span to the hex
+
+        var contentLength = Rlp.LengthOf(span) + (branchKeccakOrRlp.DataType == KeccakOrRlp.Type.Rlp
+            ? branchKeccakOrRlp.Span.Length
+            : Rlp.LengthOfKeccakRlp);
+
+        var totalLength = Rlp.LengthOfSequence(contentLength);
+
+        RlpStream stream = new(stackalloc byte[totalLength]);
+        stream.StartSequence(contentLength);
+        stream.Encode(span);
+        stream.Encode(branchKeccakOrRlp.Span);
+
+        return stream.ToKeccakOrRlp();
     }
 
     private static void OnKey(in Key key, ICommit commit)
