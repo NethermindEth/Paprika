@@ -5,7 +5,7 @@ using System.Text;
 namespace Paprika.Merkle;
 
 /// <summary>
-/// Represents an <see cref="ushort"/> backed nibble set.
+/// Represents a set of nibbles, backed by a single <see cref="ushort"/>.
 /// </summary>
 public struct NibbleSet
 {
