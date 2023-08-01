@@ -14,8 +14,6 @@ public struct NibbleSet
 
     private ushort _value;
 
-    public bool HasNibble(byte nibble) => (_value & (1 << nibble)) != 0;
-
     public NibbleSet(byte nibbleA)
     {
         _value = (ushort)(1 << nibbleA);

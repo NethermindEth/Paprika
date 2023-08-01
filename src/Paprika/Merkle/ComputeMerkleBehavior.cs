@@ -223,9 +223,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
                         // create branch, truncate both leaves, add them at the end
                         var branchKey = Key.Merkle(path.SliceTo(i + diffAt));
-                        commit.SetBranch(branchKey,
-                            new NibbleSet(nibbleA, nibbleB),
-                            new NibbleSet(nibbleA, nibbleB));
+                        commit.SetBranch(branchKey, new NibbleSet(nibbleA, nibbleB));
 
                         // nibbleA, deep copy to write in an unsafe manner
                         var pathA = path.SliceTo(i + diffAt).AppendNibble(nibbleA, span);
@@ -256,7 +254,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                                 // 2. leave the next branch as is
                                 // 3. add a new leaf
                                 var set = new NibbleSet(ext.Path[0], leftoverPath[0]);
-                                commit.SetBranch(key, set, set);
+                                commit.SetBranch(key, set);
                                 commit.SetLeaf(Key.Merkle(path.SliceTo(i + 1)), path.SliceFrom(i + 1));
                                 return;
                             }
@@ -269,8 +267,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
                                 var ext0Th = ext.Path[0];
 
-                                var set = new NibbleSet(ext0Th, leftoverPath[0]);
-                                commit.SetBranch(key, set, set);
+                                commit.SetBranch(key, new NibbleSet(ext0Th, leftoverPath[0]));
 
                                 commit.SetExtension(Key.Merkle(key.Path.AppendNibble(ext0Th, span)),
                                     ext.Path.SliceFrom(1));
@@ -293,7 +290,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                             var splitAt = i + ext.Path.Length - 1;
                             var set = new NibbleSet(path[splitAt], ext.Path[lastNibblePos]);
 
-                            commit.SetBranchAllDirty(Key.Merkle(path.SliceTo(splitAt)), set);
+                            commit.SetBranch(Key.Merkle(path.SliceTo(splitAt)), set);
                             commit.SetLeaf(Key.Merkle(path.SliceTo(splitAt + 1)), path.SliceFrom(splitAt + 1));
 
                             return;
@@ -310,7 +307,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         var existingNibble = ext.Path[diffAt];
                         var addedNibble = path[i + diffAt];
                         var children = new NibbleSet(existingNibble, addedNibble);
-                        commit.SetBranchAllDirty(Key.Merkle(branch1), children);
+                        commit.SetBranch(Key.Merkle(branch1), children);
 
                         // E2
                         var extension2 = branch1.AppendNibble(existingNibble, span);
@@ -333,17 +330,17 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         if (branch.HasKeccak)
                         {
                             // branch has keccak, this means it was not written yet, needs to be dirtied
-                            commit.SetBranch(key, branch.Children.Set(nibble), new NibbleSet(nibble));
+                            commit.SetBranch(key, branch.Children.Set(nibble));
                         }
                         else
                         {
-                            if (branch.Children[nibble] && branch.Dirty[nibble])
+                            if (branch.Children[nibble] && !branch.HasKeccak)
                             {
-                                // everything set as needed, continue
+                                // if child is set and there's no keccak for the branch, everything set as needed
                                 continue;
                             }
 
-                            commit.SetBranch(key, branch.Children.Set(nibble), branch.Dirty.Set(nibble));
+                            commit.SetBranch(key, branch.Children.Set(nibble));
                         }
                     }
                     break;

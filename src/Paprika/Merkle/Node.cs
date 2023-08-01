@@ -227,7 +227,7 @@ public static partial class Node
     {
         public int MaxByteLength => Header.Size +
                                     NibbleSet.MaxByteSize +
-                                    (HeaderHasKeccak(Header) ? Keccak.Size : NibbleSet.MaxByteSize);
+                                    (HeaderHasKeccak(Header) ? Keccak.Size : 0);
 
         private const int HeaderMetadataKeccakMask = 0b0001;
         private const int NoKeccak = 0;
@@ -235,22 +235,19 @@ public static partial class Node
 
         public readonly Header Header;
         public readonly NibbleSet.Readonly Children;
-        public readonly NibbleSet.Readonly Dirty;
         public readonly Keccak Keccak;
 
         private Branch(Header header, NibbleSet.Readonly children, Keccak keccak)
         {
             Header = ValidateHeaderKeccak(ValidateHeaderNodeType(header, Type.Branch), shouldHaveKeccak: true);
             Children = children;
-            Dirty = default;
             Keccak = keccak;
         }
 
-        private Branch(Header header, NibbleSet.Readonly children, NibbleSet.Readonly dirty)
+        private Branch(Header header, NibbleSet.Readonly children)
         {
             Header = ValidateHeaderKeccak(header, shouldHaveKeccak: false);
             Children = children;
-            Dirty = dirty;
             Keccak = default;
         }
 
@@ -272,14 +269,13 @@ public static partial class Node
             }
         }
 
-        public Branch(NibbleSet.Readonly children, NibbleSet.Readonly dirty)
+        public Branch(NibbleSet.Readonly children)
         {
             Header = new Header(Type.Branch, metadata: NoKeccak);
 
             Assert(children);
 
             Children = children;
-            Dirty = dirty;
             Keccak = default;
         }
 
@@ -314,10 +310,6 @@ public static partial class Node
             {
                 leftover = Keccak.WriteToWithLeftover(leftover);
             }
-            else
-            {
-                leftover = Dirty.WriteToWithLeftover(leftover);
-            }
 
             return leftover;
         }
@@ -335,8 +327,7 @@ public static partial class Node
             }
             else
             {
-                leftover = NibbleSet.Readonly.ReadFrom(leftover, out var dirty);
-                branch = new Branch(header, children, dirty);
+                branch = new Branch(header, children);
             }
 
             return leftover;

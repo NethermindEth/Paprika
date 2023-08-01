@@ -14,16 +14,9 @@ public static class CommitExtensions
         commit.Set(key, leaf.WriteTo(stackalloc byte[leaf.MaxByteLength]));
     }
 
-    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children,
-        NibbleSet.Readonly dirtyChildren)
+    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children)
     {
-        var branch = new Node.Branch(children, dirtyChildren);
-        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
-    }
-
-    public static void SetBranchAllDirty(this ICommit commit, in Key key, NibbleSet.Readonly children)
-    {
-        var branch = new Node.Branch(children, children);
+        var branch = new Node.Branch(children);
         commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
     }
 
