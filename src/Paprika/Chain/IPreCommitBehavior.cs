@@ -52,5 +52,5 @@ public interface ICommit
 /// <summary>
 /// A delegate to be called on the each key that that the commit contains.
 /// </summary>
-public delegate void CommitAction(in Key key, ICommit commit);
+public delegate void CommitAction(in Key key, ReadOnlySpan<byte> value, ICommit commit);
 

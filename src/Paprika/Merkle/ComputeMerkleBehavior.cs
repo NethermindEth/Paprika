@@ -41,7 +41,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         if (_fullMerkle)
         {
             var root = Key.Merkle(NibblePath.Empty);
-            var keccakOrRlp = Compute(root, commit);
+            var keccakOrRlp = Compute(root, commit, TrieType.State);
 
             Debug.Assert(keccakOrRlp.DataType == KeccakOrRlp.Type.Keccak);
 
@@ -52,7 +52,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
     public Keccak RootHash { get; private set; }
 
     [SkipLocalsInit]
-    private static KeccakOrRlp Compute(in Key key, ICommit commit)
+    private static KeccakOrRlp Compute(in Key key, ICommit commit, TrieType trieType)
     {
         using var owner = commit.Get(key);
         if (owner.IsEmpty)
@@ -65,9 +65,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         switch (type)
         {
             case Node.Type.Leaf:
-                return EncodeLeaf(key, commit, leaf);
+                return EncodeLeaf(key, commit, leaf, trieType);
             case Node.Type.Extension:
-                return EncodeExtension(key, commit, ext);
+                return EncodeExtension(key, commit, ext, trieType);
             case Node.Type.Branch:
                 if (branch.HasKeccak)
                 {
@@ -75,16 +75,18 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                     return branch.Keccak;
                 }
 
-                return EncodeBranch(key, commit, branch);
+                return EncodeBranch(key, commit, branch, trieType);
             default:
                 throw new ArgumentOutOfRangeException();
         }
     }
 
-    private static KeccakOrRlp EncodeLeaf(Key key, ICommit commit, scoped in Node.Leaf leaf)
+    private static KeccakOrRlp EncodeLeaf(Key key, ICommit commit, scoped in Node.Leaf leaf, TrieType trieType)
     {
         var leafPath =
             key.Path.Append(leaf.Path, stackalloc byte[key.Path.MaxByteLength + leaf.Path.MaxByteLength + 1]);
+
+        Debug.Assert(trieType == TrieType.State, "Only accounts now");
 
         using var leafData = commit.Get(Key.Account(leafPath));
 
@@ -94,7 +96,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         return keccakOrRlp;
     }
 
-    private static KeccakOrRlp EncodeBranch(Key key, ICommit commit, scoped in Node.Branch branch)
+    private static KeccakOrRlp EncodeBranch(Key key, ICommit commit, scoped in Node.Branch branch, TrieType trieType)
     {
         var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
 
@@ -113,7 +115,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
             if (branch.Children[i])
             {
                 var childPath = key.Path.AppendNibble(i, childSpan);
-                var value = Compute(Key.Merkle(childPath), commit);
+                var value = Compute(Key.Merkle(childPath), commit, trieType);
 
                 // it's either Keccak or a span. Both are encoded the same ways
                 stream.Encode(value.Span);
@@ -142,12 +144,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         return result;
     }
 
-    private static KeccakOrRlp EncodeExtension(in Key key, ICommit commit, scoped in Node.Extension ext)
+    private static KeccakOrRlp EncodeExtension(in Key key, ICommit commit, scoped in Node.Extension ext,
+        TrieType trieType)
     {
         Span<byte> span = stackalloc byte[Math.Max(ext.Path.HexEncodedLength, key.Path.MaxByteLength + 1)];
 
         // retrieve the children keccak-or-rlp
-        var branchKeccakOrRlp = Compute(Key.Merkle(key.Path.Append(ext.Path, span)), commit);
+        var branchKeccakOrRlp = Compute(Key.Merkle(key.Path.Append(ext.Path, span)), commit, trieType);
 
         ext.Path.HexEncode(span, false);
         span = span.Slice(0, ext.Path.HexEncodedLength); // trim the span to the hex
@@ -166,19 +169,136 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         return stream.ToKeccakOrRlp();
     }
 
-    private static void OnKey(in Key key, ICommit commit)
+    private static void OnKey(in Key key, ReadOnlySpan<byte> value, ICommit commit)
     {
-        if (key.Type == DataType.Account)
+        if (value.IsEmpty)
         {
-            MarkAccountPathDirty(in key.Path, commit);
+            Delete(in key.Path, 0, commit);
         }
         else
         {
-            throw new Exception("Not implemented for other types now.");
+            MarkPathDirty(in key.Path, commit);
         }
     }
 
-    private static void MarkAccountPathDirty(in NibblePath path, ICommit commit)
+    private enum DeleteStatus
+    {
+        KeyDoesNotExist,
+
+        /// <summary>
+        /// Happens when a leaf is deleted.
+        /// </summary>
+        LeafDeleted,
+
+        /// <summary>
+        /// Happens when a branch turns into a leaf or extension.
+        /// </summary>
+        BranchToLeafOrExtension,
+
+        /// <summary>
+        /// Happens when an extension turns into a leaf.
+        /// </summary>
+        ExtensionToLeaf,
+
+        NodeTypePreserved
+    }
+
+    /// <summary>
+    /// Deletes the given path, providing information whether the node has changed its type.
+    /// </summary>
+    /// <returns>Whether the node has changed its type </returns>
+    /// <exception cref="ArgumentOutOfRangeException"></exception>
+    private static DeleteStatus Delete(in NibblePath path, int at, ICommit commit)
+    {
+        var slice = path.SliceTo(at);
+        var key = Key.Merkle(slice);
+
+        var leftoverPath = path.SliceFrom(at);
+
+        using var owner = commit.Get(key);
+
+        if (owner.IsEmpty)
+        {
+            return DeleteStatus.KeyDoesNotExist;
+        }
+
+        // read the existing one
+        Node.ReadFrom(owner.Span, out var type, out var leaf, out var ext, out var branch);
+        switch (type)
+        {
+            case Node.Type.Leaf:
+                {
+                    var diffAt = leaf.Path.FindFirstDifferentNibble(leftoverPath);
+
+                    if (diffAt == leaf.Path.Length)
+                    {
+                        commit.DeleteKey(key);
+                        return DeleteStatus.LeafDeleted;
+                    }
+
+                    return DeleteStatus.KeyDoesNotExist;
+                }
+            case Node.Type.Extension:
+                {
+                    var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
+                    if (diffAt != ext.Path.Length)
+                    {
+                        // the path does not follow the extension path. It does not exist
+                        return DeleteStatus.KeyDoesNotExist;
+                    }
+
+                    var status = Delete(path, at + ext.Path.Length, commit);
+                    if (status == DeleteStatus.KeyDoesNotExist)
+                    {
+                        // the child reported not existence
+                        return DeleteStatus.KeyDoesNotExist;
+                    }
+
+                    if (status == DeleteStatus.NodeTypePreserved)
+                    {
+                        // The node has not change its type
+                        return DeleteStatus.NodeTypePreserved;
+                    }
+
+                    // DeleteStatus.BranchToLeafOrExtension
+                    throw new NotImplementedException("DeleteStatus.BranchToLeafOrExtension");
+                }
+            case Node.Type.Branch:
+                {
+                    var nibble = path[at];
+                    if (!branch.Children[nibble])
+                    {
+                        // no such child
+                        return DeleteStatus.KeyDoesNotExist;
+                    }
+
+                    var status = Delete(path, at + 1, commit);
+                    if (status == DeleteStatus.KeyDoesNotExist)
+                    {
+                        // child reports non-existence
+                        return DeleteStatus.KeyDoesNotExist;
+                    }
+
+                    if (status == DeleteStatus.NodeTypePreserved)
+                    {
+                        if (branch.HasKeccak)
+                        {
+                            // reset keccak
+                            commit.SetBranch(key, branch.Children);
+                        }
+
+                        return DeleteStatus.NodeTypePreserved;
+                    }
+
+                    // the underlying has been changed
+                    throw new NotImplementedException("Branch");
+                }
+            default:
+                throw new ArgumentOutOfRangeException();
+        }
+    }
+
+    private static void MarkPathDirty(in NibblePath path, ICommit commit)
     {
         Span<byte> span = stackalloc byte[33];
 

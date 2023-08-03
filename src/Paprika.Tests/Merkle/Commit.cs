@@ -74,7 +74,7 @@ class Commit : ICommit
         foreach (var (k, v) in _before)
         {
             Key.ReadFrom(k, out var key);
-            action(key, this);
+            action(key, v, this);
         }
     }
 

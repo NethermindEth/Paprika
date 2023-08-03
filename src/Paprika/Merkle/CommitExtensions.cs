@@ -25,4 +25,6 @@ public static class CommitExtensions
         var extension = new Node.Extension(path);
         commit.Set(key, extension.WriteTo(stackalloc byte[extension.MaxByteLength]));
     }
+
+    public static void DeleteKey(this ICommit commit, in Key key) => commit.Set(key, ReadOnlySpan<byte>.Empty);
 }
