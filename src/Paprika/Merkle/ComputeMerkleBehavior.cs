@@ -268,7 +268,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                     var childPath = path.SliceTo(newAt);
                     var childKey = Key.Merkle(childPath);
                     using var childOwner = commit.Get(childKey);
-                    Node.ReadFrom(owner.Span, out var childType, out var childLeaf, out var childExt, out _);
+                    Node.ReadFrom(childOwner.Span, out var childType, out var childLeaf, out var childExt, out _);
 
                     if (childType == Node.Type.Extension)
                     {
@@ -297,6 +297,14 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                     }
 
                     var newAt = at + 1;
+
+                    // copy child before delete, the delete may overwrite the memory
+                    var childPath = path.SliceTo(newAt);
+                    var childKey = Key.Merkle(childPath);
+                    using var childOwner = commit.Get(childKey);
+                    Span<byte> childSpan = stackalloc byte[childOwner.Span.Length];
+                    childOwner.Span.CopyTo(childSpan);
+
                     var status = Delete(path, newAt, commit);
                     if (status == DeleteStatus.KeyDoesNotExist)
                     {
@@ -330,10 +338,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                     }
 
                     // need to collapse the branch
-                    var childPath = path.SliceTo(newAt);
-                    var childKey = Key.Merkle(childPath);
-                    using var childOwner = commit.Get(childKey);
-                    Node.ReadFrom(owner.Span, out var childType, out var childLeaf, out var childExt, out _);
+                    Node.ReadFrom(childSpan, out var childType, out var childLeaf, out var childExt, out _);
 
                     if (childType == Node.Type.Extension)
                     {
@@ -345,8 +350,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         return DeleteStatus.NodeTypePreserved;
                     }
 
-                    // the single child is a leaf, make it a leaf
-                    commit.DeleteKey(childKey);
+                    // the leave is deleted above, replace the branch with the only child 
+                    var onlyChildPath = slice.AppendNibble(children.SmallestNibbleSet,
+                        stackalloc byte[slice.MaxByteLength + 1]);
+
+                    // TODO: retrieve child, commit leaf under branch
+
                     commit.SetLeaf(key,
                         childPath.Append(childLeaf.Path, stackalloc byte[NibblePath.FullKeccakByteLength]));
 

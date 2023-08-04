@@ -12,6 +12,8 @@ namespace Paprika.Tests.Merkle;
 /// </summary>
 class Commit : ICommit
 {
+    // history <- before <- after
+    private readonly Dictionary<byte[], byte[]> _history = new(new BytesEqualityComparer());
     private readonly Dictionary<byte[], byte[]> _before = new(new BytesEqualityComparer());
     private readonly Dictionary<byte[], byte[]> _after = new(new BytesEqualityComparer());
     private bool _asserting;
@@ -20,6 +22,8 @@ class Commit : ICommit
     {
         _before[GetKey(key)] = value.ToArray();
     }
+
+    public void DeleteKey(in Key key) => Set(key, ReadOnlySpan<byte>.Empty);
 
     public void ShouldBeEmpty()
     {
@@ -40,12 +44,18 @@ class Commit : ICommit
     ReadOnlySpanOwner<byte> ICommit.Get(in Key key)
     {
         var k = GetKey(key);
-        if (_before.TryGetValue(k, out var value))
+
+        if (_after.TryGetValue(k, out var value))
         {
             return new ReadOnlySpanOwner<byte>(value, null);
         }
 
-        if (_after.TryGetValue(k, out value))
+        if (_before.TryGetValue(k, out value))
+        {
+            return new ReadOnlySpanOwner<byte>(value, null);
+        }
+
+        if (_history.TryGetValue(k, out value))
         {
             return new ReadOnlySpanOwner<byte>(value, null);
         }
@@ -86,18 +96,36 @@ class Commit : ICommit
         _asserting = true;
     }
 
-    public Commit Next()
+    /// <summary>
+    /// Generates next commit, folding history into the current state.
+    /// </summary>
+    public Commit Squash(bool removeEmpty = false)
     {
         var commit = new Commit();
 
+        var dict = commit._history;
+
         foreach (var kvp in _before)
         {
-            commit._before[kvp.Key] = kvp.Value;
+            dict[kvp.Key] = kvp.Value;
         }
 
         foreach (var kvp in _after)
         {
-            commit._before[kvp.Key] = kvp.Value;
+            dict[kvp.Key] = kvp.Value;
+        }
+
+        if (removeEmpty)
+        {
+            var emptyKeys = dict
+                .Where((kvp) => kvp.Value.Length == 0)
+                .Select(kvp => kvp.Key)
+                .ToArray();
+
+            foreach (var emptyKey in emptyKeys)
+            {
+                dict.Remove(emptyKey);
+            }
         }
 
         return commit;

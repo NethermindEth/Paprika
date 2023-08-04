@@ -1,5 +1,6 @@
 ﻿using NUnit.Framework;
 using Paprika.Chain;
+using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
 
@@ -263,6 +264,41 @@ public class DirtyTests
 
         // 0x0000A
         commit.SetLeafWithSplitOn(key1, branchSplitAt + 1);
+
+        commit.ShouldBeEmpty();
+    }
+
+    [Test]
+    public void Sets_and_deletes()
+    {
+        var key0 = NibblePath.Parse("A0000001");
+        var key1 = NibblePath.Parse("B0000002");
+        var key2 = NibblePath.Parse("C0000003");
+
+        var a0 = Key.Account(key0);
+        var a1 = Key.Account(key1);
+        var a2 = Key.Account(key2);
+
+        var merkle = new ComputeMerkleBehavior();
+        var commit = new Commit();
+
+        commit.Set(a0, new byte[] { 1 });
+        commit.Set(a1, new byte[] { 2 });
+        commit.Set(a2, new byte[] { 3 });
+
+        // run merkle
+        merkle.BeforeCommit(commit);
+
+        commit = commit.Squash(true);
+
+        // delete and squash to prepare for the Merkle run
+        commit.DeleteKey(a0);
+        commit.DeleteKey(a1);
+        commit.DeleteKey(a2);
+
+        merkle.BeforeCommit(commit);
+
+
 
         commit.ShouldBeEmpty();
     }
