@@ -247,7 +247,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         return DeleteStatus.KeyDoesNotExist;
                     }
 
-                    var status = Delete(path, at + ext.Path.Length, commit);
+                    var newAt = at + ext.Path.Length;
+                    var status = Delete(path, newAt, commit);
+
                     if (status == DeleteStatus.KeyDoesNotExist)
                     {
                         // the child reported not existence
@@ -260,8 +262,30 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         return DeleteStatus.NodeTypePreserved;
                     }
 
-                    // DeleteStatus.BranchToLeafOrExtension
-                    throw new NotImplementedException("DeleteStatus.BranchToLeafOrExtension");
+                    Debug.Assert(status == DeleteStatus.BranchToLeafOrExtension,
+                        "branch has been changed to an extension or a leaf");
+
+                    var childPath = path.SliceTo(newAt);
+                    var childKey = Key.Merkle(childPath);
+                    using var childOwner = commit.Get(childKey);
+                    Node.ReadFrom(owner.Span, out var childType, out var childLeaf, out var childExt, out _);
+
+                    if (childType == Node.Type.Extension)
+                    {
+                        // it's E->E, merge extensions into a single extension with concatenated path
+                        commit.DeleteKey(childKey);
+                        commit.SetExtension(key,
+                            ext.Path.Append(childExt.Path, stackalloc byte[NibblePath.FullKeccakByteLength]));
+
+                        return DeleteStatus.NodeTypePreserved;
+                    }
+
+                    // it's E->L, merge them into a leaf
+                    commit.DeleteKey(childKey);
+                    commit.SetLeaf(key,
+                        ext.Path.Append(childLeaf.Path, stackalloc byte[NibblePath.FullKeccakByteLength]));
+
+                    return DeleteStatus.ExtensionToLeaf;
                 }
             case Node.Type.Branch:
                 {
@@ -272,14 +296,18 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         return DeleteStatus.KeyDoesNotExist;
                     }
 
-                    var status = Delete(path, at + 1, commit);
+                    var newAt = at + 1;
+                    var status = Delete(path, newAt, commit);
                     if (status == DeleteStatus.KeyDoesNotExist)
                     {
                         // child reports non-existence
                         return DeleteStatus.KeyDoesNotExist;
                     }
 
-                    if (status == DeleteStatus.NodeTypePreserved)
+                    if (status
+                        is DeleteStatus.NodeTypePreserved
+                        or DeleteStatus.ExtensionToLeaf
+                        or DeleteStatus.BranchToLeafOrExtension)
                     {
                         if (branch.HasKeccak)
                         {
@@ -290,8 +318,39 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         return DeleteStatus.NodeTypePreserved;
                     }
 
-                    // the underlying has been changed
-                    throw new NotImplementedException("Branch");
+                    Debug.Assert(status == DeleteStatus.LeafDeleted, "leaf deleted");
+
+                    var children = branch.Children.Remove(nibble);
+
+                    // if branch has still more than one child, just update the set
+                    if (children.SetCount > 1)
+                    {
+                        commit.SetBranch(key, children);
+                        return DeleteStatus.NodeTypePreserved;
+                    }
+
+                    // need to collapse the branch
+                    var childPath = path.SliceTo(newAt);
+                    var childKey = Key.Merkle(childPath);
+                    using var childOwner = commit.Get(childKey);
+                    Node.ReadFrom(owner.Span, out var childType, out var childLeaf, out var childExt, out _);
+
+                    if (childType == Node.Type.Extension)
+                    {
+                        // the single child is an extension, make it an extension
+                        commit.DeleteKey(childKey);
+                        commit.SetExtension(key,
+                            childPath.Append(childExt.Path, stackalloc byte[NibblePath.FullKeccakByteLength]));
+
+                        return DeleteStatus.NodeTypePreserved;
+                    }
+
+                    // the single child is a leaf, make it a leaf
+                    commit.DeleteKey(childKey);
+                    commit.SetLeaf(key,
+                        childPath.Append(childLeaf.Path, stackalloc byte[NibblePath.FullKeccakByteLength]));
+
+                    return DeleteStatus.ExtensionToLeaf;
                 }
             default:
                 throw new ArgumentOutOfRangeException();

@@ -123,6 +123,14 @@ public struct NibbleSet
             };
         }
 
+        public Readonly Remove(byte nibble)
+        {
+            return new NibbleSet(_value)
+            {
+                [nibble] = false
+            };
+        }
+
         public override string ToString() => new NibbleSet(_value).ToString();
     }
 }
