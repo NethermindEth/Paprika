@@ -85,4 +85,21 @@ class Commit : ICommit
     {
         _asserting = true;
     }
+
+    public Commit Next()
+    {
+        var commit = new Commit();
+
+        foreach (var kvp in _before)
+        {
+            commit._before[kvp.Key] = kvp.Value;
+        }
+
+        foreach (var kvp in _after)
+        {
+            commit._before[kvp.Key] = kvp.Value;
+        }
+
+        return commit;
+    }
 }
