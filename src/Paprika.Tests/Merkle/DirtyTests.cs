@@ -1,4 +1,5 @@
-﻿using NUnit.Framework;
+﻿using System.Buffers.Binary;
+using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -329,6 +330,45 @@ public class DirtyTests
         commit.DeleteKey(a1);
         commit.DeleteKey(a2);
 
+        merkle.BeforeCommit(commit);
+
+        commit.Squash(true).ShouldHaveSquashedStateEmpty();
+    }
+
+    [TestCase(20)]
+    public void Big_random_set_and_delete(int size)
+    {
+        const int seed = 19;
+
+        var merkle = new ComputeMerkleBehavior();
+        var commit = new Commit();
+
+        var random = new Random(seed);
+        Span<byte> value = stackalloc byte[sizeof(int)];
+
+        for (int i = 0; i < size; i++)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(value, i);
+            var path = NibblePath.FromKey(random.NextKeccak());
+            var key = Key.Account(path);
+            commit.Set(key, value);
+        }
+
+        merkle.BeforeCommit(commit);
+
+        commit = commit.Squash(true);
+
+        // delete
+        random = new Random(seed);
+
+        for (int i = 0; i < size; i++)
+        {
+            var path = NibblePath.FromKey(random.NextKeccak());
+            var key = Key.Account(path);
+            commit.DeleteKey(key);
+        }
+
+        // delete and squash to prepare for the Merkle run
         merkle.BeforeCommit(commit);
 
         commit.Squash(true).ShouldHaveSquashedStateEmpty();

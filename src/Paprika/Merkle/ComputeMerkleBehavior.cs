@@ -216,7 +216,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         var leftoverPath = path.SliceFrom(at);
 
         using var owner = commit.Get(key);
-
         if (owner.IsEmpty)
         {
             return DeleteStatus.KeyDoesNotExist;
@@ -338,7 +337,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                     using var onlyChildSpanOwner = commit.Get(onlyChildKey);
 
                     // need to collapse the branch
-                    Node.ReadFrom(onlyChildSpanOwner.Span, out var childType, out var childLeaf, out var childExt, out _);
+                    Node.ReadFrom(onlyChildSpanOwner.Span, out var childType, out var childLeaf, out var childExt,
+                        out _);
 
                     if (childType == Node.Type.Extension)
                     {
