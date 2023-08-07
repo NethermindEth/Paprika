@@ -262,8 +262,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         return DeleteStatus.NodeTypePreserved;
                     }
 
-                    Debug.Assert(status == DeleteStatus.BranchToLeafOrExtension,
-                        "branch has been changed to an extension or a leaf");
+                    Debug.Assert(status == DeleteStatus.BranchToLeafOrExtension, $"Unexpected status of {status}");
 
                     var childPath = path.SliceTo(newAt);
                     var childKey = Key.Merkle(childPath);
@@ -298,13 +297,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
                     var newAt = at + 1;
 
-                    // copy child before delete, the delete may overwrite the memory
-                    var childPath = path.SliceTo(newAt);
-                    var childKey = Key.Merkle(childPath);
-                    using var childOwner = commit.Get(childKey);
-                    Span<byte> childSpan = stackalloc byte[childOwner.Span.Length];
-                    childOwner.Span.CopyTo(childSpan);
-
                     var status = Delete(path, newAt, commit);
                     if (status == DeleteStatus.KeyDoesNotExist)
                     {
@@ -337,29 +329,39 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         return DeleteStatus.NodeTypePreserved;
                     }
 
+                    // there's an only child now. The branch should be collapsed
+                    var onlyNibble = children.SmallestNibbleSet;
+                    var onlyChildPath = slice.AppendNibble(onlyNibble,
+                        stackalloc byte[slice.MaxByteLength + 1]);
+
+                    var onlyChildKey = Key.Merkle(onlyChildPath);
+                    using var onlyChildSpanOwner = commit.Get(onlyChildKey);
+
                     // need to collapse the branch
-                    Node.ReadFrom(childSpan, out var childType, out var childLeaf, out var childExt, out _);
+                    Node.ReadFrom(onlyChildSpanOwner.Span, out var childType, out var childLeaf, out var childExt, out _);
 
                     if (childType == Node.Type.Extension)
                     {
-                        // the single child is an extension, make it an extension
-                        commit.DeleteKey(childKey);
-                        commit.SetExtension(key,
-                            childPath.Append(childExt.Path, stackalloc byte[NibblePath.FullKeccakByteLength]));
+                        var extensionPath = NibblePath.FromNibble(onlyNibble)
+                            .Append(childExt.Path, stackalloc byte[NibblePath.FullKeccakByteLength]);
 
-                        return DeleteStatus.NodeTypePreserved;
+                        // the single child is an extension, make it an extension
+                        commit.SetExtension(key, extensionPath);
+
+                        return DeleteStatus.BranchToLeafOrExtension;
                     }
 
-                    // the leave is deleted above, replace the branch with the only child 
-                    var onlyChildPath = slice.AppendNibble(children.SmallestNibbleSet,
-                        stackalloc byte[slice.MaxByteLength + 1]);
+                    // prepare the new leaf path
+                    var leafPath = NibblePath.FromNibble(onlyNibble)
+                        .Append(childLeaf.Path, stackalloc byte[NibblePath.FullKeccakByteLength]);
 
-                    // TODO: retrieve child, commit leaf under branch
+                    // replace branch with the leaf
+                    commit.SetLeaf(key, leafPath);
 
-                    commit.SetLeaf(key,
-                        childPath.Append(childLeaf.Path, stackalloc byte[NibblePath.FullKeccakByteLength]));
+                    // delete the only child
+                    commit.DeleteKey(onlyChildKey);
 
-                    return DeleteStatus.ExtensionToLeaf;
+                    return DeleteStatus.BranchToLeafOrExtension;
                 }
             default:
                 throw new ArgumentOutOfRangeException();

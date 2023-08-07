@@ -269,7 +269,7 @@ public class DirtyTests
     }
 
     [Test]
-    public void Sets_and_deletes()
+    public void Branch_set_and_deletes()
     {
         var key0 = NibblePath.Parse("A0000001");
         var key1 = NibblePath.Parse("B0000002");
@@ -298,9 +298,40 @@ public class DirtyTests
 
         merkle.BeforeCommit(commit);
 
+        commit.Squash(true).ShouldHaveSquashedStateEmpty();
+    }
 
 
-        commit.ShouldBeEmpty();
+    [Test]
+    public void Extension_split_in_the_middle_set_and_delete()
+    {
+        var key0 = NibblePath.Parse("0A000001");
+        var key1 = NibblePath.Parse("0B00A002");
+        var key2 = NibblePath.Parse("0B00C003");
+
+        var a0 = Key.Account(key0);
+        var a1 = Key.Account(key1);
+        var a2 = Key.Account(key2);
+
+        var merkle = new ComputeMerkleBehavior();
+        var commit = new Commit();
+
+        commit.Set(a0, new byte[] { 1 });
+        commit.Set(a1, new byte[] { 2 });
+        commit.Set(a2, new byte[] { 3 });
+
+        merkle.BeforeCommit(commit);
+
+        commit = commit.Squash(true);
+
+        // delete and squash to prepare for the Merkle run
+        commit.DeleteKey(a0);
+        commit.DeleteKey(a1);
+        commit.DeleteKey(a2);
+
+        merkle.BeforeCommit(commit);
+
+        commit.Squash(true).ShouldHaveSquashedStateEmpty();
     }
 }
 

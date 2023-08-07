@@ -25,14 +25,18 @@ class Commit : ICommit
 
     public void DeleteKey(in Key key) => Set(key, ReadOnlySpan<byte>.Empty);
 
-    public void ShouldBeEmpty()
+    public void ShouldBeEmpty() => AssertEmpty(_after, "set of operations");
+
+    public void ShouldHaveSquashedStateEmpty() => AssertEmpty(_history, "squashed state");
+
+    private static void AssertEmpty(Dictionary<byte[], byte[]> dict, string txt)
     {
-        if (_after.Count == 0)
+        if (dict.Count == 0)
             return;
 
         var sb = new StringBuilder();
-        sb.AppendLine("The commit should be empty, but it contains the following keys: ");
-        foreach (var (key, value) in _after)
+        sb.AppendLine($"The {txt} should be empty, but it contains the following keys: ");
+        foreach (var (key, value) in dict)
         {
             Key.ReadFrom(key, out Key k);
             sb.AppendLine($"- {k.ToString()}");
