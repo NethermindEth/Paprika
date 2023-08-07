@@ -164,8 +164,7 @@ public static partial class Node
 
         public override string ToString() =>
             $"{nameof(Leaf)} {{ " +
-            $"{nameof(Header)}: {Header.ToString()}, " +
-            $"{nameof(Path)}: {Path.ToString()}, " +
+            $"{nameof(Path)}: {Path.ToString()} " +
             $"}}";
     }
 

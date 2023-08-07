@@ -3,6 +3,7 @@ using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Data;
+using Paprika.Merkle;
 using Paprika.Utils;
 
 namespace Paprika.Tests.Merkle;
@@ -39,7 +40,29 @@ class Commit : ICommit
         foreach (var (key, value) in dict)
         {
             Key.ReadFrom(key, out Key k);
-            sb.AppendLine($"- {k.ToString()}");
+
+            sb.Append($"- {k.ToString()}");
+
+            if (k.Type == DataType.Merkle)
+            {
+                Node.ReadFrom(value, out var type, out var leaf, out var ext, out var branch);
+                switch (type)
+                {
+                    case Node.Type.Leaf:
+                        sb.Append($" {leaf.ToString()}");
+                        break;
+                    case Node.Type.Extension:
+                        sb.Append($" {ext.ToString()}");
+                        break;
+                    case Node.Type.Branch:
+                        sb.Append($" {branch.ToString()}");
+                        break;
+                }
+            }
+
+            sb.AppendLine();
+
+
         }
 
         Assert.Fail(sb.ToString());

@@ -265,25 +265,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
                     var childPath = path.SliceTo(newAt);
                     var childKey = Key.Merkle(childPath);
-                    using var childOwner = commit.Get(childKey);
-                    Node.ReadFrom(childOwner.Span, out var childType, out var childLeaf, out var childExt, out _);
 
-                    if (childType == Node.Type.Extension)
-                    {
-                        // it's E->E, merge extensions into a single extension with concatenated path
-                        commit.DeleteKey(childKey);
-                        commit.SetExtension(key,
-                            ext.Path.Append(childExt.Path, stackalloc byte[NibblePath.FullKeccakByteLength]));
-
-                        return DeleteStatus.NodeTypePreserved;
-                    }
-
-                    // it's E->L, merge them into a leaf
-                    commit.DeleteKey(childKey);
-                    commit.SetLeaf(key,
-                        ext.Path.Append(childLeaf.Path, stackalloc byte[NibblePath.FullKeccakByteLength]));
-
-                    return DeleteStatus.ExtensionToLeaf;
+                    return TransformExtension(childKey, commit, key, ext);
                 }
             case Node.Type.Branch:
                 {
@@ -366,6 +349,32 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
             default:
                 throw new ArgumentOutOfRangeException();
         }
+    }
+
+    /// <summary>
+    /// Transforms the extension either to a <see cref="Node.Type.Leaf"/> or to a longer <see cref="Node.Type.Extension"/>. 
+    /// </summary>
+    private static DeleteStatus TransformExtension(in Key childKey, ICommit commit, in Key key, in Node.Extension ext)
+    {
+        using var childOwner = commit.Get(childKey);
+        Node.ReadFrom(childOwner.Span, out var childType, out var childLeaf, out var childExt, out _);
+
+        if (childType == Node.Type.Extension)
+        {
+            // it's E->E, merge extensions into a single extension with concatenated path
+            commit.DeleteKey(childKey);
+            commit.SetExtension(key,
+                ext.Path.Append(childExt.Path, stackalloc byte[NibblePath.FullKeccakByteLength]));
+
+            return DeleteStatus.NodeTypePreserved;
+        }
+
+        // it's E->L, merge them into a leaf
+        commit.DeleteKey(childKey);
+        commit.SetLeaf(key,
+            ext.Path.Append(childLeaf.Path, stackalloc byte[NibblePath.FullKeccakByteLength]));
+
+        return DeleteStatus.ExtensionToLeaf;
     }
 
     private static void MarkPathDirty(in NibblePath path, ICommit commit)

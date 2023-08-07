@@ -335,7 +335,7 @@ public class DirtyTests
         commit.Squash(true).ShouldHaveSquashedStateEmpty();
     }
 
-    [TestCase(20)]
+    [TestCase(30)]
     public void Big_random_set_and_delete(int size)
     {
         const int seed = 19;
