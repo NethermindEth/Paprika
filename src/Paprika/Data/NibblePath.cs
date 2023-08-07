@@ -63,9 +63,6 @@ public readonly ref struct NibblePath
         return new NibblePath(key.BytesAsSpan, nibbleFrom, count - nibbleFrom);
     }
 
-    public static NibblePath FromNibble(in byte nibble, bool odd = false) =>
-        new(ref Unsafe.AsRef(in nibble), (byte)(odd ? 0 : OddBit), 1);
-
     private NibblePath(ReadOnlySpan<byte> key, int nibbleFrom, int length)
     {
         _span = ref Unsafe.Add(ref MemoryMarshal.GetReference(key), nibbleFrom / 2);

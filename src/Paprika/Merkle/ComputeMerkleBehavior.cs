@@ -323,10 +323,15 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                     Node.ReadFrom(onlyChildSpanOwner.Span, out var childType, out var childLeaf, out var childExt,
                         out _);
 
+                    var firstNibblePath =
+                        NibblePath
+                            .FromKey(stackalloc byte[1] { (byte)(onlyNibble << NibblePath.NibbleShift) })
+                            .SliceTo(1);
+
                     if (childType == Node.Type.Extension)
                     {
-                        var extensionPath = NibblePath.FromNibble(onlyNibble)
-                            .Append(childExt.Path, stackalloc byte[NibblePath.FullKeccakByteLength]);
+                        var extensionPath = firstNibblePath.Append(childExt.Path,
+                            stackalloc byte[NibblePath.FullKeccakByteLength]);
 
                         // the single child is an extension, make it an extension
                         commit.SetExtension(key, extensionPath);
@@ -335,8 +340,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                     }
 
                     // prepare the new leaf path
-                    var leafPath = NibblePath.FromNibble(onlyNibble)
-                        .Append(childLeaf.Path, stackalloc byte[NibblePath.FullKeccakByteLength]);
+                    var leafPath =
+                        firstNibblePath.Append(childLeaf.Path, stackalloc byte[NibblePath.FullKeccakByteLength]);
 
                     // replace branch with the leaf
                     commit.SetLeaf(key, leafPath);
@@ -354,10 +359,16 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
     /// <summary>
     /// Transforms the extension either to a <see cref="Node.Type.Leaf"/> or to a longer <see cref="Node.Type.Extension"/>. 
     /// </summary>
+    [SkipLocalsInit]
     private static DeleteStatus TransformExtension(in Key childKey, ICommit commit, in Key key, in Node.Extension ext)
     {
         using var childOwner = commit.Get(childKey);
-        Node.ReadFrom(childOwner.Span, out var childType, out var childLeaf, out var childExt, out _);
+
+        // TODO: this should be not needed but for some reason the ownership of the owner breaks memory safety here
+        Span<byte> copy = stackalloc byte[childOwner.Span.Length];
+        childOwner.Span.CopyTo(copy);
+
+        Node.ReadFrom(copy, out var childType, out var childLeaf, out var childExt, out _);
 
         if (childType == Node.Type.Extension)
         {
