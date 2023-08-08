@@ -17,12 +17,10 @@ public class Commit : ICommit
     private readonly Dictionary<byte[], byte[]> _history = new(Comparer);
     private readonly Dictionary<byte[], byte[]> _before = new(Comparer);
     private readonly Dictionary<byte[], byte[]> _after = new(Comparer);
-    
-    private bool _asserting;
-    
-    private static readonly BytesEqualityComparer Comparer = new();
 
-    public readonly ComputeMerkleBehavior Merkle = new();
+    private bool _asserting;
+
+    private static readonly BytesEqualityComparer Comparer = new();
 
     public void Set(in Key key, ReadOnlySpan<byte> value)
     {
@@ -66,8 +64,6 @@ public class Commit : ICommit
             }
 
             sb.AppendLine();
-
-
         }
 
         Assert.Fail(sb.ToString());
@@ -118,6 +114,39 @@ public class Commit : ICommit
             Key.ReadFrom(k, out var key);
             action(key, v, this);
         }
+    }
+
+    public KeyEnumerator GetSnapshotOfBefore() => new(_before.Keys.ToArray());
+
+    public ref struct KeyEnumerator
+    {
+        private readonly byte[][] _keys;
+        private int _index;
+
+        public KeyEnumerator(byte[][] keys)
+        {
+            _keys = keys;
+            _index = -1;
+        }
+
+        public bool MoveNext()
+        {
+            int index = _index + 1;
+            if (index < _keys.Length)
+            {
+                _index = index;
+                Key.ReadFrom(_keys[index], out var key);
+                Current = key;
+
+                return true;
+            }
+
+            return false;
+        }
+
+        public KeyEnumerator GetEnumerator() => this;
+
+        public Key Current { get; private set; }
     }
 
     /// <summary>
