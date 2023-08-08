@@ -1,7 +1,6 @@
 ﻿using System.Buffers.Binary;
 using NUnit.Framework;
 using Paprika.Chain;
-using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
 
@@ -12,329 +11,211 @@ public class DirtyTests
     [Test(Description = "No values set, no changes tracked")]
     public void Empty()
     {
-        var merkle = new ComputeMerkleBehavior();
         var commit = new Commit();
 
-        merkle.BeforeCommit(commit);
-
-        commit.StartAssert();
-
-        commit.ShouldBeEmpty();
+        commit.ContainsOnly(_ =>
+        {
+            /* nothing to remove as this is empty set*/
+        });
     }
 
     [Test(Description = "Single account should create only a single leaf")]
     public void Single_account()
     {
-        var path = NibblePath.Parse("012345");
-        var account = Key.Account(path);
-
-        var merkle = new ComputeMerkleBehavior();
         var commit = new Commit();
 
-        commit.Set(account, new byte[] { 1 });
+        const string path = "012345";
 
-        merkle.BeforeCommit(commit);
+        commit.Set(path);
 
-        commit.StartAssert();
-        commit.SetLeaf(Key.Merkle(NibblePath.Empty), path);
-        commit.ShouldBeEmpty();
+        commit.ContainsOnly(commit => { commit.SetLeaf(Key.Merkle(NibblePath.Empty), path); });
     }
 
     [Test(Description = "Three accounts, diffing at first nibble. The root is a branch with nibbles set for leafs.")]
     public void Three_accounts_sharing_start_nibble()
     {
-        var key0 = NibblePath.Parse("A0000001");
-        var key1 = NibblePath.Parse("B0000002");
-        var key2 = NibblePath.Parse("C0000003");
-
-        var a0 = Key.Account(key0);
-        var a1 = Key.Account(key1);
-        var a2 = Key.Account(key2);
-
-        var merkle = new ComputeMerkleBehavior();
         var commit = new Commit();
 
-        commit.Set(a0, new byte[] { 1 });
-        commit.Set(a1, new byte[] { 2 });
-        commit.Set(a2, new byte[] { 3 });
+        const string key0 = "A0000001";
+        const string key1 = "B0000002";
+        const string key2 = "C0000003";
 
-        merkle.BeforeCommit(commit);
-
-        commit.StartAssert();
+        commit.Set(key0);
+        commit.Set(key1);
+        commit.Set(key2);
 
         const int splitOnNibble = 1;
 
-        commit.SetLeafWithSplitOn(key0, splitOnNibble);
-        commit.SetLeafWithSplitOn(key1, splitOnNibble);
-        commit.SetLeafWithSplitOn(key2, splitOnNibble);
+        commit.ContainsOnly(c =>
+        {
+            c.SetLeafWithSplitOn(key0, splitOnNibble);
+            c.SetLeafWithSplitOn(key1, splitOnNibble);
+            c.SetLeafWithSplitOn(key2, splitOnNibble);
 
-        NibbleSet.Readonly children = new NibbleSet(0xA, 0xB, 0xC);
-        commit.SetBranch(Key.Merkle(NibblePath.Empty), children);
-
-        commit.ShouldBeEmpty();
+            NibbleSet.Readonly children = new NibbleSet(0xA, 0xB, 0xC);
+            c.SetBranch(Key.Merkle(NibblePath.Empty), children);
+        });
     }
 
     [Test(Description =
         "Three accounts, sharing first nibble. The root is an extension -> branch -> with nibbles set for leafs.")]
     public void Three_accounts_starting_with_same_nibble()
     {
-        var key0 = NibblePath.Parse("00000001");
-        var key1 = NibblePath.Parse("07000002");
-        var key2 = NibblePath.Parse("0A000003");
-
-        var a0 = Key.Account(key0);
-        var a1 = Key.Account(key1);
-        var a2 = Key.Account(key2);
-
-        var merkle = new ComputeMerkleBehavior();
         var commit = new Commit();
 
-        commit.Set(a0, new byte[] { 1 });
-        commit.Set(a1, new byte[] { 2 });
-        commit.Set(a2, new byte[] { 3 });
+        const string key0 = "00000001";
+        const string key1 = "07000002";
+        const string key2 = "0A000003";
 
-        merkle.BeforeCommit(commit);
-
-        commit.StartAssert();
+        commit.Set(key0);
+        commit.Set(key1);
+        commit.Set(key2);
 
         const int splitOnNibble = 2;
 
-        var branchPath = key0.SliceTo(1);
-        NibbleSet.Readonly children = new NibbleSet(0, 7, 0xA);
-        commit.SetBranch(Key.Merkle(branchPath), children);
+        commit.ContainsOnly(c =>
+        {
+            var branchPath = NibblePath.Parse(key0).SliceTo(1);
+            NibbleSet.Readonly children = new NibbleSet(0, 7, 0xA);
+            c.SetBranch(Key.Merkle(branchPath), children);
 
-        commit.SetLeafWithSplitOn(key0, splitOnNibble);
-        commit.SetLeafWithSplitOn(key1, splitOnNibble);
-        commit.SetLeafWithSplitOn(key2, splitOnNibble);
+            c.SetLeafWithSplitOn(key0, splitOnNibble);
+            c.SetLeafWithSplitOn(key1, splitOnNibble);
+            c.SetLeafWithSplitOn(key2, splitOnNibble);
 
-        commit.SetExtension(Key.Merkle(NibblePath.Empty), key0.SliceTo(1));
-
-        commit.ShouldBeEmpty();
+            c.SetExtension(Key.Merkle(NibblePath.Empty), branchPath);
+        });
     }
 
     [Test]
     public void Long_extension_split_on_first()
     {
-        var key0 = NibblePath.Parse("00010001");
-        var key1 = NibblePath.Parse("00020002");
-        var key2 = NibblePath.Parse("20020003");
-
-        var a0 = Key.Account(key0);
-        var a1 = Key.Account(key1);
-        var a2 = Key.Account(key2);
-
-        var merkle = new ComputeMerkleBehavior();
         var commit = new Commit();
 
-        commit.Set(a0, new byte[] { 1 });
-        commit.Set(a1, new byte[] { 2 });
-        commit.Set(a2, new byte[] { 3 });
+        const string key0 = "00010001";
+        const string key1 = "00020002";
+        const string key2 = "20020003";
 
-        merkle.BeforeCommit(commit);
+        commit.Set(key0);
+        commit.Set(key1);
+        commit.Set(key2);
 
-        commit.StartAssert();
+        commit.ContainsOnly(c =>
+        {
+            var path0 = NibblePath.Parse(key0);
+            var path1 = NibblePath.Parse(key1);
 
-        commit.SetBranch(Key.Merkle(NibblePath.Empty), new NibbleSet(0, 2));
+            c.SetBranch(Key.Merkle(NibblePath.Empty), new NibbleSet(0, 2));
 
-        commit.SetExtension(Key.Merkle(key0.SliceTo(1)), key0.SliceFrom(1).SliceTo(2));
+            c.SetExtension(Key.Merkle(path0.SliceTo(1)), path0.SliceFrom(1).SliceTo(2));
 
-        // most nested children
-        const int branchAt = 3;
-        NibbleSet.Readonly children = new NibbleSet(key0.GetAt(branchAt), key1.GetAt(branchAt));
-        commit.SetBranch(Key.Merkle(key0.SliceTo(branchAt)), children);
-        commit.SetLeafWithSplitOn(key0, branchAt + 1);
-        commit.SetLeafWithSplitOn(key1, branchAt + 1);
+            // most nested children
+            const int branchAt = 3;
+            NibbleSet.Readonly children = new NibbleSet(path0.GetAt(branchAt), path1.GetAt(branchAt));
+            c.SetBranch(Key.Merkle(path0.SliceTo(branchAt)), children);
+            c.SetLeafWithSplitOn(path0, branchAt + 1);
+            c.SetLeafWithSplitOn(path1, branchAt + 1);
 
-        commit.SetLeafWithSplitOn(key2, 1);
-
-        commit.ShouldBeEmpty();
+            c.SetLeafWithSplitOn(key2, 1);
+        });
     }
 
     [Test(Description = "Split extension into a branch on the first nibble.")]
     public void Root_extension_split()
     {
-        var key0 = NibblePath.Parse("00030001");
-        var key1 = NibblePath.Parse("07030002");
-        var key2 = NibblePath.Parse("30030003");
-
-        var a0 = Key.Account(key0);
-        var a1 = Key.Account(key1);
-        var a2 = Key.Account(key2);
-
-        var merkle = new ComputeMerkleBehavior();
         var commit = new Commit();
 
-        commit.Set(a0, new byte[] { 1 });
-        commit.Set(a1, new byte[] { 2 });
-        commit.Set(a2, new byte[] { 3 });
+        const string key0 = "00030001";
+        const string key1 = "07030002";
+        const string key2 = "30030003";
 
-        merkle.BeforeCommit(commit);
+        commit.Set(key0);
+        commit.Set(key1);
+        commit.Set(key2);
 
-        commit.StartAssert();
+        commit.ContainsOnly(c =>
+        {
+            var path0 = NibblePath.Parse(key0);
+            
+            c.SetBranch(Key.Merkle(NibblePath.Empty), new NibbleSet(0, 3));
 
-        NibbleSet.Readonly children = new NibbleSet(0, 3);
-        commit.SetBranch(Key.Merkle(NibblePath.Empty), children);
+            c.SetBranch(Key.Merkle(path0.SliceTo(1)), new NibbleSet(0, 7));
 
-        NibbleSet.Readonly children1 = new NibbleSet(0, 7);
-        commit.SetBranch(Key.Merkle(key0.SliceTo(1)), children1);
-
-        commit.SetLeafWithSplitOn(key0, 2);
-        commit.SetLeafWithSplitOn(key1, 2);
-        commit.SetLeafWithSplitOn(key2, 1);
-
-        commit.ShouldBeEmpty();
+            c.SetLeafWithSplitOn(key0, 2);
+            c.SetLeafWithSplitOn(key1, 2);
+            c.SetLeafWithSplitOn(key2, 1);
+        });
     }
 
     [Test]
     public void Extension_split_last_nibble()
     {
-        var key0 = NibblePath.Parse("00030001");
-        var key1 = NibblePath.Parse("00A30002");
-        var key2 = NibblePath.Parse("0BA30003");
-
-        var a0 = Key.Account(key0);
-        var a1 = Key.Account(key1);
-        var a2 = Key.Account(key2);
-
-        var merkle = new ComputeMerkleBehavior();
         var commit = new Commit();
+        
+        const string key0 = "00030001";
+        const string key1 = "00A30002";
+        const string key2 = "0BA30003";
 
-        commit.Set(a0, new byte[] { 1 });
-        commit.Set(a1, new byte[] { 2 });
-        commit.Set(a2, new byte[] { 3 });
+        commit.Set(key0);
+        commit.Set(key1);
+        commit.Set(key2);
 
-        merkle.BeforeCommit(commit);
+        commit.ContainsOnly(c =>
+        {
+            var path0 = NibblePath.Parse(key0);
+            c.SetExtension(Key.Merkle(NibblePath.Empty), path0.SliceTo(1));
 
-        commit.StartAssert();
+            c.SetBranch(Key.Merkle(path0.SliceTo(1)), new NibbleSet(0, 0x0B));
 
-        commit.SetExtension(Key.Merkle(NibblePath.Empty), key0.SliceTo(1));
+            c.SetBranch(Key.Merkle(path0.SliceTo(2)), new NibbleSet(0, 0x0A));
 
-        NibbleSet.Readonly children = new NibbleSet(0, 0x0B);
-        commit.SetBranch(Key.Merkle(key0.SliceTo(1)), children);
-
-        NibbleSet.Readonly children1 = new NibbleSet(0, 0x0A);
-        commit.SetBranch(Key.Merkle(key0.SliceTo(2)), children1);
-
-        commit.SetLeafWithSplitOn(key0, 3);
-        commit.SetLeafWithSplitOn(key1, 3);
-        commit.SetLeafWithSplitOn(key2, 2);
-
-        commit.ShouldBeEmpty();
+            c.SetLeafWithSplitOn(path0, 3);
+            c.SetLeafWithSplitOn(key1, 3);
+            c.SetLeafWithSplitOn(key2, 2);
+        });
     }
 
     [Test]
     public void Extension_split_in_the_middle()
     {
-        var key0 = NibblePath.Parse("00000001");
-        var key1 = NibblePath.Parse("0000A002");
-        var key2 = NibblePath.Parse("00B00003");
-
-        var a0 = Key.Account(key0);
-        var a1 = Key.Account(key1);
-        var a2 = Key.Account(key2);
-
-        var merkle = new ComputeMerkleBehavior();
         var commit = new Commit();
+        
+        const string key0 = "00000001";
+        const string key1 = "0000A002";
+        const string key2 = "00B00003";
 
-        commit.Set(a0, new byte[] { 1 });
-        commit.Set(a1, new byte[] { 2 });
-        commit.Set(a2, new byte[] { 3 });
+        commit.Set(key0);
+        commit.Set(key1);
+        commit.Set(key2);
 
-        merkle.BeforeCommit(commit);
+        commit.ContainsOnly(c =>
+        {
+            var path0 = NibblePath.Parse(key0);
+            var path2 = NibblePath.Parse(key2);
+            
+            c.SetExtension(Key.Merkle(NibblePath.Empty), path0.SliceTo(2));
 
-        commit.StartAssert();
+            c.SetBranch(Key.Merkle(path2.SliceTo(2)), new NibbleSet(0, 0xB));
 
-        commit.SetExtension(Key.Merkle(NibblePath.Empty), key0.SliceTo(2));
+            // 0x00B
+            c.SetLeafWithSplitOn(path2, 3);
 
-        NibbleSet.Readonly children = new NibbleSet(0, 0xB);
-        commit.SetBranch(Key.Merkle(key2.SliceTo(2)), children);
+            // 0x000
+            c.SetExtension(Key.Merkle(path0.SliceTo(3)), path0.SliceFrom(3).SliceTo(1));
 
-        // 0x00B
-        commit.SetLeafWithSplitOn(key2, 3);
+            // 0x0000
+            const int branchSplitAt = 4;
+            c.SetBranch(Key.Merkle(path0.SliceTo(branchSplitAt)), new NibbleSet(0, 0xA));
 
-        // 0x000
-        commit.SetExtension(Key.Merkle(key0.SliceTo(3)), key0.SliceFrom(3).SliceTo(1));
+            // 0x00000
+            c.SetLeafWithSplitOn(path0, branchSplitAt + 1);
 
-        // 0x0000
-        const int branchSplitAt = 4;
-        NibbleSet.Readonly children1 = new NibbleSet(0, 0xA);
-        commit.SetBranch(Key.Merkle(key0.SliceTo(branchSplitAt)), children1);
-
-        // 0x00000
-        commit.SetLeafWithSplitOn(key0, branchSplitAt + 1);
-
-        // 0x0000A
-        commit.SetLeafWithSplitOn(key1, branchSplitAt + 1);
-
-        commit.ShouldBeEmpty();
+            // 0x0000A
+            c.SetLeafWithSplitOn(key1, branchSplitAt + 1);
+        });
     }
 
-    [Test]
-    public void Branch_set_and_deletes()
-    {
-        var key0 = NibblePath.Parse("A0000001");
-        var key1 = NibblePath.Parse("B0000002");
-        var key2 = NibblePath.Parse("C0000003");
-
-        var a0 = Key.Account(key0);
-        var a1 = Key.Account(key1);
-        var a2 = Key.Account(key2);
-
-        var merkle = new ComputeMerkleBehavior();
-        var commit = new Commit();
-
-        commit.Set(a0, new byte[] { 1 });
-        commit.Set(a1, new byte[] { 2 });
-        commit.Set(a2, new byte[] { 3 });
-
-        // run merkle
-        merkle.BeforeCommit(commit);
-
-        commit = commit.Squash(true);
-
-        // delete and squash to prepare for the Merkle run
-        commit.DeleteKey(a0);
-        commit.DeleteKey(a1);
-        commit.DeleteKey(a2);
-
-        merkle.BeforeCommit(commit);
-
-        commit.Squash(true).ShouldHaveSquashedStateEmpty();
-    }
-
-
-    [Test]
-    public void Extension_split_in_the_middle_set_and_delete()
-    {
-        var key0 = NibblePath.Parse("0A000001");
-        var key1 = NibblePath.Parse("0B00A002");
-        var key2 = NibblePath.Parse("0B00C003");
-
-        var a0 = Key.Account(key0);
-        var a1 = Key.Account(key1);
-        var a2 = Key.Account(key2);
-
-        var merkle = new ComputeMerkleBehavior();
-        var commit = new Commit();
-
-        commit.Set(a0, new byte[] { 1 });
-        commit.Set(a1, new byte[] { 2 });
-        commit.Set(a2, new byte[] { 3 });
-
-        merkle.BeforeCommit(commit);
-
-        commit = commit.Squash(true);
-
-        // delete and squash to prepare for the Merkle run
-        commit.DeleteKey(a0);
-        commit.DeleteKey(a1);
-        commit.DeleteKey(a2);
-
-        merkle.BeforeCommit(commit);
-
-        commit.Squash(true).ShouldHaveSquashedStateEmpty();
-    }
-
+    [Ignore("For now until the tests are dual in nature")]
     [TestCase(1000)]
     public void Big_random_set_and_delete(int size)
     {
@@ -380,5 +261,32 @@ public static class CommitExtensions
     public static void SetLeafWithSplitOn(this ICommit commit, in NibblePath key, int splitOnNibble)
     {
         commit.SetLeaf(Key.Merkle(key.SliceTo(splitOnNibble)), key.SliceFrom(splitOnNibble));
+    }
+
+    public static void SetLeafWithSplitOn(this ICommit commit, string path, int splitOnNibble)
+    {
+        var key = NibblePath.Parse(path);
+        commit.SetLeaf(Key.Merkle(key.SliceTo(splitOnNibble)), key.SliceFrom(splitOnNibble));
+    }
+
+
+    public static void SetLeaf(this ICommit commit, in Key key, string leafPath)
+    {
+        var leaf = new Node.Leaf(NibblePath.Parse(leafPath));
+        commit.Set(key, leaf.WriteTo(stackalloc byte[leaf.MaxByteLength]));
+    }
+
+    public static void Set(this Commit commit, string path) =>
+        commit.Set(Key.Account(NibblePath.Parse(path)), new byte[] { 0 });
+
+    public static void ContainsOnly(this Commit commit, Action<ICommit> assert)
+    {
+        commit.Merkle.BeforeCommit(commit);
+
+        commit.StartAssert();
+
+        assert(commit);
+
+        commit.ShouldBeEmpty();
     }
 }

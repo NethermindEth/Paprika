@@ -11,13 +11,18 @@ namespace Paprika.Tests.Merkle;
 /// <summary>
 /// A commit mock used to provide the data and assert them when needed.
 /// </summary>
-class Commit : ICommit
+public class Commit : ICommit
 {
     // history <- before <- after
-    private readonly Dictionary<byte[], byte[]> _history = new(new BytesEqualityComparer());
-    private readonly Dictionary<byte[], byte[]> _before = new(new BytesEqualityComparer());
-    private readonly Dictionary<byte[], byte[]> _after = new(new BytesEqualityComparer());
+    private readonly Dictionary<byte[], byte[]> _history = new(Comparer);
+    private readonly Dictionary<byte[], byte[]> _before = new(Comparer);
+    private readonly Dictionary<byte[], byte[]> _after = new(Comparer);
+    
     private bool _asserting;
+    
+    private static readonly BytesEqualityComparer Comparer = new();
+
+    public readonly ComputeMerkleBehavior Merkle = new();
 
     public void Set(in Key key, ReadOnlySpan<byte> value)
     {
