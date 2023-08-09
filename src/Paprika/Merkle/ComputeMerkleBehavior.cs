@@ -141,7 +141,17 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
         ArrayPool<byte>.Shared.Return(bytes);
 
+        if (ShouldMemoizeBranchKeccak(key.Path))
+        {
+            commit.SetBranch(key, branch.Children, result);
+        }
+
         return result;
+    }
+
+    private static bool ShouldMemoizeBranchKeccak(NibblePath branchPath)
+    {
+        return false;
     }
 
     private static KeccakOrRlp EncodeExtension(in Key key, ICommit commit, scoped in Node.Extension ext,

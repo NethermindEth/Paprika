@@ -1,5 +1,7 @@
 using Paprika.Chain;
+using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.RLP;
 
 namespace Paprika.Merkle;
 
@@ -16,6 +18,13 @@ public static class CommitExtensions
 
     public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children)
     {
+        var branch = new Node.Branch(children);
+        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
+    }
+
+    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, KeccakOrRlp keccak)
+    {
+        throw new NotImplementedException();
         var branch = new Node.Branch(children);
         commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
     }
