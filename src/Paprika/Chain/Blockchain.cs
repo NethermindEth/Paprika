@@ -482,7 +482,7 @@ public class Blockchain : IAsyncDisposable
             {
                 foreach (var item in map)
                 {
-                    action(item.Key, this);
+                    action(item.Key, item.RawData, this);
                 }
             }
         }

@@ -2,8 +2,14 @@ using Paprika.Crypto;
 
 namespace Paprika.RLP;
 
+/// <summary>
+/// Represents a result of encoding a node in Trie. If it's length is shorter than 32 bytes, then it's an RLP.
+/// If it's equal or bigger, then it's its Keccak.
+/// </summary>
 public readonly ref struct KeccakOrRlp
 {
+    private const int NonKeccakOffset = 1;
+
     public enum Type : byte
     {
         Keccak = 0,
@@ -13,7 +19,9 @@ public readonly ref struct KeccakOrRlp
     public readonly Type DataType;
     private readonly Keccak _keccak;
 
-    public Span<byte> AsSpan() => _keccak.BytesAsSpan;
+    public Span<byte> Span => DataType == Type.Keccak
+        ? _keccak.BytesAsSpan
+        : _keccak.BytesAsSpan.Slice(NonKeccakOffset + _keccak.BytesAsSpan[0]);
 
     private KeccakOrRlp(Type dataType, scoped Span<byte> data)
     {
@@ -21,21 +29,22 @@ public readonly ref struct KeccakOrRlp
         _keccak = new Keccak(data);
     }
 
+    public static implicit operator KeccakOrRlp(Keccak keccak) => new(Type.Keccak, keccak.BytesAsSpan);
+
     public static KeccakOrRlp FromSpan(scoped Span<byte> data)
     {
         Span<byte> output = stackalloc byte[Keccak.Size];
 
         if (data.Length < 32)
         {
+            // encode length as teh first byte
             output[0] = (byte)data.Length;
-            data.CopyTo(output[1..]);
+            data.CopyTo(output[NonKeccakOffset..]);
             return new KeccakOrRlp(Type.Rlp, output);
         }
-        else
-        {
-            KeccakHash.ComputeHash(data, output);
-            return new KeccakOrRlp(Type.Keccak, output);
-        }
+
+        KeccakHash.ComputeHash(data, output);
+        return new KeccakOrRlp(Type.Keccak, output);
     }
 }
 

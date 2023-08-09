@@ -133,4 +133,6 @@ public ref struct RlpStream
                 return;
         }
     }
+
+    public override string ToString() => $"[{nameof(RlpStream)}|{Position}/{Length}]";
 }

@@ -6,6 +6,7 @@ namespace Paprika.RLP;
 public static class Rlp
 {
     public const int LengthOfKeccakRlp = 33;
+    public const int MaxLengthOfLength = 4;
 
     public static int LengthOf(UInt256 item)
     {
@@ -60,6 +61,6 @@ public static class Rlp
             return 3;
         }
 
-        return 4;
+        return MaxLengthOfLength;
     }
 }

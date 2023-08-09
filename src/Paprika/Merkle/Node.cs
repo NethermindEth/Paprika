@@ -1,9 +1,8 @@
-using System.Buffers.Binary;
 using System.Diagnostics;
-using System.Numerics;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
 using Paprika.Data;
+using static System.Diagnostics.Debug;
 
 namespace Paprika.Merkle;
 
@@ -44,7 +43,7 @@ public static partial class Node
 
     private static Header ValidateHeaderNodeType(Header header, Type expected)
     {
-        Debug.Assert(header.NodeType == expected, $"Expected {nameof(Header)} with {nameof(Type)} {expected}, got {header.NodeType}");
+        Assert(header.NodeType == expected, $"Expected {nameof(Header)} with {nameof(Type)} {expected}, got {header.NodeType}");
 
         return header;
     }
@@ -117,25 +116,23 @@ public static partial class Node
 
     public readonly ref partial struct Leaf
     {
-        public int MaxByteLength => Header.Size + Path.MaxByteLength + Keccak.Size;
+        public int MaxByteLength => Header.Size + Path.MaxByteLength;
 
         public readonly Header Header;
         public readonly NibblePath Path;
-        public readonly Keccak Keccak;
 
-        private Leaf(Header header, NibblePath path, Keccak keccak)
+        private Leaf(Header header, NibblePath path)
         {
             ValidateHeaderNodeType(header, Type.Leaf);
             Header = header;
             Path = path;
-            Keccak = keccak;
         }
 
-        public Leaf(NibblePath path, Keccak keccak)
+        public Leaf(NibblePath path)
         {
-            Header = new Header(Type.Leaf);
+            // leaves shall never be marked as dirty or not. This information will be held by branch
+            Header = new Header(Type.Leaf, false);
             Path = path;
-            Keccak = keccak;
         }
 
         public Span<byte> WriteTo(Span<byte> output)
@@ -148,7 +145,6 @@ public static partial class Node
         {
             var leftover = Header.WriteToWithLeftover(output);
             leftover = Path.WriteToWithLeftover(leftover);
-            leftover = Keccak.WriteToWithLeftover(leftover);
 
             return leftover;
         }
@@ -157,22 +153,18 @@ public static partial class Node
         {
             var leftover = Header.ReadFrom(source, out var header);
             leftover = NibblePath.ReadFrom(leftover, out var path);
-            leftover = Keccak.ReadFrom(leftover, out var keccak);
 
-            leaf = new Leaf(header, path, keccak);
+            leaf = new Leaf(header, path);
             return leftover;
         }
 
         public bool Equals(in Leaf other) =>
             Header.Equals(other.Header)
-            && Path.Equals(other.Path)
-            && Keccak.Equals(other.Keccak);
+            && Path.Equals(other.Path);
 
         public override string ToString() =>
             $"{nameof(Leaf)} {{ " +
-            $"{nameof(Header)}: {Header.ToString()}, " +
-            $"{nameof(Path)}: {Path.ToString()}, " +
-            $"{nameof(Keccak)}: {Keccak} " +
+            $"{nameof(Path)}: {Path.ToString()} " +
             $"}}";
     }
 
@@ -232,75 +224,75 @@ public static partial class Node
 
     public readonly ref struct Branch
     {
-        public int MaxByteLength => Header.Size + sizeof(ushort) + (HeaderHasKeccak(Header) ? Keccak.Size : 0);
-        private const int NibbleBitSetSize = sizeof(ushort);
+        public int MaxByteLength => Header.Size +
+                                    NibbleSet.MaxByteSize +
+                                    (HeaderHasKeccak(Header) ? Keccak.Size : 0);
 
         private const int HeaderMetadataKeccakMask = 0b0001;
         private const int NoKeccak = 0;
-        private const int HasKeccak = 1;
+        private const int KeccakSet = 1;
 
         public readonly Header Header;
-        public readonly ushort NibbleBitSet;
+        public readonly NibbleSet.Readonly Children;
         public readonly Keccak Keccak;
 
-        // TODO: What interface do we want to expose for nibbles?
-        // Options:
-        // - `IEnumerable<byte>` with all nibbles is not possible
-        // - `byte[]` with all nibbles
-        // - `bool HasNibble(byte nibble)` to lookup a single nibble at a time
-        public bool HasNibble(byte nibble) => (NibbleBitSet & (1 << nibble)) != 0;
-
-        private Branch(Header header, ushort nibbleBitSet, Keccak keccak)
+        private Branch(Header header, NibbleSet.Readonly children, Keccak keccak)
         {
             Header = ValidateHeaderKeccak(ValidateHeaderNodeType(header, Type.Branch), shouldHaveKeccak: true);
-            NibbleBitSet = ValidateNibbleBitSet(nibbleBitSet);
+            Children = children;
             Keccak = keccak;
         }
 
-        private Branch(Header header, ushort nibbleBitSet)
+        private Branch(Header header, NibbleSet.Readonly children)
         {
             Header = ValidateHeaderKeccak(header, shouldHaveKeccak: false);
-            NibbleBitSet = ValidateNibbleBitSet(nibbleBitSet);
+            Children = children;
             Keccak = default;
         }
 
-        public Branch(ushort nibbleBitSet, Keccak keccak)
+        public Branch(NibbleSet.Readonly children, Keccak keccak)
         {
-            Header = new Header(Type.Branch, metadata: HasKeccak);
-            NibbleBitSet = ValidateNibbleBitSet(nibbleBitSet);
+            Header = new Header(Type.Branch, metadata: KeccakSet);
+
+            Assert(children);
+
+            Children = children;
             Keccak = keccak;
         }
 
-        public Branch(ushort nibbleBitSet)
+        private static void Assert(NibbleSet.Readonly set)
         {
-            Header = new Header(Type.Branch, metadata: NoKeccak);
-            NibbleBitSet = ValidateNibbleBitSet(nibbleBitSet);
-            Keccak = default;
+            if (set.SetCount < 2)
+            {
+                throw new ArgumentException($"At least two nibbles should be set, but only {set.SetCount} were found");
+            }
         }
 
-        private static ushort ValidateNibbleBitSet(ushort nibbleBitSet)
+        public Branch(NibbleSet.Readonly children)
         {
-            var count = BitOperations.PopCount(nibbleBitSet);
-            if (count < 2)
-            {
-                throw new ArgumentException("At least two nibbles should be set, but only {count} were found", nameof(nibbleBitSet));
-            }
+            Header = new Header(Type.Branch, metadata: NoKeccak);
 
-            return nibbleBitSet;
+            Assert(children);
+
+            Children = children;
+            Keccak = default;
         }
 
         private static Header ValidateHeaderKeccak(Header header, bool shouldHaveKeccak)
         {
-            var expected = shouldHaveKeccak ? HasKeccak : NoKeccak;
+            var expected = shouldHaveKeccak ? KeccakSet : NoKeccak;
             var actual = header.Metadata & HeaderMetadataKeccakMask;
 
-            Debug.Assert(actual == expected, $"Expected {nameof(Header)} to have {nameof(Keccak)} = {shouldHaveKeccak}, got {!shouldHaveKeccak}");
+            Debug.Assert(actual == expected,
+                $"Expected {nameof(Header)} to have {nameof(Keccak)} = {shouldHaveKeccak}, got {!shouldHaveKeccak}");
 
             return header;
         }
 
+        public bool HasKeccak => HeaderHasKeccak(Header);
+
         private static bool HeaderHasKeccak(Header header) =>
-            (header.Metadata & HeaderMetadataKeccakMask) == HasKeccak;
+            (header.Metadata & HeaderMetadataKeccakMask) == KeccakSet;
 
         public Span<byte> WriteTo(Span<byte> output)
         {
@@ -311,9 +303,7 @@ public static partial class Node
         public Span<byte> WriteToWithLeftover(Span<byte> output)
         {
             var leftover = Header.WriteToWithLeftover(output);
-
-            BinaryPrimitives.WriteUInt16LittleEndian(leftover, NibbleBitSet);
-            leftover = leftover.Slice(NibbleBitSetSize);
+            leftover = Children.WriteToWithLeftover(leftover);
 
             if (HeaderHasKeccak(Header))
             {
@@ -327,17 +317,16 @@ public static partial class Node
         {
             var leftover = Header.ReadFrom(source, out var header);
 
-            var nibbleBitSet = BinaryPrimitives.ReadUInt16LittleEndian(leftover);
-            leftover = leftover.Slice(NibbleBitSetSize);
+            leftover = NibbleSet.Readonly.ReadFrom(leftover, out var children);
 
             if (HeaderHasKeccak(header))
             {
                 leftover = Keccak.ReadFrom(leftover, out var keccak);
-                branch = new Branch(header, nibbleBitSet, keccak);
+                branch = new Branch(header, children, keccak);
             }
             else
             {
-                branch = new Branch(header, nibbleBitSet);
+                branch = new Branch(header, children);
             }
 
             return leftover;
@@ -346,14 +335,14 @@ public static partial class Node
         public bool Equals(in Branch other)
         {
             return Header.Equals(other.Header)
-                   && NibbleBitSet.Equals(other.NibbleBitSet)
+                   && Children.Equals(other.Children)
                    && Keccak.Equals(other.Keccak);
         }
 
         public override string ToString() =>
             $"{nameof(Branch)} {{ " +
             $"{nameof(Header)}: {Header.ToString()}, " +
-            $"{nameof(NibbleBitSet)}: {NibbleBitSet}, " +
+            $"{nameof(Children)}: {Children}, " +
             $"{nameof(Keccak)}: {Keccak} " +
             $"}}";
     }

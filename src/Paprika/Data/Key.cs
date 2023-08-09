@@ -87,6 +87,33 @@ public readonly ref partial struct Key
         return Type == key.Type && AdditionalKey.SequenceEqual(key.AdditionalKey) && Path.Equals(key.Path);
     }
 
+    private const int TypeByteLength = 1;
+
+    public int MaxByteLength => TypeByteLength + Path.MaxByteLength + AdditionalKey.MaxByteLength();
+
+    /// <summary>
+    /// Writes the span to the destination.
+    /// </summary>
+    /// <returns>The leftover.</returns>
+    public Span<byte> WriteTo(Span<byte> destination)
+    {
+        destination[0] = (byte)Type;
+        var leftover = Path.WriteToWithLeftover(destination.Slice(1));
+        leftover = AdditionalKey.WriteToWithLeftover(leftover);
+
+        var written = destination.Length - leftover.Length;
+        return destination.Slice(0, written);
+    }
+
+    public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Key key)
+    {
+        var type = (DataType)source[0];
+        var leftover = NibblePath.ReadFrom(source.Slice(1), out var path);
+        leftover = SpanSerialization.ReadFrom(leftover, out var additionalKey);
+        key = new Key(path, type, additionalKey);
+        return leftover;
+    }
+
     public override string ToString()
     {
         return $"{nameof(Path)}: {Path.ToString()}, " +

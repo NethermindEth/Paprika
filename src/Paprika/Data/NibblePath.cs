@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
@@ -28,6 +29,19 @@ public readonly ref struct NibblePath
     private readonly byte _odd;
 
     public static NibblePath Empty => default;
+
+    public static NibblePath Parse(string hex)
+    {
+        var nibbles = new byte[(hex.Length + 1) / 2];
+        var path = FromKey(nibbles).SliceTo(hex.Length);
+
+        for (var i = 0; i < hex.Length; i++)
+        {
+            path.UnsafeSetAt(i, 0, byte.Parse(hex.AsSpan(i, 1), NumberStyles.HexNumber));
+        }
+
+        return path;
+    }
 
     public static NibblePath FromKey(ReadOnlySpan<byte> key, int nibbleFrom = 0)
     {
@@ -82,7 +96,7 @@ public readonly ref struct NibblePath
     }
 
     /// <summary>
-    /// Writes the nibbles to the destination.
+    /// Writes the nibbles to the destination.  
     /// </summary>
     /// <param name="destination"></param>
     /// <returns>The actual bytes written.</returns>
@@ -100,6 +114,15 @@ public readonly ref struct NibblePath
         destination[0] = (byte)(odd | (Length << LengthShift));
 
         MemoryMarshal.CreateSpan(ref _span, lenght).CopyTo(destination.Slice(PreambleLength));
+
+        // clearing the oldest nibble, if needed
+        // yes, it can be branch free
+        if (((odd + Length) & 1) == 1)
+        {
+            ref var oldest = ref destination[lenght];
+            oldest = (byte)(oldest & 0b1111_0000);
+        }
+
         return lenght + PreambleLength;
     }
 
@@ -122,29 +145,30 @@ public readonly ref struct NibblePath
     /// </summary>
     public NibblePath SliceTo(int length) => new(ref _span, _odd, (byte)length);
 
-    public byte GetAt(int nibble)
-    {
-        ref var b = ref Unsafe.Add(ref _span, (nibble + _odd) / 2);
-        return (byte)((b >> GetShift(nibble)) & NibbleMask);
-    }
+    public byte this[int nibble] => GetAt(nibble);
 
-    private int GetShift(int nibble)
-    {
-        return (1 - ((nibble + _odd) & OddBit)) * NibbleShift;
-    }
+    public byte GetAt(int nibble) => (byte)((GetRefAt(nibble) >> GetShift(nibble)) & NibbleMask);
+
+    private int GetShift(int nibble) => (1 - ((nibble + _odd) & OddBit)) * NibbleShift;
 
     /// <summary>
-    /// Moves into arbitrary direction. 
+    /// Sets a <paramref name="value"/> of the nibble at the given <paramref name="nibble"/> location.
+    /// This is unsafe. Use only for owned memory. 
     /// </summary>
     public void UnsafeSetAt(int nibble, byte countOdd, byte value)
     {
-        ref var b = ref Unsafe.Add(ref _span, (nibble + _odd) / 2);
+        ref var b = ref GetRefAt(nibble);
         var shift = GetShift(nibble + countOdd);
         var mask = NibbleMask << shift;
 
         b = (byte)((b & ~mask) | (value << shift));
     }
 
+    private ref byte GetRefAt(int nibble) => ref Unsafe.Add(ref _span, (nibble + _odd) / 2);
+
+    /// <summary>
+    /// Copies the path in an unsafe manner, by reusing the reference but changing the count.
+    /// </summary>
     public NibblePath CopyWithUnsafePointerMoveBack(int nibbleCount)
     {
         var odd = (byte)((_odd ^ nibbleCount) & 1);
@@ -152,6 +176,49 @@ public readonly ref struct NibblePath
         var count = shiftBack / 2;
 
         return new NibblePath(ref Unsafe.Add(ref _span, count), odd, (byte)(Length + nibbleCount));
+    }
+
+    /// <summary>
+    /// Appends a <paramref name="nibble"/> to the end of the path,
+    /// using the <paramref name="workingSet"/> as the underlying memory for the new new <see cref="NibblePath"/>.
+    /// </summary>
+    /// <remarks>
+    /// The copy is required as the original path can be based on the readonly memory.
+    /// </remarks>
+    /// <returns>The newly copied nibble path.</returns>
+    public NibblePath AppendNibble(byte nibble, Span<byte> workingSet)
+    {
+        if (workingSet.Length <= MaxByteLength)
+        {
+            throw new ArgumentException("Not enough memory to append");
+        }
+
+        WriteTo(workingSet);
+
+        var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(Length + 1));
+        appended.UnsafeSetAt(Length, 0, nibble);
+        return appended;
+    }
+
+    /// <summary>
+    /// Appends the <see cref="other"/> path using the <paramref name="workingSet"/> as the working memory.
+    /// </summary>
+    public NibblePath Append(in NibblePath other, Span<byte> workingSet)
+    {
+        if (workingSet.Length <= MaxByteLength)
+        {
+            throw new ArgumentException("Not enough memory to append");
+        }
+
+        WriteTo(workingSet);
+
+        var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(Length + other.Length));
+        for (int i = 0; i < other.Length; i++)
+        {
+            appended.UnsafeSetAt(Length + i, 0, other[i]);
+        }
+
+        return appended;
     }
 
     public byte FirstNibble => (byte)((_span >> ((1 - _odd) * NibbleShift)) & NibbleMask);
