@@ -82,6 +82,8 @@ public readonly ref struct NibblePath
     /// </summary>
     public int MaxByteLength => Length / 2 + 2;
 
+    public const int KeccakNibbleCount = Keccak.Size * NibblePerByte;
+
     public const int FullKeccakByteLength = Keccak.Size / 2 + 2;
 
     /// <summary>

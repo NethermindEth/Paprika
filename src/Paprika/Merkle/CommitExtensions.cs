@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -24,8 +25,10 @@ public static class CommitExtensions
 
     public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, KeccakOrRlp keccak)
     {
-        throw new NotImplementedException();
-        var branch = new Node.Branch(children);
+        Debug.Assert(keccak.DataType == KeccakOrRlp.Type.Keccak);
+        var actual = new Keccak(keccak.Span);
+
+        var branch = new Node.Branch(children, actual);
         commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
     }
 
