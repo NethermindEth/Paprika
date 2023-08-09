@@ -218,7 +218,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         using var owner = commit.Get(key);
         if (owner.IsEmpty)
         {
-            Debug.Fail($"No key in db for path {path.ToString()}");
             return DeleteStatus.KeyDoesNotExist;
         }
 
@@ -236,7 +235,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         return DeleteStatus.LeafDeleted;
                     }
 
-                    Debug.Fail($"Fail to delete leaf: {path.ToString()}");
                     return DeleteStatus.KeyDoesNotExist;
                 }
             case Node.Type.Extension:
@@ -245,7 +243,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                     if (diffAt != ext.Path.Length)
                     {
                         // the path does not follow the extension path. It does not exist
-                        Debug.Fail($"Fail to delete extension {path.ToString()}");
                         return DeleteStatus.KeyDoesNotExist;
                     }
 
@@ -276,7 +273,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                     var nibble = path[at];
                     if (!branch.Children[nibble])
                     {
-                        Debug.Fail($"Fail to delete child with path {path.ToString()}");
                         // no such child
                         return DeleteStatus.KeyDoesNotExist;
                     }
@@ -336,6 +332,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                     {
                         var extensionPath = firstNibblePath.Append(childExt.Path,
                             stackalloc byte[NibblePath.FullKeccakByteLength]);
+
+                        // delete the only child
+                        commit.DeleteKey(onlyChildKey);
 
                         // the single child is an extension, make it an extension
                         commit.SetExtension(key, extensionPath);

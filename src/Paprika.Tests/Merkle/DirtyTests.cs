@@ -276,7 +276,7 @@ public class DirtyTests
     [Test]
     public void Big_random_set_and_delete()
     {
-        const int size = 1000;
+        const int size = 100000;
         const int seed = 19;
         var commit = new Commit();
 
