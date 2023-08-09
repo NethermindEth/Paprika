@@ -226,7 +226,7 @@ public class DirtyTests
     }
 
     [Test]
-    public void Branch_with_extension_child()
+    public void Branch_with_extension_child_even()
     {
         var commit = new Commit();
 
@@ -249,44 +249,51 @@ public class DirtyTests
         });
     }
 
-    [Ignore("For now until the tests are dual in nature")]
-    [TestCase(1000)]
-    public void Big_random_set_and_delete(int size)
+    [Test]
+    public void Branch_with_extension_child_odd()
     {
-        const int seed = 19;
+        var commit = new Commit();
 
-        var merkle = new ComputeMerkleBehavior();
+        const string key0 = "A0001001";
+        const string key1 = "B0002002";
+        const string key2 = "C0003003";
+        const string key3 = "C0004003";
+
+        commit.Set(key0);
+        commit.Set(key1);
+        commit.Set(key2);
+        commit.Set(key3);
+
+        Assert(commit, c =>
+        {
+            if (_delete == false)
+            {
+                NUnit.Framework.Assert.Ignore("No asserting for non-delete scenario");
+            }
+        });
+    }
+
+    [Test]
+    public void Big_random_set_and_delete()
+    {
+        const int size = 1000;
+        const int seed = 19;
         var commit = new Commit();
 
         var random = new Random(seed);
-        Span<byte> value = stackalloc byte[sizeof(int)];
 
-        for (int i = 0; i < size; i++)
+        for (var i = 0; i < size; i++)
         {
-            BinaryPrimitives.WriteInt32LittleEndian(value, i);
-            var path = NibblePath.FromKey(random.NextKeccak());
-            var key = Key.Account(path);
-            commit.Set(key, value);
+            commit.Set(NibblePath.FromKey(random.NextKeccak()));
         }
 
-        merkle.BeforeCommit(commit);
-
-        commit = commit.Squash(true);
-
-        // delete
-        random = new Random(seed);
-
-        for (int i = 0; i < size; i++)
+        Assert(commit, c =>
         {
-            var path = NibblePath.FromKey(random.NextKeccak());
-            var key = Key.Account(path);
-            commit.DeleteKey(key);
-        }
-
-        // delete and squash to prepare for the Merkle run
-        merkle.BeforeCommit(commit);
-
-        commit.Squash(true).ShouldHaveSquashedStateEmpty();
+            if (_delete == false)
+            {
+                NUnit.Framework.Assert.Ignore("No asserting for non-delete scenario");
+            }
+        });
     }
 
     private void Assert(Commit commit, Action<ICommit> assert)
@@ -349,8 +356,7 @@ public static class CommitExtensions
         commit.Set(key, leaf.WriteTo(stackalloc byte[leaf.MaxByteLength]));
     }
 
-    public static void Set(this Commit commit, string path) =>
-        commit.Set(Key.Account(NibblePath.Parse(path)), new byte[] { 0 });
+    public static void Set(this Commit commit, string path) => commit.Set(NibblePath.Parse(path));
 
-
+    public static void Set(this Commit commit, in NibblePath path) => commit.Set(Key.Account(path), new byte[] { 0 });
 }
