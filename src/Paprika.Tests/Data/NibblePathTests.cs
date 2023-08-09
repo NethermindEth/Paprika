@@ -254,4 +254,45 @@ public class NibblePathTests
 
         Console.WriteLine(path.ToString());
     }
+
+    [Test]
+    public void PrependNibble_odd()
+    {
+        const byte first = 0xDC;
+        const byte second = 0xBA;
+        const byte nibble = 0xE;
+
+        Span<byte> span = stackalloc byte[2] { first, second };
+        var path = NibblePath.FromKey(span, 1);
+
+        var firstNibblePath =
+            NibblePath
+                .FromKey(stackalloc byte[1] { nibble << NibblePath.NibbleShift })
+                .SliceTo(1);
+
+        var appended = firstNibblePath.Append(path, stackalloc byte[NibblePath.FullKeccakByteLength]);
+        Span<byte> expected = stackalloc byte[2] { (nibble << NibblePath.NibbleShift) | (first & 0x0F), second };
+
+        NibblePath.FromKey(expected).Equals(appended);
+    }
+
+    [Test]
+    public void PrependNibble_even()
+    {
+        const byte first = 0xDC;
+        const byte nibble = 0xE;
+
+        Span<byte> span = stackalloc byte[1] { first };
+        var path = NibblePath.FromKey(span, 1);
+
+        var firstNibblePath =
+            NibblePath
+                .FromKey(stackalloc byte[1] { nibble << NibblePath.NibbleShift })
+                .SliceTo(1);
+
+        var appended = firstNibblePath.Append(path, stackalloc byte[NibblePath.FullKeccakByteLength]);
+        Span<byte> expected = stackalloc byte[2] { nibble, first };
+
+        NibblePath.FromKey(expected).SliceFrom(1).Equals(appended);
+    }
 }

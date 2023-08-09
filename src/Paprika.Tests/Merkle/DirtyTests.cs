@@ -11,12 +11,11 @@ namespace Paprika.Tests.Merkle;
 [TestFixture(false, TestName = "Asserting Merkle structure")]
 public class DirtyTests
 {
-    [field: ThreadStatic]
-    public static bool Delete { get; private set; }
+    private readonly bool _delete;
 
     public DirtyTests(bool delete)
     {
-        Delete = delete;
+        _delete = delete;
     }
 
     [Test(Description = "No values set, no changes tracked")]
@@ -24,7 +23,7 @@ public class DirtyTests
     {
         var commit = new Commit();
 
-        commit.Assert(_ =>
+        Assert(commit, _ =>
         {
             /* nothing to remove as this is empty set*/
         });
@@ -39,7 +38,7 @@ public class DirtyTests
 
         commit.Set(path);
 
-        commit.Assert(c => c.SetLeaf(Key.Merkle(NibblePath.Empty), path));
+        Assert(commit, c => c.SetLeaf(Key.Merkle(NibblePath.Empty), path));
     }
 
     [Test(Description = "Three accounts, diffing at first nibble. The root is a branch with nibbles set for leafs.")]
@@ -57,7 +56,7 @@ public class DirtyTests
 
         const int splitOnNibble = 1;
 
-        commit.Assert(c =>
+        Assert(commit, c =>
         {
             c.SetLeafWithSplitOn(key0, splitOnNibble);
             c.SetLeafWithSplitOn(key1, splitOnNibble);
@@ -84,7 +83,7 @@ public class DirtyTests
 
         const int splitOnNibble = 2;
 
-        commit.Assert(c =>
+        Assert(commit, c =>
         {
             var branchPath = NibblePath.Parse(key0).SliceTo(1);
             NibbleSet.Readonly children = new NibbleSet(0, 7, 0xA);
@@ -111,7 +110,7 @@ public class DirtyTests
         commit.Set(key1);
         commit.Set(key2);
 
-        commit.Assert(c =>
+        Assert(commit, c =>
         {
             var path0 = NibblePath.Parse(key0);
             var path1 = NibblePath.Parse(key1);
@@ -144,7 +143,7 @@ public class DirtyTests
         commit.Set(key1);
         commit.Set(key2);
 
-        commit.Assert(c =>
+        Assert(commit, c =>
         {
             var path0 = NibblePath.Parse(key0);
 
@@ -171,7 +170,7 @@ public class DirtyTests
         commit.Set(key1);
         commit.Set(key2);
 
-        commit.Assert(c =>
+        Assert(commit, c =>
         {
             var path0 = NibblePath.Parse(key0);
             c.SetExtension(Key.Merkle(NibblePath.Empty), path0.SliceTo(1));
@@ -199,7 +198,7 @@ public class DirtyTests
         commit.Set(key1);
         commit.Set(key2);
 
-        commit.Assert(c =>
+        Assert(commit, c =>
         {
             var path0 = NibblePath.Parse(key0);
             var path2 = NibblePath.Parse(key2);
@@ -223,6 +222,30 @@ public class DirtyTests
 
             // 0x0000A
             c.SetLeafWithSplitOn(key1, branchSplitAt + 1);
+        });
+    }
+
+    [Test]
+    public void Branch_with_extension_child()
+    {
+        var commit = new Commit();
+
+        const string key0 = "A0010001";
+        const string key1 = "B0020002";
+        const string key2 = "C0030003";
+        const string key3 = "C0040003";
+
+        commit.Set(key0);
+        commit.Set(key1);
+        commit.Set(key2);
+        commit.Set(key3);
+
+        Assert(commit, c =>
+        {
+            if (_delete == false)
+            {
+                NUnit.Framework.Assert.Ignore("No asserting for non-delete scenario");
+            }
         });
     }
 
@@ -265,6 +288,45 @@ public class DirtyTests
 
         commit.Squash(true).ShouldHaveSquashedStateEmpty();
     }
+
+    private void Assert(Commit commit, Action<ICommit> assert)
+    {
+        var merkle = new ComputeMerkleBehavior();
+
+        // run merkle before
+        merkle.BeforeCommit(commit);
+
+        if (_delete)
+        {
+            // get all the keys inserted before merkle
+            var keys = commit.GetSnapshotOfBefore();
+
+            // squash commit to the history
+            commit = commit.Squash(true);
+
+            // delete all the keys that were set initially to get clean slate
+            foreach (var key in keys)
+            {
+                commit.DeleteKey(key);
+            }
+
+            // run Merkle it again to undo the structure
+            merkle.BeforeCommit(commit);
+        }
+
+        if (!_delete)
+        {
+            commit.StartAssert();
+            assert(commit);
+            commit.ShouldBeEmpty();
+        }
+        else
+        {
+            // delete should have everything removed
+            commit = commit.Squash(true);
+            commit.ShouldHaveSquashedStateEmpty();
+        }
+    }
 }
 
 public static class CommitExtensions
@@ -290,42 +352,5 @@ public static class CommitExtensions
     public static void Set(this Commit commit, string path) =>
         commit.Set(Key.Account(NibblePath.Parse(path)), new byte[] { 0 });
 
-    public static void Assert(this Commit commit, Action<ICommit> assert)
-    {
-        var merkle = new ComputeMerkleBehavior();
 
-        // run merkle before
-        merkle.BeforeCommit(commit);
-
-        if (DirtyTests.Delete)
-        {
-            // get all the keys inserted before merkle
-            var keys = commit.GetSnapshotOfBefore();
-
-            // squash commit to the history
-            commit = commit.Squash(true);
-
-            // delete all the keys that were set initially to get clean slate
-            foreach (var key in keys)
-            {
-                commit.DeleteKey(key);
-            }
-
-            // run Merkle it again to undo the structure
-            merkle.BeforeCommit(commit);
-        }
-
-        if (!DirtyTests.Delete)
-        {
-            commit.StartAssert();
-            assert(commit);
-            commit.ShouldBeEmpty();
-        }
-        else
-        {
-            // delete should have everything removed
-            commit = commit.Squash(true);
-            commit.ShouldHaveSquashedStateEmpty();
-        }
-    }
 }
