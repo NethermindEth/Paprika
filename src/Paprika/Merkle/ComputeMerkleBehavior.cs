@@ -162,7 +162,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
     private bool ShouldMemoizeBranchKeccak(in NibblePath branchPath)
     {
-        var level = NibblePath.KeccakNibbleCount - branchPath.Length - _minimumTreeLevelToMemoizeKeccak;
+        var level = branchPath.Length - _minimumTreeLevelToMemoizeKeccak;
 
         // memoize only if the branch is deeper than _minimumTreeLevelToMemoizeKeccak and every _memoizeKeccakEvery
         return level >= 0 && level % _memoizeKeccakEvery == 0;
