@@ -26,11 +26,20 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
     /// </remarks>
     private const int MaxBufferNeeded = 1024;
 
-    private readonly bool _fullMerkle;
+    public const int DefaultMinimumTreeLevelToMemoizeKeccak = 2;
+    public const int MemoizeKeccakEveryNLevel = 2;
 
-    public ComputeMerkleBehavior(bool fullMerkle = false)
+    private readonly bool _fullMerkle;
+    private readonly int _minimumTreeLevelToMemoizeKeccak;
+    private readonly int _memoizeKeccakEvery;
+
+    public ComputeMerkleBehavior(bool fullMerkle = false,
+        int minimumTreeLevelToMemoizeKeccak = DefaultMinimumTreeLevelToMemoizeKeccak,
+        int memoizeKeccakEvery = MemoizeKeccakEveryNLevel)
     {
         _fullMerkle = fullMerkle;
+        _minimumTreeLevelToMemoizeKeccak = minimumTreeLevelToMemoizeKeccak;
+        _memoizeKeccakEvery = memoizeKeccakEvery;
     }
 
     public void BeforeCommit(ICommit commit)
@@ -52,7 +61,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
     public Keccak RootHash { get; private set; }
 
     [SkipLocalsInit]
-    private static KeccakOrRlp Compute(in Key key, ICommit commit, TrieType trieType)
+    private KeccakOrRlp Compute(in Key key, ICommit commit, TrieType trieType)
     {
         using var owner = commit.Get(key);
         if (owner.IsEmpty)
@@ -96,7 +105,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         return keccakOrRlp;
     }
 
-    private static KeccakOrRlp EncodeBranch(Key key, ICommit commit, scoped in Node.Branch branch, TrieType trieType)
+    private KeccakOrRlp EncodeBranch(Key key, ICommit commit, scoped in Node.Branch branch, TrieType trieType)
     {
         var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
 
@@ -141,10 +150,25 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
         ArrayPool<byte>.Shared.Return(bytes);
 
+        if (result.DataType == KeccakOrRlp.Type.Keccak && ShouldMemoizeBranchKeccak(key.Path))
+        {
+            // Memoize only if Keccak and falls into the criteria.
+            // Storing RLP for an embedded node is useless as it can be easily re-calculated.
+            commit.SetBranch(key, branch.Children, new Keccak(result.Span));
+        }
+
         return result;
     }
 
-    private static KeccakOrRlp EncodeExtension(in Key key, ICommit commit, scoped in Node.Extension ext,
+    private bool ShouldMemoizeBranchKeccak(in NibblePath branchPath)
+    {
+        var level = branchPath.Length - _minimumTreeLevelToMemoizeKeccak;
+
+        // memoize only if the branch is deeper than _minimumTreeLevelToMemoizeKeccak and every _memoizeKeccakEvery
+        return level >= 0 && level % _memoizeKeccakEvery == 0;
+    }
+
+    private KeccakOrRlp EncodeExtension(in Key key, ICommit commit, scoped in Node.Extension ext,
         TrieType trieType)
     {
         Span<byte> span = stackalloc byte[Math.Max(ext.Path.HexEncodedLength, key.Path.MaxByteLength + 1)];

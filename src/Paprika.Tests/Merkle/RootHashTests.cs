@@ -76,7 +76,12 @@ public class RootHashTests
             commit.Set(Key.Account(new Keccak(key)), new Account(value, value).WriteTo(account));
         }
 
-        AssertRoot(hexString, commit);
+        AssertRootFirst(hexString, commit);
+        AssertRootSecond(hexString, commit);
+
+        // use two separate method
+        static void AssertRootFirst(string hex, Commit commit) => AssertRoot(hex, commit);
+        static void AssertRootSecond(string hex, Commit commit) => AssertRoot(hex, commit);
     }
 
     [Test]
