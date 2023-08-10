@@ -23,12 +23,9 @@ public static class CommitExtensions
         commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
     }
 
-    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, KeccakOrRlp keccak)
+    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, Keccak keccak)
     {
-        Debug.Assert(keccak.DataType == KeccakOrRlp.Type.Keccak);
-        var actual = new Keccak(keccak.Span);
-
-        var branch = new Node.Branch(children, actual);
+        var branch = new Node.Branch(children, keccak);
         commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
     }
 

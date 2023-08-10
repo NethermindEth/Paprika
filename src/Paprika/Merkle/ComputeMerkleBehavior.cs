@@ -150,17 +150,21 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
         ArrayPool<byte>.Shared.Return(bytes);
 
-        if (ShouldMemoizeBranchKeccak(key.Path))
+        if (result.DataType == KeccakOrRlp.Type.Keccak && ShouldMemoizeBranchKeccak(key.Path))
         {
-            commit.SetBranch(key, branch.Children, result);
+            // Memoize only if Keccak and falls into the criteria.
+            // Storing RLP for an embedded node is useless as it can be easily re-calculated.
+            commit.SetBranch(key, branch.Children, new Keccak(result.Span));
         }
 
         return result;
     }
 
-    private bool ShouldMemoizeBranchKeccak(NibblePath branchPath)
+    private bool ShouldMemoizeBranchKeccak(in NibblePath branchPath)
     {
         var level = NibblePath.KeccakNibbleCount - branchPath.Length - _minimumTreeLevelToMemoizeKeccak;
+
+        // memoize only if the branch is deeper than _minimumTreeLevelToMemoizeKeccak and every _memoizeKeccakEvery
         return level >= 0 && level % _memoizeKeccakEvery == 0;
     }
 
