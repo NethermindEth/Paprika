@@ -71,7 +71,7 @@ public class PreCommitBehaviorTests
             owner.Span.SequenceEqual(Value).Should().BeTrue();
         }
 
-        private static void OnKey(in Key key, ReadOnlySpan<byte> value, ICommit commit) => throw new Exception("Should not be called at all!");
+        private static void OnKey(in Key key, ReadOnlySpan<byte> value) => throw new Exception("Should not be called at all!");
     }
 
     /// <summary>
@@ -97,7 +97,7 @@ public class PreCommitBehaviorTests
             _keccaks.SetEquals(_found).Should().BeTrue();
         }
 
-        private void OnKey(in Key key, ReadOnlySpan<byte> value, ICommit commit)
+        private void OnKey(in Key key, ReadOnlySpan<byte> value)
         {
             key.Type.Should().Be(DataType.Account);
 

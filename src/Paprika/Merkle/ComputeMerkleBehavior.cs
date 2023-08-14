@@ -5,6 +5,7 @@ using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.RLP;
+using Paprika.Utils;
 
 namespace Paprika.Merkle;
 
@@ -44,8 +45,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
     public void BeforeCommit(ICommit commit)
     {
+        var wrapped = new CommitWrapper(commit);
+
         // run the visitor on the commit
-        commit.Visit(OnKey, TrieType.State);
+        commit.Visit(wrapped.OnKey, TrieType.State);
 
         if (_fullMerkle)
         {
@@ -193,15 +196,42 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         return stream.ToKeccakOrRlp();
     }
 
-    private static void OnKey(in Key key, ReadOnlySpan<byte> value, ICommit commit)
+    /// <summary>
+    /// Wraps the original commit allowing to intercept and alter behavior of the methods,
+    /// depending on the <see cref="TrieType"/>.
+    /// </summary>
+    class CommitWrapper : ICommit
     {
-        if (value.IsEmpty)
+        private readonly ICommit _original;
+
+        public CommitWrapper(ICommit original)
         {
-            Delete(in key.Path, 0, commit);
+            _original = original;
         }
-        else
+
+        ReadOnlySpanOwner<byte> ICommit.Get(in Key key)
         {
-            MarkPathDirty(in key.Path, commit);
+            return _original.Get(in key);
+        }
+
+        void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload)
+        {
+            _original.Set(in key, in payload);
+        }
+
+        void ICommit.Visit(CommitAction action, TrieType type) =>
+            throw new NotImplementedException("Shall not be used");
+
+        public void OnKey(in Key key, ReadOnlySpan<byte> value)
+        {
+            if (value.IsEmpty)
+            {
+                Delete(in key.Path, 0, this);
+            }
+            else
+            {
+                MarkPathDirty(in key.Path, this);
+            }
         }
     }
 
