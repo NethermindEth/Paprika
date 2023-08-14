@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.ComponentModel.Design;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Paprika.Chain;
@@ -45,10 +46,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
     public void BeforeCommit(ICommit commit)
     {
-        var wrapped = new CommitWrapper(commit);
+        // go through storage
 
-        // run the visitor on the commit
-        commit.Visit(wrapped.OnKey, TrieType.State);
+        // go through state
+        commit.Visit(new StateHandler(commit).OnKey, TrieType.State);
 
         if (_fullMerkle)
         {
@@ -197,40 +198,28 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
     }
 
     /// <summary>
-    /// Wraps the original commit allowing to intercept and alter behavior of the methods,
-    /// depending on the <see cref="TrieType"/>.
+    /// The handler for the state part.
     /// </summary>
-    class CommitWrapper : ICommit
+    private class StateHandler
     {
-        private readonly ICommit _original;
+        private readonly ICommit _commit;
 
-        public CommitWrapper(ICommit original)
+        public StateHandler(ICommit commit)
         {
-            _original = original;
+            _commit = commit;
         }
-
-        ReadOnlySpanOwner<byte> ICommit.Get(in Key key)
-        {
-            return _original.Get(in key);
-        }
-
-        void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload)
-        {
-            _original.Set(in key, in payload);
-        }
-
-        void ICommit.Visit(CommitAction action, TrieType type) =>
-            throw new NotImplementedException("Shall not be used");
 
         public void OnKey(in Key key, ReadOnlySpan<byte> value)
         {
+            Debug.Assert(key.Type == DataType.Account);
+
             if (value.IsEmpty)
             {
-                Delete(in key.Path, 0, this);
+                Delete(in key.Path, 0, _commit);
             }
             else
             {
-                MarkPathDirty(in key.Path, this);
+                MarkPathDirty(in key.Path, _commit);
             }
         }
     }
