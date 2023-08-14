@@ -6,6 +6,7 @@ using System.Threading.Channels;
 using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Merkle;
 using Paprika.Store;
 using Paprika.Utils;
 
@@ -484,9 +485,11 @@ public class Blockchain : IAsyncDisposable
 
         void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload) => SetImpl(key, payload, _preCommitMaps);
 
-        void ICommit.Visit(CommitAction action)
+        void ICommit.Visit(CommitAction action, TrieType type)
         {
-            foreach (var map in _mapsState)
+            var maps = type == TrieType.State ? _mapsState : _mapsStorage;
+
+            foreach (var map in maps)
             {
                 foreach (var item in map)
                 {
@@ -540,9 +543,9 @@ public class Blockchain : IAsyncDisposable
                 return default;
             }
 
+            // the previous is now leased, all the methods are safe to be called
             if (previous is Block block)
             {
-                // return leased, how to ensure that the lease is right
                 return block.TryGet(bloom, key, out succeeded);
             }
 
@@ -554,6 +557,10 @@ public class Blockchain : IAsyncDisposable
                     succeeded = true;
                     return new ReadOnlySpanOwner<byte>(span, batch);
                 }
+
+                // report as succeeded operation. The value is not there but it was walked through.
+                succeeded = true;
+                return default;
             }
 
             throw new Exception($"The type of previous is not handled: {previous.GetType()}");

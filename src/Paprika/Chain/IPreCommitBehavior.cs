@@ -1,4 +1,5 @@
 ﻿using Paprika.Data;
+using Paprika.Merkle;
 using Paprika.Utils;
 
 namespace Paprika.Chain;
@@ -46,7 +47,10 @@ public interface ICommit
     /// </summary>
     void Set(in Key key, in ReadOnlySpan<byte> payload);
 
-    void Visit(CommitAction action);
+    /// <summary>
+    /// Visits the given <paramref name="type"/> of the changes in the given commit.
+    /// </summary>
+    void Visit(CommitAction action, TrieType type);
 }
 
 /// <summary>

@@ -3,6 +3,7 @@ using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Merkle;
 using Paprika.Store;
 using static Paprika.Tests.Values;
 
@@ -62,7 +63,7 @@ public class PreCommitBehaviorTests
         {
             commit.Set(AssignedKey, Value);
 
-            commit.Visit(OnKey);
+            commit.Visit(OnKey, TrieType.State);
 
             using var owner = commit.Get(AssignedKey);
 
@@ -91,7 +92,7 @@ public class PreCommitBehaviorTests
         {
             _found.Clear();
 
-            commit.Visit(OnKey);
+            commit.Visit(OnKey, TrieType.State);
 
             _keccaks.SetEquals(_found).Should().BeTrue();
         }

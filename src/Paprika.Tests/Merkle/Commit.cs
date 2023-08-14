@@ -107,8 +107,10 @@ public class Commit : ICommit
         }
     }
 
-    void ICommit.Visit(CommitAction action)
+    void ICommit.Visit(CommitAction action, TrieType type)
     {
+        type.Should().Be(TrieType.State);
+
         foreach (var (k, v) in _before)
         {
             Key.ReadFrom(k, out var key);

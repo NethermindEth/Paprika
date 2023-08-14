@@ -45,7 +45,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
     public void BeforeCommit(ICommit commit)
     {
         // run the visitor on the commit
-        commit.Visit(OnKey);
+        commit.Visit(OnKey, TrieType.State);
 
         if (_fullMerkle)
         {
