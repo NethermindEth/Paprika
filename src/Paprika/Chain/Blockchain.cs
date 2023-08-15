@@ -409,7 +409,7 @@ public class Blockchain : IAsyncDisposable
             else if (key.Type == DataType.StorageCell)
             {
                 key.Path.AddToHashCode(ref code);
-                code.AddBytes(key.AdditionalKey);
+                key.StoragePath.AddToHashCode(ref code);
             }
             else if (key.Type == DataType.Merkle)
             {
