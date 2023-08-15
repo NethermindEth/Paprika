@@ -56,9 +56,10 @@ public readonly ref struct NibbleBasedMap
 
         var hash = Slot.ExtractPrefix(key.Path, out var path);
         var encodedKey = path.WriteTo(stackalloc byte[path.MaxByteLength]);
+        var encodedStorageKey = key.StoragePath.WriteTo(stackalloc byte[key.StoragePath.MaxByteLength]);
 
         // does not exist yet, calculate total memory needed
-        var total = GetTotalSpaceRequired(encodedKey, key.AdditionalKey, data);
+        var total = GetTotalSpaceRequired(encodedKey, encodedStorageKey, data);
 
         if (_header.Taken + total + Slot.Size > _data.Length)
         {
@@ -91,8 +92,8 @@ public readonly ref struct NibbleBasedMap
         var dest = _data.Slice(slot.ItemAddress, total);
 
         encodedKey.CopyTo(dest);
-        key.AdditionalKey.CopyTo(dest.Slice(encodedKey.Length));
-        data.CopyTo(dest.Slice(encodedKey.Length + key.AdditionalKey.Length));
+        encodedStorageKey.CopyTo(dest.Slice(encodedKey.Length));
+        data.CopyTo(dest.Slice(encodedKey.Length + encodedStorageKey.Length));
 
         // commit low and high
         _header.Low += Slot.Size;
@@ -171,7 +172,7 @@ public readonly ref struct NibbleBasedMap
             ref var slot = ref _map._slots[_index];
             var span = _map.GetSlotPayload(ref slot);
 
-            ReadOnlySpan<byte> data;
+            ReadOnlySpan<byte> leftover;
             NibblePath path;
 
             // path rebuilding
@@ -181,13 +182,13 @@ public readonly ref struct NibbleBasedMap
             if (count == 0)
             {
                 // no nibbles stored in the slot, read as is.
-                data = NibblePath.ReadFrom(span, out path);
+                leftover = NibblePath.ReadFrom(span, out path);
             }
             else
             {
                 // there's at least one nibble extracted
                 var raw = NibblePath.RawExtract(span);
-                data = span.Slice(raw.Length);
+                leftover = span.Slice(raw.Length);
 
                 const int space = 2;
 
@@ -210,14 +211,8 @@ public readonly ref struct NibbleBasedMap
                 path = path.CopyWithUnsafePointerMoveBack(count);
             }
 
-            if (slot.Type == DataType.StorageCell)
-            {
-                const int size = Keccak.Size;
-                var additionalKey = data.Slice(0, size);
-                return new Item(Key.StorageCell(path, additionalKey), data.Slice(size), _index, slot.Type);
-            }
-
-            return new Item(Key.Raw(path, slot.Type), data, _index, slot.Type);
+            var data = NibblePath.ReadFrom(leftover, out var storagePath);
+            return new Item(Key.Raw(path, slot.Type, storagePath), data, _index, slot.Type);
         }
 
         public void Dispose()
@@ -298,10 +293,10 @@ public readonly ref struct NibbleBasedMap
         return ((byte)maxNibble, storageCellPercentageInPage);
     }
 
-    private static int GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> additionalKey,
+    private static int GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> storageKey,
         ReadOnlySpan<byte> data)
     {
-        return key.Length + data.Length + additionalKey.Length;
+        return key.Length + data.Length + storageKey.Length;
     }
 
     /// <summary>
@@ -416,6 +411,7 @@ public readonly ref struct NibbleBasedMap
     {
         var hash = Slot.ExtractPrefix(key.Path, out var path);
         var encodedKey = path.WriteTo(stackalloc byte[path.MaxByteLength]);
+        var encodedStorageKey = key.StoragePath.WriteTo(stackalloc byte[key.StoragePath.MaxByteLength]);
 
         var to = _header.Low / Slot.Size;
 
@@ -445,19 +441,19 @@ public readonly ref struct NibbleBasedMap
                     // The StartsWith check assumes that all the keys have the same length.
                     if (actual.StartsWith(encodedKey))
                     {
-                        if (key.AdditionalKey.IsEmpty)
+                        if (key.StoragePath.IsEmpty)
                         {
                             // no additional key, just assert encoded
-                            data = actual.Slice(encodedKey.Length);
+                            data = actual.Slice(encodedKey.Length + NibblePath.EmptyEncodedLength);
                             slotIndex = i;
                             return true;
                         }
 
                         // there's the additional key, assert it
                         // do it by slicing off first the encoded and then check the additional
-                        if (actual.Slice(encodedKey.Length).StartsWith(key.AdditionalKey))
+                        if (actual.Slice(encodedKey.Length).StartsWith(encodedStorageKey))
                         {
-                            data = actual.Slice(encodedKey.Length + key.AdditionalKey.Length);
+                            data = actual.Slice(encodedKey.Length + encodedStorageKey.Length);
                             slotIndex = i;
                             return true;
                         }

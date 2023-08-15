@@ -59,11 +59,9 @@ public readonly ref struct HashingMap
 
             var entry = GetEntry(offset);
 
-            var length = key.Path.MaxByteLength + TypeBytes + LengthOfLength + key.AdditionalKey.Length;
-
             // ReSharper disable once StackAllocInsideLoop, highly unlikely as this should be only one hit
 #pragma warning disable CA2014
-            var prefix = WritePrefix(key, stackalloc byte[length]);
+            var prefix = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 #pragma warning restore CA2014
 
             if (entry.StartsWith(prefix))
@@ -109,7 +107,7 @@ public readonly ref struct HashingMap
 
         _hashes[position] = hash;
 
-        var prefix = WritePrefix(key, stackalloc byte[GetPrefixAllocationSize(key)]);
+        var prefix = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
         // get the entry
         var entry = GetEntry(position);
@@ -123,20 +121,13 @@ public readonly ref struct HashingMap
         return true;
     }
 
-    private static int GetPrefixAllocationSize(in Key key) =>
-        key.Path.MaxByteLength + // path 
-        TypeBytes +  // type
-        LengthOfLength + key.AdditionalKey.Length; // additional key
-
     public static uint GetHash(in Key key)
     {
         if (CanBeCached(key))
         {
             var k = TrimToRightPathLenght(key);
 
-            Span<byte> destination = stackalloc byte[GetPrefixAllocationSize(key)];
-
-            var prefix = WritePrefix(k, destination);
+            var prefix = k.WriteTo(stackalloc byte[key.MaxByteLength]);
 
             return XxHash32.HashToUInt32(prefix) | HasCache;
         }
@@ -156,12 +147,10 @@ public readonly ref struct HashingMap
     {
         var leftover = key.Path.WriteToWithLeftover(destination);
         leftover[0] = (byte)key.Type;
-        leftover[TypeBytes] = (byte)key.AdditionalKey.Length;
 
-        key.AdditionalKey.CopyTo(leftover.Slice(TypeBytes + LengthOfLength));
+        leftover = key.StoragePath.WriteTo(leftover.Slice(TypeBytes));
 
-        var written = destination.Slice(0,
-            destination.Length - leftover.Length + TypeBytes + LengthOfLength + key.AdditionalKey.Length);
+        var written = destination.Slice(0, destination.Length - leftover.Length);
         return written;
     }
 
@@ -209,21 +198,12 @@ public readonly ref struct HashingMap
             var hash = _map._hashes[_index];
             var entry = _map.GetEntry(_index);
 
-            var leftover = NibblePath.ReadFrom(entry, out var path);
-            var type = (DataType)leftover[0];
-            var additionalKeyLength = leftover[TypeBytes];
+            var leftover = Key.ReadFrom(entry, out var key);
 
-            var dataStart = TypeBytes + LengthOfLength + additionalKeyLength;
-            var dataLength = leftover[dataStart];
-            var data = leftover.Slice(dataStart + LengthOfLength, dataLength);
+            var dataLength = leftover[0];
+            var data = leftover.Slice(LengthOfLength, dataLength);
 
-            if (type == DataType.StorageCell)
-            {
-                var additionalKey = leftover.Slice(TypeBytes + LengthOfLength, additionalKeyLength);
-                return new Item(hash, Key.StorageCell(path, additionalKey), data);
-            }
-
-            return new Item(hash, Key.Raw(path, type), data);
+            return new Item(hash, key, data);
         }
 
         public readonly ref struct Item

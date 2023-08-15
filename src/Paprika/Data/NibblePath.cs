@@ -30,6 +30,13 @@ public readonly ref struct NibblePath
 
     public static NibblePath Empty => default;
 
+    /// <summary>
+    /// The byte length of an empty path.
+    /// </summary>
+    public const int EmptyEncodedLength = 1;
+
+    public bool IsEmpty => Length == 0;
+
     public static NibblePath Parse(string hex)
     {
         var nibbles = new byte[(hex.Length + 1) / 2];

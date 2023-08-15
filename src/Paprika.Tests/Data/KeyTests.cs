@@ -9,7 +9,7 @@ public class KeyTests
 {
     private const string Path = nameof(Key.Path);
     private const string Type = nameof(Key.Type);
-    private const string AdditionalKey = nameof(Key.AdditionalKey);
+    private const string AdditionalKey = nameof(Key.StoragePath);
 
     private static NibblePath Path0 => NibblePath.FromKey(Values.Key0);
     private static NibblePath Path1A => NibblePath.FromKey(Values.Key1A);
