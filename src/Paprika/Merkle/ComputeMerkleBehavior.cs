@@ -204,10 +204,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
     {
         private readonly ICommit _commit;
 
-        public StateHandler(ICommit commit)
-        {
-            _commit = commit;
-        }
+        public StateHandler(ICommit commit) => _commit = commit;
 
         public void OnKey(in Key key, ReadOnlySpan<byte> value)
         {
@@ -222,6 +219,53 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                 MarkPathDirty(in key.Path, _commit);
             }
         }
+    }
+    
+    private class StorageHandler : ICommit
+    {
+        private readonly ICommit _commit;
+        private Keccak _keccak;
+
+        public StorageHandler(ICommit commit) => _commit = commit;
+
+        public void OnKey(in Key key, ReadOnlySpan<byte> value)
+        {
+            Debug.Assert(key.Type == DataType.StorageCell);
+
+            _keccak = key.Path.UnsafeAsKeccak;
+
+            if (value.IsEmpty)
+            {
+                Delete(in key.Path, 0, this);
+            }
+            else
+            {
+                MarkPathDirty(in key.Path, this);
+            }
+        }
+
+        public ReadOnlySpanOwner<byte> Get(in Key key)
+        {
+            Build(key, out var modified);
+            return _commit.Get(modified);
+        }
+
+        private void Build(Key original, out Key modified)
+        {
+            var k = NibblePath.FromKey(_keccak);
+            
+            if (original.Type == DataType.Merkle)
+                modified = Key.MerkleStorage(k, original.Path);
+            
+            modified = Key.StorageCell(k, original.Path);
+        }
+
+        public void Set(in Key key, in ReadOnlySpan<byte> payload)
+        {
+            _commit.Set(in key, in payload);
+        }
+
+        public void Visit(CommitAction action, TrieType type) => throw new Exception("Should not be called");
     }
 
     private enum DeleteStatus

@@ -29,7 +29,7 @@ public readonly ref partial struct Key
     /// </summary>
     public static Key Raw(NibblePath path, DataType type) =>
         new(path, type, ReadOnlySpan<byte>.Empty);
-
+    
     /// <summary>
     /// Builds the key for <see cref="DataType.Account"/>.
     /// </summary>
