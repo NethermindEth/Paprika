@@ -46,10 +46,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
     public void BeforeCommit(ICommit commit)
     {
-        // TODO: implement
-        // commit.Visit(new StorageHandler(commit).OnKey, TrieType.Storage);
+        // 1. storage
+        commit.Visit(new StorageHandler(commit).OnKey, TrieType.Storage);
 
-        // go through state
+        // 2. state
         commit.Visit(new StateHandler(commit).OnKey, TrieType.State);
 
         if (_fullMerkle)

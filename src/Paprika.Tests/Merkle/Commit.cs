@@ -109,11 +109,18 @@ public class Commit : ICommit
 
     void ICommit.Visit(CommitAction action, TrieType type)
     {
-        type.Should().Be(TrieType.State);
-
         foreach (var (k, v) in _before)
         {
             Key.ReadFrom(k, out var key);
+
+            var isStorageType = type == TrieType.Storage;
+            var isStorageKey =
+                key.Type == DataType.StorageCell ||
+                (key.Type == DataType.Merkle && !key.StoragePath.IsEmpty);
+
+            if (isStorageType != isStorageKey)
+                continue;
+
             action(key, v);
         }
     }
