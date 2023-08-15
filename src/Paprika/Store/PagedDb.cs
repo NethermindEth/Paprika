@@ -264,7 +264,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public Metadata Metadata { get; }
 
-        public bool TryGet(in Key key, out ReadOnlySpan<byte> result)
+        public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
         {
             if (_disposed)
                 throw new ObjectDisposedException("The readonly batch has already been disposed");
@@ -351,7 +351,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public Metadata Metadata => _root.Data.Metadata;
 
-        public bool TryGet(in Key key, out ReadOnlySpan<byte> result)
+        public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
         {
             CheckDisposed();
 

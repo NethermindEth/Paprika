@@ -261,7 +261,7 @@ public class Blockchain : IAsyncDisposable
 
         public void Lease() => TryAcquireLease();
 
-        public bool TryGet(in Key key, out ReadOnlySpan<byte> result)
+        public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
         {
             if (!TryAcquireLease())
             {
@@ -481,7 +481,7 @@ public class Blockchain : IAsyncDisposable
             map.TrySet(key, payload);
         }
 
-        ReadOnlySpanOwner<byte> ICommit.Get(in Key key) => Get(GetBloom(key), key);
+        ReadOnlySpanOwner<byte> ICommit.Get(scoped in Key key) => Get(GetBloom(key), key);
 
         void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload) => SetImpl(key, payload, _preCommitMaps);
 
@@ -498,7 +498,7 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-        private ReadOnlySpanOwner<byte> Get(int bloom, in Key key)
+        private ReadOnlySpanOwner<byte> Get(int bloom, scoped in Key key)
         {
             AcquireLease();
 
@@ -521,7 +521,7 @@ public class Blockchain : IAsyncDisposable
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        private ReadOnlySpanOwner<byte> TryGet(int bloom, in Key key, out bool succeeded)
+        private ReadOnlySpanOwner<byte> TryGet(int bloom, scoped in Key key, out bool succeeded)
         {
             // The lease of this is not needed.
             // The reason for that is that the caller did not .Dispose the reference held,
@@ -569,7 +569,7 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// Tries to get the key only from this block, acquiring no lease as it assumes that the lease is taken.
         /// </summary>
-        private ReadOnlySpanOwner<byte> TryGetLocalNoLease(int bloom, in Key key, out bool succeeded)
+        private ReadOnlySpanOwner<byte> TryGetLocalNoLease(int bloom, scoped in Key key, out bool succeeded)
         {
             if (!_bloom.IsSet(bloom))
             {

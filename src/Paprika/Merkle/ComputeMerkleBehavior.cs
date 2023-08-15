@@ -46,7 +46,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
     public void BeforeCommit(ICommit commit)
     {
-        // go through storage
+        // TODO: implement
+        // commit.Visit(new StorageHandler(commit).OnKey, TrieType.Storage);
 
         // go through state
         commit.Visit(new StateHandler(commit).OnKey, TrieType.State);
@@ -220,7 +221,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
             }
         }
     }
-    
+
     private class StorageHandler : ICommit
     {
         private readonly ICommit _commit;
@@ -244,25 +245,19 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
             }
         }
 
-        public ReadOnlySpanOwner<byte> Get(in Key key)
+        public ReadOnlySpanOwner<byte> Get(scoped in Key key)
         {
-            Build(key, out var modified);
-            return _commit.Get(modified);
+            return _commit.Get(Build(key));
         }
 
-        private void Build(Key original, out Key modified)
-        {
-            var k = NibblePath.FromKey(_keccak);
-            
-            if (original.Type == DataType.Merkle)
-                modified = Key.MerkleStorage(k, original.Path);
-            
-            modified = Key.StorageCell(k, original.Path);
-        }
+        /// <summary>
+        /// Builds the <see cref="_keccak"/> aware key, treating the path as the path for the storage.
+        /// </summary>
+        private Key Build(Key key) => Key.Raw(NibblePath.FromKey(_keccak), key.Type, key.Path);
 
         public void Set(in Key key, in ReadOnlySpan<byte> payload)
         {
-            _commit.Set(in key, in payload);
+            _commit.Set(Build(key), in payload);
         }
 
         public void Visit(CommitAction action, TrieType type) => throw new Exception("Should not be called");

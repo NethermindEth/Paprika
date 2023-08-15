@@ -69,7 +69,7 @@ public class Commit : ICommit
         Assert.Fail(sb.ToString());
     }
 
-    ReadOnlySpanOwner<byte> ICommit.Get(in Key key)
+    ReadOnlySpanOwner<byte> ICommit.Get(scoped in Key key)
     {
         var k = GetKey(key);
 
