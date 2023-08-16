@@ -46,14 +46,51 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
     public void BeforeCommit(ICommit commit)
     {
-        // 1. storage
-        commit.Visit(new StorageHandler(commit).OnKey, TrieType.Storage);
+        // 1. Visit all Storage operations (SSTORE). For each key:
+        //  a. remember Account that Storage belongs to
+        //  b. walk through the MPT of Account Storage to create/amend Trie nodes
+        // 2. Visit all State operations. For each key:
+        //  a. check if it was one of the Storage operations. If yes, remove it from the set above
+        //  b. walk through the MPT of Account State to create/amend Trie nodes
+        // 3. Visit all the accounts that were not accessed in 2., but were remembered in 1,
+        //    meaning Accounts that had their storage modified but no changes to codehash, balance, nonce.
+        //    For each key:
+        //  a. walk through the MPT of Account State to create/amend Trie nodes
+        // 4. Calculate the Root Hash 
+        //  a.  for each of accounts that had their storage modified (from 1.), 
+        //    i. calculate the storage root hash
+        //    ii. store it in the account (decode account, encode, set)
+        //  b.  calculate the root hash of the State
 
-        // 2. state
-        commit.Visit(new StateHandler(commit).OnKey, TrieType.State);
+        // 1. visit storage
+        var storage = new StorageHandler(commit);
+        commit.Visit(storage.OnKey, TrieType.Storage);
 
+        // 2. visit state
+        var accountsThatRequireManualTouch = new HashSet<Keccak>(storage.AccountsWithModifiedStorage);
+        var state = new StateHandler(commit, accountsThatRequireManualTouch);
+        commit.Visit(state.OnKey, TrieType.State);
+        
+        // 3. visit keys that require manual touch as they were not modified in the state step, mark them dirty
+        foreach (var accountKey in accountsThatRequireManualTouch)
+        {
+            MarkPathDirty(NibblePath.FromKey(accountKey), commit);
+        }
+        
+        // 4. recalculate root hash
         if (_fullMerkle)
         {
+            // a. start with the accounts that had their storage altered
+            foreach (var accountKey in storage.AccountsWithModifiedStorage)
+            {
+                // TODO: 1. Compute with a modified commit
+                // KeccakOrRlp storageKeccakOrRlp = Compute(Key.Merkle(NibblePath.Empty), new PrefixingCOmmit(commit, accountKey));
+                // TODO: 2. Get account
+                // TODO: 3. Modify account with the new KeccakOrRlp
+                // TODO: 4. set account
+                // commit.Set(Key.Account(accountKey), Account.);
+            }
+            
             var root = Key.Merkle(NibblePath.Empty);
             var keccakOrRlp = Compute(root, commit, TrieType.State);
 
@@ -101,7 +138,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
             key.Path.Append(leaf.Path, stackalloc byte[key.Path.MaxByteLength + leaf.Path.MaxByteLength + 1]);
 
         Debug.Assert(trieType == TrieType.State, "Only accounts now");
-
+        
         using var leafData = commit.Get(Key.Account(leafPath));
 
         Account.ReadFrom(leafData.Span, out var account);
@@ -204,12 +241,19 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
     private class StateHandler
     {
         private readonly ICommit _commit;
+        private readonly HashSet<Keccak> _accountsToVisit;
 
-        public StateHandler(ICommit commit) => _commit = commit;
+        public StateHandler(ICommit commit, HashSet<Keccak> accountsToVisit)
+        {
+            _commit = commit;
+            _accountsToVisit = accountsToVisit;
+        }
 
         public void OnKey(in Key key, ReadOnlySpan<byte> value)
         {
             Debug.Assert(key.Type == DataType.Account);
+
+            _accountsToVisit.Remove(key.Path.UnsafeAsKeccak);
 
             if (value.IsEmpty)
             {
@@ -225,6 +269,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
     private class StorageHandler : ICommit
     {
         private readonly ICommit _commit;
+        private readonly HashSet<Keccak> _accountsWithModifiedStorage = new();
         private Keccak _keccak;
 
         public StorageHandler(ICommit commit) => _commit = commit;
@@ -234,6 +279,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
             Debug.Assert(key.Type == DataType.StorageCell);
 
             _keccak = key.Path.UnsafeAsKeccak;
+            _accountsWithModifiedStorage.Add(_keccak);
 
             if (value.IsEmpty)
             {
@@ -261,6 +307,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         }
 
         public void Visit(CommitAction action, TrieType type) => throw new Exception("Should not be called");
+
+        public IEnumerable<Keccak> AccountsWithModifiedStorage => _accountsWithModifiedStorage;
     }
 
     private enum DeleteStatus
