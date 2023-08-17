@@ -32,6 +32,8 @@ public readonly struct Account : IEquatable<Account>
         StorageRootHash = storageRootHash;
     }
 
+    public Account WithChangedStorageRoot(Keccak newStorageRoot) => new(Balance, Nonce, CodeHash, newStorageRoot);
+
     public bool Equals(Account other) => Balance.Equals(other.Balance) &&
                                          Nonce == other.Nonce &&
                                          CodeHash == other.CodeHash &&

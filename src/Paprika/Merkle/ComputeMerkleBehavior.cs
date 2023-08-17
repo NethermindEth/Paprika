@@ -70,33 +70,47 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         var accountsThatRequireManualTouch = new HashSet<Keccak>(storage.AccountsWithModifiedStorage);
         var state = new StateHandler(commit, accountsThatRequireManualTouch);
         commit.Visit(state.OnKey, TrieType.State);
-        
+
         // 3. visit keys that require manual touch as they were not modified in the state step, mark them dirty
         foreach (var accountKey in accountsThatRequireManualTouch)
         {
             MarkPathDirty(NibblePath.FromKey(accountKey), commit);
         }
-        
+
         // 4. recalculate root hash
         if (_fullMerkle)
         {
+            Span<byte> accountSpan = stackalloc byte[Account.MaxByteCount];
+
+            var prefixed = new PrefixingCommit(commit);
+
             // a. start with the accounts that had their storage altered
-            foreach (var accountKey in storage.AccountsWithModifiedStorage)
+            foreach (var accountAddress in storage.AccountsWithModifiedStorage)
             {
-                // TODO: 1. Compute with a modified commit
-                // KeccakOrRlp storageKeccakOrRlp = Compute(Key.Merkle(NibblePath.Empty), new PrefixingCOmmit(commit, accountKey));
-                // TODO: 2. Get account
-                // TODO: 3. Modify account with the new KeccakOrRlp
-                // TODO: 4. set account
-                // commit.Set(Key.Account(accountKey), Account.);
+                prefixed.SetPrefix(accountAddress);
+
+                // compute new storage root hash
+                var keccakOrRlp = Compute(Key.Merkle(NibblePath.Empty), prefixed, TrieType.Storage);
+
+                // read the existing account
+                var key = Key.Account(accountAddress);
+                using var accountOwner = commit.Get(key);
+                Account.ReadFrom(accountOwner.Span, out var account);
+
+                // update it
+                account = account.WithChangedStorageRoot(new Keccak(keccakOrRlp.Span));
+
+                // set it
+                commit.Set(key, account.WriteTo(accountSpan));
+
             }
-            
+
             var root = Key.Merkle(NibblePath.Empty);
-            var keccakOrRlp = Compute(root, commit, TrieType.State);
+            var rootKeccak = Compute(root, commit, TrieType.State);
 
-            Debug.Assert(keccakOrRlp.DataType == KeccakOrRlp.Type.Keccak);
+            Debug.Assert(rootKeccak.DataType == KeccakOrRlp.Type.Keccak);
 
-            RootHash = new Keccak(keccakOrRlp.Span);
+            RootHash = new Keccak(rootKeccak.Span);
         }
     }
 
@@ -138,7 +152,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
             key.Path.Append(leaf.Path, stackalloc byte[key.Path.MaxByteLength + leaf.Path.MaxByteLength + 1]);
 
         Debug.Assert(trieType == TrieType.State, "Only accounts now");
-        
+
         using var leafData = commit.Get(Key.Account(leafPath));
 
         Account.ReadFrom(leafData.Span, out var account);
@@ -266,47 +280,55 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         }
     }
 
-    private class StorageHandler : ICommit
+    private class PrefixingCommit : ICommit
     {
         private readonly ICommit _commit;
-        private readonly HashSet<Keccak> _accountsWithModifiedStorage = new();
         private Keccak _keccak;
 
-        public StorageHandler(ICommit commit) => _commit = commit;
-
-        public void OnKey(in Key key, ReadOnlySpan<byte> value)
+        public PrefixingCommit(ICommit commit)
         {
-            Debug.Assert(key.Type == DataType.StorageCell);
-
-            _keccak = key.Path.UnsafeAsKeccak;
-            _accountsWithModifiedStorage.Add(_keccak);
-
-            if (value.IsEmpty)
-            {
-                Delete(in key.Path, 0, this);
-            }
-            else
-            {
-                MarkPathDirty(in key.Path, this);
-            }
+            _commit = commit;
         }
 
-        public ReadOnlySpanOwner<byte> Get(scoped in Key key)
-        {
-            return _commit.Get(Build(key));
-        }
+        public void SetPrefix(in NibblePath path) => SetPrefix(path.UnsafeAsKeccak);
+
+        public void SetPrefix(in Keccak keccak) => _keccak = keccak;
+
+        public ReadOnlySpanOwner<byte> Get(scoped in Key key) => _commit.Get(Build(key));
+
+        public void Set(in Key key, in ReadOnlySpan<byte> payload) => _commit.Set(Build(key), in payload);
 
         /// <summary>
         /// Builds the <see cref="_keccak"/> aware key, treating the path as the path for the storage.
         /// </summary>
         private Key Build(Key key) => Key.Raw(NibblePath.FromKey(_keccak), key.Type, key.Path);
 
-        public void Set(in Key key, in ReadOnlySpan<byte> payload)
-        {
-            _commit.Set(Build(key), in payload);
-        }
-
         public void Visit(CommitAction action, TrieType type) => throw new Exception("Should not be called");
+    }
+
+    private class StorageHandler
+    {
+        private readonly PrefixingCommit _commit;
+        private readonly HashSet<Keccak> _accountsWithModifiedStorage = new();
+
+        public StorageHandler(ICommit commit) => _commit = new PrefixingCommit(commit);
+
+        public void OnKey(in Key key, ReadOnlySpan<byte> value)
+        {
+            Debug.Assert(key.Type == DataType.StorageCell);
+
+            _commit.SetPrefix(key.Path);
+            _accountsWithModifiedStorage.Add(key.Path.UnsafeAsKeccak);
+
+            if (value.IsEmpty)
+            {
+                Delete(in key.Path, 0, _commit);
+            }
+            else
+            {
+                MarkPathDirty(in key.Path, _commit);
+            }
+        }
 
         public IEnumerable<Keccak> AccountsWithModifiedStorage => _accountsWithModifiedStorage;
     }
