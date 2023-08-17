@@ -84,9 +84,9 @@ public class RootHashTests
         static void AssertRootSecond(string hex, Commit commit) => AssertRoot(hex, commit);
     }
 
-    [TestCase(1, "018c3c93d6a627a50a2523e194b538985e89e0291bb1299eb43bc8f76f7dc04b")]
-    [TestCase(100, "3f88f4f289002c395a4dc7a72b32803ab5e34ad87ea5b9d58f526ec028562f0a")]
-    [TestCase(1000, "1705eee34fc86a1a55cb541f50796f4e31557b76cc8740459b35814952db9ccc")]
+    [TestCase(1, "0c64fd8640de0ce2d0a928932ead5597214d5a3adc9c4c29056fef761791e374")]
+    [TestCase(100, "6328bc0a47e3e9b6c3c0fd5b08693be48102f38a1d69dd0da0ef33679882d6ea")]
+    [TestCase(1000, "ff60253c014966b6239710607f70363f52e6437777719c8320d567ab8a213055")]
     public void Big_random_storage(int count, string hexString)
     {
         var commit = new Commit();
@@ -98,8 +98,9 @@ public class RootHashTests
         for (int i = 0; i < count; i++)
         {
             random.NextBytes(key);
+            
+            var storageValue = random.Next();
             var value = (uint)random.Next();
-            var storageValue = i + 1;
 
             var a = new Account(value, value);
             var keccak = new Keccak(key);
