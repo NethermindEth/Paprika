@@ -333,11 +333,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
             if (value.IsEmpty)
             {
-                Delete(in key.Path, 0, _commit);
+                Delete(in key.StoragePath, 0, _commit);
             }
             else
             {
-                MarkPathDirty(in key.Path, _commit);
+                MarkPathDirty(in key.StoragePath, _commit);
             }
         }
 
