@@ -14,32 +14,32 @@ public readonly struct Account : IEquatable<Account>
     public readonly UInt256 Balance;
     public readonly UInt256 Nonce;
     public readonly Keccak CodeHash;
-    public readonly Keccak StorageRoot;
+    public readonly Keccak StorageRootHash;
 
     public Account(UInt256 balance, UInt256 nonce)
     {
         Balance = balance;
         Nonce = nonce;
         CodeHash = EmptyCodeHash;
-        StorageRoot = EmptyStorageRoot;
+        StorageRootHash = EmptyStorageRoot;
     }
 
-    public Account(UInt256 balance, UInt256 nonce, Keccak codeHash, Keccak storageRoot)
+    public Account(UInt256 balance, UInt256 nonce, Keccak codeHash, Keccak storageRootHash)
     {
         Balance = balance;
         Nonce = nonce;
         CodeHash = codeHash;
-        StorageRoot = storageRoot;
+        StorageRootHash = storageRootHash;
     }
 
     public bool Equals(Account other) => Balance.Equals(other.Balance) &&
                                          Nonce == other.Nonce &&
                                          CodeHash == other.CodeHash &&
-                                         StorageRoot == other.StorageRoot;
+                                         StorageRootHash == other.StorageRootHash;
 
     public override bool Equals(object? obj) => obj is Account other && Equals(other);
 
-    public override int GetHashCode() => HashCode.Combine(Balance, Nonce, CodeHash, StorageRoot);
+    public override int GetHashCode() => HashCode.Combine(Balance, Nonce, CodeHash, StorageRootHash);
 
     public static bool operator ==(Account left, Account right) => left.Equals(right);
 
@@ -111,7 +111,7 @@ public readonly struct Account : IEquatable<Account>
             }
 
             CodeHash.BytesAsSpan.CopyTo(destination.Slice(balanceAndNonceLength));
-            StorageRoot.BytesAsSpan.CopyTo(destination.Slice(balanceAndNonceLength + Keccak.Size));
+            StorageRootHash.BytesAsSpan.CopyTo(destination.Slice(balanceAndNonceLength + Keccak.Size));
 
             return destination.Slice(0, balanceAndNonceLength + Keccak.Size + Keccak.Size);
         }
@@ -126,13 +126,13 @@ public readonly struct Account : IEquatable<Account>
             destination[BigPreambleNonceIndex] = (byte)nonceLength;
 
             CodeHash.BytesAsSpan.CopyTo(span);
-            StorageRoot.BytesAsSpan.CopyTo(span.Slice(Keccak.Size));
+            StorageRootHash.BytesAsSpan.CopyTo(span.Slice(Keccak.Size));
 
             return destination.Slice(0, BigPreambleLength + balanceLength + nonceLength + Keccak.Size + Keccak.Size);
         }
     }
 
-    private bool CodeHashOrStorageRootExist => CodeHash != EmptyCodeHash || StorageRoot != EmptyStorageRoot;
+    private bool CodeHashOrStorageRootExist => CodeHash != EmptyCodeHash || StorageRootHash != EmptyStorageRoot;
 
     /// <summary>
     /// Reads the account balance and nonce.

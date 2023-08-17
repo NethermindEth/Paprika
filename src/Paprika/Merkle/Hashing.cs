@@ -9,15 +9,10 @@ public static partial class Node
 {
     public ref partial struct Leaf
     {
-        public static void KeccakOrRlp(NibblePath nibblePath, Account account, out KeccakOrRlp result) =>
-            KeccakOrRlp(nibblePath, account, Keccak.OfAnEmptyString, Keccak.EmptyTreeHash, out result);
-
         [SkipLocalsInit]
-        private static void KeccakOrRlp(
-            NibblePath nibblePath,
-            Account account,
-            Keccak codeHash,
-            Keccak storageRootHash,
+        public static void KeccakOrRlp(
+            scoped in NibblePath nibblePath,
+            scoped in Account account,
             out KeccakOrRlp result
         )
         {
@@ -33,8 +28,8 @@ public static partial class Node
                 .StartSequence(accountRlpLength)
                 .Encode(account.Nonce)
                 .Encode(account.Balance)
-                .Encode(storageRootHash)
-                .Encode(codeHash);
+                .Encode(account.StorageRootHash)
+                .Encode(account.CodeHash);
 
             // Stage 2: result = KeccakOrRlp(nibblePath, accountRlp)
             Span<byte> hexPath = stackalloc byte[nibblePath.HexEncodedLength];
