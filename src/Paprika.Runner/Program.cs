@@ -159,7 +159,7 @@ public static class Program
                     var expectedStorageValue = GetStorageValue(i);
                     var actualStorage = read.GetStorage(key, storageAddress);
 
-                    if (actualStorage != expectedStorageValue)
+                    if (actualStorage.SequenceEqual(expectedStorageValue) == false)
                     {
                         throw new InvalidOperationException($"Invalid storage for account number {i}!");
                     }
@@ -172,7 +172,7 @@ public static class Program
                     var expectedStorageValue = GetBigAccountValue(index);
                     var actualStorage = read.GetStorage(bigStorageAccount, storageAddress);
 
-                    if (actualStorage != expectedStorageValue)
+                    if (actualStorage.SequenceEqual(expectedStorageValue) == false)
                     {
                         throw new InvalidOperationException($"Invalid storage for big storage account at index {i}!");
                     }
@@ -360,7 +360,7 @@ public static class Program
         return new Account((UInt256)counter, (UInt256)counter);
     }
 
-    private static UInt256 GetStorageValue(int counter) => (UInt256)counter + 100000;
+    private static byte[] GetStorageValue(int counter) => ((UInt256)counter + 100000).ToBigEndian();
 
     private static Keccak GetBigAccountKey()
     {
@@ -379,6 +379,6 @@ public static class Program
         return key;
     }
 
-    private static UInt256 GetBigAccountValue(int counter) =>
-        new((ulong)(counter * 2246822519U), (ulong)(counter * 374761393U));
+    private static byte[] GetBigAccountValue(int counter) =>
+        (new UInt256((ulong)(counter * 2246822519U), (ulong)(counter * 374761393U))).ToBigEndian();
 }

@@ -1,4 +1,5 @@
-﻿using FluentAssertions;
+﻿using System.Buffers.Binary;
+using FluentAssertions;
 using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -13,6 +14,13 @@ namespace Paprika.Tests;
 /// </summary>
 public static class TestExtensions
 {
+    public static byte[] ToByteArray(this int value)
+    {
+        byte[] bytes = new byte[sizeof(int)];
+        BinaryPrimitives.WriteInt32BigEndian(bytes, value);
+        return bytes;
+    }
+
     public static void ShouldHaveAccount(this IReadOnlyBatch read, in Keccak key, ReadOnlySpan<byte> expected)
     {
         read.TryGet(Key.Account(key), out var value).Should().BeTrue();
@@ -34,12 +42,11 @@ public static class TestExtensions
         return account;
     }
 
-    public static UInt256 GetStorage(this IReadOnlyBatch read, in Keccak key, in Keccak storage)
+    public static byte[] GetStorage(this IReadOnlyBatch read, in Keccak key, in Keccak storage)
     {
         read.TryGet(Key.StorageCell(NibblePath.FromKey(key), storage), out var value).Should()
             .BeTrue($"Storage for the account: {key.ToString()} @ {storage.ToString()} should exist.");
-        Serializer.ReadStorageValue(value, out var v);
-        return v;
+        return value.ToArray();
     }
 
     public static void ShouldHaveStorage(this IReadOnlyBatch read, in Keccak key, in Keccak storage,
@@ -47,16 +54,6 @@ public static class TestExtensions
     {
         read.TryGet(Key.StorageCell(NibblePath.FromKey(key), storage), out var value).Should().BeTrue();
         value.SequenceEqual(expected);
-    }
-
-    public static void ShouldHaveStorage(this IReadOnlyBatch read, in Keccak key, in Keccak storage,
-        UInt256 expected)
-    {
-        Span<byte> payload = stackalloc byte[Serializer.StorageValueMaxByteCount];
-        var raw = Serializer.WriteStorageValue(payload, expected);
-
-        read.TryGet(Key.StorageCell(NibblePath.FromKey(key), storage), out var value).Should().BeTrue();
-        value.SequenceEqual(raw);
     }
 
     public static void SetAccount(this IBatch batch, in Keccak key, ReadOnlySpan<byte> value) =>

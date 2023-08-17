@@ -1,5 +1,5 @@
 using System.Runtime.CompilerServices;
-using Paprika.Crypto;
+using Nethermind.Int256;
 using Paprika.Data;
 using Paprika.RLP;
 
@@ -23,27 +23,44 @@ public static partial class Node
                 + Rlp.LengthOfKeccakRlp // CodeHash
                 + Rlp.LengthOfKeccakRlp; // StorageRootHash
 
-            Span<byte> accountRlp = stackalloc byte[Rlp.LengthOfSequence(accountRlpLength)];
-            new RlpStream(accountRlp)
+            Span<byte> valueRlp = stackalloc byte[Rlp.LengthOfSequence(accountRlpLength)];
+            new RlpStream(valueRlp)
                 .StartSequence(accountRlpLength)
                 .Encode(account.Nonce)
                 .Encode(account.Balance)
                 .Encode(account.StorageRootHash)
                 .Encode(account.CodeHash);
 
+            Finalize(nibblePath, valueRlp, out result);
+        }
+
+        [SkipLocalsInit]
+        private static void Finalize(scoped in NibblePath nibblePath, scoped Span<byte> valueRlp,
+            out KeccakOrRlp result)
+        {
             // Stage 2: result = KeccakOrRlp(nibblePath, accountRlp)
             Span<byte> hexPath = stackalloc byte[nibblePath.HexEncodedLength];
             nibblePath.HexEncode(hexPath, true);
 
-            var encodedLength = Rlp.LengthOf(hexPath) + Rlp.LengthOf(accountRlp);
+            var encodedLength = Rlp.LengthOf(hexPath) + Rlp.LengthOf(valueRlp);
             var totalLength = Rlp.LengthOfSequence(encodedLength);
 
             Span<byte> accountAndPathRlp = stackalloc byte[totalLength];
             result = new RlpStream(accountAndPathRlp)
                 .StartSequence(encodedLength)
                 .Encode(hexPath)
-                .Encode(accountRlp)
+                .Encode(valueRlp)
                 .ToKeccakOrRlp();
+        }
+
+        [SkipLocalsInit]
+        public static void KeccakOrRlp(scoped in NibblePath nibblePath, scoped ReadOnlySpan<byte> value, out KeccakOrRlp result)
+        {
+            var valueLength = Rlp.LengthOf(value);
+            Span<byte> valueRlp = stackalloc byte[valueLength];
+            new RlpStream(valueRlp).Encode(value);
+
+            Finalize(nibblePath, valueRlp, out result);
         }
     }
 }

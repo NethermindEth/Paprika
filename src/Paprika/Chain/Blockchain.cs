@@ -376,7 +376,7 @@ public class Blockchain : IAsyncDisposable
 
         private BufferPool Pool => _blockchain._pool;
 
-        public UInt256 GetStorage(in Keccak address, in Keccak storage)
+        public byte[] GetStorage(in Keccak address, in Keccak storage)
         {
             var key = Key.StorageCell(NibblePath.FromKey(address), storage);
             var bloom = GetBloom(key);
@@ -385,10 +385,9 @@ public class Blockchain : IAsyncDisposable
 
             // check the span emptiness
             if (owner.Span.IsEmpty)
-                return default;
+                return Array.Empty<byte>();
 
-            Serializer.ReadStorageValue(owner.Span, out var value);
-            return value;
+            return owner.Span.ToArray();
         }
 
         public Account GetAccount(in Keccak address)
@@ -442,15 +441,12 @@ public class Blockchain : IAsyncDisposable
             SetImpl(key, payload, _mapsState);
         }
 
-        public void SetStorage(in Keccak address, in Keccak storage, UInt256 value)
+        public void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value)
         {
             var path = NibblePath.FromKey(address);
             var key = Key.StorageCell(path, storage);
 
-            Span<byte> payload = stackalloc byte[Serializer.StorageValueMaxByteCount];
-            payload = Serializer.WriteStorageValue(payload, value);
-
-            SetImpl(key, payload, _mapsStorage);
+            SetImpl(key, value, _mapsStorage);
         }
 
         private void SetImpl(in Key key, in ReadOnlySpan<byte> payload, List<InBlockMap> maps)

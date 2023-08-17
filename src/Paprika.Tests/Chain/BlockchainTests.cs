@@ -89,7 +89,7 @@ public class BlockchainTests
                 var key = BuildKey(counter);
 
                 block.SetAccount(key, GetAccount(counter));
-                block.SetStorage(key, key, (UInt256)counter);
+                block.SetStorage(key, key, ((UInt256)counter).ToBigEndian());
 
                 counter++;
             }
@@ -127,7 +127,7 @@ public class BlockchainTests
                 var key = BuildKey(counter);
 
                 read.ShouldHaveAccount(key, GetAccount(counter));
-                read.ShouldHaveStorage(key, key, (UInt256)counter);
+                read.ShouldHaveStorage(key, key, ((UInt256)counter).ToBigEndian());
 
                 counter++;
             }

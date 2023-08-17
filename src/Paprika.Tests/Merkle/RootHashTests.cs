@@ -84,6 +84,32 @@ public class RootHashTests
         static void AssertRootSecond(string hex, Commit commit) => AssertRoot(hex, commit);
     }
 
+    [TestCase(1, "018c3c93d6a627a50a2523e194b538985e89e0291bb1299eb43bc8f76f7dc04b")]
+    [TestCase(100, "3f88f4f289002c395a4dc7a72b32803ab5e34ad87ea5b9d58f526ec028562f0a")]
+    [TestCase(1000, "1705eee34fc86a1a55cb541f50796f4e31557b76cc8740459b35814952db9ccc")]
+    public void Big_random_storage(int count, string hexString)
+    {
+        var commit = new Commit();
+
+        Random random = new(13);
+        Span<byte> key = stackalloc byte[32];
+        Span<byte> account = stackalloc byte[Account.MaxByteCount];
+
+        for (int i = 0; i < count; i++)
+        {
+            random.NextBytes(key);
+            var value = (uint)random.Next();
+            var storageValue = i + 1;
+
+            var a = new Account(value, value);
+            var keccak = new Keccak(key);
+            commit.Set(Key.Account(keccak), a.WriteTo(account));
+            commit.Set(Key.StorageCell(NibblePath.FromKey(keccak), keccak), storageValue.ToByteArray());
+        }
+
+        AssertRoot(hexString, commit);
+    }
+
     [Test]
     public void Extension()
     {

@@ -1,5 +1,4 @@
-﻿using Nethermind.Int256;
-using Paprika.Crypto;
+﻿using Paprika.Crypto;
 
 namespace Paprika.Chain;
 
@@ -12,13 +11,14 @@ public interface IWorldState : IDisposable
     Keccak ParentHash { get; }
     uint BlockNumber { get; }
 
-    public UInt256 GetStorage(in Keccak address, in Keccak storage);
+    // TODO: consider providing non allocating API, where the caller provides memory to write to.
+    public byte[] GetStorage(in Keccak address, in Keccak storage);
 
     public void SetAccount(in Keccak address, in Account account);
 
     public Account GetAccount(in Keccak address);
 
-    public void SetStorage(in Keccak address, in Keccak storage, UInt256 value);
+    public void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value);
 
     /// <summary>
     /// Commits the block to the chain allowing to build upon it.

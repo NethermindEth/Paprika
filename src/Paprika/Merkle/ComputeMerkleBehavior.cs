@@ -151,13 +151,24 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         var leafPath =
             key.Path.Append(leaf.Path, stackalloc byte[key.Path.MaxByteLength + leaf.Path.MaxByteLength + 1]);
 
-        Debug.Assert(trieType == TrieType.State, "Only accounts now");
+        var leafKey = trieType == TrieType.State
+            ? Key.Account(leafPath)
+            // the prefix will be added by the prefixing commit
+            : Key.Raw(leafPath, DataType.StorageCell, NibblePath.Empty);
 
-        using var leafData = commit.Get(Key.Account(leafPath));
+        using var leafData = commit.Get(leafKey);
 
-        Account.ReadFrom(leafData.Span, out var account);
-        Node.Leaf.KeccakOrRlp(leaf.Path, account, out var keccakOrRlp);
+        KeccakOrRlp keccakOrRlp;
+        if (trieType == TrieType.State)
+        {
+            Account.ReadFrom(leafData.Span, out var account);
+            Node.Leaf.KeccakOrRlp(leaf.Path, account, out keccakOrRlp);
+            return keccakOrRlp;
+        }
 
+        Debug.Assert(trieType == TrieType.Storage, "Only accounts now");
+
+        Node.Leaf.KeccakOrRlp(leaf.Path, leafData.Span, out keccakOrRlp);
         return keccakOrRlp;
     }
 
