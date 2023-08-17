@@ -6,40 +6,30 @@
 public enum DataType : byte
 {
     /// <summary>
-    /// [key, 0]-> account (balance, nonce)
+    /// [key, 0]-> account (balance, nonce, codeHash, storageRootHash)
     /// </summary>
     Account = 0,
 
     /// <summary>
-    /// [key, 1]-> codeHash
-    /// </summary>
-    CodeHash = 1,
-
-    /// <summary>
-    /// [key, 2]-> storageRootHash
-    /// </summary>
-    StorageRootHash = 2,
-
-    /// <summary>
-    /// [key, 3]-> [index][value],
+    /// [key, 1]-> [index][value],
     /// add to the key and use first 32 bytes of data as key
     /// </summary>
-    StorageCell = 3,
+    StorageCell = 1,
 
     /// <summary>
-    /// [key, 4]-> the DbAddress of the root page of the storage trie,
+    /// [key, 2]-> the DbAddress of the root page of the storage trie,
     /// </summary>
-    StorageTreeRootPageAddress = 4,
+    StorageTreeRootPageAddress = 2,
 
     /// <summary>
-    /// [storageCellIndex, 5]-> the StorageCell index, without the prefix of the account
+    /// [storageCellIndex, 3]-> the StorageCell index, without the prefix of the account
     /// </summary>
-    StorageTreeStorageCell = 5,
+    StorageTreeStorageCell = 3,
 
     /// <summary>
     /// As enums cannot be partial, this is for storing the Merkle.
     /// </summary>
-    Merkle = 6,
+    Merkle = 4,
 
     Deleted = 7,
     // one bit more is possible as delete is now a data type

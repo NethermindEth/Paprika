@@ -37,17 +37,6 @@ public readonly ref partial struct Key
     public static Key Account(in Keccak key) => Account(NibblePath.FromKey(key));
 
     /// <summary>
-    /// Builds the key for <see cref="DataType.CodeHash"/>.
-    /// </summary>
-    public static Key CodeHash(NibblePath path) => new(path, DataType.CodeHash, NibblePath.Empty);
-
-    /// <summary>
-    /// Builds the key for <see cref="DataType.StorageRootHash"/>.
-    /// </summary>
-    public static Key StorageRootHash(NibblePath path) =>
-        new(path, DataType.StorageRootHash, NibblePath.Empty);
-
-    /// <summary>
     /// Builds the key for <see cref="DataType.StorageCell"/>.
     /// </summary>
     /// <remarks>

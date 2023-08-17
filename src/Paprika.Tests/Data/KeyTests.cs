@@ -32,8 +32,6 @@ public class KeyTests
     [Test]
     public void Equality_Type()
     {
-        Key.Account(Path0).Equals(Key.CodeHash(Path0)).Should().BeFalse($"Different {Type}");
-
         Key.Account(Path0).Equals(Key.StorageCell(Path0, Keccak.Zero)).Should().BeFalse($"Different {Type}");
     }
 

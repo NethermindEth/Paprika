@@ -12,7 +12,7 @@ Paprika is split into two major components:
 Additionally, some other components are extracted into as reusable parts:
 
 1. `NibblePath`
-1. `FixedMap`
+1. `NibbleBasedMap`
 
 ### Blockchain
 
@@ -124,7 +124,7 @@ The biggest caveat is where to store the `AbandonedPage`. The same mechanism is 
 
 ###### Data Page
 
-A data page is responsible for both storing data in-page and providing a fanout for lower levels of the tree. The data page tries to store as much data as possible inline using the [FixedMap component](#FixedMap). If there's no more space, left, it selects a bucket, defined by a nibble. The one with the highest count of items is flushed as a separate page and a pointer to that page is stored in the bucket of the original `DataPage`. This is a bit different approach from using page splits. Instead of splitting the page and updating the parent, the page can flush down some of its data, leaving more space for the new. A single `PageData` can hold roughly 50-100 entries. An entry, again, is described in a `FixedMap`.
+A data page is responsible for both storing data in-page and providing a fanout for lower levels of the tree. The data page tries to store as much data as possible inline using the [NibbleBasedMap component](#NibbleBasedMap). If there's no more space, left, it selects a bucket, defined by a nibble. The one with the highest count of items is flushed as a separate page and a pointer to that page is stored in the bucket of the original `DataPage`. This is a bit different approach from using page splits. Instead of splitting the page and updating the parent, the page can flush down some of its data, leaving more space for the new. A single `PageData` can hold roughly 50-100 entries. An entry, again, is described in a `NibbleBasedMap`.
 
 ##### Page design in C\#
 
@@ -242,20 +242,18 @@ public struct PageHeader
 
 `NibblePath` is a custom implementation of the path of nibbles, needed to traverse the Trie of Ethereum. The structure allocates no memory and uses `ref` semantics to effectively traverse the path. It also allows for efficient comparisons and slicing. As it's `ref` based, it can be built on top of `Span<byte>`.
 
-### FixedMap
+### NibbleBasedMap
 
-The `FixedMap` component is responsible for storing data in-page. It does it by using path-based addressing based on the functionality provided by `NibblePath`. The path is not the only discriminator for the values though. The other part required to create a `FixedMap.Key` is the `type` of entry. This is an implementation of [Entity-Attribute-Value](https://en.wikipedia.org/wiki/Entity%E2%80%93attribute%E2%80%93value_model). Currently, there are the following types of entries:
+The `NibbleBasedMap` component is responsible for storing data in-page. It does it by using path-based addressing based on the functionality provided by `NibblePath`. The path is not the only discriminator for the values though. The other part required to create a `Key` is the `type` of entry. Currently, there are the following types of entries:
 
-1. `Account` - identifies `(balance, nonce)` of a given account
-1. `CodeHash` - identifies `CodeHash` of a contract
-1. `StorageRootHash` - the root hash of the storage tree of a contract
+1. `Account` - identifies `(balance, nonce, codeHash, storageRootHash)` of a given account. The entry type is aligned with `Account` of Ethereum. It uses a more efficient encoding though that requires to be translated to RLP later.
 1. `StorageCell` - identifies that the given entry is a storage cell that is kept in-page, alongside other account attributes. To make it unique, the storage cell address is stored as the first 32 bytes of its raw data. It is used for comparisons whenever needed.
-1. `StorageTreeRootPageAddress` - the address of the page that holds the root page of the storage tree. It's optional as for accounts with a small number of storage slots occupied, they will be held in-page. Only if account storage becomes really large (currently, occupies 90% of the page), it is flushed as a separate subtree.
-1. `StorageTreeStorageCell` - the storage cell that is kept under a tree with the root of `StorageTreeRootPageAddress`. As the storage cell belongs to a single account (it's in its storage tree), no need to prefix it with the account address.
+1. `StorageTreeRootPageAddress` - the address of the page that holds the root page of the storage tree. It's optional as for accounts with a small number of storage slots occupied, they will be held in-page. Only if an account's storage becomes really large, it is flushed as a separate subtree.
+1. `StorageTreeStorageCell` - the storage cell that is kept under a tree with the root of `StorageTreeRootPageAddress`. As the storage cell belongs to a single account (it's in its storage tree), no need to prefix it with the account address. The storage cell address will be used as a nibble path.
 
 For example:
 
-> To store an update of a `nonce` of a given contract, `[address, Type.Account]` pair is used as a `Key` to store the serialized `(balance, nonce)` pair.
+> To store an update of a `nonce` of a given contract, `[address, Type.Account]` pair is used as a `Key` to store the serialized `(balance, nonce, codeHash, storageRootHash)` pair.
 
 and
 
@@ -263,9 +261,9 @@ and
 
 The addition of additional bytes breaks the uniform addressing that is based on the path only. It allows at the same time for auto optimization of the tree and much more dense packaging of pages.
 
-#### FixedMap layout
+#### NibbleBasedMap layout
 
-`FixedMap` needs to store values with variant lengths over a fixed `Span<byte>` provided by the page. To make it work, Paprika uses a modified pattern of the slot array, used by major players in the world of B+ oriented databases (see: [PostgreSQL page layout](https://www.postgresql.org/docs/current/storage-page-layout.html#STORAGE-PAGE-LAYOUT-FIGURE)). How it works then?
+`NibbleBasedMap` needs to store values with variant lengths over a fixed `Span<byte>` provided by the page. To make it work, Paprika uses a modified pattern of the slot array, used by major players in the world of B+ oriented databases (see: [PostgreSQL page layout](https://www.postgresql.org/docs/current/storage-page-layout.html#STORAGE-PAGE-LAYOUT-FIGURE)). How it works then?
 
 The slot array pattern uses a fixed-size buffer that is provided within the page. It allocates chunks of it from two directions:
 
@@ -274,7 +272,7 @@ The slot array pattern uses a fixed-size buffer that is provided within the page
 
 The first direction, from `0` is used for fixed-size structures that represent slots. Each slot has some metadata, including the most important one, the offset to the start of data. The direction from the end is used to store var length payloads. Paprika diverges from the usual slot array though. The slot array assumes that it's up to the higher level to map the slot identifiers to keys. What the page provides is just a container for tuples that stores them and maps them to the `CTID`s (see: [PostgreSQL system columns](https://www.postgresql.org/docs/current/ddl-system-columns.html)). How Paprika uses this approach
 
-In Paprika, each page level represents a cutoff in the nibble path to make it aligned to the Merkle construct. The key management could be extracted out of the `FixedMap` component, but it would make it less self-contained. `FixedMap` then provides `TrySet` and `TryGet` methods that accept nibble paths. This impacts the design of the slot, which is as follows:
+In Paprika, each page level represents a cutoff in the nibble path to make it aligned to the Merkle construct. The key management could be extracted out of the `NibbleBasedMap` component, but it would make it less self-contained. `NibbleBasedMap` then provides `TrySet` and `TryGet` methods that accept nibble paths. This impacts the design of the slot, which is as follows:
 
 ```csharp
 [StructLayout(LayoutKind.Explicit, Size = Size)]
@@ -300,7 +298,7 @@ private struct Slot
 
 The slot is 4 bytes long. It extracts 4 first nibbles as a prefix for fast comparisons. It has a pointer to the item. The length of the item is calculated by subtracting the address from the previous slot address. The drawback of this design is a linear search across all the slots when an item must be found. With the expected number of items per page, which should be no bigger than 100, it gives 400 bytes of slots to search through. This should be ok-ish with modern processors. The code is marked with an optimization opportunity.
 
-With this, the `FixedMap` memory representation looks like the following.
+With this, the `NibbleBasedMap` memory representation looks like the following.
 
 ```bash
 ┌───────────────┬───────┬───────┬───────────────────────────────┐
@@ -327,7 +325,7 @@ With this, the `FixedMap` memory representation looks like the following.
 └────────────────┴─────────────┴────────────────────────────────┘
 ```
 
-The `FixedMap` can wrap an arbitrary span of memory so it can be used for any page that wants to store data by key.
+The `NibbleBasedMap` can wrap an arbitrary span of memory so it can be used for any page that wants to store data by key.
 
 ### Merkle construct
 
@@ -351,23 +349,20 @@ Let's consider a contract `0xABCD` deployed and have some of its storage cells s
 
 As you can see there's no `storageRootHash` as it is calculated from the storage itself. The listing above just gets the data that are set to Paprika. Internally, it will be mapped to a list of entries. Each entry is a mapping between a `key` and an encoded value. The key, besides the `path`, contains the data `type` and an `additional` key if needed. Also, if the number of storage cells is below ~50 (a rough estimate), it will be stored on the same page, increasing the locality. Let's see to which entries the listing above will be mapped. Let's assume that it's the only contract in the state and there are no other pages above this one. If they were, the path would be truncated. Let's encode it!
 
-| Key: Path | Key: Type         | Key: Additional Key       | Byte encoded value                                                |
-| --------- | ----------------- | ------------------------- | ----------------------------------------------------------------- |
-| `0xABCD`  | `Account`         | `_`                       | `02 23 01` + `01 02` (`balance` concatenated with `nonce`)        |
-| `0xABCD`  | `CodeHash`        | `_`                       | `FEDCBA...` (keccak, always 32 bytes)                             |
-| `0xABCD`  | `StorageCell`     | `keccak0`                 | `01 0A` (var length, big-endian, number of bytes as prefix)       |
-| `0xABCD`  | `StorageCell`     | `keccak1`                 | `01 0B` (var length, big-endian, number of bytes as prefix)       |
-| `0xABCD`  | `StorageRootHash` | `keccak of storage tree`  | `keccak value` (keccak, always 32 bytes, calculated when storing) |
-| `0xABCD`  | `KeccakOrRlp`     | `keccak of the leaf node` | `keccak value` (keccak, always 32 bytes, calculated when storing) |
+| Key: Path | Key: Type     | Key: Storage Path | Byte encoded value                                                 |
+| --------- | ------------- | ----------------- | ------------------------------------------------------------------ |
+| `0xABCD`  | `Account`     | `_`               | (`balance` and `nonce` and `codeHash` and `storage root`)          |
+| `0xABCD`  | `StorageCell` | `keccak0`         | `01 0A` (var length, big-endian, number of bytes as prefix)        |
+| `0xABCD`  | `StorageCell` | `keccak1`         | `01 0B` (var length, big-endian, number of bytes as prefix)        |
+| `0xABCD`  | `Merkle`      | ``                | the root of the Merkle tree for this account (usually, the branch) |
+| `0xABCD`  | `Merkle`      | `0`               | the child with nibble `0`                                          |
+| `0xABCD`  | `Merkle`      | `1`               | the child with nibble `1`                                          |
 
 A few remarks:
 
 1. `UInt256` is always encoded with `BigEndian`, followed by the truncation of leading zeroes and prefixed with the number of bytes used (the prefix is 1 byte)
-1. The last two values, meaning `StorageRootHash` and `KeccakOrRlp`, are evaluated and stored alongside the data, as separate entries. When data changes, they will be updated
-1. Keeping data split into attributes, make them easier to update in place, without blowing up the tree and copying a lot of data.
 1. The navigation is always path-based! Keccaks are stored as described above.
 1. For contracts with a small number of storage cells, no separate tree is created, and storage cell values are stored alongside the other data.
-1. All the entries are stored in [FixedMap](#fixedmap), where a small hash `ushort` is used to represent the slot.
 
 ### A contract with a huge storage
 
@@ -385,13 +380,10 @@ Let's consider another contract `0xCD`, deployed but wit ha lot of storage cells
 
 Which would be stored on one page as:
 
-| Key: Path | Key: Type                    | Key: Additional Key | Byte encoded value                                                |
-| --------- | ---------------------------- | ------------------- | ----------------------------------------------------------------- |
-| `0xCD`    | `Account`                    | `_`                 | `02 01 23` + `01 02` (`balance` concatenated with `nonce`)        |
-| `0xCD`    | `CodeHash`                   | `_`                 | `FEDCBA...` (keccak, always 32 bytes)                             |
-| `0xCD`    | `StorageTreeRootPageAddress` | `_`                 | `02 12 34` (var length big-endian encoding of page `@1234`)       |
-| `0xCD`    | `StorageRootHash`            | `_`                 | `keccak value` (keccak, always 32 bytes, calculated when storing) |
-| `0xCD`    | `KeccakOrRlp`                | `_`                 | `keccak value` (keccak, always 32 bytes, calculated when storing) |
+| Key: Path | Key: Type                    | Key: Additional Key | Byte encoded value                                          |
+| --------- | ---------------------------- | ------------------- | ----------------------------------------------------------- |
+| `0xCD`    | `Account`                    | `_`                 | (`balance` and `nonce` and `codeHash` and `storage root`)   |
+| `0xCD`    | `StorageTreeRootPageAddress` | `_`                 | `02 12 34` (var length big-endian encoding of page `@1234`) |
 
 And on the page under address `@1234`, which is a separate storage trie created for this huge account
 
@@ -408,7 +400,7 @@ A few remarks:
 1. A separate type `StorageTreeStorageCell` is used to represent an entry in this massive storage trie.
 1. An entry of type `StorageTreeRootPageAddress` provides a page address where to jump to find the storage cells of the given account
 1. `StorageTreeStorageCells` create a usual Paprika trie, with the extraction of the nibble with the biggest count if needed as a separate page
-1. All the entries are stored in [FixedMap](#fixedmap), where a small hash `ushort` is used to represent the slot
+1. All the entries are stored in [NibbleBasedMap](#NibbleBasedMap), where a small hash `ushort` is used to represent the slot
 
 ## Learning materials
 
