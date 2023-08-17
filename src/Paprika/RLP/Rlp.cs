@@ -15,10 +15,14 @@ public static class Rlp
             return 1;
         }
 
-        Span<byte> bytes = stackalloc byte[32];
+        const int size = 32;
+        Span<byte> bytes = stackalloc byte[size];
         item.ToBigEndian(bytes);
-        int length = bytes.WithoutLeadingZeros().Length;
-        return length + 1;
+
+        // at least one will be set as the first check is above, zero would not pass it
+        var index = bytes.IndexOfAnyExcept((byte)0);
+        var lengthWithoutLeadingZeroes = size - index;
+        return lengthWithoutLeadingZeroes + 1;
     }
 
     public static int LengthOf(ReadOnlySpan<byte> span)
@@ -52,10 +56,12 @@ public static class Rlp
         {
             return 1;
         }
+
         if (value < 1 << 16)
         {
             return 2;
         }
+
         if (value < 1 << 24)
         {
             return 3;
