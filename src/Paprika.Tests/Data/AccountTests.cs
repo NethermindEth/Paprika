@@ -46,7 +46,7 @@ public class AccountTests
         Account.ReadFrom(data, out var account);
         account.Should().Be(expected);
     }
-    
+
     [TestCaseSource(nameof(GetContractData))]
     public void Contract(UInt256 balance, UInt256 nonce, Keccak codeHash, Keccak storageRootHash)
     {
