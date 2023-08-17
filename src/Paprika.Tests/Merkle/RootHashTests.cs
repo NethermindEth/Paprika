@@ -51,10 +51,12 @@ public class RootHashTests
         span.Fill(0);
 
         span[0] = nibbleA;
-        commit.Set(Key.Account(new Keccak(span)), new Account(balanceA, nonceA).WriteTo(stackalloc byte[Account.MaxByteCount]));
+        commit.Set(Key.Account(new Keccak(span)),
+            new Account(balanceA, nonceA).WriteTo(stackalloc byte[Account.MaxByteCount]));
 
         span[0] = nibbleB;
-        commit.Set(Key.Account(new Keccak(span)), new Account(balanceB, nonceB).WriteTo(stackalloc byte[Account.MaxByteCount]));
+        commit.Set(Key.Account(new Keccak(span)),
+            new Account(balanceB, nonceB).WriteTo(stackalloc byte[Account.MaxByteCount]));
 
         AssertRoot("73130daa1ae507554a72811c06e28d4fee671bfe2e1d0cef828a7fade54384f9", commit);
     }
@@ -84,6 +86,38 @@ public class RootHashTests
         static void AssertRootSecond(string hex, Commit commit) => AssertRoot(hex, commit);
     }
 
+    [TestCase(1, 1, "954f21233681f1b941ef67b30c85b64bfb009452b7f01b28de28eb4c1d2ca258")]
+    [TestCase(1, 100, "c8cf5e6b84e39beeac713a42546cc977581d9b31307efa2b1b288ccd828f278e")]
+    [TestCase(100, 1, "68965a86aec45d3863d2c6de07fcdf75ac420dca0c0f45776704bfc9295593ac")]
+    [TestCase(1000, 1, "b8bdf00f1f389a1445867e5c14ccf17fd21d915c01492bed3e70f74de7f42248")]
+    public void Big_random_storage(int count, int storageCount, string hexString)
+    {
+        var commit = new Commit();
+
+        Random random = new(13);
+        Span<byte> account = stackalloc byte[Account.MaxByteCount];
+
+        for (var i = 0; i < count; i++)
+        {
+            // account data first
+            var keccak = random.NextKeccak();
+            var value = (uint)random.Next();
+
+            var a = new Account(value, value);
+            commit.Set(Key.Account(keccak), a.WriteTo(account));
+
+            // storage data second
+            for (var j = 0; j < storageCount; j++)
+            {
+                var storageKey = random.NextKeccak();
+                var storageValue = random.Next();
+                commit.Set(Key.StorageCell(NibblePath.FromKey(keccak), storageKey), storageValue.ToByteArray());
+            }
+        }
+
+        AssertRoot(hexString, commit);
+    }
+
     [Test]
     public void Extension()
     {
@@ -95,8 +129,10 @@ public class RootHashTests
         var balanceB = Values.Balance1;
         var nonceB = Values.Nonce1;
 
-        commit.Set(Key.Account(Values.Key0), new Account(balanceA, nonceA).WriteTo(stackalloc byte[Account.MaxByteCount]));
-        commit.Set(Key.Account(Values.Key1), new Account(balanceB, nonceB).WriteTo(stackalloc byte[Account.MaxByteCount]));
+        commit.Set(Key.Account(Values.Key0),
+            new Account(balanceA, nonceA).WriteTo(stackalloc byte[Account.MaxByteCount]));
+        commit.Set(Key.Account(Values.Key1),
+            new Account(balanceB, nonceB).WriteTo(stackalloc byte[Account.MaxByteCount]));
 
         AssertRoot("a624947d9693a5cba0701897b3a48cb9954c2f4fd54de36151800eb2c7f6bf50", commit);
     }

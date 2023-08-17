@@ -11,23 +11,6 @@ public static class Serializer
 
     public const int StorageValueMaxByteCount = MaxUint256SizeWithPrefix;
 
-    /// <summary>
-    /// Writes the storage value.
-    /// </summary>
-    public static Span<byte> WriteStorageValue(Span<byte> destination, in UInt256 value)
-    {
-        value.WriteWithLeftover(destination, out var length);
-        return destination.Slice(0, length);
-    }
-
-    /// <summary>
-    /// Writes the storage value.
-    /// </summary>
-    public static void ReadStorageValue(ReadOnlySpan<byte> source, out UInt256 value)
-    {
-        ReadFrom(source, out value);
-    }
-
     private const int NotFound = -1;
 
     /// <summary>

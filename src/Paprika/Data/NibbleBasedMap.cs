@@ -393,7 +393,7 @@ public readonly ref struct NibbleBasedMap
         }
     }
 
-    public bool TryGet(in Key key, out ReadOnlySpan<byte> data)
+    public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> data)
     {
         if (TryGetImpl(key, out var span, out _))
         {
@@ -407,7 +407,7 @@ public readonly ref struct NibbleBasedMap
 
     [OptimizationOpportunity(OptimizationType.CPU,
         "key.Write to might be called twice, here and in TrySet")]
-    private bool TryGetImpl(in Key key, out Span<byte> data, out int slotIndex)
+    private bool TryGetImpl(scoped in Key key, out Span<byte> data, out int slotIndex)
     {
         var hash = Slot.ExtractPrefix(key.Path, out var path);
         var encodedKey = path.WriteTo(stackalloc byte[path.MaxByteLength]);

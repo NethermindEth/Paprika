@@ -69,7 +69,7 @@ public class Commit : ICommit
         Assert.Fail(sb.ToString());
     }
 
-    ReadOnlySpanOwner<byte> ICommit.Get(in Key key)
+    ReadOnlySpanOwner<byte> ICommit.Get(scoped in Key key)
     {
         var k = GetKey(key);
 
@@ -107,12 +107,21 @@ public class Commit : ICommit
         }
     }
 
-    void ICommit.Visit(CommitAction action)
+    void ICommit.Visit(CommitAction action, TrieType type)
     {
         foreach (var (k, v) in _before)
         {
             Key.ReadFrom(k, out var key);
-            action(key, v, this);
+
+            var isStorageType = type == TrieType.Storage;
+            var isStorageKey =
+                key.Type == DataType.StorageCell ||
+                (key.Type == DataType.Merkle && !key.StoragePath.IsEmpty);
+
+            if (isStorageType != isStorageKey)
+                continue;
+
+            action(key, v);
         }
     }
 

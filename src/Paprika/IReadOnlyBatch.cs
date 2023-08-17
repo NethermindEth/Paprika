@@ -13,7 +13,7 @@ public interface IReadOnlyBatch : IDisposable
     /// <param name="key"></param>
     /// <param name="result"></param>
     /// <returns></returns>
-    bool TryGet(in Key key, out ReadOnlySpan<byte> result);
+    bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result);
 
     void Report(IReporter reporter);
 }

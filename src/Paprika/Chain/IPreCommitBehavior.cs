@@ -1,4 +1,5 @@
 ﻿using Paprika.Data;
+using Paprika.Merkle;
 using Paprika.Utils;
 
 namespace Paprika.Chain;
@@ -39,18 +40,21 @@ public interface ICommit
     /// <remarks>
     /// If successful, returns a result as an owner. Must be disposed properly.
     /// </remarks>
-    public ReadOnlySpanOwner<byte> Get(in Key key);
+    public ReadOnlySpanOwner<byte> Get(scoped in Key key);
 
     /// <summary>
     /// Sets the value under the given key.
     /// </summary>
     void Set(in Key key, in ReadOnlySpan<byte> payload);
 
-    void Visit(CommitAction action);
+    /// <summary>
+    /// Visits the given <paramref name="type"/> of the changes in the given commit.
+    /// </summary>
+    void Visit(CommitAction action, TrieType type);
 }
 
 /// <summary>
 /// A delegate to be called on the each key that that the commit contains.
 /// </summary>
-public delegate void CommitAction(in Key key, ReadOnlySpan<byte> value, ICommit commit);
+public delegate void CommitAction(in Key key, ReadOnlySpan<byte> value);
 

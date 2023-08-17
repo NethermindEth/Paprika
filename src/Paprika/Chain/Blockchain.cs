@@ -6,6 +6,7 @@ using System.Threading.Channels;
 using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Merkle;
 using Paprika.Store;
 using Paprika.Utils;
 
@@ -260,7 +261,7 @@ public class Blockchain : IAsyncDisposable
 
         public void Lease() => TryAcquireLease();
 
-        public bool TryGet(in Key key, out ReadOnlySpan<byte> result)
+        public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
         {
             if (!TryAcquireLease())
             {
@@ -304,11 +305,19 @@ public class Blockchain : IAsyncDisposable
         private readonly List<Page> _pages = new();
 
         /// <summary>
-        /// The maps mapping keys to values, written in this block.
+        /// The maps mapping accounts information, written in this block.
         /// </summary>
-        private readonly List<InBlockMap> _maps = new();
+        private readonly List<InBlockMap> _mapsState = new();
 
+        /// <summary>
+        /// The maps mapping storage information, written in this block.
+        /// </summary>
+        private readonly List<InBlockMap> _mapsStorage = new();
 
+        /// <summary>
+        /// The values set the <see cref="IPreCommitBehavior"/> during the <see cref="ICommit.Visit"/> invocation.
+        /// It's both storage & state as it's metadata for the pre-commit behavior.
+        /// </summary>
         private readonly List<InBlockMap> _preCommitMaps = new();
 
         /// <summary>
@@ -367,7 +376,7 @@ public class Blockchain : IAsyncDisposable
 
         private BufferPool Pool => _blockchain._pool;
 
-        public UInt256 GetStorage(in Keccak address, in Keccak storage)
+        public byte[] GetStorage(in Keccak address, in Keccak storage)
         {
             var key = Key.StorageCell(NibblePath.FromKey(address), storage);
             var bloom = GetBloom(key);
@@ -376,10 +385,9 @@ public class Blockchain : IAsyncDisposable
 
             // check the span emptiness
             if (owner.Span.IsEmpty)
-                return default;
+                return Array.Empty<byte>();
 
-            Serializer.ReadStorageValue(owner.Span, out var value);
-            return value;
+            return owner.Span.ToArray();
         }
 
         public Account GetAccount(in Keccak address)
@@ -430,18 +438,15 @@ public class Blockchain : IAsyncDisposable
 
             var payload = account.WriteTo(stackalloc byte[Account.MaxByteCount]);
 
-            SetImpl(key, payload, _maps);
+            SetImpl(key, payload, _mapsState);
         }
 
-        public void SetStorage(in Keccak address, in Keccak storage, UInt256 value)
+        public void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value)
         {
             var path = NibblePath.FromKey(address);
             var key = Key.StorageCell(path, storage);
 
-            Span<byte> payload = stackalloc byte[Serializer.StorageValueMaxByteCount];
-            payload = Serializer.WriteStorageValue(payload, value);
-
-            SetImpl(key, payload, _maps);
+            SetImpl(key, value, _mapsStorage);
         }
 
         private void SetImpl(in Key key, in ReadOnlySpan<byte> payload, List<InBlockMap> maps)
@@ -472,27 +477,26 @@ public class Blockchain : IAsyncDisposable
             map.TrySet(key, payload);
         }
 
-        ReadOnlySpanOwner<byte> ICommit.Get(in Key key) => Get(GetBloom(key), key);
+        ReadOnlySpanOwner<byte> ICommit.Get(scoped in Key key) => Get(GetBloom(key), key);
 
         void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload) => SetImpl(key, payload, _preCommitMaps);
 
-        void ICommit.Visit(CommitAction action)
+        void ICommit.Visit(CommitAction action, TrieType type)
         {
-            foreach (var map in _maps)
+            var maps = type == TrieType.State ? _mapsState : _mapsStorage;
+
+            foreach (var map in maps)
             {
                 foreach (var item in map)
                 {
-                    action(item.Key, item.RawData, this);
+                    action(item.Key, item.RawData);
                 }
             }
         }
 
-        private ReadOnlySpanOwner<byte> Get(int bloom, in Key key)
+        private ReadOnlySpanOwner<byte> Get(int bloom, scoped in Key key)
         {
-            if (TryAcquireLease() == false)
-            {
-                throw new ObjectDisposedException("This block has already been disposed");
-            }
+            AcquireLease();
 
             var result = TryGet(bloom, key, out var succeeded);
             if (succeeded)
@@ -513,15 +517,11 @@ public class Blockchain : IAsyncDisposable
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        [OptimizationOpportunity(OptimizationType.CPU,
-            "If bloom filter was stored in-line in block, not rented, it could be used without leasing to check " +
-            "whether the value is there. Less contention over lease for sure")]
-        private ReadOnlySpanOwner<byte> TryGet(int bloom, in Key key, out bool succeeded)
+        private ReadOnlySpanOwner<byte> TryGet(int bloom, scoped in Key key, out bool succeeded)
         {
             // The lease of this is not needed.
             // The reason for that is that the caller did not .Dispose the reference held,
             // therefore the lease counter is up to date!
-
             var owner = TryGetLocalNoLease(bloom, key, out succeeded);
             if (succeeded)
                 return owner;
@@ -539,9 +539,9 @@ public class Blockchain : IAsyncDisposable
                 return default;
             }
 
+            // the previous is now leased, all the methods are safe to be called
             if (previous is Block block)
             {
-                // return leased, how to ensure that the lease is right
                 return block.TryGet(bloom, key, out succeeded);
             }
 
@@ -553,6 +553,10 @@ public class Blockchain : IAsyncDisposable
                     succeeded = true;
                     return new ReadOnlySpanOwner<byte>(span, batch);
                 }
+
+                // report as succeeded operation. The value is not there but it was walked through.
+                succeeded = true;
+                return default;
             }
 
             throw new Exception($"The type of previous is not handled: {previous.GetType()}");
@@ -561,30 +565,44 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// Tries to get the key only from this block, acquiring no lease as it assumes that the lease is taken.
         /// </summary>
-        private ReadOnlySpanOwner<byte> TryGetLocalNoLease(int bloom, in Key key, out bool succeeded)
+        private ReadOnlySpanOwner<byte> TryGetLocalNoLease(int bloom, scoped in Key key, out bool succeeded)
         {
-            if (_bloom.IsSet(bloom))
+            if (!_bloom.IsSet(bloom))
+            {
+                succeeded = false;
+                return default;
+            }
+
+            // select the map to search for 
+            var map = key.Type switch
+            {
+                DataType.Account => _mapsState,
+                DataType.StorageCell => _mapsStorage,
+                _ => null
+            };
+
+            if (map != null)
             {
                 // go from last to youngest to find the recent value
-                for (int i = _maps.Count - 1; i >= 0; i--)
+                for (int i = map.Count - 1; i >= 0; i--)
                 {
-                    if (_maps[i].TryGet(key, out var span))
+                    if (map[i].TryGet(key, out var span))
                     {
                         // return with owned lease
                         succeeded = true;
                         return new ReadOnlySpanOwner<byte>(span, this);
                     }
                 }
+            }
 
-                // then pre-commit maps
-                for (int i = _preCommitMaps.Count - 1; i >= 0; i--)
+            // then pre-commit maps
+            for (int i = _preCommitMaps.Count - 1; i >= 0; i--)
+            {
+                if (_preCommitMaps[i].TryGet(key, out var span))
                 {
-                    if (_preCommitMaps[i].TryGet(key, out var span))
-                    {
-                        // return with owned lease
-                        succeeded = true;
-                        return new ReadOnlySpanOwner<byte>(span, this);
-                    }
+                    // return with owned lease
+                    succeeded = true;
+                    return new ReadOnlySpanOwner<byte>(span, this);
                 }
             }
 
@@ -607,8 +625,12 @@ public class Blockchain : IAsyncDisposable
 
         public void Apply(IBatch batch)
         {
-            // values
-            foreach (var map in _maps)
+            foreach (var map in _mapsState)
+            {
+                map.Apply(batch);
+            }
+
+            foreach (var map in _mapsStorage)
             {
                 map.Apply(batch);
             }

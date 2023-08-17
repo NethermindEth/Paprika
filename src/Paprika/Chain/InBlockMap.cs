@@ -19,7 +19,7 @@ public readonly struct InBlockMap
         return map.TrySet(key, data);
     }
 
-    public bool TryGet(in Key key, out ReadOnlySpan<byte> result)
+    public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
     {
         var map = new NibbleBasedMap(_page.Span);
         return map.TryGet(key, out result);

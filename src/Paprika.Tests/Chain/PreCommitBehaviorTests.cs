@@ -3,6 +3,7 @@ using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Merkle;
 using Paprika.Store;
 using static Paprika.Tests.Values;
 
@@ -62,7 +63,7 @@ public class PreCommitBehaviorTests
         {
             commit.Set(AssignedKey, Value);
 
-            commit.Visit(OnKey);
+            commit.Visit(OnKey, TrieType.State);
 
             using var owner = commit.Get(AssignedKey);
 
@@ -70,7 +71,7 @@ public class PreCommitBehaviorTests
             owner.Span.SequenceEqual(Value).Should().BeTrue();
         }
 
-        private static void OnKey(in Key key, ReadOnlySpan<byte> value, ICommit commit) => throw new Exception("Should not be called at all!");
+        private static void OnKey(in Key key, ReadOnlySpan<byte> value) => throw new Exception("Should not be called at all!");
     }
 
     /// <summary>
@@ -91,12 +92,12 @@ public class PreCommitBehaviorTests
         {
             _found.Clear();
 
-            commit.Visit(OnKey);
+            commit.Visit(OnKey, TrieType.State);
 
             _keccaks.SetEquals(_found).Should().BeTrue();
         }
 
-        private void OnKey(in Key key, ReadOnlySpan<byte> value, ICommit commit)
+        private void OnKey(in Key key, ReadOnlySpan<byte> value)
         {
             key.Type.Should().Be(DataType.Account);
 
