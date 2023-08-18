@@ -1,3 +1,4 @@
+using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Crypto;
@@ -42,7 +43,7 @@ public class HashingTests
 
     [Test]
     [TestCaseSource(nameof(_keysBalancesNoncesHexStrings))]
-    public void Leaf_keccak(Keccak key, UInt256 balance, UInt256 nonce, string hexString)
+    public void Account_leaf(Keccak key, UInt256 balance, UInt256 nonce, string hexString)
     {
         var account = new Account(balance, nonce);
 
@@ -51,5 +52,18 @@ public class HashingTests
 
         Assert.That(computedHash.DataType, Is.EqualTo(KeccakOrRlp.Type.Keccak));
         Assert.That(new Keccak(computedHash.Span), Is.EqualTo(expectedHash));
+    }
+
+    [Test]
+    public void Storage_leaf_small()
+    {
+        Span<byte> value = stackalloc byte[1] { 3 };
+        Span<byte> key = stackalloc byte[1] { 1 };
+        var path = NibblePath.FromKey(key);
+
+        Node.Leaf.KeccakOrRlp(path, value, out var result);
+
+        result.DataType.Should().Be(KeccakOrRlp.Type.Rlp);
+        result.Span.ToArray().Should().BeEquivalentTo(new byte[] { 0xC4, 0x82, 0x20, 0x01, 0x03 });
     }
 }
