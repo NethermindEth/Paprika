@@ -102,6 +102,8 @@ public readonly ref partial struct Key
         return leftover;
     }
 
+    public override int GetHashCode() => Path.GetHashCode() ^ StoragePath.GetHashCode() ^ (int)Type;
+
     public override string ToString()
     {
         return $"{nameof(Path)}: {Path.ToString()}, " +

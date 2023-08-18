@@ -485,18 +485,11 @@ public readonly ref struct NibblePath
         return FindFirstDifferentNibble(other) == Length;
     }
 
-    [SkipLocalsInit]
-    public void AddToHashCode(ref HashCode hash)
+    public override int GetHashCode()
     {
-        Span<byte> bytes = stackalloc byte[Length];
+        if (Length == 0)
+            return 0;
 
-        // write all the nibbles
-        for (int i = _odd; i < Length + _odd; i++)
-        {
-            var b = Unsafe.Add(ref _span, i / 2);
-            bytes[i - _odd] = (byte)((b >> ((1 - (i & OddBit)) * NibbleShift)) & NibbleMask);
-        }
-
-        hash.AddBytes(bytes);
+        throw new NotImplementedException("");
     }
 }
