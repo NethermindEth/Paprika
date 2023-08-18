@@ -21,7 +21,7 @@ public readonly ref struct KeccakOrRlp
 
     public Span<byte> Span => DataType == Type.Keccak
         ? _keccak.BytesAsSpan
-        : _keccak.BytesAsSpan.Slice(NonKeccakOffset + _keccak.BytesAsSpan[0]);
+        : _keccak.BytesAsSpan.Slice(NonKeccakOffset, _keccak.BytesAsSpan[0]);
 
     private KeccakOrRlp(Type dataType, scoped Span<byte> data)
     {
