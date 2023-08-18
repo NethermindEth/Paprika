@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using Nethermind.Int256;
 using Paprika.Data;
 using Paprika.RLP;
 

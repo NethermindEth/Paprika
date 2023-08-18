@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.ComponentModel.Design;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Paprika.Chain;
@@ -102,7 +101,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
                 // set it
                 commit.Set(key, account.WriteTo(accountSpan));
-
             }
 
             var root = Key.Merkle(NibblePath.Empty);
@@ -291,6 +289,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         }
     }
 
+    /// <summary>
+    /// This component appends the prefix to all the commit operations.
+    /// It's useful for storage operations, that have their key prefixed with the account.
+    /// </summary>
     private class PrefixingCommit : ICommit
     {
         private readonly ICommit _commit;
@@ -697,7 +699,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         if (extension2.Length < key.Path.Length + ext.Path.Length)
                         {
                             // there are some bytes to be set in the extension path, create one
-                            var e2Path = ext.Path.SliceFrom(extension2.Length);
+                            var e2Path = ext.Path.SliceFrom(diffAt + 1);
                             commit.SetExtension(Key.Merkle(extension2), e2Path);
                         }
 
