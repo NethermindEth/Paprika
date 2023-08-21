@@ -148,8 +148,6 @@ public readonly unsafe struct DataPage : IPage
         // try write in map
         if (map.TrySet(ctx.Key, ctx.Data))
         {
-            Console.WriteLine($"Set in page: {ctx.Key.ToString()}");
-
             return _page;
         }
 
@@ -173,9 +171,6 @@ public readonly unsafe struct DataPage : IPage
         foreach (var item in map.EnumerateNibble(biggestNibble))
         {
             var key = item.Key.SliceFrom(NibbleCount);
-
-            Console.WriteLine($"pushing down: {item.Key.ToString()}");
-
             var set = new SetContext(key, item.RawData, ctx.Batch);
 
             dataPage = new DataPage(dataPage.Set(set));
