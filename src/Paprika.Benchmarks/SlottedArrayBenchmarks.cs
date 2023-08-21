@@ -6,13 +6,13 @@ using Paprika.Store;
 namespace Paprika.Benchmarks;
 
 [DisassemblyDiagnoser(3)]
-public class FixedMapBenchmarks
+public class SlottedArrayBenchmarks
 {
     private readonly byte[] _writtenData = new byte[Page.PageSize];
     private readonly byte[] _writable = new byte[Page.PageSize];
     private readonly int _to;
 
-    public FixedMapBenchmarks()
+    public SlottedArrayBenchmarks()
     {
         var map = new SlottedArray(_writtenData);
 

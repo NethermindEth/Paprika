@@ -489,18 +489,64 @@ public readonly ref struct NibblePath
 
     public override int GetHashCode()
     {
-        var hash = 0;
+        const int prime = 374761393;
 
-        // TODO: optimize heavily!
-        for (int i = 0; i < Length; i++)
+        if (Length == 0)
+            return 0;
+        unchecked
         {
-            hash += GetAt(i);
-            unchecked
-            {
-                hash *= 374761393;
-            }
-        }
+            ref var span = ref _span;
 
-        return hash;
+            long hash = 0;
+            var length = Length;
+
+            if (_odd == OddBit)
+            {
+                hash = _span & 0x0F;
+                span = ref Unsafe.Add(ref span, 1);
+                length -= 1;
+            }
+
+            length /= 2; // make it byte
+
+            // 8 bytes
+            var longLoop = Math.DivRem(length, sizeof(long), out var remainder);
+            for (var i = 0; i < longLoop; i++)
+            {
+                unchecked
+                {
+                    hash *= prime;
+                    hash ^= Unsafe.ReadUnaligned<long>(ref span);
+                    span = ref Unsafe.Add(ref span, sizeof(long));
+                }
+            }
+
+            // 4 bytes
+            if (remainder > sizeof(int))
+            {
+                hash *= prime;
+                hash ^= Unsafe.ReadUnaligned<int>(ref span);
+                span = ref Unsafe.Add(ref span, sizeof(int));
+                remainder -= sizeof(int);
+            }
+
+            // 2 bytes
+            if (remainder > sizeof(short))
+            {
+                hash *= prime;
+                hash ^= Unsafe.ReadUnaligned<short>(ref span);
+                span = ref Unsafe.Add(ref span, sizeof(short));
+                remainder -= sizeof(short);
+            }
+
+            // 1 byte
+            if (remainder > 0)
+            {
+                hash *= prime;
+                hash ^= span;
+            }
+
+            return unchecked((int)((hash >> 32) ^ hash));
+        }
     }
 }

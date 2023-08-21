@@ -6,24 +6,18 @@ namespace Paprika.Benchmarks;
 
 public class NibblePathBenchmarks
 {
+    [Params(true, false)]
+    public bool FullKeccak { get; set; }
+
     [Params(0, 1, 2, 3)]
     public int Slice { get; set; }
 
     [Benchmark(OperationsPerInvoke = 4)]
-    public int Hash_short()
+    public int Hash()
     {
-        var path = NibblePath.FromKey(stackalloc byte[3] { 0xFC, 234, 1 }, Slice);
-
-        return path.GetHashCode() ^
-               path.GetHashCode() ^
-               path.GetHashCode() ^
-               path.GetHashCode();
-    }
-
-    [Benchmark(OperationsPerInvoke = 4)]
-    public int Hash_Keccak()
-    {
-        var path = NibblePath.FromKey(Keccak.OfAnEmptyString, Slice);
+        var span = FullKeccak ? Keccak.OfAnEmptyString.BytesAsSpan : stackalloc byte[3] { 0xFC, 234, 1 };
+        var path = NibblePath.FromKey(
+            span, Slice);
 
         return path.GetHashCode() ^
                path.GetHashCode() ^
