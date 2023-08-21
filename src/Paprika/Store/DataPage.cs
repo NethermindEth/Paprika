@@ -88,6 +88,8 @@ public readonly unsafe struct DataPage : IPage
 
         var path = ctx.Key.Path;
 
+        var isDelete = ctx.Data.IsEmpty;
+
         if (path.Length > 0)
         {
             // try to go deeper only if the path is long enough
@@ -136,7 +138,7 @@ public readonly unsafe struct DataPage : IPage
         }
 
         // try in-page write
-        var map = new NibbleBasedMap(Data.DataSpan);
+        var map = new SlottedArray(Data.DataSpan);
 
         // if written value is a storage cell, try to find the storage tree first
         if (TryFindExistingStorageTreeForCellOf(map, ctx.Key, out var storageTreeAddress))
@@ -203,7 +205,7 @@ public readonly unsafe struct DataPage : IPage
         }
 
         // read in-page
-        var map = new NibbleBasedMap(Data.DataSpan);
+        var map = new SlottedArray(Data.DataSpan);
 
         // try first storage tree
         if (TryFindExistingStorageTreeForCellOf(map, key, out var storageTreeAddress))
@@ -241,10 +243,10 @@ public readonly unsafe struct DataPage : IPage
         }
 
         reporter.ReportDataUsage(level,
-            Payload.BucketCount - emptyBuckets, new NibbleBasedMap(Data.DataSpan).Count);
+            Payload.BucketCount - emptyBuckets, new SlottedArray(Data.DataSpan).Count);
     }
 
-    private static bool TryFindExistingStorageTreeForCellOf(in NibbleBasedMap map, in Key key,
+    private static bool TryFindExistingStorageTreeForCellOf(in SlottedArray map, in Key key,
         out DbAddress storageTreeAddress)
     {
         if (key.Type != DataType.StorageCell)
@@ -265,7 +267,7 @@ public readonly unsafe struct DataPage : IPage
     }
 
     private static bool TryExtractAsStorageTree((byte nibble, double storageCellPercentageInPage) biggestNibbleStats,
-        in SetContext ctx, in NibbleBasedMap map)
+        in SetContext ctx, in SlottedArray map)
     {
         // A prerequisite to plan a massive storage tree is to have at least 90% of the page occupied by a single nibble
         // storage cells. If then they share the same key, we're ready to extract
@@ -337,7 +339,7 @@ public readonly unsafe struct DataPage : IPage
     }
 
     private static void WriteStorageCellInStorageTrie(SetContext ctx,
-        DbAddress storageTreeRootPageAddress, in NibbleBasedMap map)
+        DbAddress storageTreeRootPageAddress, in SlottedArray map)
     {
         var storageTree = ctx.Batch.GetAt(storageTreeRootPageAddress);
 

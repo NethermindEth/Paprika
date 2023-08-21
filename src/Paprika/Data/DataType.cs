@@ -1,7 +1,7 @@
 ﻿namespace Paprika.Data;
 
 /// <summary>
-/// Represents the type of data stored in the <see cref="NibbleBasedMap"/>.
+/// Represents the type of data stored in the <see cref="SlottedArray"/>.
 /// </summary>
 public enum DataType : byte
 {
@@ -34,7 +34,7 @@ public enum DataType : byte
     // 5, 6 - available
 
     /// <summary>
-    /// Special type for <see cref="NibbleBasedMap"/>. 
+    /// Special type for <see cref="SlottedArray"/>. 
     /// </summary>
     Deleted = 7,
 }

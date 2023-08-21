@@ -19,7 +19,7 @@ namespace Paprika.Data;
 /// It keeps an internal map, now implemented with a not-the-best loop over slots.
 /// With the use of key prefix, it should be small enough and fast enough for now.
 /// </remarks>
-public readonly ref struct NibbleBasedMap
+public readonly ref struct SlottedArray
 {
     public const int MinSize = AllocationGranularity * 3;
 
@@ -30,7 +30,7 @@ public readonly ref struct NibbleBasedMap
     private readonly Span<Slot> _slots;
     private readonly Span<byte> _raw;
 
-    public NibbleBasedMap(Span<byte> buffer)
+    public SlottedArray(Span<byte> buffer)
     {
         _raw = buffer;
         _header = ref Unsafe.As<byte, Header>(ref _raw[0]);
@@ -118,7 +118,7 @@ public readonly ref struct NibbleBasedMap
         public const byte AllNibbles = byte.MaxValue;
 
         /// <summary>The map being enumerated.</summary>
-        private readonly NibbleBasedMap _map;
+        private readonly SlottedArray _map;
 
         /// <summary>
         /// The nibble being enumerated.
@@ -131,7 +131,7 @@ public readonly ref struct NibbleBasedMap
         private readonly byte[] _bytes;
         private Item _current;
 
-        internal NibbleEnumerator(NibbleBasedMap map, byte nibble)
+        internal NibbleEnumerator(SlottedArray map, byte nibble)
         {
             _map = map;
             _nibble = nibble;
@@ -303,7 +303,7 @@ public readonly ref struct NibbleBasedMap
         var span = array.AsSpan(0, size);
 
         span.Clear();
-        var copy = new NibbleBasedMap(span);
+        var copy = new SlottedArray(span);
         var count = _header.Low / Slot.Size;
 
         for (int i = 0; i < count; i++)
