@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.IO.Hashing;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Paprika.Crypto;
 using Paprika.Store;
 using Paprika.Utils;
 
@@ -39,7 +38,7 @@ public readonly ref struct NibbleBasedMap
         _slots = MemoryMarshal.Cast<byte, Slot>(_data);
     }
 
-    public bool TrySet(in Key key, ReadOnlySpan<byte> data, int? keyHash = default)
+    public bool TrySet(in Key key, ReadOnlySpan<byte> data, ushort? keyHash = default)
     {
         if (TryGetImpl(key, out var existingData, out var index))
         {
@@ -54,7 +53,7 @@ public readonly ref struct NibbleBasedMap
             DeleteImpl(index);
         }
 
-        var hash = Slot.GetHash(keyHash ?? key.GetHashCode());
+        var hash = keyHash ?? Slot.GetHash(key);
 
         var encodedKey = key.Path.WriteTo(stackalloc byte[key.Path.MaxByteLength]);
         var encodedStorageKey = key.StoragePath.WriteTo(stackalloc byte[key.StoragePath.MaxByteLength]);
@@ -88,6 +87,7 @@ public readonly ref struct NibbleBasedMap
         slot.Hash = hash;
         slot.ItemAddress = (ushort)(_data.Length - _header.High - total);
         slot.Type = key.Type;
+        slot.PathNotEmpty = !key.Path.IsEmpty;
 
         // write item: key, additionalKey, data
         var dest = _data.Slice(slot.ItemAddress, total);
@@ -146,17 +146,16 @@ public readonly ref struct NibbleBasedMap
             int index = _index + 1;
             var to = _map.Count;
 
-            // TODO: reimplement
-            ref var slot = ref _map._slots[_index];
-            var span = _map.GetSlotPayload(ref slot);
-            Key.ReadFrom(span, out var key);
+            ref var slot = ref _map._slots[index];
 
             while (index < to &&
-                   (_map._slots[index].Type == DataType.Deleted || // filter out deleted
+                   (slot.Type == DataType.Deleted || // filter out deleted
                     (_nibble != AllNibbles &&
-                     (key.Path.IsEmpty || key.Path.FirstNibble != _nibble))))
+                     (!slot.PathNotEmpty || NibblePath.ReadFirstNibble(_map.GetSlotPayload(ref slot)) != _nibble))))
             {
+                // move by 1
                 index += 1;
+                slot = ref Unsafe.Add(ref slot, 1);
             }
 
             if (index < to)
@@ -175,8 +174,11 @@ public readonly ref struct NibbleBasedMap
         {
             ref var slot = ref _map._slots[_index];
             var span = _map.GetSlotPayload(ref slot);
-            var data = Key.ReadFrom(span, out var key);
-            return new Item(key, data, _index, slot.Type);
+
+            var leftover = NibblePath.ReadFrom(span, out NibblePath path);
+            var data = NibblePath.ReadFrom(leftover, out NibblePath storagePath);
+
+            return new Item(Key.Raw(path, slot.Type, storagePath), data, _index, slot.Type);
         }
 
         public void Dispose()
@@ -223,12 +225,15 @@ public readonly ref struct NibbleBasedMap
         var to = _header.Low / Slot.Size;
         for (var i = 0; i < to; i++)
         {
-            ref readonly var slot = ref _slots[i];
+            ref var slot = ref _slots[i];
 
             // extract only not deleted and these which have at least one nibble
-            if (slot.Type != DataType.Deleted && slot.NibbleCount > 0)
+            if (slot.Type != DataType.Deleted && slot.PathNotEmpty)
             {
-                var index = slot.FirstNibbleOfPrefix % bucketCount;
+                var payload = GetSlotPayload(ref slot);
+                var firstNibble = NibblePath.ReadFirstNibble(payload);
+
+                var index = firstNibble % bucketCount;
 
                 if (slot.Type == DataType.StorageCell)
                 {
@@ -317,6 +322,7 @@ public readonly ref struct NibbleBasedMap
                 copyTo.Hash = copyFrom.Hash;
                 copyTo.ItemAddress = high;
                 copyTo.Type = copyFrom.Type;
+                copyTo.PathNotEmpty = copyTo.PathNotEmpty;
 
                 copy._header.Low += Slot.Size;
                 copy._header.High = (ushort)(copy._header.High + fromSpan.Length);
@@ -373,8 +379,8 @@ public readonly ref struct NibbleBasedMap
         "key.Write to might be called twice, here and in TrySet")]
     private bool TryGetImpl(scoped in Key key, out Span<byte> data, out int slotIndex)
     {
-        var hash = Slot.ExtractPrefix(key.Path, out var path);
-        var encodedKey = path.WriteTo(stackalloc byte[path.MaxByteLength]);
+        var hash = Slot.GetHash(key);
+        var encodedKey = key.Path.WriteTo(stackalloc byte[key.Path.MaxByteLength]);
         var encodedStorageKey = key.StoragePath.WriteTo(stackalloc byte[key.StoragePath.MaxByteLength]);
 
         var to = _header.Low / Slot.Size;
@@ -472,8 +478,8 @@ public readonly ref struct NibbleBasedMap
             set => Raw = (ushort)((Raw & ~AddressMask) | value);
         }
 
-        private const int DataTypeShift = 12;
-        private const ushort DataTypeMask = unchecked((ushort)(1111 << DataTypeShift));
+        private const int DataTypeShift = 13;
+        private const ushort DataTypeMask = 0b1110_0000_0000_0000;
 
         /// <summary>
         /// The data type contained in this slot.
@@ -482,6 +488,18 @@ public readonly ref struct NibbleBasedMap
         {
             get => (DataType)((Raw & DataTypeMask) >> DataTypeShift);
             set => Raw = (ushort)((Raw & ~DataTypeMask) | (ushort)((byte)value << DataTypeShift));
+        }
+
+        private const int NotEmptyPathShift = 12;
+        private const ushort NotEmptyPathMask = 1 << NotEmptyPathShift;
+
+        /// <summary>
+        /// Shows whether the path that is encoded is empty or not.
+        /// </summary>
+        public bool PathNotEmpty
+        {
+            get => (Raw & NotEmptyPathMask) == NotEmptyPathMask;
+            set => Raw = (ushort)((Raw & ~NotEmptyPathMask) | (ushort)((value ? 1 : 0) << NotEmptyPathShift));
         }
 
         [FieldOffset(0)] private ushort Raw;
@@ -499,11 +517,14 @@ public readonly ref struct NibbleBasedMap
         /// <summary>
         /// Builds the hash for the key.
         /// </summary>
-        public static ushort GetHash(int keyHash)
+        public static ushort GetHash(in Key key)
         {
+            // TODO: ensure this is called once!
             unchecked
             {
-                return (ushort)(keyHash & (keyHash >> 16));
+                // do not use type in the hash, it's compared separately
+                var hashCode = key.Path.GetHashCode() ^ key.StoragePath.GetHashCode();
+                return (ushort)(hashCode ^ (hashCode >> 16));
             }
         }
 

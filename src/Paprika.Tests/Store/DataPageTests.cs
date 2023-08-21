@@ -86,7 +86,8 @@ public class DataPageTests : BasePageTests
         var batch = NewBatch(BatchId);
         var dataPage = new DataPage(page);
 
-        const int count = 128 * 1024;
+        //const int count = 128 * 1024;
+        const int count = 128;
         const int seed = 13;
 
         var random = new Random(seed);

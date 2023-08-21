@@ -264,6 +264,18 @@ public readonly ref struct NibblePath
         return source.Slice(PreambleLength + GetSpanLength(length, odd));
     }
 
+    /// <summary>
+    /// Reads the first byte of nibble of the path without decoding it fully.
+    /// </summary>
+    public static byte ReadFirstNibble(ReadOnlySpan<byte> source)
+    {
+        var b = source[0];
+        var odd = OddBit & b;
+
+        // inlined: GetShift
+        return (byte)((source[PreambleLength] >> ((1 - odd) * NibbleShift)) & NibbleMask);
+    }
+
     public int FindFirstDifferentNibble(in NibblePath other)
     {
         var length = Math.Min(other.Length, Length);
@@ -487,9 +499,18 @@ public readonly ref struct NibblePath
 
     public override int GetHashCode()
     {
-        if (Length == 0)
-            return 0;
+        var hash = 0;
 
-        throw new NotImplementedException("");
+        // TODO: optimize heavily!
+        for (int i = 0; i < Length; i++)
+        {
+            hash += GetAt(i);
+            unchecked
+            {
+                hash *= 374761393;
+            }
+        }
+
+        return hash;
     }
 }
