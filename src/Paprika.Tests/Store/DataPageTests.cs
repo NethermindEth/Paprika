@@ -86,8 +86,7 @@ public class DataPageTests : BasePageTests
         var batch = NewBatch(BatchId);
         var dataPage = new DataPage(page);
 
-        //const int count = 128 * 1024;
-        const int count = 128;
+        const int count = 128 * 1024;
         const int seed = 13;
 
         var random = new Random(seed);
@@ -183,8 +182,7 @@ public class DataPageTests : BasePageTests
 
         // set the empty path which may happen on var-length scenarios
         var keccakKey = Key.Account(NibblePath.Empty);
-        var keccakHash = HashingMap.GetHash(keccakKey);
-        dataPage = dataPage.Set(new SetContext(keccakHash, keccakKey, Span<byte>.Empty, batch)).Cast<DataPage>();
+        dataPage = dataPage.Set(new SetContext(keccakKey, Span<byte>.Empty, batch)).Cast<DataPage>();
 
         for (var i = 0; i < count; i++)
         {
@@ -193,8 +191,7 @@ public class DataPageTests : BasePageTests
         }
 
         // assert
-        var hash = HashingMap.GetHash(keccakKey);
-        dataPage.TryGet(hash, keccakKey, batch, out var value).Should().BeTrue();
+        dataPage.TryGet(keccakKey, batch, out var value).Should().BeTrue();
         value.Length.Should().Be(0);
 
         for (int i = 0; i < count; i++)
