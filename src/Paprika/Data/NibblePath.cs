@@ -491,8 +491,11 @@ public readonly ref struct NibblePath
     {
         const int prime = 374761393;
 
-        if (Length == 0)
-            return 0;
+        if (Length <= 1)
+        {
+            return Length == 0 ? 0 : GetAt(0);
+        }
+
         unchecked
         {
             ref var span = ref _span;
