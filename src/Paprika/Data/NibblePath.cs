@@ -182,18 +182,6 @@ public readonly ref struct NibblePath
     private ref byte GetRefAt(int nibble) => ref Unsafe.Add(ref _span, (nibble + _odd) / 2);
 
     /// <summary>
-    /// Copies the path in an unsafe manner, by reusing the reference but changing the count.
-    /// </summary>
-    public NibblePath CopyWithUnsafePointerMoveBack(int nibbleCount)
-    {
-        var odd = (byte)((_odd ^ nibbleCount) & 1);
-        var shiftBack = _odd + -nibbleCount - odd;
-        var count = shiftBack / 2;
-
-        return new NibblePath(ref Unsafe.Add(ref _span, count), odd, (byte)(Length + nibbleCount));
-    }
-
-    /// <summary>
     /// Appends a <paramref name="nibble"/> to the end of the path,
     /// using the <paramref name="workingSet"/> as the underlying memory for the new new <see cref="NibblePath"/>.
     /// </summary>
@@ -208,6 +196,7 @@ public readonly ref struct NibblePath
             throw new ArgumentException("Not enough memory to append");
         }
 
+        // TODO: do a ref comparison with Unsafe, if the same, no need to copy!
         WriteTo(workingSet);
 
         var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(Length + 1));
@@ -225,6 +214,7 @@ public readonly ref struct NibblePath
             throw new ArgumentException("Not enough memory to append");
         }
 
+        // TODO: do a ref comparison with Unsafe, if the same, no need to copy!
         WriteTo(workingSet);
 
         var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(Length + other.Length));

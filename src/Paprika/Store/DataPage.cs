@@ -95,7 +95,8 @@ public readonly unsafe struct DataPage : IPage
             ref var address = ref Data.Buckets[nibble];
 
             // the bucket is not null and represents a jump to another page
-            if (address.IsNull == false)
+            var hasChildPage = address.IsNull == false;
+            if (hasChildPage)
             {
                 // TODO: reintroduce in page cache
                 // // first try to find whether the page provides the in-page hash map
