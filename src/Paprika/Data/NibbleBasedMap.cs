@@ -322,7 +322,7 @@ public readonly ref struct NibbleBasedMap
                 copyTo.Hash = copyFrom.Hash;
                 copyTo.ItemAddress = high;
                 copyTo.Type = copyFrom.Type;
-                copyTo.PathNotEmpty = copyTo.PathNotEmpty;
+                copyTo.PathNotEmpty = copyFrom.PathNotEmpty;
 
                 copy._header.Low += Slot.Size;
                 copy._header.High = (ushort)(copy._header.High + fromSpan.Length);
