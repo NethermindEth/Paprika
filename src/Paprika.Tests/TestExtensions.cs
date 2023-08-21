@@ -66,28 +66,25 @@ public static class TestExtensions
         IBatchContext batch)
     {
         var k = Key.StorageCell(NibblePath.FromKey(key), storage);
-        var hash = HashingMap.GetHash(k);
-        return new DataPage(page.Set(new SetContext(hash, k, data, batch)));
+        return new DataPage(page.Set(new SetContext(k, data, batch)));
     }
 
     public static DataPage SetAccount(this DataPage page, in Keccak key, ReadOnlySpan<byte> data, IBatchContext batch)
     {
         var k = Key.Account(NibblePath.FromKey(key));
-        var hash = HashingMap.GetHash(k);
-        return new DataPage(page.Set(new SetContext(hash, k, data, batch)));
+        return new DataPage(page.Set(new SetContext(k, data, batch)));
     }
 
     public static void ShouldHaveAccount(this DataPage read, in Keccak key, ReadOnlySpan<byte> expected,
         IReadOnlyBatchContext batch, int? iteration = null)
     {
         var account = Key.Account(key);
-        var hash = HashingMap.GetHash(account);
         var because = $"Data for {account.Path.ToString()} should exist.";
         if (iteration != null)
         {
             because += $" Iteration: {iteration}";
         }
-        read.TryGet(hash, account, batch, out var value).Should().BeTrue(because);
+        read.TryGet(account, batch, out var value).Should().BeTrue(because);
         value.SequenceEqual(expected).Should()
             .BeTrue($"Expected value is {expected.ToHexString(false)} while actual is {value.ToHexString(false)}");
     }
@@ -96,9 +93,8 @@ public static class TestExtensions
         IReadOnlyBatchContext batch)
     {
         var storageCell = Key.StorageCell(NibblePath.FromKey(key), storage);
-        var hash = HashingMap.GetHash(storageCell);
         var because = $"Storage at {storageCell.ToString()} should exist";
-        read.TryGet(hash, storageCell, batch, out var value).Should().BeTrue(because);
+        read.TryGet(storageCell, batch, out var value).Should().BeTrue(because);
         value.SequenceEqual(expected).Should().BeTrue();
     }
 

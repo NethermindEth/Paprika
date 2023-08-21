@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.IO.Hashing;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Paprika.Crypto;
 using Paprika.Store;
 using Paprika.Utils;
 
@@ -20,7 +19,7 @@ namespace Paprika.Data;
 /// It keeps an internal map, now implemented with a not-the-best loop over slots.
 /// With the use of key prefix, it should be small enough and fast enough for now.
 /// </remarks>
-public readonly ref struct NibbleBasedMap
+public readonly ref struct SlottedArray
 {
     public const int MinSize = AllocationGranularity * 3;
 
@@ -31,7 +30,7 @@ public readonly ref struct NibbleBasedMap
     private readonly Span<Slot> _slots;
     private readonly Span<byte> _raw;
 
-    public NibbleBasedMap(Span<byte> buffer)
+    public SlottedArray(Span<byte> buffer)
     {
         _raw = buffer;
         _header = ref Unsafe.As<byte, Header>(ref _raw[0]);
@@ -39,7 +38,7 @@ public readonly ref struct NibbleBasedMap
         _slots = MemoryMarshal.Cast<byte, Slot>(_data);
     }
 
-    public bool TrySet(in Key key, ReadOnlySpan<byte> data)
+    public bool TrySet(in Key key, ReadOnlySpan<byte> data, ushort? keyHash = default)
     {
         if (TryGetImpl(key, out var existingData, out var index))
         {
@@ -54,8 +53,9 @@ public readonly ref struct NibbleBasedMap
             DeleteImpl(index);
         }
 
-        var hash = Slot.ExtractPrefix(key.Path, out var path);
-        var encodedKey = path.WriteTo(stackalloc byte[path.MaxByteLength]);
+        var hash = keyHash ?? Slot.GetHash(key);
+
+        var encodedKey = key.Path.WriteTo(stackalloc byte[key.Path.MaxByteLength]);
         var encodedStorageKey = key.StoragePath.WriteTo(stackalloc byte[key.StoragePath.MaxByteLength]);
 
         // does not exist yet, calculate total memory needed
@@ -84,9 +84,10 @@ public readonly ref struct NibbleBasedMap
         ref var slot = ref _slots[at / Slot.Size];
 
         // write slot
-        slot.Prefix = hash;
+        slot.Hash = hash;
         slot.ItemAddress = (ushort)(_data.Length - _header.High - total);
         slot.Type = key.Type;
+        slot.PathNotEmpty = !key.Path.IsEmpty;
 
         // write item: key, additionalKey, data
         var dest = _data.Slice(slot.ItemAddress, total);
@@ -117,7 +118,7 @@ public readonly ref struct NibbleBasedMap
         public const byte AllNibbles = byte.MaxValue;
 
         /// <summary>The map being enumerated.</summary>
-        private readonly NibbleBasedMap _map;
+        private readonly SlottedArray _map;
 
         /// <summary>
         /// The nibble being enumerated.
@@ -130,7 +131,7 @@ public readonly ref struct NibbleBasedMap
         private readonly byte[] _bytes;
         private Item _current;
 
-        internal NibbleEnumerator(NibbleBasedMap map, byte nibble)
+        internal NibbleEnumerator(SlottedArray map, byte nibble)
         {
             _map = map;
             _nibble = nibble;
@@ -145,14 +146,16 @@ public readonly ref struct NibbleBasedMap
             int index = _index + 1;
             var to = _map.Count;
 
+            ref var slot = ref _map._slots[index];
+
             while (index < to &&
-                   (_map._slots[index].Type == DataType.Deleted || // filter out deleted
+                   (slot.Type == DataType.Deleted || // filter out deleted
                     (_nibble != AllNibbles &&
-                     (
-                         _map._slots[index].NibbleCount == 0 ||
-                         _map._slots[index].FirstNibbleOfPrefix != _nibble))))
+                     (!slot.PathNotEmpty || NibblePath.ReadFirstNibble(_map.GetSlotPayload(ref slot)) != _nibble))))
             {
+                // move by 1
                 index += 1;
+                slot = ref Unsafe.Add(ref slot, 1);
             }
 
             if (index < to)
@@ -172,46 +175,9 @@ public readonly ref struct NibbleBasedMap
             ref var slot = ref _map._slots[_index];
             var span = _map.GetSlotPayload(ref slot);
 
-            ReadOnlySpan<byte> leftover;
-            NibblePath path;
+            var leftover = NibblePath.ReadFrom(span, out NibblePath path);
+            var data = NibblePath.ReadFrom(leftover, out NibblePath storagePath);
 
-            // path rebuilding
-            Span<byte> nibbles = stackalloc byte[3];
-            var count = slot.DecodeNibblesFromPrefix(nibbles);
-
-            if (count == 0)
-            {
-                // no nibbles stored in the slot, read as is.
-                leftover = NibblePath.ReadFrom(span, out path);
-            }
-            else
-            {
-                // there's at least one nibble extracted
-                var raw = NibblePath.RawExtract(span);
-                leftover = span.Slice(raw.Length);
-
-                const int space = 2;
-
-                var bytes = _bytes.AsSpan(0, raw.Length + space); //big enough to handle all cases
-
-                // copy forward enough to allow negative pointer arithmetics
-                var pathDestination = bytes.Slice(space);
-                raw.CopyTo(pathDestination);
-
-                // Terribly unsafe region!
-                // Operate on the copy, pathDestination, as it will be overwritten with unsafe ref.
-                NibblePath.ReadFrom(pathDestination, out path);
-
-                var countOdd = (byte)(count & 1);
-                for (var i = 0; i < count; i++)
-                {
-                    path.UnsafeSetAt(i - count - 1, countOdd, nibbles[i]);
-                }
-
-                path = path.CopyWithUnsafePointerMoveBack(count);
-            }
-
-            var data = NibblePath.ReadFrom(leftover, out var storagePath);
             return new Item(Key.Raw(path, slot.Type, storagePath), data, _index, slot.Type);
         }
 
@@ -259,12 +225,15 @@ public readonly ref struct NibbleBasedMap
         var to = _header.Low / Slot.Size;
         for (var i = 0; i < to; i++)
         {
-            ref readonly var slot = ref _slots[i];
+            ref var slot = ref _slots[i];
 
             // extract only not deleted and these which have at least one nibble
-            if (slot.Type != DataType.Deleted && slot.NibbleCount > 0)
+            if (slot.Type != DataType.Deleted && slot.PathNotEmpty)
             {
-                var index = slot.FirstNibbleOfPrefix % bucketCount;
+                var payload = GetSlotPayload(ref slot);
+                var firstNibble = NibblePath.ReadFirstNibble(payload);
+
+                var index = firstNibble % bucketCount;
 
                 if (slot.Type == DataType.StorageCell)
                 {
@@ -334,7 +303,7 @@ public readonly ref struct NibbleBasedMap
         var span = array.AsSpan(0, size);
 
         span.Clear();
-        var copy = new NibbleBasedMap(span);
+        var copy = new SlottedArray(span);
         var count = _header.Low / Slot.Size;
 
         for (int i = 0; i < count; i++)
@@ -350,9 +319,10 @@ public readonly ref struct NibbleBasedMap
                 var high = (ushort)(copy._data.Length - copy._header.High - fromSpan.Length);
                 fromSpan.CopyTo(copy._data.Slice(high));
 
-                copyTo.Prefix = copyFrom.Prefix;
+                copyTo.Hash = copyFrom.Hash;
                 copyTo.ItemAddress = high;
                 copyTo.Type = copyFrom.Type;
+                copyTo.PathNotEmpty = copyFrom.PathNotEmpty;
 
                 copy._header.Low += Slot.Size;
                 copy._header.High = (ushort)(copy._header.High + fromSpan.Length);
@@ -409,8 +379,8 @@ public readonly ref struct NibbleBasedMap
         "key.Write to might be called twice, here and in TrySet")]
     private bool TryGetImpl(scoped in Key key, out Span<byte> data, out int slotIndex)
     {
-        var hash = Slot.ExtractPrefix(key.Path, out var path);
-        var encodedKey = path.WriteTo(stackalloc byte[path.MaxByteLength]);
+        var hash = Slot.GetHash(key);
+        var encodedKey = key.Path.WriteTo(stackalloc byte[key.Path.MaxByteLength]);
         var encodedStorageKey = key.StoragePath.WriteTo(stackalloc byte[key.StoragePath.MaxByteLength]);
 
         var to = _header.Low / Slot.Size;
@@ -508,8 +478,8 @@ public readonly ref struct NibbleBasedMap
             set => Raw = (ushort)((Raw & ~AddressMask) | value);
         }
 
-        private const int DataTypeShift = 12;
-        private const ushort DataTypeMask = unchecked((ushort)(1111 << DataTypeShift));
+        private const int DataTypeShift = 13;
+        private const ushort DataTypeMask = 0b1110_0000_0000_0000;
 
         /// <summary>
         /// The data type contained in this slot.
@@ -520,6 +490,18 @@ public readonly ref struct NibbleBasedMap
             set => Raw = (ushort)((Raw & ~DataTypeMask) | (ushort)((byte)value << DataTypeShift));
         }
 
+        private const int NotEmptyPathShift = 12;
+        private const ushort NotEmptyPathMask = 1 << NotEmptyPathShift;
+
+        /// <summary>
+        /// Shows whether the path that is encoded is empty or not.
+        /// </summary>
+        public bool PathNotEmpty
+        {
+            get => (Raw & NotEmptyPathMask) == NotEmptyPathMask;
+            set => Raw = (ushort)((Raw & ~NotEmptyPathMask) | (ushort)((value ? 1 : 0) << NotEmptyPathShift));
+        }
+
         [FieldOffset(0)] private ushort Raw;
 
         /// <summary>
@@ -528,87 +510,28 @@ public readonly ref struct NibbleBasedMap
         public const int PrefixUshortMask = 1;
 
         /// <summary>
-        /// The memorized result of <see cref="ExtractPrefix"/> of this item.
+        /// The memorized result of <see cref="GetHash"/> of this item.
         /// </summary>
-        [FieldOffset(2)] public ushort Prefix;
-
-        // encode length trimmed as highest nibble
-        private const int NibbleCountShift = NibblePath.NibbleShift * 3;
-        private const int Mask0 = (1 << Shift1) - 1;
-        private const int Mask1 = (1 << Shift2) - 1 - Mask0;
-        private const int Mask2 = (1 << NibblePath.NibbleShift * 3) - 1 - Mask1 - Mask0;
-        private const int Shift0 = NibblePath.NibbleShift * 0;
-        private const int Shift1 = NibblePath.NibbleShift * 1;
-        private const int Shift2 = NibblePath.NibbleShift * 2;
+        [FieldOffset(2)] public ushort Hash;
 
         /// <summary>
         /// Builds the hash for the key.
         /// </summary>
-        public static ushort ExtractPrefix(NibblePath key, out NibblePath result)
+        public static ushort GetHash(in Key key)
         {
-            switch (key.Length)
+            // TODO: ensure this is called once!
+            unchecked
             {
-                case 0:
-                    result = key;
-                    return 0;
-                case 1:
-                    result = key.SliceFrom(1);
-                    return (ushort)(
-                        (1 << NibbleCountShift) +
-                        (key.GetAt(0) << Shift0)
-                    );
-                case 2:
-                    result = key.SliceFrom(2);
-                    return (ushort)(
-                        (2 << NibbleCountShift) +
-                        (key.GetAt(0) << Shift0) +
-                        (key.GetAt(1) << Shift1)
-                    );
-                default:
-                    // 3 or more
-                    result = key.SliceFrom(3);
-                    return (ushort)(
-                        (3 << NibbleCountShift) +
-                        (key.GetAt(0) << Shift0) +
-                        (key.GetAt(1) << Shift1) +
-                        (key.GetAt(2) << Shift2)
-                    );
+                // do not use type in the hash, it's compared separately
+                var hashCode = key.Path.GetHashCode() ^ key.StoragePath.GetHashCode();
+                return (ushort)(hashCode ^ (hashCode >> 16));
             }
         }
-
-        public int DecodeNibblesFromPrefix(Span<byte> nibbles)
-        {
-            var count = Prefix >> NibbleCountShift;
-            switch (count)
-            {
-                case 0:
-                    return 0;
-                case 1:
-                    nibbles[0] = (byte)(Prefix & Mask0);
-                    return 1;
-                case 2:
-                    nibbles[0] = (byte)(Prefix & Mask0);
-                    nibbles[1] = (byte)((Prefix & Mask1) >> Shift1);
-                    return 2;
-                default:
-                    nibbles[0] = (byte)(Prefix & Mask0);
-                    nibbles[1] = (byte)((Prefix & Mask1) >> Shift1);
-                    nibbles[2] = (byte)((Prefix & Mask2) >> Shift2);
-                    return 3;
-            }
-        }
-
-        public byte FirstNibbleOfPrefix => (byte)(Prefix & Mask0);
-
-        /// <summary>
-        /// Gets the nibble count encoded in the prefix
-        /// </summary>
-        public int NibbleCount => Prefix >> NibbleCountShift;
 
         public override string ToString()
         {
             return
-                $"{nameof(Type)}: {Type}, {nameof(Prefix)}: {Prefix}, {nameof(ItemAddress)}: {ItemAddress}";
+                $"{nameof(Type)}: {Type}, {nameof(Hash)}: {Hash}, {nameof(ItemAddress)}: {ItemAddress}";
         }
     }
 

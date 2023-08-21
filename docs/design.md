@@ -12,7 +12,7 @@ Paprika is split into two major components:
 Additionally, some other components are extracted into as reusable parts:
 
 1. `NibblePath`
-1. `NibbleBasedMap`
+1. `SlottedArray`
 
 ### Blockchain
 
@@ -124,7 +124,7 @@ The biggest caveat is where to store the `AbandonedPage`. The same mechanism is 
 
 ###### Data Page
 
-A data page is responsible for both storing data in-page and providing a fanout for lower levels of the tree. The data page tries to store as much data as possible inline using the [NibbleBasedMap component](#NibbleBasedMap). If there's no more space, left, it selects a bucket, defined by a nibble. The one with the highest count of items is flushed as a separate page and a pointer to that page is stored in the bucket of the original `DataPage`. This is a bit different approach from using page splits. Instead of splitting the page and updating the parent, the page can flush down some of its data, leaving more space for the new. A single `PageData` can hold roughly 50-100 entries. An entry, again, is described in a `NibbleBasedMap`.
+A data page is responsible for both storing data in-page and providing a fanout for lower levels of the tree. The data page tries to store as much data as possible inline using the [SlottedArray component](#SlottedArray). If there's no more space, left, it selects a bucket, defined by a nibble. The one with the highest count of items is flushed as a separate page and a pointer to that page is stored in the bucket of the original `DataPage`. This is a bit different approach from using page splits. Instead of splitting the page and updating the parent, the page can flush down some of its data, leaving more space for the new. A single `PageData` can hold roughly 50-100 entries. An entry, again, is described in a `SlottedArray`.
 
 ##### Page design in C\#
 
@@ -242,9 +242,9 @@ public struct PageHeader
 
 `NibblePath` is a custom implementation of the path of nibbles, needed to traverse the Trie of Ethereum. The structure allocates no memory and uses `ref` semantics to effectively traverse the path. It also allows for efficient comparisons and slicing. As it's `ref` based, it can be built on top of `Span<byte>`.
 
-### NibbleBasedMap
+### SlottedArray
 
-The `NibbleBasedMap` component is responsible for storing data in-page. It does it by using path-based addressing based on the functionality provided by `NibblePath`. The path is not the only discriminator for the values though. The other part required to create a `Key` is the `type` of entry. Currently, there are the following types of entries:
+The `SlottedArray` component is responsible for storing data in-page. It does it by using path-based addressing based on the functionality provided by `NibblePath`. The path is not the only discriminator for the values though. The other part required to create a `Key` is the `type` of entry. Currently, there are the following types of entries:
 
 1. `Account` - identifies `(balance, nonce, codeHash, storageRootHash)` of a given account. The entry type is aligned with `Account` of Ethereum. It uses a more efficient encoding though that requires to be translated to RLP later.
 1. `StorageCell` - identifies that the given entry is a storage cell that is kept in-page, alongside other account attributes. To make it unique, the storage cell address is stored as the first 32 bytes of its raw data. It is used for comparisons whenever needed.
@@ -261,9 +261,9 @@ and
 
 The addition of additional bytes breaks the uniform addressing that is based on the path only. It allows at the same time for auto optimization of the tree and much more dense packaging of pages.
 
-#### NibbleBasedMap layout
+#### SlottedArray layout
 
-`NibbleBasedMap` needs to store values with variant lengths over a fixed `Span<byte>` provided by the page. To make it work, Paprika uses a modified pattern of the slot array, used by major players in the world of B+ oriented databases (see: [PostgreSQL page layout](https://www.postgresql.org/docs/current/storage-page-layout.html#STORAGE-PAGE-LAYOUT-FIGURE)). How it works then?
+`SlottedArray` needs to store values with variant lengths over a fixed `Span<byte>` provided by the page. To make it work, Paprika uses a modified pattern of the slot array, used by major players in the world of B+ oriented databases (see: [PostgreSQL page layout](https://www.postgresql.org/docs/current/storage-page-layout.html#STORAGE-PAGE-LAYOUT-FIGURE)). How it works then?
 
 The slot array pattern uses a fixed-size buffer that is provided within the page. It allocates chunks of it from two directions:
 
@@ -272,7 +272,7 @@ The slot array pattern uses a fixed-size buffer that is provided within the page
 
 The first direction, from `0` is used for fixed-size structures that represent slots. Each slot has some metadata, including the most important one, the offset to the start of data. The direction from the end is used to store var length payloads. Paprika diverges from the usual slot array though. The slot array assumes that it's up to the higher level to map the slot identifiers to keys. What the page provides is just a container for tuples that stores them and maps them to the `CTID`s (see: [PostgreSQL system columns](https://www.postgresql.org/docs/current/ddl-system-columns.html)). How Paprika uses this approach
 
-In Paprika, each page level represents a cutoff in the nibble path to make it aligned to the Merkle construct. The key management could be extracted out of the `NibbleBasedMap` component, but it would make it less self-contained. `NibbleBasedMap` then provides `TrySet` and `TryGet` methods that accept nibble paths. This impacts the design of the slot, which is as follows:
+In Paprika, each page level represents a cutoff in the nibble path to make it aligned to the Merkle construct. The key management could be extracted out of the `SlottedArray` component, but it would make it less self-contained. `SlottedArray` then provides `TrySet` and `TryGet` methods that accept nibble paths. This impacts the design of the slot, which is as follows:
 
 ```csharp
 [StructLayout(LayoutKind.Explicit, Size = Size)]
@@ -298,7 +298,7 @@ private struct Slot
 
 The slot is 4 bytes long. It extracts 4 first nibbles as a prefix for fast comparisons. It has a pointer to the item. The length of the item is calculated by subtracting the address from the previous slot address. The drawback of this design is a linear search across all the slots when an item must be found. With the expected number of items per page, which should be no bigger than 100, it gives 400 bytes of slots to search through. This should be ok-ish with modern processors. The code is marked with an optimization opportunity.
 
-With this, the `NibbleBasedMap` memory representation looks like the following.
+With this, the `SlottedArray` memory representation looks like the following.
 
 ```bash
 ┌───────────────┬───────┬───────┬───────────────────────────────┐
@@ -325,7 +325,7 @@ With this, the `NibbleBasedMap` memory representation looks like the following.
 └────────────────┴─────────────┴────────────────────────────────┘
 ```
 
-The `NibbleBasedMap` can wrap an arbitrary span of memory so it can be used for any page that wants to store data by key.
+The `SlottedArray` can wrap an arbitrary span of memory so it can be used for any page that wants to store data by key.
 
 ### Merkle construct
 
@@ -400,7 +400,7 @@ A few remarks:
 1. A separate type `StorageTreeStorageCell` is used to represent an entry in this massive storage trie.
 1. An entry of type `StorageTreeRootPageAddress` provides a page address where to jump to find the storage cells of the given account
 1. `StorageTreeStorageCells` create a usual Paprika trie, with the extraction of the nibble with the biggest count if needed as a separate page
-1. All the entries are stored in [NibbleBasedMap](#NibbleBasedMap), where a small hash `ushort` is used to represent the slot
+1. All the entries are stored in [SlottedArray](#SlottedArray), where a small hash `ushort` is used to represent the slot
 
 ## Learning materials
 

@@ -182,18 +182,6 @@ public readonly ref struct NibblePath
     private ref byte GetRefAt(int nibble) => ref Unsafe.Add(ref _span, (nibble + _odd) / 2);
 
     /// <summary>
-    /// Copies the path in an unsafe manner, by reusing the reference but changing the count.
-    /// </summary>
-    public NibblePath CopyWithUnsafePointerMoveBack(int nibbleCount)
-    {
-        var odd = (byte)((_odd ^ nibbleCount) & 1);
-        var shiftBack = _odd + -nibbleCount - odd;
-        var count = shiftBack / 2;
-
-        return new NibblePath(ref Unsafe.Add(ref _span, count), odd, (byte)(Length + nibbleCount));
-    }
-
-    /// <summary>
     /// Appends a <paramref name="nibble"/> to the end of the path,
     /// using the <paramref name="workingSet"/> as the underlying memory for the new new <see cref="NibblePath"/>.
     /// </summary>
@@ -208,6 +196,7 @@ public readonly ref struct NibblePath
             throw new ArgumentException("Not enough memory to append");
         }
 
+        // TODO: do a ref comparison with Unsafe, if the same, no need to copy!
         WriteTo(workingSet);
 
         var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(Length + 1));
@@ -225,6 +214,7 @@ public readonly ref struct NibblePath
             throw new ArgumentException("Not enough memory to append");
         }
 
+        // TODO: do a ref comparison with Unsafe, if the same, no need to copy!
         WriteTo(workingSet);
 
         var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(Length + other.Length));
@@ -262,6 +252,18 @@ public readonly ref struct NibblePath
         nibblePath = new NibblePath(source.Slice(PreambleLength), odd, length);
 
         return source.Slice(PreambleLength + GetSpanLength(length, odd));
+    }
+
+    /// <summary>
+    /// Reads the first byte of nibble of the path without decoding it fully.
+    /// </summary>
+    public static byte ReadFirstNibble(ReadOnlySpan<byte> source)
+    {
+        var b = source[0];
+        var odd = OddBit & b;
+
+        // inlined: GetShift
+        return (byte)((source[PreambleLength] >> ((1 - odd) * NibbleShift)) & NibbleMask);
     }
 
     public int FindFirstDifferentNibble(in NibblePath other)
@@ -485,18 +487,20 @@ public readonly ref struct NibblePath
         return FindFirstDifferentNibble(other) == Length;
     }
 
-    [SkipLocalsInit]
-    public void AddToHashCode(ref HashCode hash)
+    public override int GetHashCode()
     {
-        Span<byte> bytes = stackalloc byte[Length];
+        var hash = 0;
 
-        // write all the nibbles
-        for (int i = _odd; i < Length + _odd; i++)
+        // TODO: optimize heavily!
+        for (int i = 0; i < Length; i++)
         {
-            var b = Unsafe.Add(ref _span, i / 2);
-            bytes[i - _odd] = (byte)((b >> ((1 - (i & OddBit)) * NibbleShift)) & NibbleMask);
+            hash += GetAt(i);
+            unchecked
+            {
+                hash *= 374761393;
+            }
         }
 
-        hash.AddBytes(bytes);
+        return hash;
     }
 }

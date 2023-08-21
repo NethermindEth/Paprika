@@ -405,31 +405,7 @@ public class Blockchain : IAsyncDisposable
             return result;
         }
 
-        private static int GetBloom(in Key key)
-        {
-            var code = new HashCode();
-            code.Add(key.Type);
-
-            if (key.Type == DataType.Account)
-            {
-                key.Path.AddToHashCode(ref code);
-            }
-            else if (key.Type == DataType.StorageCell)
-            {
-                key.Path.AddToHashCode(ref code);
-                key.StoragePath.AddToHashCode(ref code);
-            }
-            else if (key.Type == DataType.Merkle)
-            {
-                key.Path.AddToHashCode(ref code);
-            }
-            else
-            {
-                throw new NotImplementedException("Not implemented yet!");
-            }
-
-            return code.ToHashCode();
-        }
+        private static int GetBloom(in Key key) => key.GetHashCode();
 
         public void SetAccount(in Keccak address, in Account account)
         {

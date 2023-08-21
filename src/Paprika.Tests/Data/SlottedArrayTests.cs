@@ -5,7 +5,7 @@ using Paprika.Data;
 
 namespace Paprika.Tests.Data;
 
-public class NibbleBasedMapTests
+public class SlottedArrayTests
 {
     private static NibblePath Key0 => NibblePath.FromKey(new byte[] { 0x12, 0x34, 0x56, 0x78, 0xAB });
     private static ReadOnlySpan<byte> Data0 => new byte[] { 23 };
@@ -25,8 +25,8 @@ public class NibbleBasedMapTests
     [Test]
     public void Set_Get_Delete_Get_AnotherSet()
     {
-        Span<byte> span = stackalloc byte[NibbleBasedMap.MinSize];
-        var map = new NibbleBasedMap(span);
+        Span<byte> span = stackalloc byte[SlottedArray.MinSize];
+        var map = new SlottedArray(span);
 
         map.SetAssert(Key.Account(Key0), Data0);
 
@@ -49,7 +49,7 @@ public class NibbleBasedMapTests
     public void Enumerate_nibble(int from, int length)
     {
         Span<byte> span = stackalloc byte[256];
-        var map = new NibbleBasedMap(span);
+        var map = new SlottedArray(span);
 
         var path0 = Key0.SliceFrom(from).SliceTo(length);
         var path1 = Key1.SliceFrom(from).SliceTo(length);
@@ -80,7 +80,7 @@ public class NibbleBasedMapTests
     public void Enumerate_all()
     {
         Span<byte> span = stackalloc byte[256];
-        var map = new NibbleBasedMap(span);
+        var map = new SlottedArray(span);
 
         var key0 = Key.Account(Key0);
         var key1 = Key.Account(Key2);
@@ -112,7 +112,7 @@ public class NibbleBasedMapTests
     {
         // by trial and error, found the smallest value that will allow to put these two
         Span<byte> span = stackalloc byte[40];
-        var map = new NibbleBasedMap(span);
+        var map = new SlottedArray(span);
 
         map.TrySet(Key.Account(Key0), Data0).Should().BeTrue();
         map.TrySet(Key.Account(Key1), Data1).Should().BeTrue();
@@ -137,7 +137,7 @@ public class NibbleBasedMapTests
     {
         // by trial and error, found the smallest value that will allow to put these two
         Span<byte> span = stackalloc byte[24];
-        var map = new NibbleBasedMap(span);
+        var map = new SlottedArray(span);
 
         map.SetAssert(Key.Account(Key1), Data1);
         map.SetAssert(Key.Account(Key1), Data2);
@@ -150,7 +150,7 @@ public class NibbleBasedMapTests
     {
         // by trial and error, found the smallest value that will allow to put these two
         Span<byte> span = stackalloc byte[24];
-        var map = new NibbleBasedMap(span);
+        var map = new SlottedArray(span);
 
         map.SetAssert(Key.Account(Key0), Data0);
         map.SetAssert(Key.Account(Key0), Data2);
@@ -162,7 +162,7 @@ public class NibbleBasedMapTests
     public void Account_and_multiple_storage_cells()
     {
         Span<byte> span = stackalloc byte[512];
-        var map = new NibbleBasedMap(span);
+        var map = new SlottedArray(span);
 
         map.SetAssert(Key.Account(Key0), Data0);
         map.SetAssert(Key.StorageCell(Key0, StorageCell0), Data1);
@@ -179,7 +179,7 @@ public class NibbleBasedMapTests
     public void Different_accounts_same_cells()
     {
         Span<byte> span = stackalloc byte[512];
-        var map = new NibbleBasedMap(span);
+        var map = new SlottedArray(span);
 
         map.SetAssert(Key.StorageCell(Key0, StorageCell0), Data1);
         map.SetAssert(Key.StorageCell(Key1, StorageCell0), Data2);
@@ -191,12 +191,12 @@ public class NibbleBasedMapTests
 
 file static class FixedMapTestExtensions
 {
-    public static void SetAssert(this NibbleBasedMap map, in Key key, ReadOnlySpan<byte> data)
+    public static void SetAssert(this SlottedArray map, in Key key, ReadOnlySpan<byte> data)
     {
         map.TrySet(key, data).Should().BeTrue("TrySet should succeed");
     }
 
-    public static void GetAssert(this NibbleBasedMap map, in Key key, ReadOnlySpan<byte> expected)
+    public static void GetAssert(this SlottedArray map, in Key key, ReadOnlySpan<byte> expected)
     {
         map.TryGet(key, out var actual).Should().BeTrue();
         actual.SequenceEqual(expected).Should().BeTrue("Actual data should equal expected");
