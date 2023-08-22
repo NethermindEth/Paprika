@@ -88,8 +88,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     public static PagedDb NativeMemoryDb(ulong size, byte historyDepth = 2) =>
         new(new NativeMemoryPageManager(size), historyDepth);
 
-    public static PagedDb MemoryMappedDb(ulong size, byte historyDepth, string directory) =>
-        new(new MemoryMappedPageManager(size, historyDepth, directory), historyDepth);
+    public static PagedDb MemoryMappedDb(ulong size, byte historyDepth, string directory, bool flushToDisk = true) =>
+        new(new MemoryMappedPageManager(size, historyDepth, directory, flushToDisk), historyDepth);
 
     private void ReportRead() => _reads.Add(1);
     private void ReportWrite() => _writes.Add(1);

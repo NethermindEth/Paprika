@@ -6,11 +6,15 @@ namespace Paprika.Store.PageManagers;
 
 public class MemoryMappedPageManager : PointerPageManager
 {
+    private readonly bool _flushToDisk;
+
     /// <summary>
     /// The only option is random access. As Paprika jumps over the file, any prefetching is futile.
     /// Also, the file cannot be async to use some of the mmap features. So here it is, random access file. 
     /// </summary>
     private const FileOptions PaprikaFileOptions = FileOptions.RandomAccess | FileOptions.Asynchronous;
+
+    private const string PaprikaFileName = "paprika.db";
 
     private readonly FileStream _file;
     private readonly MemoryMappedFile _mapped;
@@ -23,9 +27,9 @@ public class MemoryMappedPageManager : PointerPageManager
     private readonly List<Task> _pendingWrites = new();
     private DbAddress[] _toWrite = new DbAddress[1];
 
-    public unsafe MemoryMappedPageManager(ulong size, byte historyDepth, string dir) : base(size)
+    public unsafe MemoryMappedPageManager(ulong size, byte historyDepth, string dir, bool flushToDisk = true) : base(size)
     {
-        Path = System.IO.Path.Combine(dir, "paprika.db");
+        Path = System.IO.Path.Combine(dir, PaprikaFileName);
 
         if (!File.Exists(Path))
         {
@@ -55,6 +59,7 @@ public class MemoryMappedPageManager : PointerPageManager
 
         _whole = _mapped.CreateViewAccessor();
         _whole.SafeMemoryMappedViewHandle.AcquirePointer(ref _ptr);
+        _flushToDisk = flushToDisk;
     }
 
     public string Path { get; }
@@ -124,7 +129,7 @@ public class MemoryMappedPageManager : PointerPageManager
         }
     }
 
-    public override void Flush() => _file.Flush(true);
+    public override void Flush() => _file.Flush(_flushToDisk);
 
     public override void Dispose()
     {

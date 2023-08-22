@@ -1,6 +1,7 @@
 ﻿using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Text;
 using HdrHistogram;
 using Nethermind.Int256;
 using Paprika.Chain;
@@ -16,7 +17,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 25_000 : 5_000;
+    private const int BlockCount = PersistentDb ? 25_000 : 10_000;
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
     private const int FinalizeEvery = 32;
@@ -32,7 +33,13 @@ public static class Program
 
     private const int LogEvery = BlockCount / NumberOfLogs;
 
-    private const bool PersistentDb = true;
+    private const bool PersistentDb = false;
+
+    /// <summary>
+    /// Whether perform a real FSYNC. Set to false, to make disk based tests faster.
+    /// </summary>
+    private const bool FlushToDisk = false;
+
     private const int UseStorageEveryNAccounts = 10;
     private const bool UseBigStorageAccount = false;
     private const int BigStorageAccountSlotCount = 1_000_000;
@@ -85,7 +92,7 @@ public static class Program
                 ((int)FlushEvery.TotalMilliseconds).ToString());
 
             PagedDb db = PersistentDb
-                ? PagedDb.MemoryMappedDb(DbFileSize, MaxReorgDepth, dataPath)
+                ? PagedDb.MemoryMappedDb(DbFileSize, MaxReorgDepth, dataPath, FlushToDisk)
                 : PagedDb.NativeMemoryDb(DbFileSize, MaxReorgDepth);
 
             var random = BuildRandom();
@@ -209,15 +216,26 @@ public static class Program
             var mb = (long)stats.PageCount * Page.PageSize / 1024 / 1024;
 
             var types = string.Join(", ", stats.PageTypes.Select(kvp => $"{kvp.Key}: {kvp.Value}"));
+
+            // histogram description
+            var sb = new StringBuilder();
+            sb.Append("Histogram percentiles: ");
+            foreach (var percentile in Percentiles)
+            {
+                sb.Append($"[{percentile.color}]P{percentile.value}: {percentile.value}th percentile [/] ");
+            }
+
             var report = new Layout()
                 .SplitRows(
                     new Layout(
                             new Rows(
+                                new Markup(sb.ToString()),
+                                new Text(""),
                                 new Text("General stats:"),
                                 new Text($"1. Size of this Paprika tree: {mb}MB"),
                                 new Text($"2. Types of pages: {types}"),
                                 WriteHistogram(stats.PageAge, "2. Age of pages: ")))
-                        .Size(5),
+                        .Size(7),
                     new Layout(table.Expand()));
 
             layout[info].Update(new Panel(report).Header("Paprika tree statistics").Expand());
@@ -266,8 +284,23 @@ public static class Program
             return $"[{color}]P{percentile}: {value,2}[/] ";
         }
 
-        return new Markup(prefix + Percentile(50, "green") + Percentile(90, "yellow") + Percentile(95, "red"));
+        var sb = new StringBuilder();
+
+        sb.Append(prefix);
+        foreach (var percentile in Percentiles)
+        {
+            sb.Append(Percentile(percentile.value, percentile.color));
+        }
+
+        return new Markup(sb.ToString());
     }
+
+    private static readonly (int value, string color)[] Percentiles =
+    {
+        new(50, "green"),
+        new(90, "yellow"),
+        new(95, "red"),
+    };
 
     private static int Writer(Blockchain blockchain, Keccak bigStorageAccount, Random random,
         Layout reporting)
