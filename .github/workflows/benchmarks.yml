@@ -5,7 +5,7 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  pull_request:
+  # pull_request:
   # push:
   #   branches: [main]
   workflow_dispatch:
@@ -48,3 +48,9 @@ jobs:
         dotnet run -c Release --project src/Paprika.Benchmarks/Paprika.Benchmarks.csproj -- --filter '${{ github.event.inputs.filter }}'
     - name: Summary
       run: echo 'Benchmarks that were run matched the filter ${{ github.event.inputs.filter }}' >> $GITHUB_STEP_SUMMARY
+    - name: PR Comment
+      uses: marocchino/sticky-pull-request-comment@v2
+      if: github.event_name == 'pull_request'
+      with:
+        recreate: true
+        path: /BenchmarkDotNet.Artifacts/**/*report-github.md
