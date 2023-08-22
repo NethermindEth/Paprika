@@ -119,7 +119,7 @@ public class Blockchain : IAsyncDisposable
                     application.Stop();
                     _flusherBlockApplicationInMs.Record((int)application.ElapsedMilliseconds);
 
-                    // commit but no flush here, it's too heavy
+                    // commit but no flush here, it's too heavy, the flush will come later
                     await batch.Commit(CommitOptions.DangerNoFlush);
                 }
 
