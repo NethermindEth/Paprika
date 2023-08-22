@@ -5,7 +5,7 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  pull_request:
+  # pull_request:
   # push:
   #   branches: [main]
   workflow_dispatch:
@@ -27,6 +27,7 @@ jobs:
     runs-on: [self-hosted, paprika]
     permissions:
       contents: read
+      pull-requests: write # for sticky-pull-request-comment
     steps:
     - name: Cache dotnet
       id: cache-dotnet
@@ -48,3 +49,15 @@ jobs:
         dotnet run -c Release --project src/Paprika.Benchmarks/Paprika.Benchmarks.csproj -- --filter '${{ github.event.inputs.filter }}'
     - name: Summary
       run: echo 'Benchmarks that were run matched the filter ${{ github.event.inputs.filter }}' >> $GITHUB_STEP_SUMMARY
+
+    ## reporting under PR
+    - uses: jwalton/gh-find-current-pr@v1
+      id: finder
+    - name: PR Comment
+      uses: marocchino/sticky-pull-request-comment@v2
+      if: success() && steps.finder.outputs.number
+      with:
+        header: BenchmarkDotNet
+        number: ${{ steps.finder.outputs.pr }}
+        recreate: true
+        path: BenchmarkDotNet.Artifacts/**/*report-github.md
