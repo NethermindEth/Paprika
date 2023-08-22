@@ -538,35 +538,6 @@ public readonly ref struct SlottedArray
 
     public override string ToString() => $"{nameof(Count)}: {Count}, {nameof(CapacityLeft)}: {CapacityLeft}";
 
-    public string Describe()
-    {
-        var sb = new StringBuilder();
-
-        sb.AppendLine(ToString());
-        sb.AppendLine("Values:");
-
-        var to = _header.Low / Slot.Size;
-        for (var i = 0; i < to; i++)
-        {
-            ref var slot = ref _slots[i];
-
-            if (slot.Type == DataType.Deleted)
-            {
-                sb.AppendLine($"- @{i}: deleted");
-            }
-            else
-            {
-                var span = GetSlotPayload(ref slot);
-                var leftover = NibblePath.ReadFrom(span, out NibblePath path);
-                var data = NibblePath.ReadFrom(leftover, out NibblePath storagePath);
-                var key = Key.Raw(path, slot.Type, storagePath);
-                sb.AppendLine($"- @{i}: {key.ToString()}-> data of length: {data.Length}");
-            }
-        }
-
-        return sb.ToString();
-    }
-
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Header
     {
