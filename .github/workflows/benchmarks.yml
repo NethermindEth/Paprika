@@ -45,4 +45,6 @@ jobs:
         submodules: true
     - name: Run benchmarks
       run: |
-        dotnet run -c Release --project src/Paprika.Benchmarks/Paprika.Benchmarks.csproj -- --filter '${{ github.event.inputs.filter }}"'
+        dotnet run -c Release --project src/Paprika.Benchmarks/Paprika.Benchmarks.csproj -- --filter '${{ github.event.inputs.filter }}'
+    - name: Summary
+      run: echo 'Benchmarks that were run matched the filter ${{ github.event.inputs.filter }}' >> $GITHUB_STEP_SUMMARY
