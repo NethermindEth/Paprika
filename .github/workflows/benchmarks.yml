@@ -1,5 +1,9 @@
 name: 'Benchmarks'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   pull_request:
   push:
@@ -13,6 +17,7 @@ env:
 
 jobs:
   benchmarks:
+    timeout-minutes: 10
     name: BenchmarkDotNet
     runs-on: [self-hosted, paprika]
     permissions:
