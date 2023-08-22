@@ -57,6 +57,7 @@ jobs:
       uses: marocchino/sticky-pull-request-comment@v2
       if: success() && steps.finder.outputs.number
       with:
+        header: BenchmarkDotNet
         number: ${{ steps.finder.outputs.pr }}
         recreate: true
         path: BenchmarkDotNet.Artifacts/**/*report-github.md
