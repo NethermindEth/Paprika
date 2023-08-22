@@ -26,7 +26,6 @@ jobs:
           key: ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}
           restore-keys: ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}
     - name: Set up .NET
-      if: ${{ steps.cache-dotnet.outputs.cache-hit != 'true' }}
       uses: actions/setup-dotnet@v3
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
