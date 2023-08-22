@@ -9,7 +9,7 @@ public class NibblePathBenchmarks
     [Params(true, false)]
     public bool FullKeccak { get; set; }
 
-    [Params(0, 1, 2, 3)]
+    [Params(0, 1, 2)]
     public int Slice { get; set; }
 
     [Benchmark(OperationsPerInvoke = 4)]
