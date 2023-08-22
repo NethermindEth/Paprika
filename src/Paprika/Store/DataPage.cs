@@ -44,10 +44,6 @@ public readonly unsafe struct DataPage : IPage
             return new DataPage(writable).Set(ctx);
         }
 
-        var path = ctx.Key.Path;
-        var isDelete = ctx.Data.IsEmpty;
-        var requiresTombstoneOnDelete = path.Length > 0;
-
         var map = new SlottedArray(Data.DataSpan);
 
         // if written value is a storage cell, try to find the storage tree first
@@ -58,6 +54,31 @@ public readonly unsafe struct DataPage : IPage
             return _page;
         }
 
+        var path = ctx.Key.Path;
+        var isDelete = ctx.Data.IsEmpty;
+
+        if (isDelete)
+        {
+            if (path.Length == 0)
+            {
+                // path is empty so this is the lvl that it belongs
+                DeleteInMap(ctx, map);
+
+                // TODO: try return page
+            }
+            else
+            {
+                // path is not empty, so it might have a child page underneath with data, let's try
+                var childPageAddress = Data.Buckets[path.FirstNibble];
+                if (childPageAddress.IsNull)
+                {
+                    // child page address does not exist, which means that it's the only one which can hold the data
+                    map.Delete(ctx.Key);
+                    // TODO: try return page
+                }
+            }
+        }
+        
         // try write in map
         if (map.TrySet(ctx.Key, ctx.Data))
         {
@@ -109,6 +130,19 @@ public readonly unsafe struct DataPage : IPage
 
         // The page has some of the values flushed down, try to add again.
         return Set(ctx);
+    }
+
+    private void DeleteInMap(SetContext ctx, SlottedArray map)
+    {
+        map.Delete(ctx.Key);
+        if (map.Count == 0)
+        {
+            if (Data.Buckets.IndexOfAnyExcept(DbAddress.Null) == -1)
+            {
+                // map is empty, buckets are empty, page is empty, return this 
+                ctx.Batch.GetNewPage()
+            }
+        }
     }
 
     /// <summary>
