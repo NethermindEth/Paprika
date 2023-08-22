@@ -1,0 +1,39 @@
+name: 'Benchmarks'
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  BUILD_CONFIG: release
+  DOTNET_VERSION: 7
+  DOTNET_INSTALL_DIR: '~/.dotnet'
+
+jobs:
+  benchmarks:
+    name: BenchmarkDotNet
+    runs-on: paprika-runner
+    permissions:
+      contents: read
+    steps:
+    - name: Cache dotnet
+      id: cache-dotnet
+      uses: actions/cache@v3
+      with:
+          path: ${{ env.DOTNET_INSTALL_DIR }}
+          key: ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}
+          restore-keys: ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}
+    - name: Set up .NET
+      if: ${{ steps.cache-dotnet.outputs.cache-hit != 'true' }}
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+    - name: Check out repository
+      uses: actions/checkout@v3
+      with:
+        submodules: true
+    - name: Run benchmarks
+      run: |
+        dotnet run -c Release --project .\src\Paprika.Benchmarks\Paprika.Benchmarks.csproj -- -f '*'
