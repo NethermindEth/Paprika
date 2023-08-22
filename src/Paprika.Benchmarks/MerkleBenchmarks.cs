@@ -5,7 +5,6 @@ using Paprika.Merkle;
 
 namespace Paprika.Benchmarks;
 
-[MemoryDiagnoser]
 public class MerkleBenchmarks
 {
     private static readonly Keccak SomeKeccak = Keccak.Compute(new byte[] { 1 });
