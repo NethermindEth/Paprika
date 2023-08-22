@@ -58,4 +58,4 @@ jobs:
       with:
         number: ${{ steps.finder.outputs.pr }}
         recreate: true
-        path: /BenchmarkDotNet.Artifacts/**/*report-github.md
+        path: BenchmarkDotNet.Artifacts/**/*report-github.md
