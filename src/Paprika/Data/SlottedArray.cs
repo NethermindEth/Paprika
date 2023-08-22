@@ -544,7 +544,7 @@ public readonly ref struct SlottedArray
 
         sb.AppendLine(ToString());
         sb.AppendLine("Values:");
-        
+
         var to = _header.Low / Slot.Size;
         for (var i = 0; i < to; i++)
         {

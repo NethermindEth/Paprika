@@ -47,7 +47,7 @@ public readonly unsafe struct DataPage : IPage
         var path = ctx.Key.Path;
         var isDelete = ctx.Data.IsEmpty;
         var requiresTombstoneOnDelete = path.Length > 0;
-        
+
         var map = new SlottedArray(Data.DataSpan);
 
         // if written value is a storage cell, try to find the storage tree first
@@ -78,7 +78,7 @@ public readonly unsafe struct DataPage : IPage
         // try get the child page
         ref var address = ref Data.Buckets[biggestNibble];
         Page child;
-        
+
         if (address.IsNull)
         {
             // there is no child page, create one
@@ -167,7 +167,7 @@ public readonly unsafe struct DataPage : IPage
         {
             return true;
         }
-    
+
         // path longer than 0, try to find in child
         if (key.Path.Length > 0)
         {
