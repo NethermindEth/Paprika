@@ -89,7 +89,7 @@ public readonly unsafe struct DataPage : IPage
         else
         {
             // the child page is not-null, retrieve it
-            child = ctx.Batch.GetNewPage(out address, true);
+            child = ctx.Batch.GetAt(address);
         }
 
         var dataPage = new DataPage(child);
