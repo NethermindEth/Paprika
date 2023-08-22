@@ -6,8 +6,8 @@ concurrency:
 
 on:
   pull_request:
-  push:
-    branches: [main]
+  # push:
+  #   branches: [main]
   workflow_dispatch:
     inputs:
       filter:
