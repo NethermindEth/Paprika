@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO.Hashing;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 using Paprika.Store;
 using Paprika.Utils;
 
@@ -535,10 +536,7 @@ public readonly ref struct SlottedArray
         }
     }
 
-    public override string ToString() =>
-        $"{nameof(Count)}: {Count}, " +
-        $"{nameof(CapacityLeft)}: {CapacityLeft}, " +
-        $"Hash of content: {XxHash32.HashToUInt32(_raw)}";
+    public override string ToString() => $"{nameof(Count)}: {Count}, {nameof(CapacityLeft)}: {CapacityLeft}";
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Header

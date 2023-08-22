@@ -29,6 +29,89 @@ public readonly unsafe struct DataPage : IPage
     public const int NibbleCount = 1;
 
     /// <summary>
+    /// Sets values for the given <see cref="SetContext.Key"/>
+    /// </summary>
+    /// <returns>
+    /// The actual page which handled the set operation. Due to page being COWed, it may be a different page.
+    /// </returns>
+    public Page Set(in SetContext ctx)
+    {
+        if (Header.BatchId != ctx.Batch.BatchId)
+        {
+            // the page is from another batch, meaning, it's readonly. Copy
+            var writable = ctx.Batch.GetWritableCopy(_page);
+
+            return new DataPage(writable).Set(ctx);
+        }
+
+        var path = ctx.Key.Path;
+        var isDelete = ctx.Data.IsEmpty;
+        var requiresTombstoneOnDelete = path.Length > 0;
+
+        var map = new SlottedArray(Data.DataSpan);
+
+        // if written value is a storage cell, try to find the storage tree first
+        if (TryFindExistingStorageTreeForCellOf(map, ctx.Key, out var storageTreeAddress))
+        {
+            // tree exists, write in it
+            WriteStorageCellInStorageTrie(ctx, storageTreeAddress, map);
+            return _page;
+        }
+
+        // try write in map
+        if (map.TrySet(ctx.Key, ctx.Data))
+        {
+            return _page;
+        }
+
+        // the map is full, extraction must follow
+        var biggestNibbleStats = map.GetBiggestNibbleStats();
+        var biggestNibble = biggestNibbleStats.nibble;
+
+        // first test should that be a storage tree
+        if (TryExtractAsStorageTree(biggestNibbleStats, ctx, map))
+        {
+            // storage cells extracted, set the value now
+            return Set(ctx);
+        }
+
+        // try get the child page
+        ref var address = ref Data.Buckets[biggestNibble];
+        Page child;
+
+        if (address.IsNull)
+        {
+            // there is no child page, create one
+            child = ctx.Batch.GetNewPage(out Data.Buckets[biggestNibble], true);
+            child.Header.TreeLevel = (byte)(Header.TreeLevel + 1);
+            child.Header.PageType = Header.PageType;
+        }
+        else
+        {
+            // the child page is not-null, retrieve it
+            child = ctx.Batch.GetAt(address);
+        }
+
+        var dataPage = new DataPage(child);
+
+        foreach (var item in map.EnumerateNibble(biggestNibble))
+        {
+            var key = item.Key.SliceFrom(NibbleCount);
+            var set = new SetContext(key, item.RawData, ctx.Batch);
+
+            dataPage = new DataPage(dataPage.Set(set));
+
+            // use the special delete for the item that is much faster than map.Delete(item.Key);
+            map.Delete(item);
+        }
+
+        address = ctx.Batch.GetAddress(dataPage.AsPage());
+
+        // The page has some of the values flushed down, try to add again.
+        return Set(ctx);
+    }
+
+    /// <summary>
     /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
     /// These buckets is used to store up to <see cref="DataSize"/> entries before flushing them down as other pages
     /// like page split. 
@@ -63,147 +146,10 @@ public readonly unsafe struct DataPage : IPage
         /// Writable area.
         /// </summary>
         public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
-
-        /// <summary>
-        /// Whether all the buckets point to pages underneath.
-        /// </summary>
-        public bool AllBucketsFull => Buckets.IndexOf(DbAddress.Null) == -1;
-    }
-
-    /// <summary>
-    /// Sets values for the given <see cref="SetContext.Key"/>
-    /// </summary>
-    /// <returns>
-    /// The actual page which handled the set operation. Due to page being COWed, it may be a different page.
-    /// </returns>
-    public Page Set(in SetContext ctx)
-    {
-        if (Header.BatchId != ctx.Batch.BatchId)
-        {
-            // the page is from another batch, meaning, it's readonly. Copy
-            var writable = ctx.Batch.GetWritableCopy(_page);
-
-            return new DataPage(writable).Set(ctx);
-        }
-
-        var path = ctx.Key.Path;
-
-        var isDelete = ctx.Data.IsEmpty;
-
-        if (path.Length > 0)
-        {
-            // try to go deeper only if the path is long enough
-            var nibble = path.FirstNibble;
-            ref var address = ref Data.Buckets[nibble];
-
-            // the bucket is not null and represents a jump to another page
-            var hasChildPage = address.IsNull == false;
-            if (hasChildPage)
-            {
-                // TODO: reintroduce in page cache
-                // // first try to find whether the page provides the in-page hash map
-                // if (TryGetHashingInPageMap(ctx.Key, out var hashingMap))
-                // {
-                //     if (hashingMap.TrySet(ctx.Hash, ctx.Key, ctx.Data))
-                //     {
-                //         // insertion in the map succeeds
-                //         return _page;
-                //     }
-                //
-                //     // no more place in the map, enumerate and add to appropriate child pages
-                //     foreach (var item in hashingMap)
-                //     {
-                //         var context = new SetContext(item.Hash, item.Key, item.RawData, ctx.Batch);
-                //
-                //         ref var addr = ref Data.Buckets[item.Key.Path.FirstNibble];
-                //
-                //         var page = ctx.Batch.GetAt(addr);
-                //         var updated = new DataPage(page).Set(context.SliceFrom(NibbleCount));
-                //         addr = ctx.Batch.GetAddress(updated);
-                //     }
-                //
-                //     hashingMap.Clear();
-                // }
-
-                // write in a corresponding child page
-                {
-                    var page = ctx.Batch.GetAt(address);
-                    var updated = new DataPage(page).Set(ctx.SliceFrom(NibbleCount));
-
-                    // remember the updated
-                    address = ctx.Batch.GetAddress(updated);
-                    return _page;
-                }
-            }
-        }
-
-        // try in-page write
-        var map = new SlottedArray(Data.DataSpan);
-
-        // if written value is a storage cell, try to find the storage tree first
-        if (TryFindExistingStorageTreeForCellOf(map, ctx.Key, out var storageTreeAddress))
-        {
-            // tree exists, write in it
-            WriteStorageCellInStorageTrie(ctx, storageTreeAddress, map);
-            return _page;
-        }
-
-        // try write in map
-        if (map.TrySet(ctx.Key, ctx.Data))
-        {
-            return _page;
-        }
-
-        // the map is full, extraction must follow
-        var biggestNibbleStats = map.GetBiggestNibbleStats();
-        var biggestNibble = biggestNibbleStats.nibble;
-
-        if (TryExtractAsStorageTree(biggestNibbleStats, ctx, map))
-        {
-            // storage cells extracted, set the value now
-            return Set(ctx);
-        }
-
-        // Create a new child page and flush to it
-        var child = ctx.Batch.GetNewPage(out Data.Buckets[biggestNibble], true);
-        child.Header.TreeLevel = (byte)(Header.TreeLevel + 1);
-        child.Header.PageType = Header.PageType;
-
-        var dataPage = new DataPage(child);
-
-        foreach (var item in map.EnumerateNibble(biggestNibble))
-        {
-            var key = item.Key.SliceFrom(NibbleCount);
-            var set = new SetContext(key, item.RawData, ctx.Batch);
-
-            dataPage = new DataPage(dataPage.Set(set));
-
-            // use the special delete for the item that is much faster than map.Delete(item.Key);
-            map.Delete(item);
-        }
-
-        Data.Buckets[biggestNibble] = ctx.Batch.GetAddress(dataPage.AsPage());
-
-        // The page has some of the values flushed down, try to add again.
-        return Set(ctx);
     }
 
     public bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
-        // path longer than 0, try to find in child
-        if (key.Path.Length > 0)
-        {
-            // try to go deeper only if the path is long enough
-            var nibble = key.Path.FirstNibble;
-            var bucket = Data.Buckets[nibble];
-
-            // non-null page jump, follow it!
-            if (bucket.IsNull == false)
-            {
-                return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), batch, out result);
-            }
-        }
-
         // read in-page
         var map = new SlottedArray(Data.DataSpan);
 
@@ -220,6 +166,19 @@ public readonly unsafe struct DataPage : IPage
         if (map.TryGet(key, out result))
         {
             return true;
+        }
+
+        // path longer than 0, try to find in child
+        if (key.Path.Length > 0)
+        {
+            // try to go deeper only if the path is long enough
+            var bucket = Data.Buckets[key.Path.FirstNibble];
+
+            // non-null page jump, follow it!
+            if (bucket.IsNull == false)
+            {
+                return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), batch, out result);
+            }
         }
 
         result = default;
