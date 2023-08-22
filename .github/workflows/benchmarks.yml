@@ -14,7 +14,7 @@ env:
 jobs:
   benchmarks:
     name: BenchmarkDotNet
-    runs-on: paprika-runner
+    runs-on: [self-hosted, paprika]
     permissions:
       contents: read
     steps:
