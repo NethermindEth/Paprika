@@ -35,4 +35,4 @@ jobs:
         submodules: true
     - name: Run benchmarks
       run: |
-        dotnet run -c Release --project src/Paprika.Benchmarks/Paprika.Benchmarks.csproj -- --filter *
+        dotnet run -c Release --project src/Paprika.Benchmarks/Paprika.Benchmarks.csproj -- --filter '*'
