@@ -376,13 +376,9 @@ public readonly ref struct SlottedArray
         return false;
     }
 
-    [OptimizationOpportunity(OptimizationType.CPU,
-        "key encoding  might be called twice, here and in TrySet")]
+    [OptimizationOpportunity(OptimizationType.CPU, "key encoding is delayed but it might be called twice, here + TrySet")]
     private bool TryGetImpl(scoped in Key key, ushort hash, out Span<byte> data, out int slotIndex)
     {
-        var encodedKey = key.Path.WriteTo(stackalloc byte[key.Path.MaxByteLength]);
-        var encodedStorageKey = key.StoragePath.WriteTo(stackalloc byte[key.StoragePath.MaxByteLength]);
-
         var to = _header.Low / Slot.Size;
 
         // uses vectorized search, treating slots as a Span<ushort>
@@ -392,9 +388,20 @@ public readonly ref struct SlottedArray
         var span = MemoryMarshal.Cast<Slot, ushort>(_slots.Slice(0, to));
 
         var offset = 0;
-        int index;
+        int index = span.IndexOf(hash);
 
-        while ((index = span.IndexOf(hash)) != notFound)
+        if (index == notFound)
+        {
+            data = default;
+            slotIndex = default;
+            return false;
+        }
+
+        // encode keys only if there
+        var encodedKey = key.Path.WriteTo(stackalloc byte[key.Path.MaxByteLength]);
+        var encodedStorageKey = key.StoragePath.WriteTo(stackalloc byte[key.StoragePath.MaxByteLength]);
+
+        while (index != notFound)
         {
             // move offset to the given position
             offset += index;
@@ -441,6 +448,9 @@ public readonly ref struct SlottedArray
             // offset moved by 1 to align
             span = span.Slice(index + 1);
             offset += 1;
+
+            // move to next index
+            index = span.IndexOf(hash);
         }
 
         data = default;
