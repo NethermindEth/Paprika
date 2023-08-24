@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Threading.Channels;
-using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
@@ -121,6 +120,33 @@ public class Blockchain : IAsyncDisposable
 
                     // commit but no flush here, it's too heavy, the flush will come later
                     await batch.Commit(CommitOptions.DangerNoFlush);
+
+                    // immediately, after commit, start a new readonly batch, otherwise pages won't be reused aggressively
+                    // publish the reader to the blocks following up the flushed one
+                    var readOnlyBatch = new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch("Flusher - History"));
+                    if (_blocksByNumber.TryGetValue(flushedTo + 1, out var nextBlocksToFlushedOne) == false)
+                    {
+                        throw new Exception("The blocks that is marked as finalized has no descendant. Is it possible?");
+                    }
+
+                    foreach (var nextBlock in nextBlocksToFlushedOne)
+                    {
+                        // lease first to bump up the counter, then pass
+                        readOnlyBatch.Lease();
+                        nextBlock.SetParentReader(readOnlyBatch);
+                    }
+
+                    if (_blocksByNumber.TryRemove(flushedTo, out var removedBlocks) == false)
+                        throw new Exception($"Missing blocks at block number {flushedTo}");
+
+                    foreach (var removedBlock in removedBlocks)
+                    {
+                        // remove by hash as well
+                        _blocksByHash.TryRemove(removedBlock.Hash, out _);
+                        removedBlock.Dispose();
+                    }
+
+                    _flusherQueueCount.Subtract(1);
                 }
 
                 timer.Stop();
@@ -141,36 +167,6 @@ public class Blockchain : IAsyncDisposable
                 if (timer.ElapsedMilliseconds > 0)
                 {
                     _flusherBlockPerS.Record((int)(count * 1000 / timer.ElapsedMilliseconds));
-                }
-
-                _flusherQueueCount.Subtract(count);
-
-                // publish the reader to the blocks following up the flushed one
-                var readOnlyBatch = new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch("Flusher - History"));
-                if (_blocksByNumber.TryGetValue(flushedTo + 1, out var nextBlocksToFlushedOne) == false)
-                {
-                    throw new Exception("The blocks that is marked as finalized has no descendant. Is it possible?");
-                }
-
-                foreach (var block in nextBlocksToFlushedOne)
-                {
-                    // lease first to bump up the counter, then pass
-                    readOnlyBatch.Lease();
-                    block.SetParentReader(readOnlyBatch);
-                }
-
-                // clean the earliest blocks
-                foreach (var flushedBlockNumber in flushed)
-                {
-                    if (_blocksByNumber.TryRemove(flushedBlockNumber, out var removed) == false)
-                        throw new Exception($"Missing blocks at block number {flushedBlockNumber}");
-
-                    foreach (var block in removed)
-                    {
-                        // remove by hash as well
-                        _blocksByHash.TryRemove(block.Hash, out _);
-                        block.Dispose();
-                    }
                 }
             }
         }

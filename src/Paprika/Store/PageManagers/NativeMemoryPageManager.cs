@@ -10,15 +10,11 @@ public unsafe class NativeMemoryPageManager : PointerPageManager
     {
         _ptr = NativeMemory.AlignedAlloc((UIntPtr)size, (UIntPtr)Page.PageSize);
 
-        NativeMemory.Clear(_ptr, (UIntPtr)size);
-
-        // NativeMemory.Fill(_ptr, (UIntPtr)size, byte.MaxValue);
-        //
-        // // clear first pages to make it clean
-        // for (var i = 0; i < historyDepth; i++)
-        // {
-        //     GetAt(new DbAddress((uint)i)).Clear();
-        // }
+        // clear first pages to make it clean
+        for (var i = 0; i < historyDepth; i++)
+        {
+            GetAt(new DbAddress((uint)i)).Clear();
+        }
     }
 
     protected override void* Ptr => _ptr;
