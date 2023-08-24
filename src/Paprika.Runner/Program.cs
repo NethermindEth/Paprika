@@ -17,7 +17,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 15_000 : 50_000;
+    private const int BlockCount = PersistentDb ? 100_000 : 20_000;
 
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
@@ -34,7 +34,7 @@ public static class Program
 
     private const int LogEvery = BlockCount / NumberOfLogs;
 
-    private const bool PersistentDb = false;
+    private const bool PersistentDb = true;
 
     /// <summary>
     /// Whether perform a real FSYNC. Set to false, to make disk based tests faster.

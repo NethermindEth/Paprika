@@ -31,7 +31,6 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     private readonly byte _historyDepth;
     private long _lastRoot;
     private readonly RootPage[] _roots;
-    private readonly Queue<(uint batchId, Queue<DbAddress> addresses)> _abandoned = new();
 
     // batches
     private readonly object _batchLock = new();
@@ -501,12 +500,6 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         private void MemoizeAbandoned()
         {
-            if (_abandoned.Count > 0)
-            {
-                _db._abandoned.Enqueue((BatchId, _abandoned));
-            }
-
-            return;
             if (_abandoned.Count == 0 && _unusedPool.Count == 0)
             {
                 // nothing to memoize
@@ -583,29 +576,48 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         private bool TryGetNoLongerUsedPage(out DbAddress found)
         {
-            var abandoned = _db._abandoned;
-            if (!abandoned.TryPeek(out var item))
+            if (_noUnusedPages)
             {
                 found = default;
                 return false;
             }
 
-            if (item.batchId >= _reusePagesOlderThanBatchId)
+            // check whether previous operations allocated the pool of unused pages
+            if (_unusedPool.Count == 0)
             {
-                found = default;
-                return false;
+                _metrics.ReportUnusedPoolFetch();
+
+                var abandonedPages = _root.Data.AbandonedPages;
+
+                // find the page across all the abandoned pages, so that it's the oldest one
+                if (TryFindOldest(abandonedPages, out var oldest, out var oldestAddress))
+                {
+                    // check whether the oldest page qualifies for being the pool
+                    if (oldest.AbandonedAtBatch < _reusePagesOlderThanBatchId)
+                    {
+                        // 1. copy all the pages to the pool
+                        while (oldest.TryDequeueFree(out var addr))
+                        {
+                            _unusedPool.Enqueue(addr);
+                        }
+
+                        // 2. register the oldest page for reuse
+                        RegisterForFutureReuse(oldest.AsPage());
+
+                        // 3. write its next in place of this page so that it's used as the pool
+                        var indexInRoot = abandonedPages.IndexOf(oldestAddress);
+                        abandonedPages[indexInRoot] = oldest.Next;
+                    }
+                    else
+                    {
+                        // there are no matching sets of unused pages
+                        // memoize it so that the follow up won't query over and over again
+                        _noUnusedPages = true;
+                    }
+                }
             }
 
-            if (item.addresses.TryDequeue(out found))
-            {
-                return true;
-            }
-
-            // remove empty queue
-            abandoned.Dequeue();
-
-            // try again
-            return TryGetNoLongerUsedPage(out found);
+            return _unusedPool.TryDequeue(out found);
         }
 
         private bool TryFindOldest(Span<DbAddress> abandonedPages, out AbandonedPage oldest,
