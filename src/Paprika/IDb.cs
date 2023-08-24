@@ -12,5 +12,5 @@ public interface IDb
     /// Starts a readonly batch that preserves a snapshot of the database as in the moment of its creation.
     /// </summary>
     /// <returns></returns>
-    IReadOnlyBatch BeginReadOnlyBatch();
+    IReadOnlyBatch BeginReadOnlyBatch(string name = "");
 }

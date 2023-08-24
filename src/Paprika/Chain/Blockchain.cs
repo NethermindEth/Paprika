@@ -146,7 +146,7 @@ public class Blockchain : IAsyncDisposable
                 _flusherQueueCount.Subtract(count);
 
                 // publish the reader to the blocks following up the flushed one
-                var readOnlyBatch = new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch());
+                var readOnlyBatch = new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch("Flusher - History"));
                 if (_blocksByNumber.TryGetValue(flushedTo + 1, out var nextBlocksToFlushedOne) == false)
                 {
                     throw new Exception("The blocks that is marked as finalized has no descendant. Is it possible?");
@@ -188,7 +188,7 @@ public class Blockchain : IAsyncDisposable
             return new Block(parentKeccak, parent, blockKeccak, blockNumber, this);
         }
 
-        using var batch = new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch());
+        using var batch = new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch($"{nameof(Blockchain)}.{nameof(StartNew)}"));
         batch.Lease(); // add one for this using
 
         var parentBlockNumber = blockNumber - 1;
@@ -253,13 +253,17 @@ public class Blockchain : IAsyncDisposable
         {
             _batch = batch;
             Metadata = batch.Metadata;
+            BatchId = batch.BatchId;
         }
 
         protected override void CleanUp() => _batch.Dispose();
 
         public Metadata Metadata { get; }
 
+        public uint BatchId { get; }
+
         public void Lease() => TryAcquireLease();
+
 
         public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
         {
@@ -280,6 +284,8 @@ public class Blockchain : IAsyncDisposable
 
         public void Report(IReporter reporter) =>
             throw new NotImplementedException("One should not report over a block");
+
+        public override string ToString() => $"Counter: {Counter}, BatchId:{_batch.BatchId}";
     }
 
     /// <summary>
@@ -663,6 +669,8 @@ public class Blockchain : IAsyncDisposable
 
         // once the flushing is done and blocks are disposed, dispose the pool
         _pool.Dispose();
+
+        Debugger.Log(0, null, $"Next free page: {_db.NextFreePage}\n\n");
 
         // dispose metrics, but flush them last time before unregistering
         _beforeMetricsDisposed?.Invoke();

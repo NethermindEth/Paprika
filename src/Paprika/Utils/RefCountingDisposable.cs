@@ -58,4 +58,8 @@ public abstract class RefCountingDisposable : IDisposable
     }
 
     protected abstract void CleanUp();
+
+    public int Counter => Volatile.Read(ref _counter);
+
+    public override string ToString() => $"Counter: {Volatile.Read(ref _counter)}";
 }

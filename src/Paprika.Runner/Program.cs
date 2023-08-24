@@ -17,7 +17,8 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 25_000 : 10_000;
+    private const int BlockCount = PersistentDb ? 15_000 : 2_000;
+
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
     private const int FinalizeEvery = 32;
@@ -26,7 +27,7 @@ public static class Program
 
     private const int NumberOfLogs = PersistentDb ? 100 : 10;
 
-    private const long DbFileSize = PersistentDb ? 64 * Gb : 16 * Gb;
+    private const long DbFileSize = PersistentDb ? 64 * Gb : 24 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
 
     private static readonly TimeSpan FlushEvery = TimeSpan.FromSeconds(10);
@@ -140,7 +141,7 @@ public static class Program
             }
 
             // waiting for finalization
-            using var read = db.BeginReadOnlyBatch();
+            using var read = db.BeginReadOnlyBatch("Runner - reading");
 
             var readingStopWatch = Stopwatch.StartNew();
             random = BuildRandom();

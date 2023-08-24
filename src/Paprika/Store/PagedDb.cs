@@ -31,6 +31,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     private readonly byte _historyDepth;
     private long _lastRoot;
     private readonly RootPage[] _roots;
+    private readonly Queue<(uint batchId, Queue<DbAddress> addresses)> _abandoned = new();
 
     // batches
     private readonly object _batchLock = new();
@@ -86,7 +87,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     }
 
     public static PagedDb NativeMemoryDb(ulong size, byte historyDepth = 2) =>
-        new(new NativeMemoryPageManager(size), historyDepth);
+        new(new NativeMemoryPageManager(size, historyDepth), historyDepth);
 
     public static PagedDb MemoryMappedDb(ulong size, byte historyDepth, string directory, bool flushToDisk = true) =>
         new(new MemoryMappedPageManager(size, historyDepth, directory, flushToDisk), historyDepth);
@@ -136,6 +137,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
     private RootPage Root => _roots[_lastRoot % _historyDepth];
 
+    public uint NextFreePage => Root.Data.NextFreePage.Raw;
+
     public void Dispose()
     {
         _manager.Dispose();
@@ -148,12 +151,12 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     /// <returns></returns>
     public IBatch BeginNextBatch() => BuildFromRoot(Root);
 
-    public IReadOnlyBatch BeginReadOnlyBatch()
+    public IReadOnlyBatch BeginReadOnlyBatch(string name = "")
     {
         lock (_batchLock)
         {
             var batchId = Root.Header.BatchId;
-            var batch = new ReadOnlyBatch(this, batchId, Root.Data.AccountPages.ToArray(), Root.Data.Metadata, Root.Data.NextFreePage);
+            var batch = new ReadOnlyBatch(this, batchId, Root.Data.AccountPages.ToArray(), Root.Data.Metadata, Root.Data.NextFreePage, name);
             _batchesReadOnly.Add(batch);
             return batch;
         }
@@ -245,13 +248,15 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         private readonly DbAddress[] _rootDataPages;
         private readonly DbAddress _nextFreePage;
+        private readonly string _name;
 
         public ReadOnlyBatch(PagedDb db, uint batchId, DbAddress[] rootDataPages, Metadata metadata,
-            DbAddress nextFreePage)
+            DbAddress nextFreePage, string name)
         {
             _db = db;
             _rootDataPages = rootDataPages;
             _nextFreePage = nextFreePage;
+            _name = name;
             BatchId = batchId;
             Metadata = metadata;
         }
@@ -303,6 +308,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         public uint BatchId { get; }
 
         public Page GetAt(DbAddress address) => _db._manager.GetAt(address);
+
+        public override string ToString() => $"{nameof(ReadOnlyBatch)}, Name: {_name}, BatchId: {BatchId}";
     }
 
     class Batch : BatchContextBase, IBatch
@@ -342,7 +349,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _reusePagesOlderThanBatchId = reusePagesOlderThanBatchId;
             _ctx = ctx;
             _unusedPool = ctx.Unused;
-            _abandoned = ctx.Abandoned;
+            _abandoned = new Queue<DbAddress>();
             _written = ctx.Written;
 
             _metrics = new BatchMetrics();
@@ -451,7 +458,14 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         }
 
         [DebuggerStepThrough]
-        public override Page GetAt(DbAddress address) => _db.GetAt(address);
+        public override Page GetAt(DbAddress address)
+        {
+            // Getting a page beyond root!
+            var nextFree = _root.Data.NextFreePage;
+            Debug.Assert(address < nextFree, $"Breached the next free page, NextFree: {nextFree}, retrieved {address}");
+            var page = _db.GetAt(address);
+            return page;
+        }
 
         public override DbAddress GetAddress(Page page) => _db.GetAddress(page);
 
@@ -473,8 +487,11 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             }
 
             var page = _db.GetAtForWriting(addr, reused);
+
             if (clear)
+            {
                 page.Clear();
+            }
 
             _written.Add(addr);
 
@@ -484,6 +501,12 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         private void MemoizeAbandoned()
         {
+            if (_abandoned.Count > 0)
+            {
+                _db._abandoned.Enqueue((BatchId, _abandoned));
+            }
+
+            return;
             if (_abandoned.Count == 0 && _unusedPool.Count == 0)
             {
                 // nothing to memoize
@@ -560,48 +583,29 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         private bool TryGetNoLongerUsedPage(out DbAddress found)
         {
-            if (_noUnusedPages)
+            var abandoned = _db._abandoned;
+            if (!abandoned.TryPeek(out var item))
             {
                 found = default;
                 return false;
             }
 
-            // check whether previous operations allocated the pool of unused pages
-            if (_unusedPool.Count == 0)
+            if (item.batchId >= _reusePagesOlderThanBatchId)
             {
-                _metrics.ReportUnusedPoolFetch();
-
-                var abandonedPages = _root.Data.AbandonedPages;
-
-                // find the page across all the abandoned pages, so that it's the oldest one
-                if (TryFindOldest(abandonedPages, out var oldest, out var oldestAddress))
-                {
-                    // check whether the oldest page qualifies for being the pool
-                    if (oldest.AbandonedAtBatch < _reusePagesOlderThanBatchId)
-                    {
-                        // 1. copy all the pages to the pool
-                        while (oldest.TryDequeueFree(out var addr))
-                        {
-                            _unusedPool.Enqueue(addr);
-                        }
-
-                        // 2. register the oldest page for reuse
-                        RegisterForFutureReuse(oldest.AsPage());
-
-                        // 3. write its next in place of this page so that it's used as the pool
-                        var indexInRoot = abandonedPages.IndexOf(oldestAddress);
-                        abandonedPages[indexInRoot] = oldest.Next;
-                    }
-                    else
-                    {
-                        // there are no matching sets of unused pages
-                        // memoize it so that the follow up won't query over and over again
-                        _noUnusedPages = true;
-                    }
-                }
+                found = default;
+                return false;
             }
 
-            return _unusedPool.TryDequeue(out found);
+            if (item.addresses.TryDequeue(out found))
+            {
+                return true;
+            }
+
+            // remove empty queue
+            abandoned.Dequeue();
+
+            // try again
+            return TryGetNoLongerUsedPage(out found);
         }
 
         private bool TryFindOldest(Span<DbAddress> abandonedPages, out AbandonedPage oldest,
