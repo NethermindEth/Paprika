@@ -16,4 +16,6 @@ public interface IReadOnlyBatch : IDisposable
     bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result);
 
     void Report(IReporter reporter);
+
+    public uint BatchId { get; }
 }

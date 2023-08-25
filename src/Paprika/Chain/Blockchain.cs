@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Threading.Channels;
-using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
@@ -121,6 +120,33 @@ public class Blockchain : IAsyncDisposable
 
                     // commit but no flush here, it's too heavy, the flush will come later
                     await batch.Commit(CommitOptions.DangerNoFlush);
+
+                    // immediately, after commit, start a new readonly batch, otherwise pages won't be reused aggressively
+                    // publish the reader to the blocks following up the flushed one
+                    var readOnlyBatch = new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch("Flusher - History"));
+                    if (_blocksByNumber.TryGetValue(flushedTo + 1, out var nextBlocksToFlushedOne) == false)
+                    {
+                        throw new Exception("The blocks that is marked as finalized has no descendant. Is it possible?");
+                    }
+
+                    foreach (var nextBlock in nextBlocksToFlushedOne)
+                    {
+                        // lease first to bump up the counter, then pass
+                        readOnlyBatch.Lease();
+                        nextBlock.SetParentReader(readOnlyBatch);
+                    }
+
+                    if (_blocksByNumber.TryRemove(flushedTo, out var removedBlocks) == false)
+                        throw new Exception($"Missing blocks at block number {flushedTo}");
+
+                    foreach (var removedBlock in removedBlocks)
+                    {
+                        // remove by hash as well
+                        _blocksByHash.TryRemove(removedBlock.Hash, out _);
+                        removedBlock.Dispose();
+                    }
+
+                    _flusherQueueCount.Subtract(1);
                 }
 
                 timer.Stop();
@@ -142,36 +168,6 @@ public class Blockchain : IAsyncDisposable
                 {
                     _flusherBlockPerS.Record((int)(count * 1000 / timer.ElapsedMilliseconds));
                 }
-
-                _flusherQueueCount.Subtract(count);
-
-                // publish the reader to the blocks following up the flushed one
-                var readOnlyBatch = new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch());
-                if (_blocksByNumber.TryGetValue(flushedTo + 1, out var nextBlocksToFlushedOne) == false)
-                {
-                    throw new Exception("The blocks that is marked as finalized has no descendant. Is it possible?");
-                }
-
-                foreach (var block in nextBlocksToFlushedOne)
-                {
-                    // lease first to bump up the counter, then pass
-                    readOnlyBatch.Lease();
-                    block.SetParentReader(readOnlyBatch);
-                }
-
-                // clean the earliest blocks
-                foreach (var flushedBlockNumber in flushed)
-                {
-                    if (_blocksByNumber.TryRemove(flushedBlockNumber, out var removed) == false)
-                        throw new Exception($"Missing blocks at block number {flushedBlockNumber}");
-
-                    foreach (var block in removed)
-                    {
-                        // remove by hash as well
-                        _blocksByHash.TryRemove(block.Hash, out _);
-                        block.Dispose();
-                    }
-                }
             }
         }
         catch (Exception e)
@@ -188,7 +184,7 @@ public class Blockchain : IAsyncDisposable
             return new Block(parentKeccak, parent, blockKeccak, blockNumber, this);
         }
 
-        using var batch = new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch());
+        using var batch = new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch($"{nameof(Blockchain)}.{nameof(StartNew)}"));
         batch.Lease(); // add one for this using
 
         var parentBlockNumber = blockNumber - 1;
@@ -253,13 +249,17 @@ public class Blockchain : IAsyncDisposable
         {
             _batch = batch;
             Metadata = batch.Metadata;
+            BatchId = batch.BatchId;
         }
 
         protected override void CleanUp() => _batch.Dispose();
 
         public Metadata Metadata { get; }
 
+        public uint BatchId { get; }
+
         public void Lease() => TryAcquireLease();
+
 
         public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
         {
@@ -280,6 +280,8 @@ public class Blockchain : IAsyncDisposable
 
         public void Report(IReporter reporter) =>
             throw new NotImplementedException("One should not report over a block");
+
+        public override string ToString() => $"Counter: {Counter}, BatchId:{_batch.BatchId}";
     }
 
     /// <summary>
@@ -663,6 +665,8 @@ public class Blockchain : IAsyncDisposable
 
         // once the flushing is done and blocks are disposed, dispose the pool
         _pool.Dispose();
+
+        Debugger.Log(0, null, $"Next free page: {_db.NextFreePage}\n\n");
 
         // dispose metrics, but flush them last time before unregistering
         _beforeMetricsDisposed?.Invoke();
