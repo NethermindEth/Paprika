@@ -1,9 +1,7 @@
 ﻿using System.Buffers;
 using System.Diagnostics;
-using System.IO.Hashing;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Text;
 using Paprika.Store;
 using Paprika.Utils;
 

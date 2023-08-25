@@ -1,6 +1,4 @@
-﻿using Paprika.Data;
-
-namespace Paprika.Store;
+﻿namespace Paprika.Store;
 
 /// <summary>
 /// The base class for all context implementations.

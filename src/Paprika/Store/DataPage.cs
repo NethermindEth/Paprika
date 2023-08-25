@@ -44,10 +44,6 @@ public readonly unsafe struct DataPage : IPage
             return new DataPage(writable).Set(ctx);
         }
 
-        var path = ctx.Key.Path;
-        var isDelete = ctx.Data.IsEmpty;
-        var requiresTombstoneOnDelete = path.Length > 0;
-
         var map = new SlottedArray(Data.DataSpan);
 
         // if written value is a storage cell, try to find the storage tree first
@@ -56,6 +52,26 @@ public readonly unsafe struct DataPage : IPage
             // tree exists, write in it
             WriteStorageCellInStorageTrie(ctx, storageTreeAddress, map);
             return _page;
+        }
+
+        var path = ctx.Key.Path;
+        var isDelete = ctx.Data.IsEmpty;
+
+        if (isDelete)
+        {
+            if (path.Length < NibbleCount)
+            {
+                // path cannot be held on a lower level so delete in here
+                return DeleteInMap(ctx, map);
+            }
+
+            // path is not empty, so it might have a child page underneath with data, let's try
+            var childPageAddress = Data.Buckets[path.FirstNibble];
+            if (childPageAddress.IsNull)
+            {
+                // there's no lower level, delete in map
+                return DeleteInMap(ctx, map);
+            }
         }
 
         // try write in map
@@ -111,6 +127,18 @@ public readonly unsafe struct DataPage : IPage
         return Set(ctx);
     }
 
+    private Page DeleteInMap(SetContext ctx, SlottedArray map)
+    {
+        map.Delete(ctx.Key);
+        if (map.Count == 0 && Data.Buckets.IndexOfAnyExcept(DbAddress.Null) == -1)
+        {
+            // map is empty, buckets are empty, page is empty
+            // TODO: for now, leave as is 
+        }
+
+        return _page;
+    }
+
     /// <summary>
     /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
     /// These buckets is used to store up to <see cref="DataSize"/> entries before flushing them down as other pages
@@ -157,7 +185,7 @@ public readonly unsafe struct DataPage : IPage
         if (TryFindExistingStorageTreeForCellOf(map, key, out var storageTreeAddress))
         {
             var storageTree = new DataPage(batch.GetAt(storageTreeAddress));
-            var inTreeAddress = Key.StorageTreeStorageCell(key);
+            var inTreeAddress = BuildStorageTreeKey(key);
 
             return storageTree.TryGet(inTreeAddress, batch, out result);
         }
@@ -208,12 +236,14 @@ public readonly unsafe struct DataPage : IPage
     private static bool TryFindExistingStorageTreeForCellOf(in SlottedArray map, in Key key,
         out DbAddress storageTreeAddress)
     {
-        if (key.Type != DataType.StorageCell)
+        if (key.Type != DataType.StorageCell ||
+            (key.Type != DataType.Merkle && key.StoragePath.IsEmpty))
         {
             storageTreeAddress = default;
             return false;
         }
 
+        // proceed only if it's a StorageCell or a Merkle for Storage
         var storageTreeRootKey = Key.StorageTreeRootPageAddress(key.Path);
         if (map.TryGet(storageTreeRootKey, out var rawPageAddress))
         {
@@ -303,7 +333,8 @@ public readonly unsafe struct DataPage : IPage
         var storageTree = ctx.Batch.GetAt(storageTreeRootPageAddress);
 
         // build a new key, based just on the storage key as the root is addressed by the account address
-        var inTreeAddress = Key.StorageTreeStorageCell(ctx.Key);
+
+        var inTreeAddress = BuildStorageTreeKey(ctx.Key);
 
         var updatedStorageTree =
             new DataPage(storageTree).Set(new SetContext(inTreeAddress, ctx.Data, ctx.Batch));
@@ -319,5 +350,14 @@ public readonly unsafe struct DataPage : IPage
                                     "It should always be possible as tge previous one is existing");
             }
         }
+    }
+
+    private static Key BuildStorageTreeKey(in Key key)
+    {
+        Debug.Assert(key.Type == DataType.StorageCell || key.Type == DataType.Merkle);
+
+        return key.Type == DataType.StorageCell
+            ? Key.StorageTreeStorageCell(key)
+            : Key.Merkle(key.StoragePath);
     }
 }

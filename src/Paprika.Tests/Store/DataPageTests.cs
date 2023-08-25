@@ -171,6 +171,7 @@ public class DataPageTests : BasePageTests
     [Test(Description = "Ensures that tree can hold entries with NibblePaths of various lengths")]
     public void Var_length_NibblePaths()
     {
+        Span<byte> data = stackalloc byte[1] { 13 };
         var page = AllocPage();
         page.Clear();
 
@@ -182,7 +183,7 @@ public class DataPageTests : BasePageTests
 
         // set the empty path which may happen on var-length scenarios
         var keccakKey = Key.Account(NibblePath.Empty);
-        dataPage = dataPage.Set(new SetContext(keccakKey, Span<byte>.Empty, batch)).Cast<DataPage>();
+        dataPage = dataPage.Set(new SetContext(keccakKey, data, batch)).Cast<DataPage>();
 
         for (var i = 0; i < count; i++)
         {
@@ -192,7 +193,7 @@ public class DataPageTests : BasePageTests
 
         // assert
         dataPage.TryGet(keccakKey, batch, out var value).Should().BeTrue();
-        value.Length.Should().Be(0);
+        value.SequenceEqual(data).Should().BeTrue();
 
         for (int i = 0; i < count; i++)
         {
