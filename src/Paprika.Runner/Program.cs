@@ -7,6 +7,7 @@ using HdrHistogram;
 using Nethermind.Int256;
 using Paprika.Chain;
 using Paprika.Crypto;
+using Paprika.Merkle;
 using Paprika.Store;
 using Paprika.Tests;
 using Spectre.Console;
@@ -118,7 +119,7 @@ public static class Program
                 Console.WriteLine($"- every {UseStorageEveryNAccounts}th account will have 1 storage slot written");
             }
 
-            if (UseBigStorageAccount)
+            if (config.UseBigStorageAccount)
             {
                 Console.WriteLine("- each account amends 1 slot in Big Storage account");
             }
@@ -144,7 +145,10 @@ public static class Program
                     ctx.Refresh();
                 }));
 
-            await using (var blockchain = new Blockchain(db, null, config.FlushEvery, 1000, reporter.Observe))
+            //var merkle = new ComputeMerkleBehavior(true, 2, 2);
+            IPreCommitBehavior preCommit = null;
+
+            await using (var blockchain = new Blockchain(db, preCommit, config.FlushEvery, 1000, reporter.Observe))
             {
                 counter = Writer(config, blockchain, bigStorageAccount, random, layout[writing]);
             }
@@ -335,7 +339,7 @@ public static class Program
                     worldState.SetStorage(key, storageAddress, storageValue);
                 }
 
-                if (UseBigStorageAccount)
+                if (config.UseBigStorageAccount)
                 {
                     if (bigStorageAccountCreated == false)
                     {
