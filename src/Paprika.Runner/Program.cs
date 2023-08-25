@@ -1,6 +1,7 @@
 ﻿using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 using System.Text;
 using HdrHistogram;
 using Nethermind.Int256;
@@ -51,7 +52,13 @@ public static class Program
     public static async Task Main(String[] args)
     {
         // select the case
-        var config = InMemorySmall;
+        var caseName = (args.Length > 0 ? args[0] : nameof(InMemorySmall)).ToLowerInvariant();
+        var cases = typeof(Program)
+            .GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+            .Where(f => f.FieldType == typeof(Case))
+            .ToDictionary(p => p.Name.ToLowerInvariant(), p => (Case)p.GetValue(null)!);
+
+        var config = cases[caseName];
 
         const string left = "Left";
         const string metrics = "Metrics";
