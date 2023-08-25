@@ -73,7 +73,7 @@ public readonly unsafe struct DataPage : IPage
                 return DeleteInMap(ctx, map);
             }
         }
-        
+
         // try write in map
         if (map.TrySet(ctx.Key, ctx.Data))
         {
@@ -185,7 +185,7 @@ public readonly unsafe struct DataPage : IPage
         if (TryFindExistingStorageTreeForCellOf(map, key, out var storageTreeAddress))
         {
             var storageTree = new DataPage(batch.GetAt(storageTreeAddress));
-            var inTreeAddress = Key.StorageTreeStorageCell(key);
+            var inTreeAddress = BuildStorageTreeKey(key);
 
             return storageTree.TryGet(inTreeAddress, batch, out result);
         }
@@ -236,12 +236,14 @@ public readonly unsafe struct DataPage : IPage
     private static bool TryFindExistingStorageTreeForCellOf(in SlottedArray map, in Key key,
         out DbAddress storageTreeAddress)
     {
-        if (key.Type != DataType.StorageCell)
+        if (key.Type != DataType.StorageCell ||
+            (key.Type != DataType.Merkle && key.StoragePath.IsEmpty))
         {
             storageTreeAddress = default;
             return false;
         }
 
+        // proceed only if it's a StorageCell or a Merkle for Storage
         var storageTreeRootKey = Key.StorageTreeRootPageAddress(key.Path);
         if (map.TryGet(storageTreeRootKey, out var rawPageAddress))
         {
@@ -331,7 +333,8 @@ public readonly unsafe struct DataPage : IPage
         var storageTree = ctx.Batch.GetAt(storageTreeRootPageAddress);
 
         // build a new key, based just on the storage key as the root is addressed by the account address
-        var inTreeAddress = Key.StorageTreeStorageCell(ctx.Key);
+
+        var inTreeAddress = BuildStorageTreeKey(ctx.Key);
 
         var updatedStorageTree =
             new DataPage(storageTree).Set(new SetContext(inTreeAddress, ctx.Data, ctx.Batch));
@@ -347,5 +350,14 @@ public readonly unsafe struct DataPage : IPage
                                     "It should always be possible as tge previous one is existing");
             }
         }
+    }
+
+    private static Key BuildStorageTreeKey(in Key key)
+    {
+        Debug.Assert(key.Type == DataType.StorageCell || key.Type == DataType.Merkle);
+
+        return key.Type == DataType.StorageCell
+            ? Key.StorageTreeStorageCell(key)
+            : Key.Merkle(key.StoragePath);
     }
 }
