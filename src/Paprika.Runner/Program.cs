@@ -17,7 +17,7 @@ namespace Paprika.Runner;
 
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 100_000 : 20_000;
+    private const int BlockCount = PersistentDb ? 100_000 : 50_000;
 
     private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
@@ -27,14 +27,14 @@ public static class Program
 
     private const int NumberOfLogs = PersistentDb ? 100 : 10;
 
-    private const long DbFileSize = PersistentDb ? 64 * Gb : 24 * Gb;
+    private const long DbFileSize = PersistentDb ? 64 * Gb : 16 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
 
     private static readonly TimeSpan FlushEvery = TimeSpan.FromSeconds(10);
 
     private const int LogEvery = BlockCount / NumberOfLogs;
 
-    private const bool PersistentDb = true;
+    private const bool PersistentDb = false;
 
     /// <summary>
     /// Whether perform a real FSYNC. Set to false, to make disk based tests faster.
@@ -165,12 +165,7 @@ public static class Program
                 {
                     var storageAddress = GetStorageAddress(i);
                     var expectedStorageValue = GetStorageValue(i);
-                    var actualStorage = read.GetStorage(key, storageAddress);
-
-                    if (actualStorage.SequenceEqual(expectedStorageValue) == false)
-                    {
-                        throw new InvalidOperationException($"Invalid storage for account number {i}!");
-                    }
+                    read.AssertStorageValue(key, storageAddress, expectedStorageValue);
                 }
 
                 if (UseBigStorageAccount)
@@ -178,12 +173,7 @@ public static class Program
                     var index = i % BigStorageAccountSlotCount;
                     var storageAddress = GetStorageAddress(index);
                     var expectedStorageValue = GetBigAccountValue(index);
-                    var actualStorage = read.GetStorage(bigStorageAccount, storageAddress);
-
-                    if (actualStorage.SequenceEqual(expectedStorageValue) == false)
-                    {
-                        throw new InvalidOperationException($"Invalid storage for big storage account at index {i}!");
-                    }
+                    read.AssertStorageValue(bigStorageAccount, storageAddress, expectedStorageValue);
                 }
 
                 if (i > 0 & i % logReadEvery == 0)

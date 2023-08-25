@@ -1,6 +1,7 @@
 ﻿using System.Buffers.Binary;
 using FluentAssertions;
 using Nethermind.Int256;
+using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store;
@@ -37,16 +38,28 @@ public static class TestExtensions
 
     public static Account GetAccount(this IReadOnlyBatch read, in Keccak key)
     {
-        read.TryGet(Key.Account(key), out var value).Should().BeTrue($"Key: {key.ToString()} should exist.");
+        if (!read.TryGet(Key.Account(key), out var value))
+        {
+            Assert.Fail($"Key: {key.ToString()} should exist.");
+        }
+
+
         Account.ReadFrom(value, out var account);
         return account;
     }
 
-    public static byte[] GetStorage(this IReadOnlyBatch read, in Keccak key, in Keccak storage)
+    public static void AssertStorageValue(this IReadOnlyBatch read, in Keccak key, in Keccak storage,
+        ReadOnlySpan<byte> expected)
     {
-        read.TryGet(Key.StorageCell(NibblePath.FromKey(key), storage), out var value).Should()
-            .BeTrue($"Storage for the account: {key.ToString()} @ {storage.ToString()} should exist.");
-        return value.ToArray();
+        if (!read.TryGet(Key.StorageCell(NibblePath.FromKey(key), storage), out var value))
+        {
+            Assert.Fail($"Storage for the account: {key.ToString()} @ {storage.ToString()} should exist.");
+        }
+
+        if (value.SequenceEqual(expected) == false)
+        {
+            throw new InvalidOperationException($"Invalid storage value for account number {key.ToString()} @ {storage.ToString()}!");
+        }
     }
 
     public static void ShouldHaveStorage(this IReadOnlyBatch read, in Keccak key, in Keccak storage,
