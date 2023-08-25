@@ -710,7 +710,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
                         // Important! Make it the last as it's updating the existing key
                         commit.SetExtension(key, extPath);
-                        
+
                         return;
                     }
                 case Node.Type.Branch:
