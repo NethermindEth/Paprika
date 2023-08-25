@@ -1,6 +1,7 @@
 ﻿using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 using System.Text;
 using HdrHistogram;
 using Nethermind.Int256;
@@ -15,38 +16,47 @@ using Spectre.Console.Rendering;
 
 namespace Paprika.Runner;
 
+/// <summary>
+/// The case for running the runner.
+/// </summary>
+public record Case(uint BlockCount, int AccountsPerBlock, ulong DbFileSize, bool PersistentDb, TimeSpan FlushEvery,
+    bool Fsync,
+    bool UseBigStorageAccount)
+{
+    public uint NumberOfLogs => PersistentDb ? 100u : 10u;
+    public uint LogEvery => BlockCount / NumberOfLogs;
+}
+
 public static class Program
 {
-    private const int BlockCount = PersistentDb ? 100_000 : 50_000;
+    private static readonly Case InMemorySmall =
+        new(50_000, 1000, 11 * Gb, false, TimeSpan.FromSeconds(5), false, false);
+    private static readonly Case
+        InMemoryBig = new(100_000, 1000, 48 * Gb, false, TimeSpan.FromSeconds(5), false, false);
+    private static readonly Case DiskSmallNoFlush =
+        new(50_000, 1000, 11 * Gb, true, TimeSpan.FromSeconds(5), false, false);
+    private static readonly Case DiskSmallFlushFile =
+        new(50_000, 1000, 11 * Gb, true, TimeSpan.FromSeconds(5), true, false);
 
-    private const int AccountsPerBlock = 1000;
     private const int MaxReorgDepth = 64;
     private const int FinalizeEvery = 32;
 
     private const int RandomSeed = 17;
-
-    private const int NumberOfLogs = PersistentDb ? 100 : 10;
-
-    private const long DbFileSize = PersistentDb ? 64 * Gb : 16 * Gb;
     private const long Gb = 1024 * 1024 * 1024L;
-
-    private static readonly TimeSpan FlushEvery = TimeSpan.FromSeconds(10);
-
-    private const int LogEvery = BlockCount / NumberOfLogs;
-
-    private const bool PersistentDb = false;
-
-    /// <summary>
-    /// Whether perform a real FSYNC. Set to false, to make disk based tests faster.
-    /// </summary>
-    private const bool FlushToDisk = false;
-
     private const int UseStorageEveryNAccounts = 10;
-    private const bool UseBigStorageAccount = false;
     private const int BigStorageAccountSlotCount = 1_000_000;
 
     public static async Task Main(String[] args)
     {
+        // select the case
+        var caseName = (args.Length > 0 ? args[0] : nameof(InMemorySmall)).ToLowerInvariant();
+        var cases = typeof(Program)
+            .GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+            .Where(f => f.FieldType == typeof(Case))
+            .ToDictionary(p => p.Name.ToLowerInvariant(), p => (Case)p.GetValue(null)!);
+
+        var config = cases[caseName];
+
         const string left = "Left";
         const string metrics = "Metrics";
         const string info = "Info";
@@ -72,7 +82,7 @@ public static class Program
             var dir = Directory.GetCurrentDirectory();
             var dataPath = Path.Combine(dir, "db");
 
-            if (PersistentDb)
+            if (config.PersistentDb)
             {
                 if (Directory.Exists(dataPath))
                 {
@@ -88,21 +98,20 @@ public static class Program
                 Console.WriteLine("Using in-memory DB for greater speed.");
             }
 
-            Console.WriteLine("Initializing db of size {0}GB", DbFileSize / Gb);
-            Console.WriteLine("Starting benchmark. Flush buffer every: {0}ms",
-                ((int)FlushEvery.TotalMilliseconds).ToString());
+            Console.WriteLine("Initializing db of size {0}GB", config.DbFileSize / Gb);
 
-            PagedDb db = PersistentDb
-                ? PagedDb.MemoryMappedDb(DbFileSize, MaxReorgDepth, dataPath, FlushToDisk)
-                : PagedDb.NativeMemoryDb(DbFileSize, MaxReorgDepth);
+            PagedDb db = config.PersistentDb
+                ? PagedDb.MemoryMappedDb(config.DbFileSize, MaxReorgDepth, dataPath, config.Fsync)
+                : PagedDb.NativeMemoryDb(config.DbFileSize, MaxReorgDepth);
 
             var random = BuildRandom();
             var bigStorageAccount = GetBigAccountKey();
 
             Console.WriteLine();
             Console.WriteLine("Writing:");
-            Console.WriteLine("- {0} accounts per block through {1} blocks", AccountsPerBlock, BlockCount);
-            Console.WriteLine("- it gives {0} total accounts", AccountsPerBlock * BlockCount);
+            Console.WriteLine("- {0} accounts per block through {1} blocks", config.AccountsPerBlock,
+                config.BlockCount);
+            Console.WriteLine("- it gives {0} total accounts", config.AccountsPerBlock * config.BlockCount);
 
             if (UseStorageEveryNAccounts > 0)
             {
@@ -135,9 +144,9 @@ public static class Program
                     ctx.Refresh();
                 }));
 
-            await using (var blockchain = new Blockchain(db, null, FlushEvery, 1000, reporter.Observe))
+            await using (var blockchain = new Blockchain(db, null, config.FlushEvery, 1000, reporter.Observe))
             {
-                counter = Writer(blockchain, bigStorageAccount, random, layout[writing]);
+                counter = Writer(config, blockchain, bigStorageAccount, random, layout[writing]);
             }
 
             // waiting for finalization
@@ -146,7 +155,7 @@ public static class Program
             var readingStopWatch = Stopwatch.StartNew();
             random = BuildRandom();
 
-            var logReadEvery = counter / NumberOfLogs;
+            var logReadEvery = counter / config.NumberOfLogs;
             for (var i = 0; i < counter; i++)
             {
                 var key = random.NextKeccak();
@@ -168,7 +177,7 @@ public static class Program
                     read.AssertStorageValue(key, storageAddress, expectedStorageValue);
                 }
 
-                if (UseBigStorageAccount)
+                if (config.UseBigStorageAccount)
                 {
                     var index = i % BigStorageAccountSlotCount;
                     var storageAddress = GetStorageAddress(index);
@@ -293,7 +302,7 @@ public static class Program
         new(95, "red"),
     };
 
-    private static int Writer(Blockchain blockchain, Keccak bigStorageAccount, Random random,
+    private static int Writer(Case config, Blockchain blockchain, Keccak bigStorageAccount, Random random,
         Layout reporting)
     {
         var counter = 0;
@@ -306,14 +315,14 @@ public static class Program
 
         var toFinalize = new List<Keccak>();
 
-        for (uint block = 1; block < BlockCount; block++)
+        for (uint block = 1; block < config.BlockCount; block++)
         {
             var blockHash = Keccak.Compute(parentBlockHash.Span);
             using var worldState = blockchain.StartNew(parentBlockHash, blockHash, block);
 
             parentBlockHash = blockHash;
 
-            for (var account = 0; account < AccountsPerBlock; account++)
+            for (var account = 0; account < config.AccountsPerBlock; account++)
             {
                 var key = random.NextKeccak();
 
@@ -356,7 +365,7 @@ public static class Program
 
             toFinalize.Add(blockHash);
 
-            if (block > 0 & block % LogEvery == 0)
+            if (block > 0 & block % config.LogEvery == 0)
             {
                 reporting.Update(
                     new Panel($@"At block {block}. Writing last batch took {writing.Elapsed:g}").Header("Writing")
@@ -367,12 +376,13 @@ public static class Program
 
         // flush leftovers by adding one more block for now
         var lastBlock = toFinalize.Last();
-        using var placeholder = blockchain.StartNew(lastBlock, Keccak.Compute(lastBlock.Span), BlockCount);
+        using var placeholder = blockchain.StartNew(lastBlock, Keccak.Compute(lastBlock.Span), config.BlockCount);
         placeholder.Commit();
         blockchain.Finalize(lastBlock);
 
         reporting.Update(
-            new Panel($@"At block {BlockCount - 1}. Writing last batch took {writing.Elapsed:g}").Header("Writing")
+            new Panel($@"At block {config.BlockCount - 1}. Writing last batch took {writing.Elapsed:g}")
+                .Header("Writing")
                 .Expand());
 
 
