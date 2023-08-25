@@ -32,7 +32,7 @@ public static class Program
 {
     private static readonly Case InMemoryReallySmall =
         new(5_000, 1000, 1 * Gb, false, TimeSpan.FromSeconds(5), false, false);
-    
+
     private static readonly Case InMemorySmall =
         new(50_000, 1000, 11 * Gb, false, TimeSpan.FromSeconds(5), false, false);
     private static readonly Case
