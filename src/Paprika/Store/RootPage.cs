@@ -27,28 +27,13 @@ public readonly unsafe struct RootPage : IPage
     {
         private const int Size = Page.PageSize - PageHeader.Size;
 
-        /// <summary>
-        /// How big is the fan out for the root.
-        /// </summary>
-        public const int RootFanOut = 16;
-
-        /// <summary>
-        /// The number of nibbles that are "consumed" on the root level.
-        /// </summary>
-        public const byte RootNibbleLevel = 1;
-
-        private const int MetadataStart = DbAddress.Size + DbAddress.Size * RootFanOut;
+        private const int MetadataStart = DbAddress.Size + DbAddress.Size;
 
         private const int AbandonedPagesStart = MetadataStart + Metadata.Size;
 
         /// <summary>
         /// This gives the upper boundary of the number of abandoned pages that can be kept in the list.
         /// </summary>
-        /// <remarks>
-        /// The value is dependent on <see cref="RootFanOut"/> as the more data pages addresses, the less space for
-        /// the abandoned. Still, the number of abandoned that is required is ~max reorg depth as later, pages are reused.
-        /// Even with fan-out of data pages equal to 256, there's still a lot of room here.
-        /// </remarks>
         private const int AbandonedPagesCount = (Size - AbandonedPagesStart) / DbAddress.Size;
 
         /// <summary>
@@ -60,12 +45,7 @@ public readonly unsafe struct RootPage : IPage
         /// <summary>
         /// The first of the data pages.
         /// </summary>
-        [FieldOffset(DbAddress.Size)] private DbAddress AccountPage;
-
-        /// <summary>
-        /// Gets the span of account pages of the root
-        /// </summary>
-        public Span<DbAddress> AccountPages => MemoryMarshal.CreateSpan(ref AccountPage, RootFanOut);
+        [FieldOffset(DbAddress.Size)] public DbAddress DataRoot;
 
         [FieldOffset(MetadataStart)]
         public Metadata Metadata;
@@ -89,20 +69,12 @@ public readonly unsafe struct RootPage : IPage
         }
     }
 
-    public static ref DbAddress FindAccountPage(Span<DbAddress> accountPages, byte firstNibble)
-    {
-        return ref accountPages[firstNibble];
-    }
-
     public void Accept(IPageVisitor visitor, IPageResolver resolver)
     {
-        foreach (var dataAddr in Data.AccountPages)
+        if (Data.DataRoot.IsNull == false)
         {
-            if (dataAddr.IsNull == false)
-            {
-                var data = new DataPage(resolver.GetAt(dataAddr));
-                visitor.On(data, dataAddr);
-            }
+            var data = new DataPage(resolver.GetAt(Data.DataRoot));
+            visitor.On(data, Data.DataRoot);
         }
 
         foreach (var addr in Data.AbandonedPages)

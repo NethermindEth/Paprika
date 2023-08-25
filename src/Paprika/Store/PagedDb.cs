@@ -155,7 +155,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         lock (_batchLock)
         {
             var batchId = Root.Header.BatchId;
-            var batch = new ReadOnlyBatch(this, batchId, Root.Data.AccountPages.ToArray(), Root.Data.Metadata, Root.Data.NextFreePage, name);
+            var batch = new ReadOnlyBatch(this, batchId, Root.Data.DataRoot, Root.Data.Metadata, Root.Data.NextFreePage, name);
             _batchesReadOnly.Add(batch);
             return batch;
         }
@@ -245,15 +245,15 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         private readonly PagedDb _db;
         private bool _disposed;
 
-        private readonly DbAddress[] _rootDataPages;
+        private readonly DbAddress _rootDataPage;
         private readonly DbAddress _nextFreePage;
         private readonly string _name;
 
-        public ReadOnlyBatch(PagedDb db, uint batchId, DbAddress[] rootDataPages, Metadata metadata,
+        public ReadOnlyBatch(PagedDb db, uint batchId, DbAddress rootDataPage, Metadata metadata,
             DbAddress nextFreePage, string name)
         {
             _db = db;
-            _rootDataPages = rootDataPages;
+            _rootDataPage = rootDataPage;
             _nextFreePage = nextFreePage;
             _name = name;
             BatchId = batchId;
@@ -275,25 +275,21 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             _db.ReportRead();
 
-            var addr = RootPage.FindAccountPage(_rootDataPages, key.Path.FirstNibble);
+            var addr = _rootDataPage;
             if (addr.IsNull)
             {
                 result = default;
                 return false;
             }
 
-            var sliced = key.SliceFrom(RootPage.Payload.RootNibbleLevel);
-            return new DataPage(GetAt(addr)).TryGet(sliced, this, out result);
+            return new DataPage(GetAt(addr)).TryGet(key, this, out result);
         }
 
         public void Report(IReporter reporter)
         {
-            foreach (var addr in _rootDataPages)
+            if (_rootDataPage.IsNull == false)
             {
-                if (addr.IsNull == false)
-                {
-                    new DataPage(GetAt(addr)).Report(reporter, this, 1);
-                }
+                new DataPage(GetAt(_rootDataPage)).Report(reporter, this, 1);
             }
 
             for (uint i = _db._historyDepth; i < _nextFreePage.Raw; i++)
@@ -360,7 +356,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         {
             CheckDisposed();
 
-            var addr = RootPage.FindAccountPage(_root.Data.AccountPages, key.Path.FirstNibble);
+            var addr = _root.Data.DataRoot;
 
             _db.ReportRead();
 
@@ -370,8 +366,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 return false;
             }
 
-            var sliced = key.SliceFrom(RootPage.Payload.RootNibbleLevel);
-            return new DataPage(GetAt(addr)).TryGet(sliced, this, out result);
+            return new DataPage(GetAt(addr)).TryGet(key, this, out result);
         }
 
         public void SetMetadata(uint blockNumber, in Keccak blockHash)
@@ -383,18 +378,16 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         {
             _db.ReportWrite();
 
-            ref var addr = ref TryGetPageAlloc(key.Path.FirstNibble, out var page);
-            var sliced = key.SliceFrom(RootPage.Payload.RootNibbleLevel);
-
-            var updated = page.Set(new SetContext(sliced, rawData, this));
+            ref var addr = ref TryGetPageAlloc(out var page);
+            var updated = page.Set(new SetContext(key, rawData, this));
             addr = _db.GetAddress(updated);
         }
 
-        private ref DbAddress TryGetPageAlloc(byte firstNibble, out DataPage page)
+        private ref DbAddress TryGetPageAlloc(out DataPage page)
         {
             CheckDisposed();
 
-            ref var addr = ref RootPage.FindAccountPage(_root.Data.AccountPages, firstNibble);
+            ref var addr = ref _root.Data.DataRoot;
             Page p;
             if (addr.IsNull)
             {
