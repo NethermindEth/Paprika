@@ -597,18 +597,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                             return;
                         }
 
-                        if (diffAt > 0)
-                        {
-                            // diff is not on the 0th position, so it will be a branch but preceded with an extension
-                            commit.SetExtension(key, leftoverPath.SliceTo(diffAt));
-                        }
-
                         var nibbleA = leaf.Path[diffAt];
                         var nibbleB = leftoverPath[diffAt];
-
-                        // create branch, truncate both leaves, add them at the end
-                        var branchKey = Key.Merkle(path.SliceTo(i + diffAt));
-                        commit.SetBranch(branchKey, new NibbleSet(nibbleA, nibbleB));
 
                         // nibbleA, deep copy to write in an unsafe manner
                         var pathA = path.SliceTo(i + diffAt).AppendNibble(nibbleA, span);
@@ -617,6 +607,17 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         // nibbleB, set the newly set leaf, slice to the next nibble
                         var pathB = path.SliceTo(i + 1 + diffAt);
                         commit.SetLeaf(Key.Merkle(pathB), leftoverPath.SliceFrom(diffAt + 1));
+
+                        // Important! Make it the last in set of changes as it may be updating the key that was read (leaf)
+                        if (diffAt > 0)
+                        {
+                            // diff is not on the 0th position, so it will be a branch but preceded with an extension
+                            commit.SetExtension(key, leftoverPath.SliceTo(diffAt));
+                        }
+
+                        // Important! Make it the last in set of changes
+                        var branchKey = Key.Merkle(path.SliceTo(i + diffAt));
+                        commit.SetBranch(branchKey, new NibbleSet(nibbleA, nibbleB));
 
                         return;
                     }
@@ -652,12 +653,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
                                 var ext0Th = ext.Path[0];
 
-                                commit.SetBranch(key, new NibbleSet(ext0Th, leftoverPath[0]));
-
                                 commit.SetExtension(Key.Merkle(key.Path.AppendNibble(ext0Th, span)),
                                     ext.Path.SliceFrom(1));
 
                                 commit.SetLeaf(Key.Merkle(path.SliceTo(i + 1)), path.SliceFrom(i + 1));
+
+                                // Important! Make it the last as it's updating the existing key and it might affect the read value
+                                commit.SetBranch(key, new NibbleSet(ext0Th, leftoverPath[0]));
                                 return;
                             }
                         }
@@ -670,14 +672,14 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                             // 2. add a branch at the end with nibbles set to the last and the leaf
                             // 3. add a new leaf
 
-                            commit.SetExtension(key, ext.Path.SliceTo(lastNibblePos));
-
                             var splitAt = i + ext.Path.Length - 1;
                             var set = new NibbleSet(path[splitAt], ext.Path[lastNibblePos]);
 
                             commit.SetBranch(Key.Merkle(path.SliceTo(splitAt)), set);
                             commit.SetLeaf(Key.Merkle(path.SliceTo(splitAt + 1)), path.SliceFrom(splitAt + 1));
 
+                            // Important! Make it the last as it's updating the existing key and it might affect the read value
+                            commit.SetExtension(key, ext.Path.SliceTo(lastNibblePos));
                             return;
                         }
 
@@ -685,7 +687,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         // this means that E0->B0 will turn into E1->B1->E2->B0
                         //                                             ->L0
                         var extPath = ext.Path.SliceTo(diffAt);
-                        commit.SetExtension(key, extPath);
 
                         // B1
                         var branch1 = key.Path.Append(extPath, span);
@@ -707,6 +708,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
                         var leafPath = branch1.AppendNibble(addedNibble, span);
                         commit.SetLeaf(Key.Merkle(leafPath), path.SliceFrom(leafPath.Length));
 
+                        // Important! Make it the last as it's updating the existing key
+                        commit.SetExtension(key, extPath);
+                        
                         return;
                     }
                 case Node.Type.Branch:
