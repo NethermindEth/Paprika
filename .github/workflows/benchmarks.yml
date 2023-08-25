@@ -1,0 +1,63 @@
+name: 'Benchmarks'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  # pull_request:
+  # push:
+  #   branches: [main]
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: 'Filter for BenchmarkSwitcher'
+        required: true
+        default: '*'
+
+env:
+  BUILD_CONFIG: release
+  DOTNET_VERSION: 7
+  DOTNET_INSTALL_DIR: '~/.dotnet'
+
+jobs:
+  benchmarks:
+    timeout-minutes: 10
+    name: BenchmarkDotNet
+    runs-on: [self-hosted, paprika]
+    permissions:
+      contents: read
+      pull-requests: write # for sticky-pull-request-comment
+    steps:
+    - name: Cache dotnet
+      id: cache-dotnet
+      uses: actions/cache@v3
+      with:
+          path: ${{ env.DOTNET_INSTALL_DIR }}
+          key: ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}
+          restore-keys: ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}
+    - name: Set up .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+    - name: Check out repository
+      uses: actions/checkout@v3
+      with:
+        submodules: true
+    - name: Run benchmarks
+      run: |
+        dotnet run -c Release --project src/Paprika.Benchmarks/Paprika.Benchmarks.csproj -- --filter '${{ github.event.inputs.filter }}'
+    - name: Summary
+      run: echo 'Benchmarks that were run matched the filter ${{ github.event.inputs.filter }}' >> $GITHUB_STEP_SUMMARY
+
+    ## reporting under PR
+    - uses: jwalton/gh-find-current-pr@v1
+      id: finder
+    - name: PR Comment
+      uses: marocchino/sticky-pull-request-comment@v2
+      if: success() && steps.finder.outputs.number
+      with:
+        header: BenchmarkDotNet
+        number: ${{ steps.finder.outputs.pr }}
+        recreate: true
+        path: BenchmarkDotNet.Artifacts/**/*report-github.md

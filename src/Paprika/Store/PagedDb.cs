@@ -86,7 +86,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     }
 
     public static PagedDb NativeMemoryDb(ulong size, byte historyDepth = 2) =>
-        new(new NativeMemoryPageManager(size), historyDepth);
+        new(new NativeMemoryPageManager(size, historyDepth), historyDepth);
 
     public static PagedDb MemoryMappedDb(ulong size, byte historyDepth, string directory, bool flushToDisk = true) =>
         new(new MemoryMappedPageManager(size, historyDepth, directory, flushToDisk), historyDepth);
@@ -136,6 +136,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
     private RootPage Root => _roots[_lastRoot % _historyDepth];
 
+    public uint NextFreePage => Root.Data.NextFreePage.Raw;
+
     public void Dispose()
     {
         _manager.Dispose();
@@ -148,12 +150,12 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     /// <returns></returns>
     public IBatch BeginNextBatch() => BuildFromRoot(Root);
 
-    public IReadOnlyBatch BeginReadOnlyBatch()
+    public IReadOnlyBatch BeginReadOnlyBatch(string name = "")
     {
         lock (_batchLock)
         {
             var batchId = Root.Header.BatchId;
-            var batch = new ReadOnlyBatch(this, batchId, Root.Data.AccountPages.ToArray(), Root.Data.Metadata, Root.Data.NextFreePage);
+            var batch = new ReadOnlyBatch(this, batchId, Root.Data.AccountPages.ToArray(), Root.Data.Metadata, Root.Data.NextFreePage, name);
             _batchesReadOnly.Add(batch);
             return batch;
         }
@@ -245,13 +247,15 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         private readonly DbAddress[] _rootDataPages;
         private readonly DbAddress _nextFreePage;
+        private readonly string _name;
 
         public ReadOnlyBatch(PagedDb db, uint batchId, DbAddress[] rootDataPages, Metadata metadata,
-            DbAddress nextFreePage)
+            DbAddress nextFreePage, string name)
         {
             _db = db;
             _rootDataPages = rootDataPages;
             _nextFreePage = nextFreePage;
+            _name = name;
             BatchId = batchId;
             Metadata = metadata;
         }
@@ -303,6 +307,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         public uint BatchId { get; }
 
         public Page GetAt(DbAddress address) => _db._manager.GetAt(address);
+
+        public override string ToString() => $"{nameof(ReadOnlyBatch)}, Name: {_name}, BatchId: {BatchId}";
     }
 
     class Batch : BatchContextBase, IBatch
@@ -342,7 +348,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _reusePagesOlderThanBatchId = reusePagesOlderThanBatchId;
             _ctx = ctx;
             _unusedPool = ctx.Unused;
-            _abandoned = ctx.Abandoned;
+            _abandoned = new Queue<DbAddress>();
             _written = ctx.Written;
 
             _metrics = new BatchMetrics();
@@ -451,7 +457,14 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         }
 
         [DebuggerStepThrough]
-        public override Page GetAt(DbAddress address) => _db.GetAt(address);
+        public override Page GetAt(DbAddress address)
+        {
+            // Getting a page beyond root!
+            var nextFree = _root.Data.NextFreePage;
+            Debug.Assert(address < nextFree, $"Breached the next free page, NextFree: {nextFree}, retrieved {address}");
+            var page = _db.GetAt(address);
+            return page;
+        }
 
         public override DbAddress GetAddress(Page page) => _db.GetAddress(page);
 
@@ -473,8 +486,11 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             }
 
             var page = _db.GetAtForWriting(addr, reused);
+
             if (clear)
+            {
                 page.Clear();
+            }
 
             _written.Add(addr);
 

@@ -39,7 +39,9 @@ public readonly ref struct SlottedArray
 
     public bool TrySet(in Key key, ReadOnlySpan<byte> data, ushort? keyHash = default)
     {
-        if (TryGetImpl(key, out var existingData, out var index))
+        var hash = keyHash ?? Slot.GetHash(key);
+
+        if (TryGetImpl(key, hash, out var existingData, out var index))
         {
             // same size, copy in place
             if (data.Length == existingData.Length)
@@ -51,8 +53,6 @@ public readonly ref struct SlottedArray
             // cannot reuse, delete existing and add again
             DeleteImpl(index);
         }
-
-        var hash = keyHash ?? Slot.GetHash(key);
 
         var encodedKey = key.Path.WriteTo(stackalloc byte[key.Path.MaxByteLength]);
         var encodedStorageKey = key.StoragePath.WriteTo(stackalloc byte[key.StoragePath.MaxByteLength]);
@@ -273,7 +273,7 @@ public readonly ref struct SlottedArray
     /// </summary>
     public bool Delete(in Key key)
     {
-        if (TryGetImpl(key, out _, out var index))
+        if (TryGetImpl(key, Slot.GetHash(key), out _, out var index))
         {
             DeleteImpl(index);
             return true;
@@ -364,7 +364,7 @@ public readonly ref struct SlottedArray
 
     public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> data)
     {
-        if (TryGetImpl(key, out var span, out _))
+        if (TryGetImpl(key, Slot.GetHash(key), out var span, out _))
         {
             data = span;
             return true;
@@ -374,14 +374,9 @@ public readonly ref struct SlottedArray
         return false;
     }
 
-    [OptimizationOpportunity(OptimizationType.CPU,
-        "key.Write to might be called twice, here and in TrySet")]
-    private bool TryGetImpl(scoped in Key key, out Span<byte> data, out int slotIndex)
+    [OptimizationOpportunity(OptimizationType.CPU, "key encoding is delayed but it might be called twice, here + TrySet")]
+    private bool TryGetImpl(scoped in Key key, ushort hash, out Span<byte> data, out int slotIndex)
     {
-        var hash = Slot.GetHash(key);
-        var encodedKey = key.Path.WriteTo(stackalloc byte[key.Path.MaxByteLength]);
-        var encodedStorageKey = key.StoragePath.WriteTo(stackalloc byte[key.StoragePath.MaxByteLength]);
-
         var to = _header.Low / Slot.Size;
 
         // uses vectorized search, treating slots as a Span<ushort>
@@ -391,9 +386,20 @@ public readonly ref struct SlottedArray
         var span = MemoryMarshal.Cast<Slot, ushort>(_slots.Slice(0, to));
 
         var offset = 0;
-        int index;
+        int index = span.IndexOf(hash);
 
-        while ((index = span.IndexOf(hash)) != notFound)
+        if (index == notFound)
+        {
+            data = default;
+            slotIndex = default;
+            return false;
+        }
+
+        // encode keys only if there
+        var encodedKey = key.Path.WriteTo(stackalloc byte[key.Path.MaxByteLength]);
+        var encodedStorageKey = key.StoragePath.WriteTo(stackalloc byte[key.StoragePath.MaxByteLength]);
+
+        while (index != notFound)
         {
             // move offset to the given position
             offset += index;
@@ -440,6 +446,9 @@ public readonly ref struct SlottedArray
             // offset moved by 1 to align
             span = span.Slice(index + 1);
             offset += 1;
+
+            // move to next index
+            index = span.IndexOf(hash);
         }
 
         data = default;

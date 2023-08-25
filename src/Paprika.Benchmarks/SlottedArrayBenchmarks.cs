@@ -5,7 +5,6 @@ using Paprika.Store;
 
 namespace Paprika.Benchmarks;
 
-[DisassemblyDiagnoser(3)]
 public class SlottedArrayBenchmarks
 {
     private readonly byte[] _writtenData = new byte[Page.PageSize];
@@ -100,5 +99,4 @@ public class SlottedArrayBenchmarks
 
         return result;
     }
-
 }
