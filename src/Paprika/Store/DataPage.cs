@@ -59,23 +59,18 @@ public readonly unsafe struct DataPage : IPage
 
         if (isDelete)
         {
-            if (path.Length == 0)
+            if (path.Length < NibbleCount)
             {
-                // path is empty so this is the lvl that it belongs
-                DeleteInMap(ctx, map);
-
-                // TODO: try return page
+                // path cannot be held on a lower level so delete in here
+                return DeleteInMap(ctx, map);
             }
-            else
+
+            // path is not empty, so it might have a child page underneath with data, let's try
+            var childPageAddress = Data.Buckets[path.FirstNibble];
+            if (childPageAddress.IsNull)
             {
-                // path is not empty, so it might have a child page underneath with data, let's try
-                var childPageAddress = Data.Buckets[path.FirstNibble];
-                if (childPageAddress.IsNull)
-                {
-                    // child page address does not exist, which means that it's the only one which can hold the data
-                    map.Delete(ctx.Key);
-                    // TODO: try return page
-                }
+                // there's no lower level, delete in map
+                return DeleteInMap(ctx, map);
             }
         }
         
@@ -132,17 +127,16 @@ public readonly unsafe struct DataPage : IPage
         return Set(ctx);
     }
 
-    private void DeleteInMap(SetContext ctx, SlottedArray map)
+    private Page DeleteInMap(SetContext ctx, SlottedArray map)
     {
         map.Delete(ctx.Key);
-        if (map.Count == 0)
+        if (map.Count == 0 && Data.Buckets.IndexOfAnyExcept(DbAddress.Null) == -1)
         {
-            if (Data.Buckets.IndexOfAnyExcept(DbAddress.Null) == -1)
-            {
-                // map is empty, buckets are empty, page is empty, return this 
-                ctx.Batch.GetNewPage()
-            }
+            // map is empty, buckets are empty, page is empty
+            // TODO: for now, leave as is 
         }
+
+        return _page;
     }
 
     /// <summary>
