@@ -42,11 +42,8 @@ public static class Program
     private const int FinalizeEvery = 32;
 
     private const int RandomSeed = 17;
-
     private const long Gb = 1024 * 1024 * 1024L;
-
     private const int UseStorageEveryNAccounts = 10;
-    private const bool UseBigStorageAccount = false;
     private const int BigStorageAccountSlotCount = 1_000_000;
 
     public static async Task Main(String[] args)
@@ -177,12 +174,7 @@ public static class Program
                 {
                     var storageAddress = GetStorageAddress(i);
                     var expectedStorageValue = GetStorageValue(i);
-                    var actualStorage = read.GetStorage(key, storageAddress);
-
-                    if (actualStorage.SequenceEqual(expectedStorageValue) == false)
-                    {
-                        throw new InvalidOperationException($"Invalid storage for account number {i}!");
-                    }
+                    read.AssertStorageValue(key, storageAddress, expectedStorageValue);
                 }
 
                 if (config.UseBigStorageAccount)
@@ -190,12 +182,7 @@ public static class Program
                     var index = i % BigStorageAccountSlotCount;
                     var storageAddress = GetStorageAddress(index);
                     var expectedStorageValue = GetBigAccountValue(index);
-                    var actualStorage = read.GetStorage(bigStorageAccount, storageAddress);
-
-                    if (actualStorage.SequenceEqual(expectedStorageValue) == false)
-                    {
-                        throw new InvalidOperationException($"Invalid storage for big storage account at index {i}!");
-                    }
+                    read.AssertStorageValue(bigStorageAccount, storageAddress, expectedStorageValue);
                 }
 
                 if (i > 0 & i % logReadEvery == 0)
