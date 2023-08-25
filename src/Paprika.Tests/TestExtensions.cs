@@ -42,13 +42,13 @@ public static class TestExtensions
         {
             Assert.Fail($"Key: {key.ToString()} should exist.");
         }
-            
-            
+
+
         Account.ReadFrom(value, out var account);
         return account;
     }
 
-    public static void AssertStorageValue(this IReadOnlyBatch read, in Keccak key, in Keccak storage, 
+    public static void AssertStorageValue(this IReadOnlyBatch read, in Keccak key, in Keccak storage,
         ReadOnlySpan<byte> expected)
     {
         if (!read.TryGet(Key.StorageCell(NibblePath.FromKey(key), storage), out var value))
