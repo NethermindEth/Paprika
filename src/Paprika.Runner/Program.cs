@@ -31,7 +31,7 @@ public record Case(uint BlockCount, int AccountsPerBlock, ulong DbFileSize, bool
 public static class Program
 {
     private static readonly Case InMemoryReallySmall =
-        new(5_000, 1000, 1 * Gb, false, TimeSpan.FromSeconds(5), false, false);
+        new(100, 1000, 1 * Gb, false, TimeSpan.FromSeconds(5), false, false);
 
     private static readonly Case InMemorySmall =
         new(50_000, 1000, 11 * Gb, false, TimeSpan.FromSeconds(5), false, false);
@@ -148,8 +148,8 @@ public static class Program
                     ctx.Refresh();
                 }));
 
-            //var merkle = new ComputeMerkleBehavior(true, 2, 2);
-            IPreCommitBehavior preCommit = null;
+            var preCommit = new ComputeMerkleBehavior(true, 2, 2);
+            //IPreCommitBehavior preCommit = null;
 
             await using (var blockchain = new Blockchain(db, preCommit, config.FlushEvery, 1000, reporter.Observe))
             {
@@ -170,18 +170,34 @@ public static class Program
 
                 var expected = GetAccountValue(i);
 
-                if (actual != expected)
-                {
-                    throw new InvalidOperationException(
-                        $"Invalid account state for account number {i} with address {key.ToString()}. " +
-                        $"The expected value is {expected} while the actual is {actual}!");
-                }
+                var hasStorage = UseStorageEveryNAccounts > 0 && i % UseStorageEveryNAccounts == 0;
 
-                if (UseStorageEveryNAccounts > 0 && i % UseStorageEveryNAccounts == 0)
+                if (hasStorage)
                 {
+                    // the account has the storage, compare only: balance, nonce and codehash as the storage will be different
+                    if (!actual.Nonce.Equals(expected.Nonce) ||
+                        !actual.Balance.Equals(expected.Balance) ||
+                        !actual.CodeHash.Equals(expected.CodeHash))
+                    {
+                        throw new InvalidOperationException(
+                            $"Invalid account state for account number {i} with address {key.ToString()}. " +
+                            $"The expected value is {expected} while the actual is {actual}!");
+                    }
+
+                    // compare storage
                     var storageAddress = GetStorageAddress(i);
                     var expectedStorageValue = GetStorageValue(i);
                     read.AssertStorageValue(key, storageAddress, expectedStorageValue);
+                }
+                else
+                {
+                    // no storage, compare fully
+                    if (actual != expected)
+                    {
+                        throw new InvalidOperationException(
+                            $"Invalid account state for account number {i} with address {key.ToString()}. " +
+                            $"The expected value is {expected} while the actual is {actual}!");
+                    }
                 }
 
                 if (config.UseBigStorageAccount)
