@@ -17,6 +17,11 @@ namespace Paprika.Merkle;
 ///  construct.
 /// 2. calls the computation of the Merkle RootHash when needed.
 /// </summary>
+/// <remarks>
+/// Important: even though the underlying storage does COW, it's not done on the commit level. This means
+/// that if there's an update for the given key, the key should be first read and worked with,
+/// only to be updated at the end of the processing. Otherwise, the data using zero-copy could be overwritten.
+/// </remarks>
 public class ComputeMerkleBehavior : IPreCommitBehavior
 {
     /// <summary>
