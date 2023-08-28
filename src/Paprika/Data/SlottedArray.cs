@@ -374,6 +374,18 @@ public readonly ref struct SlottedArray
         return false;
     }
 
+    public bool TryGet(scoped in Key key, ushort hash, out ReadOnlySpan<byte> data)
+    {
+        if (TryGetImpl(key, hash, out var span, out _))
+        {
+            data = span;
+            return true;
+        }
+
+        data = default;
+        return false;
+    }
+
     [OptimizationOpportunity(OptimizationType.CPU, "key encoding is delayed but it might be called twice, here + TrySet")]
     private bool TryGetImpl(scoped in Key key, ushort hash, out Span<byte> data, out int slotIndex)
     {
