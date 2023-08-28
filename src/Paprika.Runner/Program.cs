@@ -177,7 +177,8 @@ public static class Program
                     // the account has the storage, compare only: balance, nonce and codehash as the storage will be different
                     if (!actual.Nonce.Equals(expected.Nonce) ||
                         !actual.Balance.Equals(expected.Balance) ||
-                        !actual.CodeHash.Equals(expected.CodeHash))
+                        !actual.CodeHash.Equals(expected.CodeHash) ||
+                        actual.StorageRootHash.Equals(Keccak.EmptyTreeHash)) // should not be empty!
                     {
                         throw new InvalidOperationException(
                             $"Invalid account state for account number {i} with address {key.ToString()}. " +
