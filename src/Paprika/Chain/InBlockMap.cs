@@ -19,11 +19,13 @@ public readonly struct InBlockMap
         return map.TrySet(key, data);
     }
 
-    public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
+    public bool TryGet(scoped in Key key, ushort hash, out ReadOnlySpan<byte> result)
     {
         var map = new SlottedArray(_page.Span);
-        return map.TryGet(key, out result);
+        return map.TryGet(key, hash, out result);
     }
+
+    public static ushort Hash(scoped in Key key) => SlottedArray.Slot.GetHash(key);
 
     public void Apply(IBatch batch)
     {

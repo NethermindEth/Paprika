@@ -126,7 +126,8 @@ public class Blockchain : IAsyncDisposable
                     var readOnlyBatch = new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch("Flusher - History"));
                     if (_blocksByNumber.TryGetValue(flushedTo + 1, out var nextBlocksToFlushedOne) == false)
                     {
-                        throw new Exception("The blocks that is marked as finalized has no descendant. Is it possible?");
+                        throw new Exception(
+                            "The blocks that is marked as finalized has no descendant. Is it possible?");
                     }
 
                     foreach (var nextBlock in nextBlocksToFlushedOne)
@@ -184,7 +185,8 @@ public class Blockchain : IAsyncDisposable
             return new Block(parentKeccak, parent, blockKeccak, blockNumber, this);
         }
 
-        using var batch = new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch($"{nameof(Blockchain)}.{nameof(StartNew)}"));
+        using var batch =
+            new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch($"{nameof(Blockchain)}.{nameof(StartNew)}"));
         batch.Lease(); // add one for this using
 
         var parentBlockNumber = blockNumber - 1;
@@ -382,8 +384,9 @@ public class Blockchain : IAsyncDisposable
         {
             var key = Key.StorageCell(NibblePath.FromKey(address), storage);
             var bloom = GetBloom(key);
+            var hash = InBlockMap.Hash(key);
 
-            using var owner = Get(bloom, key);
+            using var owner = Get(bloom, hash, key);
 
             // check the span emptiness
             if (owner.Span.IsEmpty)
@@ -396,8 +399,9 @@ public class Blockchain : IAsyncDisposable
         {
             var key = Key.Account(NibblePath.FromKey(address));
             var bloom = GetBloom(key);
+            var hash = InBlockMap.Hash(key);
 
-            using var owner = Get(bloom, key);
+            using var owner = Get(bloom, hash, key);
 
             // check the span emptiness
             if (owner.Span.IsEmpty)
@@ -455,7 +459,7 @@ public class Blockchain : IAsyncDisposable
             map.TrySet(key, payload);
         }
 
-        ReadOnlySpanOwner<byte> ICommit.Get(scoped in Key key) => Get(GetBloom(key), key);
+        ReadOnlySpanOwner<byte> ICommit.Get(scoped in Key key) => Get(GetBloom(key), InBlockMap.Hash(key), key);
 
         void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload) => SetImpl(key, payload, _preCommitMaps);
 
@@ -472,18 +476,18 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-        private ReadOnlySpanOwner<byte> Get(int bloom, scoped in Key key)
+        private ReadOnlySpanOwner<byte> Get(int bloom, ushort hash, scoped in Key key)
         {
             AcquireLease();
 
-            var result = TryGet(bloom, key, out var succeeded);
+            var result = TryGet(bloom, hash, key, out var succeeded);
             if (succeeded)
                 return result;
 
             // slow path
             while (true)
             {
-                result = TryGet(bloom, key, out succeeded);
+                result = TryGet(bloom, hash, key, out succeeded);
                 if (succeeded)
                     return result;
 
@@ -495,12 +499,12 @@ public class Blockchain : IAsyncDisposable
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        private ReadOnlySpanOwner<byte> TryGet(int bloom, scoped in Key key, out bool succeeded)
+        private ReadOnlySpanOwner<byte> TryGet(int bloom, ushort hash, scoped in Key key, out bool succeeded)
         {
             // The lease of this is not needed.
             // The reason for that is that the caller did not .Dispose the reference held,
             // therefore the lease counter is up to date!
-            var owner = TryGetLocalNoLease(bloom, key, out succeeded);
+            var owner = TryGetLocalNoLease(bloom, hash, key, out succeeded);
             if (succeeded)
                 return owner;
 
@@ -520,7 +524,7 @@ public class Blockchain : IAsyncDisposable
             // the previous is now leased, all the methods are safe to be called
             if (previous is Block block)
             {
-                return block.TryGet(bloom, key, out succeeded);
+                return block.TryGet(bloom, hash, key, out succeeded);
             }
 
             if (previous is IReadOnlyBatch batch)
@@ -543,7 +547,7 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// Tries to get the key only from this block, acquiring no lease as it assumes that the lease is taken.
         /// </summary>
-        private ReadOnlySpanOwner<byte> TryGetLocalNoLease(int bloom, scoped in Key key, out bool succeeded)
+        private ReadOnlySpanOwner<byte> TryGetLocalNoLease(int bloom, ushort hash, scoped in Key key, out bool succeeded)
         {
             if (!_bloom.IsSet(bloom))
             {
@@ -564,7 +568,7 @@ public class Blockchain : IAsyncDisposable
                 // go from last to youngest to find the recent value
                 for (int i = map.Count - 1; i >= 0; i--)
                 {
-                    if (map[i].TryGet(key, out var span))
+                    if (map[i].TryGet(key, hash, out var span))
                     {
                         // return with owned lease
                         succeeded = true;
@@ -576,7 +580,7 @@ public class Blockchain : IAsyncDisposable
             // then pre-commit maps
             for (int i = _preCommitMaps.Count - 1; i >= 0; i--)
             {
-                if (_preCommitMaps[i].TryGet(key, out var span))
+                if (_preCommitMaps[i].TryGet(key, hash, out var span))
                 {
                     // return with owned lease
                     succeeded = true;
