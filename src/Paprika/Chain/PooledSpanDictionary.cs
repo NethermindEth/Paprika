@@ -62,7 +62,13 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         }
 
         // key does exist, write value
-        // TODO: provide a replacement policy instead of appending in all the cases
+        if (refValue.Length == data.Length)
+        {
+            // data lengths are equal, write in-situ
+            data.CopyTo(GetAt(refValue));
+            return;
+        }
+
         refValue = BuildValue(data);
     }
 
@@ -125,15 +131,15 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
 
     private static ushort Mix(int hash) => unchecked((ushort)((hash >> 16) ^ hash));
 
-    private ReadOnlySpan<byte> GetAt(KeySpan key) => GetAt(new ValueSpan(key.Pointer, key.Length));
-
-    private ReadOnlySpan<byte> GetAt(ValueSpan value)
+    private ReadOnlySpan<byte> GetAt(KeySpan key)
     {
-        if (value.Pointer == InlineKeyPointer)
-        {
-            return _key.AsSpan(0, value.Length);
-        }
+        return key.Pointer == InlineKeyPointer
+            ? _key.AsSpan(0, key.Length)
+            : GetAt(new ValueSpan(key.Pointer, key.Length));
+    }
 
+    private Span<byte> GetAt(ValueSpan value)
+    {
         var pageNo = Math.DivRem(value.Pointer, BufferSize, out var offset);
         return _pages[pageNo].Span.Slice(offset, value.Length);
     }
