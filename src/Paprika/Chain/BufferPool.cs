@@ -12,7 +12,9 @@ namespace Paprika.Chain;
 /// </summary>
 public class BufferPool : IDisposable
 {
-    private readonly int _pagesInOneSlab;
+    public const int BufferSize = Page.PageSize;
+
+    private readonly int _buffersInOneSlab;
     private readonly bool _assertCountOnDispose;
     private readonly ConcurrentQueue<Page> _pool = new();
     private readonly ConcurrentQueue<IntPtr> _slabs = new();
@@ -22,9 +24,9 @@ public class BufferPool : IDisposable
     // metrics
     private readonly Meter _meter;
 
-    public BufferPool(int pagesInOneSlab, bool assertCountOnDispose = true)
+    public BufferPool(int buffersInOneSlab, bool assertCountOnDispose = true)
     {
-        _pagesInOneSlab = pagesInOneSlab;
+        _buffersInOneSlab = buffersInOneSlab;
         _assertCountOnDispose = assertCountOnDispose;
 
         _meter = new Meter("Paprika.Chain.BufferPool");
@@ -39,18 +41,18 @@ public class BufferPool : IDisposable
         Page pooled;
         while (_pool.TryDequeue(out pooled) == false)
         {
-            var allocSize = _pagesInOneSlab * Page.PageSize;
+            var allocSize = _buffersInOneSlab * BufferSize;
 
             _allocatedMB.Add(allocSize / 1024 / 1024);
 
-            var slab = (byte*)NativeMemory.AlignedAlloc((UIntPtr)allocSize, Page.PageSize);
+            var slab = (byte*)NativeMemory.AlignedAlloc((UIntPtr)allocSize, BufferSize);
 
             _slabs.Enqueue(new IntPtr(slab));
 
             // enqueue all
-            for (var i = 0; i < _pagesInOneSlab; i++)
+            for (var i = 0; i < _buffersInOneSlab; i++)
             {
-                var page = new Page(slab + Page.PageSize * i);
+                var page = new Page(slab + BufferSize * i);
                 _pool.Enqueue(page);
             }
         }
@@ -65,7 +67,7 @@ public class BufferPool : IDisposable
 
     public void Dispose()
     {
-        var expectedCount = _pagesInOneSlab * _slabs.Count;
+        var expectedCount = _buffersInOneSlab * _slabs.Count;
         var actualCount = _pool.Count;
 
         if (_assertCountOnDispose)
