@@ -97,7 +97,7 @@ public readonly ref struct NibblePath
 
     public const int KeccakNibbleCount = Keccak.Size * NibblePerByte;
 
-    public const int FullKeccakByteLength = Keccak.Size / 2 + 2;
+    public const int FullKeccakByteLength = Keccak.Size + 2;
 
     /// <summary>
     /// Writes the nibble path into the destination.
