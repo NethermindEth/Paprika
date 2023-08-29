@@ -4,6 +4,14 @@ using Paprika.Store;
 
 namespace Paprika.Chain;
 
+/// <summary>
+/// The pooled span dictionary uses memory from <see cref="BufferPool"/> to store large chunks of memory.
+/// </summary>
+/// <remarks>
+/// This component hacks into the dictionary to provide the underlying keys by implementing the custom equality comparer.
+/// It allows to store in the underlying dict just simple entries and not pass the reference in there. To get the reference,
+/// the <see cref="Equals"/> gets the underlying <see cref="Span{Byte}"/> from pages;
+/// </remarks>
 public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySpan>, IDisposable
 {
     private const int BufferSize = BufferPool.BufferSize;
