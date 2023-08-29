@@ -1,5 +1,7 @@
 ﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paprika.Crypto;
+using Paprika.Data;
 using Paprika.Store;
 
 namespace Paprika.Chain;
@@ -22,7 +24,10 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
     private Page _current;
     private int _position;
 
-    private readonly byte[] _key = new byte[1024];
+    private static readonly int KeyBytesCount =
+        Key.StorageCell(NibblePath.FromKey(Keccak.EmptyTreeHash), Keccak.EmptyTreeHash).MaxByteLength;
+
+    private readonly byte[] _key = new byte[KeyBytesCount];
 
     private const int InlineKeyPointer = -1;
 
