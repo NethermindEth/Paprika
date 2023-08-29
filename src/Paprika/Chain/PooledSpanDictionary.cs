@@ -175,6 +175,9 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
 
         [FieldOffset(2)] public readonly ushort Length;
 
+        /// <summary>
+        /// Starts at 0, combining the short hash and the length to make hash more unique.
+        /// </summary>
         [FieldOffset(0)] public readonly int Hash;
 
         [FieldOffset(4)] public readonly int Pointer;
