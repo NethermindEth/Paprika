@@ -33,6 +33,7 @@ public class Blockchain : IAsyncDisposable
     private readonly Histogram<int> _flusherBlockPerS;
     private readonly Histogram<int> _flusherBlockApplicationInMs;
     private readonly Histogram<int> _flusherFlushInMs;
+    private readonly Counter<long> _bloomMissedReads;
     private readonly MetricsExtensions.IAtomicIntGauge _flusherQueueCount;
 
     private readonly PagedDb _db;
@@ -84,6 +85,8 @@ public class Blockchain : IAsyncDisposable
             "The time it took to synchronize the file");
         _flusherQueueCount = _meter.CreateAtomicObservableGauge("Flusher queue size", "Blocks",
             "The number of the blocks in the flush queue");
+        _bloomMissedReads = _meter.CreateCounter<long>("Bloom missed reads", "Reads",
+            "Number of reads that passed bloom but missed in dictionary");
     }
 
     /// <summary>
@@ -98,7 +101,6 @@ public class Blockchain : IAsyncDisposable
             while (await reader.WaitToReadAsync())
             {
                 var flushed = new List<uint>();
-                uint flushedTo = 0;
                 var timer = Stopwatch.StartNew();
 
                 while (timer.Elapsed < _minFlushDelay && reader.TryRead(out var block))
@@ -109,7 +111,7 @@ public class Blockchain : IAsyncDisposable
                     var application = Stopwatch.StartNew();
 
                     flushed.Add(block.BlockNumber);
-                    flushedTo = block.BlockNumber;
+                    var flushedTo = block.BlockNumber;
 
                     batch.SetMetadata(block.BlockNumber, block.Hash);
 
@@ -299,7 +301,7 @@ public class Blockchain : IAsyncDisposable
         /// A simple bloom filter to assert whether the given key was set in a given block,
         /// used to speed up getting the keys.
         /// </summary>
-        private readonly BloomFilter _bloom;
+        private readonly HashSet<int> _bloom;
 
         private readonly Blockchain _blockchain;
 
@@ -328,7 +330,7 @@ public class Blockchain : IAsyncDisposable
         /// The previous can point to either another <see cref="Block"/> as the parent,
         /// or <see cref="IReadOnlyBatch"/> if the parent has been already applied to the state after finalization.
         /// </summary>
-        private RefCountingDisposable _previous;
+        private RefCountingDisposable? _previous;
 
         public Block(Keccak parentHash, RefCountingDisposable parent, Keccak hash, uint blockNumber,
             Blockchain blockchain)
@@ -341,7 +343,7 @@ public class Blockchain : IAsyncDisposable
             ParentHash = parentHash;
 
             // rent pages for the bloom
-            _bloom = new BloomFilter(Rent());
+            _bloom = new HashSet<int>();
 
             _state = new PooledSpanDictionary(Pool);
             _storage = new PooledSpanDictionary(Pool);
@@ -362,11 +364,11 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         public void Commit()
         {
-            // run pre-commit
-            _blockchain._preCommit?.BeforeCommit(this);
-
             // acquires one more lease for this block as it is stored in the blockchain
             AcquireLease();
+
+            // run pre-commit
+            _blockchain._preCommit?.BeforeCommit(this);
 
             // set to blocks in number and in blocks by hash
             _blockchain._blocksByNumber.AddOrUpdate(BlockNumber,
@@ -434,7 +436,7 @@ public class Blockchain : IAsyncDisposable
         private void SetImpl(in Key key, in ReadOnlySpan<byte> payload, PooledSpanDictionary dict)
         {
             var bloom = GetBloom(key);
-            _bloom.Set(bloom);
+            _bloom.Add(bloom);
 
             dict.Set(key.WriteTo(stackalloc byte[key.MaxByteLength]), bloom, payload);
         }
@@ -496,7 +498,7 @@ public class Blockchain : IAsyncDisposable
             // search the parent, either previous block or a readonly batch
             var previous = Volatile.Read(ref _previous);
 
-            if (previous.TryAcquireLease() == false)
+            if (previous == null || previous.TryAcquireLease() == false)
             {
                 // the previous was not possible to get a lease, should return and retry
                 succeeded = false;
@@ -531,7 +533,7 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private ReadOnlySpanOwner<byte> TryGetLocalNoLease(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom, out bool succeeded)
         {
-            if (!_bloom.IsSet(bloom))
+            if (!_bloom.Contains(bloom))
             {
                 succeeded = false;
                 return default;
@@ -551,6 +553,8 @@ public class Blockchain : IAsyncDisposable
                 succeeded = true;
                 return new ReadOnlySpanOwner<byte>(span, this);
             }
+
+            _blockchain._bloomMissedReads.Add(1);
 
             succeeded = false;
             return default;
@@ -596,7 +600,10 @@ public class Blockchain : IAsyncDisposable
 
             var previous = Interlocked.Exchange(ref _previous, readOnlyBatch);
             // dismiss the previous block
-            ((Block)previous).Dispose();
+            if (previous != null)
+            {
+                ((Block)previous).Dispose();
+            }
 
             ReleaseLeaseOnce();
         }

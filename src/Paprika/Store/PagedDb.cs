@@ -91,7 +91,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     public static PagedDb MemoryMappedDb(ulong size, byte historyDepth, string directory, bool flushToDisk = true) =>
         new(new MemoryMappedPageManager(size, historyDepth, directory, flushToDisk), historyDepth);
 
-    private void ReportRead() => _reads.Add(1);
+    private void ReportRead(long number = 1) => _reads.Add(number);
     private void ReportWrite() => _writes.Add(1);
     private void ReportCommit(TimeSpan elapsed)
     {
@@ -243,11 +243,12 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     class ReadOnlyBatch : IReadOnlyBatch, IReadOnlyBatchContext
     {
         private readonly PagedDb _db;
-        private bool _disposed;
+        private volatile bool _disposed;
 
         private readonly DbAddress _rootDataPage;
         private readonly DbAddress _nextFreePage;
         private readonly string _name;
+        private long _reads;
 
         public ReadOnlyBatch(PagedDb db, uint batchId, DbAddress rootDataPage, Metadata metadata,
             DbAddress nextFreePage, string name)
@@ -262,6 +263,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public void Dispose()
         {
+            _db.ReportRead(Volatile.Read(ref _reads));
             _disposed = true;
             _db.DisposeReadOnlyBatch(this);
         }
@@ -273,7 +275,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             if (_disposed)
                 throw new ObjectDisposedException("The readonly batch has already been disposed");
 
-            _db.ReportRead();
+            Interlocked.Increment(ref _reads);
 
             var addr = _rootDataPage;
             if (addr.IsNull)
