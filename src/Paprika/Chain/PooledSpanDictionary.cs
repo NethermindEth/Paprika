@@ -26,7 +26,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         AllocateNewPage();
     }
 
-    public bool TryGet(ReadOnlySpan<byte> key, int hash, out ReadOnlySpan<byte> result)
+    public bool TryGet(scoped ReadOnlySpan<byte> key, int hash, out ReadOnlySpan<byte> result)
     {
         var mixed = Mix(hash);
         if (_dict.TryGetValue(BuildKeyTemp(key, mixed), out var value))
@@ -39,7 +39,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         return false;
     }
 
-    public void Set(ReadOnlySpan<byte> key, int hash, ReadOnlySpan<byte> data)
+    public void Set(scoped ReadOnlySpan<byte> key, int hash, ReadOnlySpan<byte> data)
     {
         var mixed = Mix(hash);
 
@@ -126,7 +126,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
             return _key.AsSpan(0, value.Length);
         }
 
-        var offset = Math.DivRem(value.Pointer, BufferSize, out var pageNo);
+        var pageNo = Math.DivRem(value.Pointer, BufferSize, out var offset);
         return _pages[pageNo].Span.Slice(offset, value.Length);
     }
 
@@ -139,9 +139,9 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         }
 
         toWrite.CopyTo(_current.Span.Slice(_position));
-        var position = _position + _pages.Count * BufferSize;
+        var pointer = _position + (_pages.Count - 1) * BufferSize;
         _position += toWrite.Length;
-        return position;
+        return pointer;
     }
 
     /// <summary>
@@ -157,20 +157,19 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
             Pointer = pointer;
         }
 
-        [FieldOffset(0)]
-        public readonly ushort ShortHash;
+        [FieldOffset(0)] public readonly ushort ShortHash;
 
-        [FieldOffset(2)]
-        public readonly ushort Length;
+        [FieldOffset(2)] public readonly ushort Length;
 
-        [FieldOffset(0)]
-        public readonly int Hash;
+        [FieldOffset(0)] public readonly int Hash;
 
-        [FieldOffset(4)]
-        public readonly int Pointer;
+        [FieldOffset(4)] public readonly int Pointer;
+
+        public override string ToString() =>
+            $"{nameof(Length)}: {Length}, {nameof(Hash)}: {Hash}, {nameof(Pointer)}: {Pointer}";
     }
 
-    public readonly struct ValueSpan
+    private readonly struct ValueSpan
     {
         public readonly int Pointer;
         public readonly ushort Length;
@@ -180,6 +179,8 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
             Pointer = pointer;
             Length = length;
         }
+
+        public override string ToString() => $"{nameof(Pointer)}: {Pointer}, {nameof(Length)}: {Length}";
     }
 
     bool IEqualityComparer<KeySpan>.Equals(KeySpan x, KeySpan y)

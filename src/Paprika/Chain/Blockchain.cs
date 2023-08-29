@@ -460,16 +460,15 @@ public class Blockchain : IAsyncDisposable
 
             var bloom = GetBloom(key);
             var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
-            var context = new Context(key, keyWritten, bloom);
 
-            var result = TryGet(context, out var succeeded);
+            var result = TryGet(key, keyWritten, bloom, out var succeeded);
             if (succeeded)
                 return result;
 
             // slow path
             while (true)
             {
-                result = TryGet(context, out succeeded);
+                result = TryGet(key, keyWritten, bloom, out succeeded);
                 if (succeeded)
                     return result;
 
@@ -477,30 +476,17 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-        readonly ref struct Context
-        {
-            public readonly Key Key;
-            public readonly ReadOnlySpan<byte> KeyWritten;
-            public readonly int Bloom;
-
-            public Context(Key key, ReadOnlySpan<byte> keyWritten, int bloom)
-            {
-                Key = key;
-                KeyWritten = keyWritten;
-                Bloom = bloom;
-            }
-        }
 
         /// <summary>
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        private ReadOnlySpanOwner<byte> TryGet(scoped in Context context, out bool succeeded)
+        private ReadOnlySpanOwner<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom, out bool succeeded)
         {
             // The lease of this is not needed.
             // The reason for that is that the caller did not .Dispose the reference held,
             // therefore the lease counter is up to date!
-            var owner = TryGetLocalNoLease(context, out succeeded);
+            var owner = TryGetLocalNoLease(key, keyWritten, bloom, out succeeded);
             if (succeeded)
                 return owner;
 
@@ -520,12 +506,12 @@ public class Blockchain : IAsyncDisposable
             // the previous is now leased, all the methods are safe to be called
             if (previous is Block block)
             {
-                return block.TryGet(context, out succeeded);
+                return block.TryGet(key, keyWritten, bloom, out succeeded);
             }
 
             if (previous is IReadOnlyBatch batch)
             {
-                if (batch.TryGet(context.Key, out var span))
+                if (batch.TryGet(key, out var span))
                 {
                     // return leased batch
                     succeeded = true;
@@ -543,23 +529,23 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// Tries to get the key only from this block, acquiring no lease as it assumes that the lease is taken.
         /// </summary>
-        private ReadOnlySpanOwner<byte> TryGetLocalNoLease(scoped in Context context, out bool succeeded)
+        private ReadOnlySpanOwner<byte> TryGetLocalNoLease(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom, out bool succeeded)
         {
-            if (!_bloom.IsSet(context.Bloom))
+            if (!_bloom.IsSet(bloom))
             {
                 succeeded = false;
                 return default;
             }
 
             // select the map to search for 
-            var dict = context.Key.Type switch
+            var dict = key.Type switch
             {
                 DataType.Account => _state,
                 DataType.StorageCell => _storage,
                 _ => _preCommit
             };
 
-            if (dict.TryGet(context.KeyWritten, context.Bloom, out var span))
+            if (dict.TryGet(keyWritten, bloom, out var span))
             {
                 // return with owned lease
                 succeeded = true;
@@ -577,6 +563,10 @@ public class Blockchain : IAsyncDisposable
             {
                 Pool.Return(page);
             }
+
+            _state.Dispose();
+            _storage.Dispose();
+            _preCommit.Dispose();
 
             // it's ok to go with null here
             var previous = Interlocked.Exchange(ref _previous!, null);
