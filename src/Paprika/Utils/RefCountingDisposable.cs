@@ -7,13 +7,14 @@ public abstract class RefCountingDisposable : IDisposable
 {
     private const int Initial = 1;
     private const int NoAccessors = 0;
-    private const int Disposing = 1 << 31;
+    private const int Disposing = -1;
+    private const int DisposingBarrier = 0;
 
-    private int _counter;
+    private int _leases;
 
     protected RefCountingDisposable(int initialCount = Initial)
     {
-        _counter = initialCount;
+        _leases = initialCount;
     }
 
     public void AcquireLease()
@@ -26,11 +27,11 @@ public abstract class RefCountingDisposable : IDisposable
 
     public bool TryAcquireLease()
     {
-        var value = Interlocked.Increment(ref _counter);
-        if ((value & Disposing) == Disposing)
+        var value = Interlocked.Increment(ref _leases);
+        if (value < DisposingBarrier)
         {
             // move back as the component is being disposed
-            Interlocked.Decrement(ref _counter);
+            Interlocked.Decrement(ref _leases);
 
             return false;
         }
@@ -43,13 +44,13 @@ public abstract class RefCountingDisposable : IDisposable
     /// </summary>
     public void Dispose() => ReleaseLeaseOnce();
 
-    protected void ReleaseLeaseOnce()
+    private void ReleaseLeaseOnce()
     {
-        var value = Interlocked.Decrement(ref _counter);
+        var value = Interlocked.Decrement(ref _leases);
 
         if (value == NoAccessors)
         {
-            if (Interlocked.CompareExchange(ref _counter, Disposing, NoAccessors) == NoAccessors)
+            if (Interlocked.CompareExchange(ref _leases, Disposing, NoAccessors) == NoAccessors)
             {
                 // set to disposed by this Release
                 CleanUp();
@@ -59,7 +60,9 @@ public abstract class RefCountingDisposable : IDisposable
 
     protected abstract void CleanUp();
 
-    public int Counter => Volatile.Read(ref _counter);
-
-    public override string ToString() => $"Counter: {Volatile.Read(ref _counter)}";
+    public override string ToString()
+    {
+        var leases = Volatile.Read(ref _leases);
+        return leases == Disposing ? "Disposed" : $"Leases: {Volatile.Read(ref leases)}";
+    }
 }

@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -22,9 +23,10 @@ public class Blockchain : IAsyncDisposable
     // allocate 1024 pages (4MB) at once
     private readonly BufferPool _pool = new(1024);
 
-    // It's unlikely that there will be many blocks per number as it would require the network to be heavily fragmented. 
-    private readonly ConcurrentDictionary<uint, Block[]> _blocksByNumber = new();
-    private readonly ConcurrentDictionary<Keccak, Block> _blocksByHash = new();
+    private readonly object _blockLock = new();
+    private readonly Dictionary<uint, List<Block>> _blocksByNumber = new();
+    private readonly Dictionary<Keccak, Block> _blocksByHash = new();
+
     private readonly Channel<Block> _finalizedChannel;
 
     // metrics
@@ -122,13 +124,22 @@ public class Blockchain : IAsyncDisposable
                     // commit but no flush here, it's too heavy, the flush will come later
                     await batch.Commit(CommitOptions.DangerNoFlush);
 
-                    if (_blocksByNumber.TryRemove(flushedTo, out var removedBlocks) == false)
-                        throw new Exception($"Missing blocks at block number {flushedTo}");
+                    // inform the blocks about flushing
+                    Block[] blocks;
 
-                    foreach (var removedBlock in removedBlocks)
+                    lock (_blockLock)
                     {
-                        // remove by hash as well
-                        _blocksByHash.TryRemove(removedBlock.Hash, out _);
+                        if (!_blocksByNumber.TryGetValue(flushedTo, out var removedBlocks))
+                        {
+                            throw new Exception($"Missing blocks at block number {flushedTo}");
+                        }
+
+                        blocks = removedBlocks.ToArray();
+                    }
+
+                    foreach (var removedBlock in blocks)
+                    {
+                        // dispose one to allow leases to do the count
                         removedBlock.Dispose();
                     }
 
@@ -163,9 +174,57 @@ public class Blockchain : IAsyncDisposable
         }
     }
 
+    private void Add(Block block)
+    {
+        // allocate before lock
+        var list = new List<Block> { block };
+
+        lock (_blockLock)
+        {
+            // blocks by number first
+            ref var blocks =
+                ref CollectionsMarshal.GetValueRefOrAddDefault(_blocksByNumber, block.BlockNumber,
+                    out var exists);
+
+            if (exists == false)
+            {
+                blocks = list;
+            }
+            else
+            {
+                blocks.Add(block);
+            }
+
+            // blocks by hash
+            _blocksByHash.Add(block.Hash, block);
+        }
+    }
+
+    private void Remove(Block block)
+    {
+        lock (_blockLock)
+        {
+            // blocks by number, use remove first as usually it should be the case
+            if (!_blocksByNumber.Remove(block.BlockNumber, out var blocks))
+            {
+                throw new Exception($"Blocks @ {block.BlockNumber} should not be empty");
+            }
+
+            blocks.Remove(block);
+            if (blocks.Count > 0)
+            {
+                // re-add only if not empty
+                _blocksByNumber.Add(block.BlockNumber, blocks);
+            }
+
+            // blocks by hash
+            _blocksByHash.Remove(block.Hash);
+        }
+    }
+
     public IWorldState StartNew(Keccak parentKeccak, Keccak blockKeccak, uint blockNumber)
     {
-        lock (this)
+        lock (_blockLock)
         {
             var batch = _db.BeginReadOnlyBatch($"{nameof(Blockchain)}.{nameof(StartNew)} @ {blockNumber}");
             var batchBlockNumber = batch.Metadata.BlockNumber;
@@ -195,36 +254,45 @@ public class Blockchain : IAsyncDisposable
 
     public void Finalize(Keccak keccak)
     {
-        // find the block to finalize
-        if (_blocksByHash.TryGetValue(keccak, out var block) == false)
+        Stack<Block> finalized;
+        uint count;
+
+        // gather all the blocks to finalize 
+        lock (_blockLock)
         {
-            throw new Exception("Block that is marked as finalized is not present");
-        }
-
-        Debug.Assert(block.BlockNumber > _lastFinalized,
-            "Block that is finalized should have a higher number than the last finalized");
-
-        // gather all the blocks between last finalized and this.
-        var count = block.BlockNumber - _lastFinalized;
-        Stack<Block> finalized = new((int)count);
-        for (var blockNumber = block.BlockNumber; blockNumber > _lastFinalized; blockNumber--)
-        {
-            // to finalize
-            finalized.Push(block);
-
-            if (block.TryGetParent(out block) == false)
+            if (_blocksByHash.TryGetValue(keccak, out var block) == false)
             {
-                // no next block, break
-                break;
+                throw new Exception("Block that is marked as finalized is not present");
             }
+
+            Debug.Assert(block.BlockNumber > _lastFinalized,
+                "Block that is finalized should have a higher number than the last finalized");
+
+            // gather all the blocks between last finalized and this.
+
+            count = block.BlockNumber - _lastFinalized;
+
+            finalized = new((int)count);
+            for (var blockNumber = block.BlockNumber; blockNumber > _lastFinalized; blockNumber--)
+            {
+                // no need to acquire lease here, the block is already leased for the blockchain before Add(block)
+                finalized.Push(block);
+                if (_blocksByHash.TryGetValue(block.ParentHash, out block) == false)
+                {
+                    break;
+                }
+            }
+
+            _lastFinalized += count;
         }
 
         // report count before actual writing to do no
         _flusherQueueCount.Add((int)count);
 
+        // push them!
         var writer = _finalizedChannel.Writer;
 
-        while (finalized.TryPop(out block))
+        while (finalized.TryPop(out var block))
         {
             if (writer.TryWrite(block) == false)
             {
@@ -232,8 +300,6 @@ public class Blockchain : IAsyncDisposable
                 SpinWait.SpinUntil(() => writer.TryWrite(block));
             }
         }
-
-        _lastFinalized += count;
     }
 
     private class ReadOnlyBatchCountingRefs : RefCountingDisposable, IReadOnlyBatch
@@ -253,7 +319,7 @@ public class Blockchain : IAsyncDisposable
 
         public uint BatchId { get; }
 
-        
+
         public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
         {
             AcquireLease();
@@ -271,7 +337,7 @@ public class Blockchain : IAsyncDisposable
         public void Report(IReporter reporter) =>
             throw new NotImplementedException("One should not report over a block");
 
-        public override string ToString() => $"Counter: {Counter}, BatchId:{_batch.BatchId}";
+        public override string ToString() => base.ToString() + $", BatchId:{_batch.BatchId}";
     }
 
     /// <summary>
@@ -309,7 +375,6 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private readonly PooledSpanDictionary _preCommit;
 
-
         public Block(Keccak parentHash, Keccak hash, uint blockNumber, IReadOnlyBatch batch, Block[] ancestors,
             Blockchain blockchain)
         {
@@ -336,24 +401,11 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         public void Commit()
         {
-            // acquires one more lease for this block as it is stored in the blockchain
-            AcquireLease();
-
             // run pre-commit
             _blockchain._preCommit?.BeforeCommit(this);
 
-            // set to blocks in number and in blocks by hash
-            _blockchain._blocksByNumber.AddOrUpdate(BlockNumber,
-                static (_, block) => new[] { block },
-                static (_, existing, block) =>
-                {
-                    var array = existing;
-                    Array.Resize(ref array, array.Length + 1);
-                    array[^1] = block;
-                    return array;
-                }, this);
-
-            _blockchain._blocksByHash.TryAdd(Hash, this);
+            AcquireLease();
+            _blockchain.Add(this);
         }
 
         private BufferPool Pool => _blockchain._pool;
@@ -459,7 +511,7 @@ public class Blockchain : IAsyncDisposable
             if (succeeded)
                 return owner;
 
-            // lock all the blocks locally
+            // walk all the blocks locally
             foreach (var ancestor in _ancestors)
             {
                 owner = ancestor.TryGetLocal(key, keyWritten, bloom, out succeeded);
@@ -521,13 +573,16 @@ public class Blockchain : IAsyncDisposable
             _state.Dispose();
             _storage.Dispose();
             _preCommit.Dispose();
-            
+
             _batch.Dispose();
 
+            // release all the ancestors
             foreach (var ancestor in _ancestors)
             {
                 ancestor.Dispose();
             }
+
+            _blockchain.Remove(this);
         }
 
         public void Apply(IBatch batch)
@@ -545,6 +600,13 @@ public class Blockchain : IAsyncDisposable
                 batch.SetRaw(key, kvp.Value);
             }
         }
+
+        public override string ToString() =>
+            base.ToString() + ", " +
+            $"{nameof(BlockNumber)}: {BlockNumber}, " +
+            $"State: {_state}, " +
+            $"Storage: {_storage}, " +
+            $"PreCommit: {_preCommit}";
     }
 
     public async ValueTask DisposeAsync()
