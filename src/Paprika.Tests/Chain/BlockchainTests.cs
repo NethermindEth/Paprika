@@ -65,6 +65,48 @@ public class BlockchainTests
         block3A.GetAccount(Key0).Should().Be(account1A);
     }
 
+    [Test(Description =
+        "Not finalize the last block but one but last to see that dependencies are properly propagated.")]
+    public async Task Finalization_queue()
+    {
+        const int count = 1000;
+        const int lastValue = count - 1;
+
+        using var db = PagedDb.NativeMemoryDb(16 * Mb, 2);
+
+        var random = new Random(13);
+
+        await using var blockchain = new Blockchain(db);
+
+        var block = blockchain.StartNew(Keccak.Zero, random.NextKeccak(), 1);
+        block.Commit();
+        block.Dispose();
+
+        for (uint no = 2; no < count; no++)
+        {
+            // remember block as prev
+            var prev = block;
+
+            // create new, set, commit and dispose
+            block = blockchain.StartNew(prev.Hash, random.NextKeccak(), no);
+            block.SetAccount(Key0, new Account(no, no));
+            block.Commit();
+            block.Dispose();
+
+            // finalize but only previous so that the dependency is there and should be managed properly
+            blockchain.Finalize(prev.Hash);
+        }
+
+        // DO NOT FINALIZE the last block! it will clean the dependencies and destroy the purpose of the test
+        // blockchain.Finalize(block.Hash);
+
+        // for now, to monitor the block chain, requires better handling of ref-counting on finalized
+        await Task.Delay(1000);
+
+        using var last = blockchain.StartNew(block.Hash, random.NextKeccak(), block.BlockNumber + 1);
+        last.GetAccount(Key0).Should().Be(new Account(lastValue, lastValue));
+    }
+
     [Test]
     public async Task BiggerTest()
     {
