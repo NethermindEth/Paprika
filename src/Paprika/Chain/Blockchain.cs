@@ -135,6 +135,16 @@ public class Blockchain : IAsyncDisposable
                         }
 
                         blocks = removedBlocks.ToArray();
+
+                        // destroy dependencies on previous by setting up the next
+                        if (_blocksByNumber.TryGetValue(flushedTo + 1, out var nextBlocks))
+                        {
+                            foreach (var next in nextBlocks)
+                            {
+                                var (b, ancestors) = BuildBlockDataDependencies(next.ParentHash, next.BlockNumber);
+                                next.ReplaceData(b, ancestors);
+                            }
+                        }
                     }
 
                     foreach (var removedBlock in blocks)
@@ -226,30 +236,36 @@ public class Blockchain : IAsyncDisposable
     {
         lock (_blockLock)
         {
-            var batch = _db.BeginReadOnlyBatch($"{nameof(Blockchain)}.{nameof(StartNew)} @ {blockNumber}");
-            var batchBlockNumber = batch.Metadata.BlockNumber;
-            var blocksToRead = blockNumber - batchBlockNumber - 1;
+            var (batch, ancestors) = BuildBlockDataDependencies(parentKeccak, blockNumber);
+            return new Block(parentKeccak, blockKeccak, blockNumber, batch, ancestors, this);
+        }
+    }
 
-            var blocks = new Block[blocksToRead];
+    private (IReadOnlyBatch batch, Block[] ancestors) BuildBlockDataDependencies(Keccak parentKeccak, uint blockNumber)
+    {
+        var batch = _db.BeginReadOnlyBatch($"{nameof(Blockchain)}.{nameof(StartNew)} @ {blockNumber}");
+        var batchBlockNumber = batch.Metadata.BlockNumber;
+        var blocksToRead = blockNumber - batchBlockNumber - 1;
 
-            var parent = parentKeccak;
+        var ancestors = new Block[blocksToRead];
 
-            for (int i = 0; i < blocksToRead; i++)
+        var parent = parentKeccak;
+
+        for (var i = 0; i < blocksToRead; i++)
+        {
+            if (_blocksByHash.TryGetValue(parent, out var parentBlock) == false)
             {
-                if (_blocksByHash.TryGetValue(parent, out var parentBlock) == false)
-                {
-                    throw new Exception($"Missing block: @{blockNumber - 1}");
-                }
-
-                // lease parent
-                parentBlock.AcquireLease();
-
-                blocks[i] = parentBlock;
-                parent = parentBlock.ParentHash;
+                throw new Exception($"Missing block: @{blockNumber - 1}");
             }
 
-            return new Block(parentKeccak, blockKeccak, blockNumber, batch, blocks, this);
+            // lease parent
+            parentBlock.AcquireLease();
+
+            ancestors[i] = parentBlock;
+            parent = parentBlock.ParentHash;
         }
+
+        return (batch, ancestors);
     }
 
     public void Finalize(Keccak keccak)
@@ -355,8 +371,10 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private readonly HashSet<int> _bloom;
 
-        private readonly ReadOnlyBatchCountingRefs _batch;
-        private readonly Block[] _ancestors;
+        private ReadOnlyBatchCountingRefs _batch;
+        private Block[] _ancestors;
+        private readonly ReaderWriterLockSlim _lock;
+
         private readonly Blockchain _blockchain;
 
         /// <summary>
@@ -379,6 +397,7 @@ public class Blockchain : IAsyncDisposable
             Blockchain blockchain)
         {
             _batch = new ReadOnlyBatchCountingRefs(batch);
+            _lock = new ReaderWriterLockSlim();
 
             _ancestors = ancestors;
 
@@ -511,25 +530,62 @@ public class Blockchain : IAsyncDisposable
             if (succeeded)
                 return owner;
 
-            // walk all the blocks locally
-            foreach (var ancestor in _ancestors)
-            {
-                owner = ancestor.TryGetLocal(key, keyWritten, bloom, out succeeded);
-                if (succeeded)
-                    return owner;
-            }
+            _lock.EnterReadLock();
 
-            if (_batch.TryGet(key, out var span))
+            try
             {
-                // return leased batch
-                succeeded = true;
-                _batch.AcquireLease();
-                return new ReadOnlySpanOwner<byte>(span, _batch);
+                // walk all the blocks locally
+                foreach (var ancestor in _ancestors)
+                {
+                    owner = ancestor.TryGetLocal(key, keyWritten, bloom, out succeeded);
+                    if (succeeded)
+                        return owner;
+                }
+
+                if (_batch.TryGet(key, out var span))
+                {
+                    // return leased batch
+                    succeeded = true;
+                    _batch.AcquireLease();
+                    return new ReadOnlySpanOwner<byte>(span, _batch);
+                }
+            }
+            finally
+            {
+                _lock.ExitReadLock();
             }
 
             // report as succeeded operation. The value is not there but it was walked through.
             succeeded = true;
             return default;
+        }
+
+        public void ReplaceData(IReadOnlyBatch batch, Block[] ancestors)
+        {
+            ReadOnlyBatchCountingRefs prevBatch;
+            Block[] prevAncestors;
+
+            _lock.EnterWriteLock();
+            try
+            {
+                // swap previous
+                prevBatch = _batch;
+                prevAncestors = _ancestors;
+
+                _batch = new ReadOnlyBatchCountingRefs(batch);
+                _ancestors = ancestors;
+            }
+            finally
+            {
+                _lock.ExitWriteLock();
+            }
+
+            // release previous
+            prevBatch.Dispose();
+            foreach (var ancestor in prevAncestors)
+            {
+                ancestor.Dispose();
+            }
         }
 
         /// <summary>
