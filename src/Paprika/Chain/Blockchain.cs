@@ -1,5 +1,4 @@
-﻿using System.Collections.Concurrent;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
@@ -336,19 +335,7 @@ public class Blockchain : IAsyncDisposable
         public uint BatchId { get; }
 
 
-        public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
-        {
-            AcquireLease();
-
-            try
-            {
-                return _batch.TryGet(key, out result);
-            }
-            finally
-            {
-                Dispose();
-            }
-        }
+        public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result) => _batch.TryGet(key, out result);
 
         public void Report(IReporter reporter) =>
             throw new NotImplementedException("One should not report over a block");
