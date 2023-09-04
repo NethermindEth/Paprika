@@ -34,7 +34,7 @@ public static class Program
         new(100, 1000, 1 * Gb, false, TimeSpan.FromSeconds(5), false, false);
 
     private static readonly Case InMemorySmall =
-        new(50_000, 1000, 11 * Gb, false, TimeSpan.FromSeconds(5), false, false);
+        new(5_000, 1000, 11 * Gb, false, TimeSpan.FromSeconds(5), false, false);
     private static readonly Case
         InMemoryBig = new(100_000, 1000, 48 * Gb, false, TimeSpan.FromSeconds(5), false, false);
     private static readonly Case DiskSmallNoFlush =
@@ -53,7 +53,7 @@ public static class Program
     public static async Task Main(String[] args)
     {
         // select the case
-        var caseName = (args.Length > 0 ? args[0] : nameof(InMemoryReallySmall)).ToLowerInvariant();
+        var caseName = (args.Length > 0 ? args[0] : nameof(InMemorySmall)).ToLowerInvariant();
         var cases = typeof(Program)
             .GetFields(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
             .Where(f => f.FieldType == typeof(Case))

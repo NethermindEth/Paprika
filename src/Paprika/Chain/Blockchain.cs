@@ -1,7 +1,6 @@
-﻿using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -23,9 +22,10 @@ public class Blockchain : IAsyncDisposable
     // allocate 1024 pages (4MB) at once
     private readonly BufferPool _pool = new(1024);
 
-    // It's unlikely that there will be many blocks per number as it would require the network to be heavily fragmented. 
-    private readonly ConcurrentDictionary<uint, Block[]> _blocksByNumber = new();
-    private readonly ConcurrentDictionary<Keccak, Block> _blocksByHash = new();
+    private readonly object _blockLock = new();
+    private readonly Dictionary<uint, List<Block>> _blocksByNumber = new();
+    private readonly Dictionary<Keccak, Block> _blocksByHash = new();
+
     private readonly Channel<Block> _finalizedChannel;
 
     // metrics
@@ -123,29 +123,32 @@ public class Blockchain : IAsyncDisposable
                     // commit but no flush here, it's too heavy, the flush will come later
                     await batch.Commit(CommitOptions.DangerNoFlush);
 
-                    // immediately, after commit, start a new readonly batch, otherwise pages won't be reused aggressively
-                    // publish the reader to the blocks following up the flushed one
-                    var readOnlyBatch = new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch("Flusher - History"));
-                    if (_blocksByNumber.TryGetValue(flushedTo + 1, out var nextBlocksToFlushedOne) == false)
+                    // inform the blocks about flushing
+                    Block[] blocks;
+
+                    lock (_blockLock)
                     {
-                        throw new Exception(
-                            "The blocks that is marked as finalized has no descendant. Is it possible?");
+                        if (!_blocksByNumber.TryGetValue(flushedTo, out var removedBlocks))
+                        {
+                            throw new Exception($"Missing blocks at block number {flushedTo}");
+                        }
+
+                        blocks = removedBlocks.ToArray();
+
+                        // destroy dependencies on previous by setting up the next
+                        if (_blocksByNumber.TryGetValue(flushedTo + 1, out var nextBlocks))
+                        {
+                            foreach (var next in nextBlocks)
+                            {
+                                var (b, ancestors) = BuildBlockDataDependencies(next.ParentHash, next.BlockNumber);
+                                next.ReplaceData(b, ancestors);
+                            }
+                        }
                     }
 
-                    foreach (var nextBlock in nextBlocksToFlushedOne)
+                    foreach (var removedBlock in blocks)
                     {
-                        // lease first to bump up the counter, then pass
-                        readOnlyBatch.Lease();
-                        nextBlock.SetParentReader(readOnlyBatch);
-                    }
-
-                    if (_blocksByNumber.TryRemove(flushedTo, out var removedBlocks) == false)
-                        throw new Exception($"Missing blocks at block number {flushedTo}");
-
-                    foreach (var removedBlock in removedBlocks)
-                    {
-                        // remove by hash as well
-                        _blocksByHash.TryRemove(removedBlock.Hash, out _);
+                        // dispose one to allow leases to do the count
                         removedBlock.Dispose();
                     }
 
@@ -180,59 +183,131 @@ public class Blockchain : IAsyncDisposable
         }
     }
 
+    private void Add(Block block)
+    {
+        // allocate before lock
+        var list = new List<Block> { block };
+
+        lock (_blockLock)
+        {
+            // blocks by number first
+            ref var blocks =
+                ref CollectionsMarshal.GetValueRefOrAddDefault(_blocksByNumber, block.BlockNumber,
+                    out var exists);
+
+            if (exists == false)
+            {
+                blocks = list;
+            }
+            else
+            {
+                blocks.Add(block);
+            }
+
+            // blocks by hash
+            _blocksByHash.Add(block.Hash, block);
+        }
+    }
+
+    private void Remove(Block block)
+    {
+        lock (_blockLock)
+        {
+            // blocks by number, use remove first as usually it should be the case
+            if (!_blocksByNumber.Remove(block.BlockNumber, out var blocks))
+            {
+                throw new Exception($"Blocks @ {block.BlockNumber} should not be empty");
+            }
+
+            blocks.Remove(block);
+            if (blocks.Count > 0)
+            {
+                // re-add only if not empty
+                _blocksByNumber.Add(block.BlockNumber, blocks);
+            }
+
+            // blocks by hash
+            _blocksByHash.Remove(block.Hash);
+        }
+    }
+
     public IWorldState StartNew(Keccak parentKeccak, Keccak blockKeccak, uint blockNumber)
     {
-        if (_blocksByHash.TryGetValue(parentKeccak, out var parent))
+        lock (_blockLock)
         {
-            return new Block(parentKeccak, parent, blockKeccak, blockNumber, this);
+            var (batch, ancestors) = BuildBlockDataDependencies(parentKeccak, blockNumber);
+            return new Block(parentKeccak, blockKeccak, blockNumber, batch, ancestors, this);
+        }
+    }
+
+    private (IReadOnlyBatch batch, Block[] ancestors) BuildBlockDataDependencies(Keccak parentKeccak, uint blockNumber)
+    {
+        var batch = _db.BeginReadOnlyBatch($"{nameof(Blockchain)}.{nameof(StartNew)} @ {blockNumber}");
+        var batchBlockNumber = batch.Metadata.BlockNumber;
+        var blocksToRead = blockNumber - batchBlockNumber - 1;
+
+        var ancestors = new Block[blocksToRead];
+
+        var parent = parentKeccak;
+
+        for (var i = 0; i < blocksToRead; i++)
+        {
+            if (_blocksByHash.TryGetValue(parent, out var parentBlock) == false)
+            {
+                throw new Exception($"Missing block: @{blockNumber - 1}");
+            }
+
+            // lease parent
+            parentBlock.AcquireLease();
+
+            ancestors[i] = parentBlock;
+            parent = parentBlock.ParentHash;
         }
 
-        using var batch =
-            new ReadOnlyBatchCountingRefs(_db.BeginReadOnlyBatch($"{nameof(Blockchain)}.{nameof(StartNew)}"));
-        batch.Lease(); // add one for this using
-
-        var parentBlockNumber = blockNumber - 1;
-        if (batch.Metadata.BlockNumber == parentBlockNumber)
-        {
-            // block does the leasing itself
-            return new Block(parentKeccak, batch, blockKeccak, blockNumber, this);
-        }
-
-        throw new Exception("There is no parent and the db is not aligned with the parent number");
+        return (batch, ancestors);
     }
 
     public void Finalize(Keccak keccak)
     {
-        // find the block to finalize
-        if (_blocksByHash.TryGetValue(keccak, out var block) == false)
+        Stack<Block> finalized;
+        uint count;
+
+        // gather all the blocks to finalize 
+        lock (_blockLock)
         {
-            throw new Exception("Block that is marked as finalized is not present");
-        }
-
-        Debug.Assert(block.BlockNumber > _lastFinalized,
-            "Block that is finalized should have a higher number than the last finalized");
-
-        // gather all the blocks between last finalized and this.
-        var count = block.BlockNumber - _lastFinalized;
-        Stack<Block> finalized = new((int)count);
-        for (var blockNumber = block.BlockNumber; blockNumber > _lastFinalized; blockNumber--)
-        {
-            // to finalize
-            finalized.Push(block);
-
-            if (block.TryGetParent(out block) == false)
+            if (_blocksByHash.TryGetValue(keccak, out var block) == false)
             {
-                // no next block, break
-                break;
+                throw new Exception("Block that is marked as finalized is not present");
             }
+
+            Debug.Assert(block.BlockNumber > _lastFinalized,
+                "Block that is finalized should have a higher number than the last finalized");
+
+            // gather all the blocks between last finalized and this.
+
+            count = block.BlockNumber - _lastFinalized;
+
+            finalized = new((int)count);
+            for (var blockNumber = block.BlockNumber; blockNumber > _lastFinalized; blockNumber--)
+            {
+                // no need to acquire lease here, the block is already leased for the blockchain before Add(block)
+                finalized.Push(block);
+                if (_blocksByHash.TryGetValue(block.ParentHash, out block) == false)
+                {
+                    break;
+                }
+            }
+
+            _lastFinalized += count;
         }
 
         // report count before actual writing to do no
         _flusherQueueCount.Add((int)count);
 
+        // push them!
         var writer = _finalizedChannel.Writer;
 
-        while (finalized.TryPop(out block))
+        while (finalized.TryPop(out var block))
         {
             if (writer.TryWrite(block) == false)
             {
@@ -240,16 +315,13 @@ public class Blockchain : IAsyncDisposable
                 SpinWait.SpinUntil(() => writer.TryWrite(block));
             }
         }
-
-        _lastFinalized += count;
     }
 
     private class ReadOnlyBatchCountingRefs : RefCountingDisposable, IReadOnlyBatch
     {
         private readonly IReadOnlyBatch _batch;
-        private const int LiveOnlyAsLongAsBlocksThatReferThisBatch = 0;
 
-        public ReadOnlyBatchCountingRefs(IReadOnlyBatch batch) : base(LiveOnlyAsLongAsBlocksThatReferThisBatch)
+        public ReadOnlyBatchCountingRefs(IReadOnlyBatch batch)
         {
             _batch = batch;
             Metadata = batch.Metadata;
@@ -262,30 +334,13 @@ public class Blockchain : IAsyncDisposable
 
         public uint BatchId { get; }
 
-        public void Lease() => TryAcquireLease();
 
-
-        public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
-        {
-            if (!TryAcquireLease())
-            {
-                throw new Exception("Should be able to lease it!");
-            }
-
-            try
-            {
-                return _batch.TryGet(key, out result);
-            }
-            finally
-            {
-                Dispose();
-            }
-        }
+        public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result) => _batch.TryGet(key, out result);
 
         public void Report(IReporter reporter) =>
             throw new NotImplementedException("One should not report over a block");
 
-        public override string ToString() => $"Counter: {Counter}, BatchId:{_batch.BatchId}";
+        public override string ToString() => base.ToString() + $", BatchId:{_batch.BatchId}";
     }
 
     /// <summary>
@@ -303,12 +358,11 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private readonly HashSet<int> _bloom;
 
-        private readonly Blockchain _blockchain;
+        private ReadOnlyBatchCountingRefs _batch;
+        private Block[] _ancestors;
+        private readonly ReaderWriterLockSlim _lock;
 
-        /// <summary>
-        /// All the pages rented for this block from the <see cref="BufferPool"/>.
-        /// </summary>
-        private readonly List<Page> _pages = new();
+        private readonly Blockchain _blockchain;
 
         /// <summary>
         /// The maps mapping accounts information, written in this block.
@@ -326,16 +380,16 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private readonly PooledSpanDictionary _preCommit;
 
-        /// <summary>
-        /// The previous can point to either another <see cref="Block"/> as the parent,
-        /// or <see cref="IReadOnlyBatch"/> if the parent has been already applied to the state after finalization.
-        /// </summary>
-        private RefCountingDisposable? _previous;
+        private bool _committed;
 
-        public Block(Keccak parentHash, RefCountingDisposable parent, Keccak hash, uint blockNumber,
+        public Block(Keccak parentHash, Keccak hash, uint blockNumber, IReadOnlyBatch batch, Block[] ancestors,
             Blockchain blockchain)
         {
-            _previous = parent;
+            _batch = new ReadOnlyBatchCountingRefs(batch);
+            _lock = new ReaderWriterLockSlim();
+
+            _ancestors = ancestors;
+
             _blockchain = blockchain;
 
             Hash = hash;
@@ -348,15 +402,6 @@ public class Blockchain : IAsyncDisposable
             _state = new PooledSpanDictionary(Pool);
             _storage = new PooledSpanDictionary(Pool);
             _preCommit = new PooledSpanDictionary(Pool);
-
-            parent.AcquireLease();
-        }
-
-        private Page Rent()
-        {
-            var page = Pool.Rent(true);
-            _pages.Add(page);
-            return page;
         }
 
         /// <summary>
@@ -364,24 +409,12 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         public void Commit()
         {
-            // acquires one more lease for this block as it is stored in the blockchain
-            AcquireLease();
-
             // run pre-commit
             _blockchain._preCommit?.BeforeCommit(this);
 
-            // set to blocks in number and in blocks by hash
-            _blockchain._blocksByNumber.AddOrUpdate(BlockNumber,
-                static (_, block) => new[] { block },
-                static (_, existing, block) =>
-                {
-                    var array = existing;
-                    Array.Resize(ref array, array.Length + 1);
-                    array[^1] = block;
-                    return array;
-                }, this);
-
-            _blockchain._blocksByHash.TryAdd(Hash, this);
+            AcquireLease();
+            _blockchain.Add(this);
+            _committed = true;
         }
 
         private BufferPool Pool => _blockchain._pool;
@@ -458,8 +491,6 @@ public class Blockchain : IAsyncDisposable
 
         private ReadOnlySpanOwner<byte> Get(scoped in Key key)
         {
-            AcquireLease();
-
             var bloom = GetBloom(key);
             var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
@@ -478,60 +509,80 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-
         /// <summary>
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        private ReadOnlySpanOwner<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom, out bool succeeded)
+        private ReadOnlySpanOwner<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom,
+            out bool succeeded)
         {
-            // The lease of this is not needed.
-            // The reason for that is that the caller did not .Dispose the reference held,
-            // therefore the lease counter is up to date!
-            var owner = TryGetLocalNoLease(key, keyWritten, bloom, out succeeded);
+            var owner = TryGetLocal(key, keyWritten, bloom, out succeeded);
             if (succeeded)
                 return owner;
 
-            // this asset should be no longer leased
-            ReleaseLeaseOnce();
+            _lock.EnterReadLock();
 
-            // search the parent, either previous block or a readonly batch
-            var previous = Volatile.Read(ref _previous);
-
-            if (previous == null || previous.TryAcquireLease() == false)
+            try
             {
-                // the previous was not possible to get a lease, should return and retry
-                succeeded = false;
-                return default;
-            }
+                // walk all the blocks locally
+                foreach (var ancestor in _ancestors)
+                {
+                    owner = ancestor.TryGetLocal(key, keyWritten, bloom, out succeeded);
+                    if (succeeded)
+                        return owner;
+                }
 
-            // the previous is now leased, all the methods are safe to be called
-            if (previous is Block block)
-            {
-                return block.TryGet(key, keyWritten, bloom, out succeeded);
-            }
-
-            if (previous is IReadOnlyBatch batch)
-            {
-                if (batch.TryGet(key, out var span))
+                if (_batch.TryGet(key, out var span))
                 {
                     // return leased batch
                     succeeded = true;
-                    return new ReadOnlySpanOwner<byte>(span, batch);
+                    _batch.AcquireLease();
+                    return new ReadOnlySpanOwner<byte>(span, _batch);
                 }
-
-                // report as succeeded operation. The value is not there but it was walked through.
-                succeeded = true;
-                return default;
+            }
+            finally
+            {
+                _lock.ExitReadLock();
             }
 
-            throw new Exception($"The type of previous is not handled: {previous.GetType()}");
+            // report as succeeded operation. The value is not there but it was walked through.
+            succeeded = true;
+            return default;
+        }
+
+        public void ReplaceData(IReadOnlyBatch batch, Block[] ancestors)
+        {
+            ReadOnlyBatchCountingRefs prevBatch;
+            Block[] prevAncestors;
+
+            _lock.EnterWriteLock();
+            try
+            {
+                // swap previous
+                prevBatch = _batch;
+                prevAncestors = _ancestors;
+
+                _batch = new ReadOnlyBatchCountingRefs(batch);
+                _ancestors = ancestors;
+            }
+            finally
+            {
+                _lock.ExitWriteLock();
+            }
+
+            // release previous
+            prevBatch.Dispose();
+            foreach (var ancestor in prevAncestors)
+            {
+                ancestor.Dispose();
+            }
         }
 
         /// <summary>
         /// Tries to get the key only from this block, acquiring no lease as it assumes that the lease is taken.
         /// </summary>
-        private ReadOnlySpanOwner<byte> TryGetLocalNoLease(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom, out bool succeeded)
+        private ReadOnlySpanOwner<byte> TryGetLocal(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
+            int bloom, out bool succeeded)
         {
             if (!_bloom.Contains(bloom))
             {
@@ -551,6 +602,9 @@ public class Blockchain : IAsyncDisposable
             {
                 // return with owned lease
                 succeeded = true;
+
+                AcquireLease();
+
                 return new ReadOnlySpanOwner<byte>(span, this);
             }
 
@@ -562,19 +616,22 @@ public class Blockchain : IAsyncDisposable
 
         protected override void CleanUp()
         {
-            // return all the pages
-            foreach (var page in _pages)
-            {
-                Pool.Return(page);
-            }
-
             _state.Dispose();
             _storage.Dispose();
             _preCommit.Dispose();
 
-            // it's ok to go with null here
-            var previous = Interlocked.Exchange(ref _previous!, null);
-            previous.Dispose();
+            _batch.Dispose();
+
+            // release all the ancestors
+            foreach (var ancestor in _ancestors)
+            {
+                ancestor.Dispose();
+            }
+
+            if (_committed)
+            {
+                _blockchain.Remove(this);
+            }
         }
 
         public void Apply(IBatch batch)
@@ -593,33 +650,12 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-        // ReSharper disable once SuggestBaseTypeForParameter
-        public void SetParentReader(ReadOnlyBatchCountingRefs readOnlyBatch)
-        {
-            AcquireLease();
-
-            var previous = Interlocked.Exchange(ref _previous, readOnlyBatch);
-            // dismiss the previous block
-            if (previous != null)
-            {
-                ((Block)previous).Dispose();
-            }
-
-            ReleaseLeaseOnce();
-        }
-
-        public bool TryGetParent([MaybeNullWhen(false)] out Block value)
-        {
-            var previous = Volatile.Read(ref _previous);
-            if (previous is Block block)
-            {
-                value = block;
-                return true;
-            }
-
-            value = null;
-            return false;
-        }
+        public override string ToString() =>
+            base.ToString() + ", " +
+            $"{nameof(BlockNumber)}: {BlockNumber}, " +
+            $"State: {_state}, " +
+            $"Storage: {_storage}, " +
+            $"PreCommit: {_preCommit}";
     }
 
     public async ValueTask DisposeAsync()
