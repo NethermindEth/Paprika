@@ -380,6 +380,8 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private readonly PooledSpanDictionary _preCommit;
 
+        private bool _committed;
+
         public Block(Keccak parentHash, Keccak hash, uint blockNumber, IReadOnlyBatch batch, Block[] ancestors,
             Blockchain blockchain)
         {
@@ -412,6 +414,7 @@ public class Blockchain : IAsyncDisposable
 
             AcquireLease();
             _blockchain.Add(this);
+            _committed = true;
         }
 
         private BufferPool Pool => _blockchain._pool;
@@ -625,7 +628,10 @@ public class Blockchain : IAsyncDisposable
                 ancestor.Dispose();
             }
 
-            _blockchain.Remove(this);
+            if (_committed)
+            {
+                _blockchain.Remove(this);
+            }
         }
 
         public void Apply(IBatch batch)
