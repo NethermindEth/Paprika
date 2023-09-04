@@ -25,10 +25,11 @@ public abstract class RefCountingDisposable : IDisposable
         }
     }
 
-    public bool TryAcquireLease()
+    protected bool TryAcquireLease()
     {
         var value = Interlocked.Increment(ref _leases);
-        if (value < DisposingBarrier)
+        var previous = value - 1;
+        if (previous < DisposingBarrier)
         {
             // move back as the component is being disposed
             Interlocked.Decrement(ref _leases);
