@@ -148,7 +148,7 @@ public static class Program
                     ctx.Refresh();
                 }));
 
-            var preCommit = new ComputeMerkleBehavior(true, 2, 2);
+            var preCommit = new ComputeMerkleBehavior(true, 2, 1);
             //IPreCommitBehavior preCommit = null;
 
             await using (var blockchain = new Blockchain(db, preCommit, config.FlushEvery, 1000, reporter.Observe))
@@ -392,7 +392,7 @@ public static class Program
             if (block > 0 & block % config.LogEvery == 0)
             {
                 reporting.Update(
-                    new Panel($@"At block {block}. Writing last batch took {writing.Elapsed:g}").Header("Writing")
+                    new Panel($@"At block {block}. Writing last batch of {config.LogEvery} blocks took {writing.Elapsed:g}").Header("Writing")
                         .Expand());
                 writing.Restart();
             }

@@ -67,13 +67,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         //  b.  calculate the root hash of the State
 
         // 1. visit storage
-        var storage = new StorageHandler(commit);
-        commit.Visit(storage.OnKey, TrieType.Storage);
+        var storage = VisitStorage(commit);
 
         // 2. visit state
-        var accountsThatRequireManualTouch = new HashSet<Keccak>(storage.AccountsWithModifiedStorage);
-        var state = new StateHandler(commit, accountsThatRequireManualTouch);
-        commit.Visit(state.OnKey, TrieType.State);
+        var accountsThatRequireManualTouch = VisitState(commit, storage);
 
         // 3. visit keys that require manual touch as they were not modified in the state step, mark them dirty
         foreach (var accountKey in accountsThatRequireManualTouch)
@@ -84,29 +81,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         // 4. recalculate root hash
         if (_fullMerkle)
         {
-            Span<byte> accountSpan = stackalloc byte[Account.MaxByteCount];
-
-            var prefixed = new PrefixingCommit(commit);
-
-            // a. start with the accounts that had their storage altered
-            foreach (var accountAddress in storage.AccountsWithModifiedStorage)
-            {
-                prefixed.SetPrefix(accountAddress);
-
-                // compute new storage root hash
-                var keccakOrRlp = Compute(Key.Merkle(NibblePath.Empty), prefixed, TrieType.Storage);
-
-                // read the existing account
-                var key = Key.Account(accountAddress);
-                using var accountOwner = commit.Get(key);
-                Account.ReadFrom(accountOwner.Span, out var account);
-
-                // update it
-                account = account.WithChangedStorageRoot(new Keccak(keccakOrRlp.Span));
-
-                // set it
-                commit.Set(key, account.WriteTo(accountSpan));
-            }
+            CalculateStorageRoots(commit, storage);
 
             var root = Key.Merkle(NibblePath.Empty);
             var rootKeccak = Compute(root, commit, TrieType.State);
@@ -115,6 +90,48 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
             RootHash = new Keccak(rootKeccak.Span);
         }
+    }
+
+    private void CalculateStorageRoots(ICommit commit, StorageHandler storage)
+    {
+        Span<byte> accountSpan = stackalloc byte[Account.MaxByteCount];
+
+        var prefixed = new PrefixingCommit(commit);
+
+        // a. start with the accounts that had their storage altered
+        foreach (var accountAddress in storage.AccountsWithModifiedStorage)
+        {
+            prefixed.SetPrefix(accountAddress);
+
+            // compute new storage root hash
+            var keccakOrRlp = Compute(Key.Merkle(NibblePath.Empty), prefixed, TrieType.Storage);
+
+            // read the existing account
+            var key = Key.Account(accountAddress);
+            using var accountOwner = commit.Get(key);
+            Account.ReadFrom(accountOwner.Span, out var account);
+
+            // update it
+            account = account.WithChangedStorageRoot(new Keccak(keccakOrRlp.Span));
+
+            // set it
+            commit.Set(key, account.WriteTo(accountSpan));
+        }
+    }
+
+    private static HashSet<Keccak> VisitState(ICommit commit, StorageHandler storage)
+    {
+        var accountsThatRequireManualTouch = new HashSet<Keccak>(storage.AccountsWithModifiedStorage);
+        var state = new StateHandler(commit, accountsThatRequireManualTouch);
+        commit.Visit(state.OnKey, TrieType.State);
+        return accountsThatRequireManualTouch;
+    }
+
+    private static StorageHandler VisitStorage(ICommit commit)
+    {
+        var storage = new StorageHandler(commit);
+        commit.Visit(storage.OnKey, TrieType.Storage);
+        return storage;
     }
 
     public Keccak RootHash { get; private set; }
