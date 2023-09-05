@@ -22,15 +22,7 @@ public interface IPreCommitBehavior
 /// allowing for additional modifications of the data just before the commit.
 /// </summary>
 /// <remarks>
-/// Use Enumerator to access all the keys
-///
-/// public static void Foreach(this ICommit commit)
-/// {
-///     foreach (var key in commit)
-///     {
-///         key.
-///     }
-///  }
+/// Use <see cref="Visit"/> to access all the keys.
 /// </remarks>
 public interface ICommit
 {
@@ -50,7 +42,21 @@ public interface ICommit
     /// <summary>
     /// Visits the given <paramref name="type"/> of the changes in the given commit.
     /// </summary>
-    void Visit(CommitAction action, TrieType type);
+    void Visit(CommitAction action, TrieType type) => throw new Exception("No visitor available for this commit");
+
+    /// <summary>
+    /// Gets the child commit that is a thread-safe write-through commit.
+    /// </summary>
+    /// <returns>A child commit.</returns>
+    IChildCommit GetChild() => throw new Exception($"No {nameof(GetChild)} available for this commit");
+}
+
+public interface IChildCommit : ICommit, IDisposable
+{
+    /// <summary>
+    /// Commits to the parent
+    /// </summary>
+    void Commit();
 }
 
 /// <summary>

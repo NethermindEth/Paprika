@@ -125,6 +125,42 @@ public class Commit : ICommit
         }
     }
 
+    public IChildCommit GetChild() => new ChildCommit(this);
+
+    class ChildCommit : IChildCommit
+    {
+        private readonly ICommit _commit;
+        private readonly Dictionary<byte[], byte[]> _data = new(Comparer);
+
+        public ChildCommit(ICommit commit)
+        {
+            _commit = commit;
+        }
+
+        public void Dispose() => _data.Clear();
+
+        public ReadOnlySpanOwner<byte> Get(scoped in Key key)
+        {
+            return _data.TryGetValue(GetKey(key), out var value) ?
+                new ReadOnlySpanOwner<byte>(value, null) :
+                _commit.Get(key);
+        }
+
+        public void Set(in Key key, in ReadOnlySpan<byte> payload)
+        {
+            _data[GetKey(key)] = payload.ToArray();
+        }
+
+        public void Commit()
+        {
+            foreach (var kvp in _data)
+            {
+                Key.ReadFrom(kvp.Key, out var key);
+                _commit.Set(key, kvp.Value);
+            }
+        }
+    }
+
     public KeyEnumerator GetSnapshotOfBefore() => new(_before.Keys.ToArray());
 
     public ref struct KeyEnumerator

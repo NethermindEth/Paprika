@@ -446,7 +446,7 @@ public class Blockchain : IAsyncDisposable
             return result;
         }
 
-        private static int GetBloom(in Key key) => key.GetHashCode();
+        private static int GetHash(in Key key) => key.GetHashCode();
 
         public void SetAccount(in Keccak address, in Account account)
         {
@@ -468,10 +468,10 @@ public class Blockchain : IAsyncDisposable
 
         private void SetImpl(in Key key, in ReadOnlySpan<byte> payload, PooledSpanDictionary dict)
         {
-            var bloom = GetBloom(key);
-            _bloom.Add(bloom);
+            var hash = GetHash(key);
+            _bloom.Add(hash);
 
-            dict.Set(key.WriteTo(stackalloc byte[key.MaxByteLength]), bloom, payload);
+            dict.Set(key.WriteTo(stackalloc byte[key.MaxByteLength]), hash, payload);
         }
 
         ReadOnlySpanOwner<byte> ICommit.Get(scoped in Key key) => Get(key);
@@ -489,19 +489,67 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
+        IChildCommit ICommit.GetChild() => new ChildCommit(new PooledSpanDictionary(Pool), this);
+
+        class ChildCommit : IChildCommit
+        {
+            private readonly PooledSpanDictionary _dict;
+            private readonly ICommit _parent;
+
+            public ChildCommit(PooledSpanDictionary dictionary, ICommit parent)
+            {
+                _dict = dictionary;
+                _parent = parent;
+            }
+
+            public void Dispose() => _dict.Dispose();
+
+            public ReadOnlySpanOwner<byte> Get(scoped in Key key)
+            {
+                var hash = GetHash(key);
+                var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+
+                if (_dict.TryGet(keyWritten, hash, out var result))
+                {
+                    return new ReadOnlySpanOwner<byte>(result, null);
+                }
+
+                return _parent.Get(key);
+            }
+
+            public void Set(in Key key, in ReadOnlySpan<byte> payload)
+            {
+                var hash = GetHash(key);
+                var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+
+                _dict.Set(keyWritten, hash, payload);
+            }
+
+            public void Commit()
+            {
+                foreach (var kvp in _dict)
+                {
+                    Key.ReadFrom(kvp.Key, out var key);
+                    _parent.Set(key, kvp.Value);
+                }
+            }
+
+            public override string ToString() => _dict.ToString();
+        }
+
         private ReadOnlySpanOwner<byte> Get(scoped in Key key)
         {
-            var bloom = GetBloom(key);
+            var hash = GetHash(key);
             var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
-            var result = TryGet(key, keyWritten, bloom, out var succeeded);
+            var result = TryGet(key, keyWritten, hash, out var succeeded);
             if (succeeded)
                 return result;
 
             // slow path
             while (true)
             {
-                result = TryGet(key, keyWritten, bloom, out succeeded);
+                result = TryGet(key, keyWritten, hash, out succeeded);
                 if (succeeded)
                     return result;
 

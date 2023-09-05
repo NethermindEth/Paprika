@@ -194,6 +194,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
     private KeccakOrRlp EncodeBranch(Key key, ICommit commit, scoped in Node.Branch branch, TrieType trieType)
     {
+        // run: for the state trie, only for the root and with all children set
+        var runInParallel = trieType == TrieType.State && key.Path.IsEmpty && branch.Children.AllSet;
+
         var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
 
         // leave for length preamble
@@ -203,22 +206,56 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
             Position = initialShift
         };
 
-        const int additionalBytesForNibbleAppending = 1;
-        Span<byte> childSpan = stackalloc byte[key.Path.MaxByteLength + additionalBytesForNibbleAppending];
-
-        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+        if (!runInParallel)
         {
-            if (branch.Children[i])
-            {
-                var childPath = key.Path.AppendNibble(i, childSpan);
-                var value = Compute(Key.Merkle(childPath), commit, trieType);
+            const int additionalBytesForNibbleAppending = 1;
+            Span<byte> childSpan = stackalloc byte[key.Path.MaxByteLength + additionalBytesForNibbleAppending];
 
-                // it's either Keccak or a span. Both are encoded the same ways
-                stream.Encode(value.Span);
-            }
-            else
+            for (byte i = 0; i < NibbleSet.NibbleCount; i++)
             {
-                stream.EncodeEmptyArray();
+                if (branch.Children[i])
+                {
+                    var childPath = key.Path.AppendNibble(i, childSpan);
+                    var value = Compute(Key.Merkle(childPath), commit, trieType);
+
+                    // it's either Keccak or a span. Both are encoded the same ways
+                    stream.Encode(value.Span);
+                }
+                else
+                {
+                    stream.EncodeEmptyArray();
+                }
+            }
+        }
+        else
+        {
+            // materialize path so that it can be closure captured
+            var pathData = key.Path.WriteTo(stackalloc byte[key.Path.MaxByteLength]).ToArray();
+            var results = new byte[NibbleSet.NibbleCount][];
+            var childCommits = Enumerable.Range(0, NibbleSet.NibbleCount).Select(i => commit.GetChild()).ToArray();
+
+            // parallel calculation
+            //for (int nibble = 0; nibble < NibbleSet.NibbleCount; nibble++)
+            Parallel.For((long)0, NibbleSet.NibbleCount, nibble =>
+            {
+                NibblePath.ReadFrom(pathData, out var path);
+                var childPath = path.AppendNibble((byte)nibble, stackalloc byte[path.MaxByteLength + 1]);
+                results[nibble] = Compute(Key.Merkle(childPath), childCommits[nibble], trieType).Span.ToArray();
+            //}
+            });
+
+            // commit all the children
+            foreach (var child in childCommits)
+            {
+                child.Commit();
+                child.Dispose();
+            }
+
+            // write all results in the stream
+            for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+            {
+                // it's either Keccak or a span. Both are encoded the same ways
+                stream.Encode(results[i]);
             }
         }
 
@@ -339,6 +376,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         private Key Build(Key key) => Key.Raw(NibblePath.FromKey(_keccak), key.Type, key.Path);
 
         public void Visit(CommitAction action, TrieType type) => throw new Exception("Should not be called");
+        public IChildCommit GetChild() => throw new Exception("Should not be called");
     }
 
     private class StorageHandler
