@@ -24,7 +24,7 @@ public record Case(uint BlockCount, int AccountsPerBlock, ulong DbFileSize, bool
     bool Fsync,
     bool UseBigStorageAccount)
 {
-    public uint NumberOfLogs => PersistentDb ? 100u : 10u;
+    public static uint NumberOfLogs => 10u;
     public uint LogEvery => BlockCount / NumberOfLogs;
 }
 
@@ -154,7 +154,7 @@ public static class Program
 
             await using (var blockchain = new Blockchain(db, preCommit, config.FlushEvery, 1000, reporter.Observe))
             {
-                (counter, result) = Writer(config, blockchain, bigStorageAccount, random, layout[writing]);
+                counter = Writer(config, blockchain, bigStorageAccount, random, layout[writing]);
             }
 
             // waiting for finalization
@@ -163,7 +163,7 @@ public static class Program
             var readingStopWatch = Stopwatch.StartNew();
             random = BuildRandom();
 
-            var logReadEvery = counter / config.NumberOfLogs;
+            var logReadEvery = counter / Case.NumberOfLogs;
             for (var i = 0; i < counter; i++)
             {
                 var key = random.NextKeccak();
@@ -217,7 +217,7 @@ public static class Program
             }
 
             // the final report
-            ReportReading(counter, result);
+            ReportReading(counter);
 
             // statistics
             layout[info].Update(new Panel("Gathering statistics...").Header("Paprika tree statistics").Expand());
@@ -268,17 +268,12 @@ public static class Program
             spectre.Cancel();
             await reportingTask;
 
-            void ReportReading(int i, object? result = null)
+            void ReportReading(int i)
             {
                 var secondsPerRead = TimeSpan.FromTicks(readingStopWatch.ElapsedTicks / logReadEvery).TotalSeconds;
                 var readsPerSeconds = 1 / secondsPerRead;
 
                 var txt = $"Reading at {i,9} out of {counter} accounts.\nCurrent speed: {readsPerSeconds:F1} reads/s";
-
-                if (result != null)
-                {
-                    txt += $"\nRootHash: {result}";
-                }
 
                 layout[reading].Update(new Panel(txt).Header(reading).Expand());
 
@@ -332,9 +327,10 @@ public static class Program
         new(95, "red"),
     };
 
-    private static (int counter, object result) Writer(Case config, Blockchain blockchain, Keccak bigStorageAccount, Random random,
-        Layout reporting)
+    private static int Writer(Case config, Blockchain blockchain, Keccak bigStorageAccount, Random random, Layout reporting)
     {
+        var report = new StringBuilder();
+        string result = "";
         var counter = 0;
 
         bool bigStorageAccountCreated = false;
@@ -344,8 +340,6 @@ public static class Program
         var parentBlockHash = Keccak.Zero;
 
         var toFinalize = new List<Keccak>();
-
-        object result = null;
 
         for (uint block = 1; block < config.BlockCount; block++)
         {
@@ -385,7 +379,7 @@ public static class Program
                 counter++;
             }
 
-            result = worldState.Commit();
+            result = $"{worldState.Commit().ToString()?[..8]}...";
 
             // finalize
             if (toFinalize.Count >= FinalizeEvery)
@@ -399,9 +393,10 @@ public static class Program
 
             if (block > 0 & block % config.LogEvery == 0)
             {
-                reporting.Update(
-                    new Panel($@"At block {block}. Writing last batch of {config.LogEvery} blocks took {writing.Elapsed:g}").Header("Writing")
-                        .Expand());
+                report.AppendLine(
+                    $@"At block {block}. This batch of {config.LogEvery} blocks took {writing.Elapsed:g}. RootHash: {result}");
+
+                reporting.Update(new Panel(report.ToString()).Header("Writing").Expand());
                 writing.Restart();
             }
         }
@@ -412,13 +407,11 @@ public static class Program
         placeholder.Commit();
         blockchain.Finalize(lastBlock);
 
-        reporting.Update(
-            new Panel($@"At block {config.BlockCount - 1}. Writing last batch took {writing.Elapsed:g}")
-                .Header("Writing")
-                .Expand());
+        report.AppendLine($@"At block {config.BlockCount - 1}. This batch of {config.LogEvery} blocks took {writing.Elapsed:g}. RootHash: {result}");
 
+        reporting.Update(new Panel(report.ToString()).Header("Writing").Expand());
 
-        return (counter, result);
+        return counter;
     }
 
     private static Account GetAccountValue(int counter)
