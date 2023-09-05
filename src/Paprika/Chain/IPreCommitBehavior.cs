@@ -14,7 +14,7 @@ public interface IPreCommitBehavior
     /// Executed just before commit.
     /// </summary>
     /// <param name="commit">The object representing the commit.</param>
-    public void BeforeCommit(ICommit commit);
+    public object BeforeCommit(ICommit commit);
 }
 
 /// <summary>

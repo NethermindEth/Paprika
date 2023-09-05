@@ -128,6 +128,7 @@ public static class Program
             }
 
             var counter = 0;
+            object result;
 
             // ReSharper disable once MethodSupportsCancellation
 #pragma warning disable CS4014
@@ -153,7 +154,7 @@ public static class Program
 
             await using (var blockchain = new Blockchain(db, preCommit, config.FlushEvery, 1000, reporter.Observe))
             {
-                counter = Writer(config, blockchain, bigStorageAccount, random, layout[writing]);
+                (counter, result) = Writer(config, blockchain, bigStorageAccount, random, layout[writing]);
             }
 
             // waiting for finalization
@@ -216,7 +217,7 @@ public static class Program
             }
 
             // the final report
-            ReportReading(counter);
+            ReportReading(counter, result);
 
             // statistics
             layout[info].Update(new Panel("Gathering statistics...").Header("Paprika tree statistics").Expand());
@@ -267,12 +268,17 @@ public static class Program
             spectre.Cancel();
             await reportingTask;
 
-            void ReportReading(int i)
+            void ReportReading(int i, object? result = null)
             {
                 var secondsPerRead = TimeSpan.FromTicks(readingStopWatch.ElapsedTicks / logReadEvery).TotalSeconds;
                 var readsPerSeconds = 1 / secondsPerRead;
 
-                var txt = $"Reading at {i,9} out of {counter} accounts. Current speed: {readsPerSeconds:F1} reads/s";
+                var txt = $"Reading at {i,9} out of {counter} accounts.\nCurrent speed: {readsPerSeconds:F1} reads/s";
+
+                if (result != null)
+                {
+                    txt += $"\nRootHash: {result}";
+                }
 
                 layout[reading].Update(new Panel(txt).Header(reading).Expand());
 
@@ -326,7 +332,7 @@ public static class Program
         new(95, "red"),
     };
 
-    private static int Writer(Case config, Blockchain blockchain, Keccak bigStorageAccount, Random random,
+    private static (int counter, object result) Writer(Case config, Blockchain blockchain, Keccak bigStorageAccount, Random random,
         Layout reporting)
     {
         var counter = 0;
@@ -338,6 +344,8 @@ public static class Program
         var parentBlockHash = Keccak.Zero;
 
         var toFinalize = new List<Keccak>();
+
+        object result = null;
 
         for (uint block = 1; block < config.BlockCount; block++)
         {
@@ -377,7 +385,7 @@ public static class Program
                 counter++;
             }
 
-            worldState.Commit();
+            result = worldState.Commit();
 
             // finalize
             if (toFinalize.Count >= FinalizeEvery)
@@ -410,7 +418,7 @@ public static class Program
                 .Expand());
 
 
-        return counter;
+        return (counter, result);
     }
 
     private static Account GetAccountValue(int counter)

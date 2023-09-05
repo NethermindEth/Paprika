@@ -407,14 +407,16 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// Commits the block to the block chain.
         /// </summary>
-        public void Commit()
+        public object Commit()
         {
             // run pre-commit
-            _blockchain._preCommit?.BeforeCommit(this);
+            var result = _blockchain._preCommit?.BeforeCommit(this);
 
             AcquireLease();
             _blockchain.Add(this);
             _committed = true;
+
+            return result ?? "null";
         }
 
         private BufferPool Pool => _blockchain._pool;

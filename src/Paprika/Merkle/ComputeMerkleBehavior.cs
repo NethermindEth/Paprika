@@ -48,7 +48,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         _memoizeKeccakEvery = memoizeKeccakEvery;
     }
 
-    public void BeforeCommit(ICommit commit)
+    public object BeforeCommit(ICommit commit)
     {
         // 1. Visit all Storage operations (SSTORE). For each key:
         //  a. remember Account that Storage belongs to
@@ -88,8 +88,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
             Debug.Assert(rootKeccak.DataType == KeccakOrRlp.Type.Keccak);
 
-            RootHash = new Keccak(rootKeccak.Span);
+            return new Keccak(rootKeccak.Span).ToString();
         }
+
+        return "not full merkle";
     }
 
     private void CalculateStorageRoots(ICommit commit, StorageHandler storage)
@@ -195,7 +197,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
     private KeccakOrRlp EncodeBranch(Key key, ICommit commit, scoped in Node.Branch branch, TrieType trieType)
     {
         // run: for the state trie, only for the root and with all children set
-        var runInParallel = trieType == TrieType.State && key.Path.IsEmpty && branch.Children.AllSet;
+        var runInParallel = false;//trieType == TrieType.State && key.Path.IsEmpty && branch.Children.AllSet;
 
         var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
 
@@ -235,14 +237,14 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
             var childCommits = Enumerable.Range(0, NibbleSet.NibbleCount).Select(i => commit.GetChild()).ToArray();
 
             // parallel calculation
-            //for (int nibble = 0; nibble < NibbleSet.NibbleCount; nibble++)
-            Parallel.For((long)0, NibbleSet.NibbleCount, nibble =>
+            for (int nibble = 0; nibble < NibbleSet.NibbleCount; nibble++)
+            //Parallel.For((long)0, NibbleSet.NibbleCount, nibble =>
             {
                 NibblePath.ReadFrom(pathData, out var path);
                 var childPath = path.AppendNibble((byte)nibble, stackalloc byte[path.MaxByteLength + 1]);
                 results[nibble] = Compute(Key.Merkle(childPath), childCommits[nibble], trieType).Span.ToArray();
-            //}
-            });
+            }
+            //});
 
             // commit all the children
             foreach (var child in childCommits)
