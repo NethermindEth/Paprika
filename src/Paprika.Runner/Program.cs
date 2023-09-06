@@ -127,8 +127,7 @@ public static class Program
                 Console.WriteLine("- each account amends 1 slot in Big Storage account");
             }
 
-            var counter = 0;
-            object result;
+            int counter;
 
             // ReSharper disable once MethodSupportsCancellation
 #pragma warning disable CS4014
@@ -394,7 +393,7 @@ public static class Program
             if (block > 0 & block % config.LogEvery == 0)
             {
                 report.AppendLine(
-                    $@"At block {block}. This batch of {config.LogEvery} blocks took {writing.Elapsed:h\:mm\:ss\.FF}. RootHash: {result}");
+                    $@"At block {block, 4}. This batch of {config.LogEvery} blocks took {writing.Elapsed:h\:mm\:ss\.FF}. RootHash: {result}");
 
                 reporting.Update(new Panel(report.ToString()).Header("Writing").Expand());
                 writing.Restart();
