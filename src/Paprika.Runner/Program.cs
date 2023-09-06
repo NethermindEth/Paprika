@@ -24,7 +24,7 @@ public record Case(uint BlockCount, int AccountsPerBlock, ulong DbFileSize, bool
     bool Fsync,
     bool UseBigStorageAccount)
 {
-    public static uint NumberOfLogs => 10u;
+    public static uint NumberOfLogs => 20u;
     public uint LogEvery => BlockCount / NumberOfLogs;
 }
 
@@ -394,7 +394,7 @@ public static class Program
             if (block > 0 & block % config.LogEvery == 0)
             {
                 report.AppendLine(
-                    $@"At block {block}. This batch of {config.LogEvery} blocks took {writing.Elapsed:g}. RootHash: {result}");
+                    $@"At block {block}. This batch of {config.LogEvery} blocks took {writing.Elapsed:h\:mm\:ss\.FF}. RootHash: {result}");
 
                 reporting.Update(new Panel(report.ToString()).Header("Writing").Expand());
                 writing.Restart();
@@ -407,7 +407,7 @@ public static class Program
         placeholder.Commit();
         blockchain.Finalize(lastBlock);
 
-        report.AppendLine($@"At block {config.BlockCount - 1}. This batch of {config.LogEvery} blocks took {writing.Elapsed:g}. RootHash: {result}");
+        report.AppendLine($@"At block {config.BlockCount - 1}. This batch of {config.LogEvery} blocks took {writing.Elapsed:h\:mm\:ss\.FF}. RootHash: {result}");
 
         reporting.Update(new Panel(report.ToString()).Header("Writing").Expand());
 
