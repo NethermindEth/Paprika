@@ -18,7 +18,7 @@ public class DataPageTests : BasePageTests
 
     private static Keccak GetKey(int i)
     {
-        var keccak = Keccak.EmptyTreeHash;
+        var keccak = Keccak.Zero;
         BinaryPrimitives.WriteInt32LittleEndian(keccak.BytesAsSpan, i);
         return keccak;
     }
@@ -201,5 +201,49 @@ public class DataPageTests : BasePageTests
             var path = NibblePath.FromKey(key);
             dataPage.ShouldHaveAccount(key, GetValue(i), batch);
         }
+    }
+
+    [Test]
+    public void Page_overflows_with_merkle()
+    {
+        var page = AllocPage();
+        page.Clear();
+
+        var batch = NewBatch(BatchId);
+        var dataPage = new DataPage(page);
+
+        const int seed = 13;
+        var rand = new Random(seed);
+
+        const int count = 10_000;
+        for (int i = 0; i < count; i++)
+        {
+            var account = NibblePath.FromKey(rand.NextKeccak());
+
+            var accountKey = Key.Raw(account, DataType.Account, NibblePath.Empty);
+            var merkleKey = Key.Raw(account, DataType.Merkle, NibblePath.Empty);
+
+            dataPage = dataPage.Set(new SetContext(accountKey, GetAccountValue(i), batch)).Cast<DataPage>();
+            dataPage = dataPage.Set(new SetContext(merkleKey, GetMerkleValue(i), batch)).Cast<DataPage>();
+        }
+
+        rand = new Random(seed);
+
+        for (int i = 0; i < count; i++)
+        {
+            var account = NibblePath.FromKey(rand.NextKeccak());
+
+            var accountKey = Key.Raw(account, DataType.Account, NibblePath.Empty);
+            var merkleKey = Key.Raw(account, DataType.Merkle, NibblePath.Empty);
+
+            dataPage.TryGet(accountKey, batch, out var actualAccountValue).Should().BeTrue();
+            actualAccountValue.SequenceEqual(GetAccountValue(i)).Should().BeTrue();
+
+            dataPage.TryGet(merkleKey, batch, out var actualMerkleValue).Should().BeTrue();
+            actualMerkleValue.SequenceEqual(GetMerkleValue(i)).Should().BeTrue();
+        }
+
+        static byte[] GetAccountValue(int i) => BitConverter.GetBytes(i * 2 + 1);
+        static byte[] GetMerkleValue(int i) => BitConverter.GetBytes(i * 2);
     }
 }

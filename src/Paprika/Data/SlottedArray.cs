@@ -430,10 +430,16 @@ public readonly ref struct SlottedArray
                     {
                         if (key.StoragePath.IsEmpty)
                         {
-                            // no additional key, just assert encoded
-                            data = actual.Slice(encodedKey.Length + NibblePath.EmptyEncodedLength);
-                            slotIndex = i;
-                            return true;
+                            // the searched storage path is empty, but need to ensure that it starts right
+                            // the empty path is encoded as "[0]", compare manually
+                            if (actual[encodedKey.Length] == 0)
+                            {
+                                data = actual.Slice(encodedKey.Length + NibblePath.EmptyEncodedLength);
+                                slotIndex = i;
+                                return true;
+                            }
+
+                            continue;
                         }
 
                         // there's the additional key, assert it

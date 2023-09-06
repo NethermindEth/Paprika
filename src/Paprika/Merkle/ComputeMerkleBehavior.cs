@@ -138,7 +138,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
     public Keccak RootHash { get; private set; }
 
-    [SkipLocalsInit]
+
     private KeccakOrRlp Compute(in Key key, ICommit commit, TrieType trieType)
     {
         using var owner = commit.Get(key);
