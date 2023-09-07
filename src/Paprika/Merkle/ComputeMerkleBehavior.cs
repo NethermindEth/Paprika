@@ -88,7 +88,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
             Debug.Assert(rootKeccak.DataType == KeccakOrRlp.Type.Keccak);
 
-            return new Keccak(rootKeccak.Span).ToString();
+            var value = new Keccak(rootKeccak.Span);
+            RootHash = value;
+
+            return value.ToString();
         }
 
         return "not full merkle";

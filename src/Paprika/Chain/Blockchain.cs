@@ -134,16 +134,6 @@ public class Blockchain : IAsyncDisposable
                         }
 
                         blocks = removedBlocks.ToArray();
-
-                        // destroy dependencies on previous by setting up the next
-                        if (_blocksByNumber.TryGetValue(flushedTo + 1, out var nextBlocks))
-                        {
-                            foreach (var next in nextBlocks)
-                            {
-                                var (b, ancestors) = BuildBlockDataDependencies(next.ParentHash, next.BlockNumber);
-                                next.ReplaceData(b, ancestors);
-                            }
-                        }
                     }
 
                     foreach (var removedBlock in blocks)
@@ -358,9 +348,8 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private readonly HashSet<int> _bloom;
 
-        private ReadOnlyBatchCountingRefs _batch;
+        private readonly ReadOnlyBatchCountingRefs _batch;
         private Block[] _ancestors;
-        private readonly ReaderWriterLockSlim _lock;
 
         private readonly Blockchain _blockchain;
 
@@ -386,7 +375,6 @@ public class Blockchain : IAsyncDisposable
             Blockchain blockchain)
         {
             _batch = new ReadOnlyBatchCountingRefs(batch);
-            _lock = new ReaderWriterLockSlim();
 
             _ancestors = ancestors;
 
@@ -411,6 +399,18 @@ public class Blockchain : IAsyncDisposable
         {
             // run pre-commit
             var result = _blockchain._preCommit?.BeforeCommit(this);
+
+            // After this step, this block requires no batch or ancestors.
+            // It just provides data on its own as it was committed.
+            // Clean up dependencies here: batch and ancestors.
+            _batch.Dispose();
+
+            foreach (var ancestor in _ancestors)
+            {
+                ancestor.Dispose();
+            }
+
+            _ancestors = Array.Empty<Block>();
 
             AcquireLease();
             _blockchain.Add(this);
@@ -541,22 +541,16 @@ public class Blockchain : IAsyncDisposable
 
         private ReadOnlySpanOwner<byte> Get(scoped in Key key)
         {
+            Debug.Assert(_committed == false,
+                "The block is committed and it cleaned up some of its dependencies. It cannot provide data for Get method");
+
             var hash = GetHash(key);
             var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
             var result = TryGet(key, keyWritten, hash, out var succeeded);
-            if (succeeded)
-                return result;
 
-            // slow path
-            while (true)
-            {
-                result = TryGet(key, keyWritten, hash, out succeeded);
-                if (succeeded)
-                    return result;
-
-                Thread.Yield();
-            }
+            Debug.Assert(succeeded);
+            return result;
         }
 
         /// <summary>
@@ -570,69 +564,32 @@ public class Blockchain : IAsyncDisposable
             if (succeeded)
                 return owner;
 
-            _lock.EnterReadLock();
+            var expected = BlockNumber - 1;
 
-            try
+            // walk all the blocks locally
+            foreach (var ancestor in _ancestors)
             {
-                var expected = BlockNumber - 1;
+                Debug.Assert(ancestor.BlockNumber == expected);
+                expected--;
 
-                // walk all the blocks locally
-                foreach (var ancestor in _ancestors)
-                {
-                    Debug.Assert(ancestor.BlockNumber == expected);
-                    expected--;
-
-                    owner = ancestor.TryGetLocal(key, keyWritten, bloom, out succeeded);
-                    if (succeeded)
-                        return owner;
-                }
-
-                Debug.Assert(_batch.BatchId == expected);
-
-                if (_batch.TryGet(key, out var span))
-                {
-                    // return leased batch
-                    succeeded = true;
-                    _batch.AcquireLease();
-                    return new ReadOnlySpanOwner<byte>(span, _batch);
-                }
+                owner = ancestor.TryGetLocal(key, keyWritten, bloom, out succeeded);
+                if (succeeded)
+                    return owner;
             }
-            finally
+
+            Debug.Assert(_batch.BatchId == expected);
+
+            if (_batch.TryGet(key, out var span))
             {
-                _lock.ExitReadLock();
+                // return leased batch
+                succeeded = true;
+                _batch.AcquireLease();
+                return new ReadOnlySpanOwner<byte>(span, _batch);
             }
 
             // report as succeeded operation. The value is not there but it was walked through.
             succeeded = true;
             return default;
-        }
-
-        public void ReplaceData(IReadOnlyBatch batch, Block[] ancestors)
-        {
-            ReadOnlyBatchCountingRefs prevBatch;
-            Block[] prevAncestors;
-
-            _lock.EnterWriteLock();
-            try
-            {
-                // swap previous
-                prevBatch = _batch;
-                prevAncestors = _ancestors;
-
-                _batch = new ReadOnlyBatchCountingRefs(batch);
-                _ancestors = ancestors;
-            }
-            finally
-            {
-                _lock.ExitWriteLock();
-            }
-
-            // release previous
-            prevBatch.Dispose();
-            foreach (var ancestor in prevAncestors)
-            {
-                ancestor.Dispose();
-            }
         }
 
         /// <summary>

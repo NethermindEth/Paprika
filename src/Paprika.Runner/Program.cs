@@ -393,7 +393,7 @@ public static class Program
             if (block > 0 & block % config.LogEvery == 0)
             {
                 report.AppendLine(
-                    $@"At block {block, 4}. This batch of {config.LogEvery} blocks took {writing.Elapsed:h\:mm\:ss\.FF}. RootHash: {result}");
+                    $@"At block {block,4}. This batch of {config.LogEvery} blocks took {writing.Elapsed:h\:mm\:ss\.FF}. RootHash: {result}");
 
                 reporting.Update(new Panel(report.ToString()).Header("Writing").Expand());
                 writing.Restart();

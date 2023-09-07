@@ -60,7 +60,6 @@ public class BlockchainTests
 
         // start the third block
         using var block3A = blockchain.StartNew(Block2A, Block3A, 3);
-        block3A.Commit();
 
         block3A.GetAccount(Key0).Should().Be(account1A);
     }
