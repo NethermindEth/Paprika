@@ -612,10 +612,19 @@ public class Blockchain : IAsyncDisposable
             {
                 DataType.Account => _state,
                 DataType.StorageCell => _storage,
-                _ => _preCommit
+                _ => null
             };
 
-            if (dict.TryGet(keyWritten, bloom, out var span))
+            // first always try pre-commit as it may overwrite data
+            if (_preCommit.TryGet(keyWritten, bloom, out var span))
+            {
+                // return with owned lease
+                succeeded = true;
+                AcquireLease();
+                return new ReadOnlySpanOwner<byte>(span, this);
+            }
+
+            if (dict != null && dict.TryGet(keyWritten, bloom, out span))
             {
                 // return with owned lease
                 succeeded = true;
