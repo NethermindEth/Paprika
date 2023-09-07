@@ -246,4 +246,54 @@ public class DataPageTests : BasePageTests
         static byte[] GetAccountValue(int i) => BitConverter.GetBytes(i * 2 + 1);
         static byte[] GetMerkleValue(int i) => BitConverter.GetBytes(i * 2);
     }
+
+    [TestCase(1, 1000, TestName = "Value at the beginning")]
+    [TestCase(999, 1000, TestName = "Value at the end")]
+    public void Delete(int deleteAt, int count)
+    {
+        var page = AllocPage();
+        page.Clear();
+
+        var batch = NewBatch(BatchId);
+        var dataPage = new DataPage(page);
+
+        var account = NibblePath.FromKey(GetKey(0));
+
+        const int seed = 13;
+        var random = new Random(seed);
+
+        for (var i = 0; i < count; i++)
+        {
+            var storagePath = NibblePath.FromKey(random.NextKeccak());
+            var merkleKey = Key.Raw(account, DataType.Merkle, storagePath);
+            var value = GetValue(i);
+
+            dataPage = dataPage.Set(new SetContext(merkleKey, value, batch)).Cast<DataPage>();
+        }
+
+        // delete
+        random = new Random(seed);
+        for (var i = 0; i < deleteAt; i++)
+        {
+            // skip till set
+            random.NextKeccak();
+        }
+        {
+            var storagePath = NibblePath.FromKey(random.NextKeccak());
+            var merkleKey = Key.Raw(account, DataType.Merkle, storagePath);
+            dataPage = dataPage.Set(new SetContext(merkleKey, ReadOnlySpan<byte>.Empty, batch)).Cast<DataPage>();
+        }
+
+        // assert
+        random = new Random(seed);
+
+        for (var i = 0; i < count; i++)
+        {
+            var storagePath = NibblePath.FromKey(random.NextKeccak());
+            var merkleKey = Key.Raw(account, DataType.Merkle, storagePath);
+            dataPage.TryGet(merkleKey, batch, out var actual).Should().BeTrue();
+            var value = i == deleteAt ? ReadOnlySpan<byte>.Empty : GetValue(i);
+            actual.SequenceEqual(value).Should().BeTrue($"Does not match for i: {i} and delete at: {deleteAt}");
+        }
+    }
 }
