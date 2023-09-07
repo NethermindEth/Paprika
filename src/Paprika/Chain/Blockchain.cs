@@ -117,6 +117,9 @@ public class Blockchain : IAsyncDisposable
 
                     block.Apply(batch);
 
+                    // only for debugging if needed
+                    //block.Assert(batch);
+
                     application.Stop();
                     _flusherBlockApplicationInMs.Record((int)application.ElapsedMilliseconds);
 
@@ -661,6 +664,45 @@ public class Blockchain : IAsyncDisposable
             {
                 Key.ReadFrom(kvp.Key, out var key);
                 batch.SetRaw(key, kvp.Value);
+            }
+        }
+
+        public void Assert(IReadOnlyBatch batch)
+        {
+            using var squashed = new PooledSpanDictionary(Pool);
+
+            Squash(_state, squashed);
+            Squash(_storage, squashed);
+            Squash(_preCommit, squashed);
+
+            foreach (var kvp in squashed)
+            {
+                Key.ReadFrom(kvp.Key, out var key);
+
+                if (!batch.TryGet(key, out var value))
+                {
+                    throw new KeyNotFoundException($"Key {key.ToString()} not found.");
+                }
+
+                if (!value.SequenceEqual(kvp.Value))
+                {
+                    var expected = kvp.Value.ToHexString(false);
+                    var actual = value.ToHexString(false);
+
+                    throw new Exception($"Values are different for {key.ToString()}. " +
+                                        $"Expected is {expected} while found is {actual}.");
+                }
+            }
+        }
+
+        private static void Squash(PooledSpanDictionary source, PooledSpanDictionary destination)
+        {
+            Span<byte> span = stackalloc byte[128];
+
+            foreach (var kvp in source)
+            {
+                Key.ReadFrom(kvp.Key, out var key);
+                destination.Set(key.WriteTo(span), GetHash(key), kvp.Value);
             }
         }
 
