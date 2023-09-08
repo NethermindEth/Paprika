@@ -18,7 +18,7 @@ public class DataPageTests : BasePageTests
 
     private static Keccak GetKey(int i)
     {
-        var keccak = Keccak.EmptyTreeHash;
+        var keccak = Keccak.Zero;
         BinaryPrimitives.WriteInt32LittleEndian(keccak.BytesAsSpan, i);
         return keccak;
     }
@@ -200,6 +200,100 @@ public class DataPageTests : BasePageTests
             var key = GetKey(i);
             var path = NibblePath.FromKey(key);
             dataPage.ShouldHaveAccount(key, GetValue(i), batch);
+        }
+    }
+
+    [Test]
+    public void Page_overflows_with_merkle()
+    {
+        var page = AllocPage();
+        page.Clear();
+
+        var batch = NewBatch(BatchId);
+        var dataPage = new DataPage(page);
+
+        const int seed = 13;
+        var rand = new Random(seed);
+
+        const int count = 10_000;
+        for (int i = 0; i < count; i++)
+        {
+            var account = NibblePath.FromKey(rand.NextKeccak());
+
+            var accountKey = Key.Raw(account, DataType.Account, NibblePath.Empty);
+            var merkleKey = Key.Raw(account, DataType.Merkle, NibblePath.Empty);
+
+            dataPage = dataPage.Set(new SetContext(accountKey, GetAccountValue(i), batch)).Cast<DataPage>();
+            dataPage = dataPage.Set(new SetContext(merkleKey, GetMerkleValue(i), batch)).Cast<DataPage>();
+        }
+
+        rand = new Random(seed);
+
+        for (int i = 0; i < count; i++)
+        {
+            var account = NibblePath.FromKey(rand.NextKeccak());
+
+            var accountKey = Key.Raw(account, DataType.Account, NibblePath.Empty);
+            var merkleKey = Key.Raw(account, DataType.Merkle, NibblePath.Empty);
+
+            dataPage.TryGet(accountKey, batch, out var actualAccountValue).Should().BeTrue();
+            actualAccountValue.SequenceEqual(GetAccountValue(i)).Should().BeTrue();
+
+            dataPage.TryGet(merkleKey, batch, out var actualMerkleValue).Should().BeTrue();
+            actualMerkleValue.SequenceEqual(GetMerkleValue(i)).Should().BeTrue();
+        }
+
+        static byte[] GetAccountValue(int i) => BitConverter.GetBytes(i * 2 + 1);
+        static byte[] GetMerkleValue(int i) => BitConverter.GetBytes(i * 2);
+    }
+
+    [TestCase(1, 1000, TestName = "Value at the beginning")]
+    [TestCase(999, 1000, TestName = "Value at the end")]
+    public void Delete(int deleteAt, int count)
+    {
+        var page = AllocPage();
+        page.Clear();
+
+        var batch = NewBatch(BatchId);
+        var dataPage = new DataPage(page);
+
+        var account = NibblePath.FromKey(GetKey(0));
+
+        const int seed = 13;
+        var random = new Random(seed);
+
+        for (var i = 0; i < count; i++)
+        {
+            var storagePath = NibblePath.FromKey(random.NextKeccak());
+            var merkleKey = Key.Raw(account, DataType.Merkle, storagePath);
+            var value = GetValue(i);
+
+            dataPage = dataPage.Set(new SetContext(merkleKey, value, batch)).Cast<DataPage>();
+        }
+
+        // delete
+        random = new Random(seed);
+        for (var i = 0; i < deleteAt; i++)
+        {
+            // skip till set
+            random.NextKeccak();
+        }
+        {
+            var storagePath = NibblePath.FromKey(random.NextKeccak());
+            var merkleKey = Key.Raw(account, DataType.Merkle, storagePath);
+            dataPage = dataPage.Set(new SetContext(merkleKey, ReadOnlySpan<byte>.Empty, batch)).Cast<DataPage>();
+        }
+
+        // assert
+        random = new Random(seed);
+
+        for (var i = 0; i < count; i++)
+        {
+            var storagePath = NibblePath.FromKey(random.NextKeccak());
+            var merkleKey = Key.Raw(account, DataType.Merkle, storagePath);
+            dataPage.TryGet(merkleKey, batch, out var actual).Should().BeTrue();
+            var value = i == deleteAt ? ReadOnlySpan<byte>.Empty : GetValue(i);
+            actual.SequenceEqual(value).Should().BeTrue($"Does not match for i: {i} and delete at: {deleteAt}");
         }
     }
 }

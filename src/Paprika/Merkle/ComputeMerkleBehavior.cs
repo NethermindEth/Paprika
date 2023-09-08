@@ -1,3 +1,5 @@
+#define USE_PARALLEL
+
 using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -48,7 +50,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         _memoizeKeccakEvery = memoizeKeccakEvery;
     }
 
-    public void BeforeCommit(ICommit commit)
+    public object BeforeCommit(ICommit commit)
     {
         // 1. Visit all Storage operations (SSTORE). For each key:
         //  a. remember Account that Storage belongs to
@@ -67,13 +69,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         //  b.  calculate the root hash of the State
 
         // 1. visit storage
-        var storage = new StorageHandler(commit);
-        commit.Visit(storage.OnKey, TrieType.Storage);
+        var storage = VisitStorage(commit);
 
         // 2. visit state
-        var accountsThatRequireManualTouch = new HashSet<Keccak>(storage.AccountsWithModifiedStorage);
-        var state = new StateHandler(commit, accountsThatRequireManualTouch);
-        commit.Visit(state.OnKey, TrieType.State);
+        var accountsThatRequireManualTouch = VisitState(commit, storage);
 
         // 3. visit keys that require manual touch as they were not modified in the state step, mark them dirty
         foreach (var accountKey in accountsThatRequireManualTouch)
@@ -84,42 +83,67 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         // 4. recalculate root hash
         if (_fullMerkle)
         {
-            Span<byte> accountSpan = stackalloc byte[Account.MaxByteCount];
-
-            var prefixed = new PrefixingCommit(commit);
-
-            // a. start with the accounts that had their storage altered
-            foreach (var accountAddress in storage.AccountsWithModifiedStorage)
-            {
-                prefixed.SetPrefix(accountAddress);
-
-                // compute new storage root hash
-                var keccakOrRlp = Compute(Key.Merkle(NibblePath.Empty), prefixed, TrieType.Storage);
-
-                // read the existing account
-                var key = Key.Account(accountAddress);
-                using var accountOwner = commit.Get(key);
-                Account.ReadFrom(accountOwner.Span, out var account);
-
-                // update it
-                account = account.WithChangedStorageRoot(new Keccak(keccakOrRlp.Span));
-
-                // set it
-                commit.Set(key, account.WriteTo(accountSpan));
-            }
+            CalculateStorageRoots(commit, storage);
 
             var root = Key.Merkle(NibblePath.Empty);
             var rootKeccak = Compute(root, commit, TrieType.State);
 
             Debug.Assert(rootKeccak.DataType == KeccakOrRlp.Type.Keccak);
 
-            RootHash = new Keccak(rootKeccak.Span);
+            var value = new Keccak(rootKeccak.Span);
+            RootHash = value;
+
+            return value.ToString();
         }
+
+        return "not full merkle";
+    }
+
+    private void CalculateStorageRoots(ICommit commit, StorageHandler storage)
+    {
+        Span<byte> accountSpan = stackalloc byte[Account.MaxByteCount];
+
+        var prefixed = new PrefixingCommit(commit);
+
+        // a. start with the accounts that had their storage altered
+        foreach (var accountAddress in storage.AccountsWithModifiedStorage)
+        {
+            prefixed.SetPrefix(accountAddress);
+
+            // compute new storage root hash
+            var keccakOrRlp = Compute(Key.Merkle(NibblePath.Empty), prefixed, TrieType.Storage);
+
+            // read the existing account
+            var key = Key.Account(accountAddress);
+            using var accountOwner = commit.Get(key);
+            Account.ReadFrom(accountOwner.Span, out var account);
+
+            // update it
+            account = account.WithChangedStorageRoot(new Keccak(keccakOrRlp.Span));
+
+            // set it
+            commit.Set(key, account.WriteTo(accountSpan));
+        }
+    }
+
+    private static HashSet<Keccak> VisitState(ICommit commit, StorageHandler storage)
+    {
+        var accountsThatRequireManualTouch = new HashSet<Keccak>(storage.AccountsWithModifiedStorage);
+        var state = new StateHandler(commit, accountsThatRequireManualTouch);
+        commit.Visit(state.OnKey, TrieType.State);
+        return accountsThatRequireManualTouch;
+    }
+
+    private static StorageHandler VisitStorage(ICommit commit)
+    {
+        var storage = new StorageHandler(commit);
+        commit.Visit(storage.OnKey, TrieType.Storage);
+        return storage;
     }
 
     public Keccak RootHash { get; private set; }
 
-    [SkipLocalsInit]
+
     private KeccakOrRlp Compute(in Key key, ICommit commit, TrieType trieType)
     {
         using var owner = commit.Get(key);
@@ -177,6 +201,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 
     private KeccakOrRlp EncodeBranch(Key key, ICommit commit, scoped in Node.Branch branch, TrieType trieType)
     {
+        // run: for the state trie, only for the root and with all children set
+        var runStateRootInParallel = trieType == TrieType.State && key.Path.IsEmpty && branch.Children.AllSet;
+
         var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
 
         // leave for length preamble
@@ -186,22 +213,60 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
             Position = initialShift
         };
 
-        const int additionalBytesForNibbleAppending = 1;
-        Span<byte> childSpan = stackalloc byte[key.Path.MaxByteLength + additionalBytesForNibbleAppending];
-
-        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+        if (!runStateRootInParallel)
         {
-            if (branch.Children[i])
-            {
-                var childPath = key.Path.AppendNibble(i, childSpan);
-                var value = Compute(Key.Merkle(childPath), commit, trieType);
+            const int additionalBytesForNibbleAppending = 1;
+            Span<byte> childSpan = stackalloc byte[key.Path.MaxByteLength + additionalBytesForNibbleAppending];
 
-                // it's either Keccak or a span. Both are encoded the same ways
-                stream.Encode(value.Span);
-            }
-            else
+            for (byte i = 0; i < NibbleSet.NibbleCount; i++)
             {
-                stream.EncodeEmptyArray();
+                if (branch.Children[i])
+                {
+                    var childPath = key.Path.AppendNibble(i, childSpan);
+                    var value = Compute(Key.Merkle(childPath), commit, trieType);
+
+                    // it's either Keccak or a span. Both are encoded the same ways
+                    stream.Encode(value.Span);
+                }
+                else
+                {
+                    stream.EncodeEmptyArray();
+                }
+            }
+        }
+        else
+        {
+            // materialize path so that it can be closure captured
+            var results = new byte[NibbleSet.NibbleCount][];
+            var commits = new IChildCommit[NibbleSet.NibbleCount];
+
+            // parallel calculation
+#if USE_PARALLEL
+            Parallel.For((long)0, NibbleSet.NibbleCount, nibble =>
+#else
+            var synchronized = commit;
+            for (var nibble = 0; nibble < NibbleSet.NibbleCount; nibble++)
+#endif
+            {
+                var childPath = NibblePath.FromKey(stackalloc byte[1] { (byte)(nibble << NibblePath.NibbleShift) }, 0).SliceTo(1);
+                var child = commits[nibble] = commit.GetChild();
+                results[nibble] = Compute(Key.Merkle(childPath), child, trieType).Span.ToArray();
+#if !USE_PARALLEL
+            }
+#else
+            });
+
+            foreach (var childCommit in commits)
+            {
+                childCommit.Commit();
+                childCommit.Dispose();
+            }
+#endif
+            // write all results in the stream
+            for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+            {
+                // it's either Keccak or a span. Both are encoded the same ways
+                stream.Encode(results[i]);
             }
         }
 

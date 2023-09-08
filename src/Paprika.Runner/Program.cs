@@ -24,7 +24,7 @@ public record Case(uint BlockCount, int AccountsPerBlock, ulong DbFileSize, bool
     bool Fsync,
     bool UseBigStorageAccount)
 {
-    public uint NumberOfLogs => PersistentDb ? 100u : 10u;
+    public static uint NumberOfLogs => 20u;
     public uint LogEvery => BlockCount / NumberOfLogs;
 }
 
@@ -127,7 +127,7 @@ public static class Program
                 Console.WriteLine("- each account amends 1 slot in Big Storage account");
             }
 
-            var counter = 0;
+            int counter;
 
             // ReSharper disable once MethodSupportsCancellation
 #pragma warning disable CS4014
@@ -148,7 +148,7 @@ public static class Program
                     ctx.Refresh();
                 }));
 
-            var preCommit = new ComputeMerkleBehavior(true, 2, 2);
+            var preCommit = new ComputeMerkleBehavior(true, 2, 1);
             //IPreCommitBehavior preCommit = null;
 
             await using (var blockchain = new Blockchain(db, preCommit, config.FlushEvery, 1000, reporter.Observe))
@@ -162,7 +162,7 @@ public static class Program
             var readingStopWatch = Stopwatch.StartNew();
             random = BuildRandom();
 
-            var logReadEvery = counter / config.NumberOfLogs;
+            var logReadEvery = counter / Case.NumberOfLogs;
             for (var i = 0; i < counter; i++)
             {
                 var key = random.NextKeccak();
@@ -272,7 +272,7 @@ public static class Program
                 var secondsPerRead = TimeSpan.FromTicks(readingStopWatch.ElapsedTicks / logReadEvery).TotalSeconds;
                 var readsPerSeconds = 1 / secondsPerRead;
 
-                var txt = $"Reading at {i,9} out of {counter} accounts. Current speed: {readsPerSeconds:F1} reads/s";
+                var txt = $"Reading at {i,9} out of {counter} accounts.\nCurrent speed: {readsPerSeconds:F1} reads/s";
 
                 layout[reading].Update(new Panel(txt).Header(reading).Expand());
 
@@ -326,9 +326,10 @@ public static class Program
         new(95, "red"),
     };
 
-    private static int Writer(Case config, Blockchain blockchain, Keccak bigStorageAccount, Random random,
-        Layout reporting)
+    private static int Writer(Case config, Blockchain blockchain, Keccak bigStorageAccount, Random random, Layout reporting)
     {
+        var report = new StringBuilder();
+        string result = "";
         var counter = 0;
 
         bool bigStorageAccountCreated = false;
@@ -377,7 +378,8 @@ public static class Program
                 counter++;
             }
 
-            worldState.Commit();
+            var obj = worldState.Commit();
+            result = $"{obj.ToString()?[..8]}...";
 
             // finalize
             if (toFinalize.Count >= FinalizeEvery)
@@ -391,9 +393,10 @@ public static class Program
 
             if (block > 0 & block % config.LogEvery == 0)
             {
-                reporting.Update(
-                    new Panel($@"At block {block}. Writing last batch took {writing.Elapsed:g}").Header("Writing")
-                        .Expand());
+                report.AppendLine(
+                    $@"At block {block,4}. This batch of {config.LogEvery} blocks took {writing.Elapsed:h\:mm\:ss\.FF}. RootHash: {result}");
+
+                reporting.Update(new Panel(report.ToString()).Header("Writing").Expand());
                 writing.Restart();
             }
         }
@@ -404,11 +407,9 @@ public static class Program
         placeholder.Commit();
         blockchain.Finalize(lastBlock);
 
-        reporting.Update(
-            new Panel($@"At block {config.BlockCount - 1}. Writing last batch took {writing.Elapsed:g}")
-                .Header("Writing")
-                .Expand());
+        report.AppendLine($@"At block {config.BlockCount - 1}. This batch of {config.LogEvery} blocks took {writing.Elapsed:h\:mm\:ss\.FF}. RootHash: {result}");
 
+        reporting.Update(new Panel(report.ToString()).Header("Writing").Expand());
 
         return counter;
     }

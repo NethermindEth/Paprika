@@ -117,6 +117,9 @@ public class Blockchain : IAsyncDisposable
 
                     block.Apply(batch);
 
+                    // only for debugging if needed
+                    //block.Assert(batch);
+
                     application.Stop();
                     _flusherBlockApplicationInMs.Record((int)application.ElapsedMilliseconds);
 
@@ -134,16 +137,6 @@ public class Blockchain : IAsyncDisposable
                         }
 
                         blocks = removedBlocks.ToArray();
-
-                        // destroy dependencies on previous by setting up the next
-                        if (_blocksByNumber.TryGetValue(flushedTo + 1, out var nextBlocks))
-                        {
-                            foreach (var next in nextBlocks)
-                            {
-                                var (b, ancestors) = BuildBlockDataDependencies(next.ParentHash, next.BlockNumber);
-                                next.ReplaceData(b, ancestors);
-                            }
-                        }
                     }
 
                     foreach (var removedBlock in blocks)
@@ -358,9 +351,8 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private readonly HashSet<int> _bloom;
 
-        private ReadOnlyBatchCountingRefs _batch;
+        private readonly ReadOnlyBatchCountingRefs _batch;
         private Block[] _ancestors;
-        private readonly ReaderWriterLockSlim _lock;
 
         private readonly Blockchain _blockchain;
 
@@ -386,7 +378,6 @@ public class Blockchain : IAsyncDisposable
             Blockchain blockchain)
         {
             _batch = new ReadOnlyBatchCountingRefs(batch);
-            _lock = new ReaderWriterLockSlim();
 
             _ancestors = ancestors;
 
@@ -399,22 +390,40 @@ public class Blockchain : IAsyncDisposable
             // rent pages for the bloom
             _bloom = new HashSet<int>();
 
-            _state = new PooledSpanDictionary(Pool);
-            _storage = new PooledSpanDictionary(Pool);
-            _preCommit = new PooledSpanDictionary(Pool);
+            // as pre-commit can use parallelism, make the pooled dictionaries concurrent friendly:
+            // 1. make the dictionary preserve once written values, which means that it can repeatedly read and set without worrying of ordering operations
+            // 2. set dictionary so that it allows concurrent readers
+
+            _state = new PooledSpanDictionary(Pool, true, true);
+            _storage = new PooledSpanDictionary(Pool, true, true);
+            _preCommit = new PooledSpanDictionary(Pool, true, true);
         }
 
         /// <summary>
         /// Commits the block to the block chain.
         /// </summary>
-        public void Commit()
+        public object Commit()
         {
             // run pre-commit
-            _blockchain._preCommit?.BeforeCommit(this);
+            var result = _blockchain._preCommit?.BeforeCommit(this);
+
+            // After this step, this block requires no batch or ancestors.
+            // It just provides data on its own as it was committed.
+            // Clean up dependencies here: batch and ancestors.
+            _batch.Dispose();
+
+            foreach (var ancestor in _ancestors)
+            {
+                ancestor.Dispose();
+            }
+
+            _ancestors = Array.Empty<Block>();
 
             AcquireLease();
             _blockchain.Add(this);
             _committed = true;
+
+            return result ?? "null";
         }
 
         private BufferPool Pool => _blockchain._pool;
@@ -446,7 +455,7 @@ public class Blockchain : IAsyncDisposable
             return result;
         }
 
-        private static int GetBloom(in Key key) => key.GetHashCode();
+        private static int GetHash(in Key key) => key.GetHashCode();
 
         public void SetAccount(in Keccak address, in Account account)
         {
@@ -468,10 +477,10 @@ public class Blockchain : IAsyncDisposable
 
         private void SetImpl(in Key key, in ReadOnlySpan<byte> payload, PooledSpanDictionary dict)
         {
-            var bloom = GetBloom(key);
-            _bloom.Add(bloom);
+            var hash = GetHash(key);
+            _bloom.Add(hash);
 
-            dict.Set(key.WriteTo(stackalloc byte[key.MaxByteLength]), bloom, payload);
+            dict.Set(key.WriteTo(stackalloc byte[key.MaxByteLength]), hash, payload);
         }
 
         ReadOnlySpanOwner<byte> ICommit.Get(scoped in Key key) => Get(key);
@@ -489,24 +498,67 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
+        IChildCommit ICommit.GetChild() => new ChildCommit(new PooledSpanDictionary(Pool, true, false), this);
+
+
+        class ChildCommit : IChildCommit
+        {
+            private readonly PooledSpanDictionary _dict;
+            private readonly ICommit _parent;
+
+            public ChildCommit(PooledSpanDictionary dictionary, ICommit parent)
+            {
+                _dict = dictionary;
+                _parent = parent;
+            }
+
+            public void Dispose() => _dict.Dispose();
+
+            public ReadOnlySpanOwner<byte> Get(scoped in Key key)
+            {
+                var hash = GetHash(key);
+                var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+
+                if (_dict.TryGet(keyWritten, hash, out var result))
+                {
+                    return new ReadOnlySpanOwner<byte>(result, null);
+                }
+
+                return _parent.Get(key);
+            }
+
+            public void Set(in Key key, in ReadOnlySpan<byte> payload)
+            {
+                var hash = GetHash(key);
+                var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+
+                _dict.Set(keyWritten, hash, payload);
+            }
+
+            public void Commit()
+            {
+                foreach (var kvp in _dict)
+                {
+                    Key.ReadFrom(kvp.Key, out var key);
+                    _parent.Set(key, kvp.Value);
+                }
+            }
+
+            public override string ToString() => _dict.ToString();
+        }
+
         private ReadOnlySpanOwner<byte> Get(scoped in Key key)
         {
-            var bloom = GetBloom(key);
+            Debug.Assert(_committed == false,
+                "The block is committed and it cleaned up some of its dependencies. It cannot provide data for Get method");
+
+            var hash = GetHash(key);
             var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
-            var result = TryGet(key, keyWritten, bloom, out var succeeded);
-            if (succeeded)
-                return result;
+            var result = TryGet(key, keyWritten, hash, out var succeeded);
 
-            // slow path
-            while (true)
-            {
-                result = TryGet(key, keyWritten, bloom, out succeeded);
-                if (succeeded)
-                    return result;
-
-                Thread.Yield();
-            }
+            Debug.Assert(succeeded);
+            return result;
         }
 
         /// <summary>
@@ -520,62 +572,32 @@ public class Blockchain : IAsyncDisposable
             if (succeeded)
                 return owner;
 
-            _lock.EnterReadLock();
+            var expected = BlockNumber - 1;
 
-            try
+            // walk all the blocks locally
+            foreach (var ancestor in _ancestors)
             {
-                // walk all the blocks locally
-                foreach (var ancestor in _ancestors)
-                {
-                    owner = ancestor.TryGetLocal(key, keyWritten, bloom, out succeeded);
-                    if (succeeded)
-                        return owner;
-                }
+                Debug.Assert(ancestor.BlockNumber == expected);
+                expected--;
 
-                if (_batch.TryGet(key, out var span))
-                {
-                    // return leased batch
-                    succeeded = true;
-                    _batch.AcquireLease();
-                    return new ReadOnlySpanOwner<byte>(span, _batch);
-                }
+                owner = ancestor.TryGetLocal(key, keyWritten, bloom, out succeeded);
+                if (succeeded)
+                    return owner;
             }
-            finally
+
+            Debug.Assert(_batch.BatchId == expected);
+
+            if (_batch.TryGet(key, out var span))
             {
-                _lock.ExitReadLock();
+                // return leased batch
+                succeeded = true;
+                _batch.AcquireLease();
+                return new ReadOnlySpanOwner<byte>(span, _batch);
             }
 
             // report as succeeded operation. The value is not there but it was walked through.
             succeeded = true;
             return default;
-        }
-
-        public void ReplaceData(IReadOnlyBatch batch, Block[] ancestors)
-        {
-            ReadOnlyBatchCountingRefs prevBatch;
-            Block[] prevAncestors;
-
-            _lock.EnterWriteLock();
-            try
-            {
-                // swap previous
-                prevBatch = _batch;
-                prevAncestors = _ancestors;
-
-                _batch = new ReadOnlyBatchCountingRefs(batch);
-                _ancestors = ancestors;
-            }
-            finally
-            {
-                _lock.ExitWriteLock();
-            }
-
-            // release previous
-            prevBatch.Dispose();
-            foreach (var ancestor in prevAncestors)
-            {
-                ancestor.Dispose();
-            }
         }
 
         /// <summary>
@@ -595,10 +617,19 @@ public class Blockchain : IAsyncDisposable
             {
                 DataType.Account => _state,
                 DataType.StorageCell => _storage,
-                _ => _preCommit
+                _ => null
             };
 
-            if (dict.TryGet(keyWritten, bloom, out var span))
+            // first always try pre-commit as it may overwrite data
+            if (_preCommit.TryGet(keyWritten, bloom, out var span))
+            {
+                // return with owned lease
+                succeeded = true;
+                AcquireLease();
+                return new ReadOnlySpanOwner<byte>(span, this);
+            }
+
+            if (dict != null && dict.TryGet(keyWritten, bloom, out span))
             {
                 // return with owned lease
                 succeeded = true;
@@ -647,6 +678,45 @@ public class Blockchain : IAsyncDisposable
             {
                 Key.ReadFrom(kvp.Key, out var key);
                 batch.SetRaw(key, kvp.Value);
+            }
+        }
+
+        public void Assert(IReadOnlyBatch batch)
+        {
+            using var squashed = new PooledSpanDictionary(Pool);
+
+            Squash(_state, squashed);
+            Squash(_storage, squashed);
+            Squash(_preCommit, squashed);
+
+            foreach (var kvp in squashed)
+            {
+                Key.ReadFrom(kvp.Key, out var key);
+
+                if (!batch.TryGet(key, out var value))
+                {
+                    throw new KeyNotFoundException($"Key {key.ToString()} not found.");
+                }
+
+                if (!value.SequenceEqual(kvp.Value))
+                {
+                    var expected = kvp.Value.ToHexString(false);
+                    var actual = value.ToHexString(false);
+
+                    throw new Exception($"Values are different for {key.ToString()}. " +
+                                        $"Expected is {expected} while found is {actual}.");
+                }
+            }
+        }
+
+        private static void Squash(PooledSpanDictionary source, PooledSpanDictionary destination)
+        {
+            Span<byte> span = stackalloc byte[128];
+
+            foreach (var kvp in source)
+            {
+                Key.ReadFrom(kvp.Key, out var key);
+                destination.Set(key.WriteTo(span), GetHash(key), kvp.Value);
             }
         }
 

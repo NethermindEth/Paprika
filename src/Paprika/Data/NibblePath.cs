@@ -158,7 +158,11 @@ public readonly ref struct NibblePath
     /// <summary>
     /// Trims the end of the nibble path so that it gets to the specified length.
     /// </summary>
-    public NibblePath SliceTo(int length) => new(ref _span, _odd, (byte)length);
+    public NibblePath SliceTo(int length)
+    {
+        Debug.Assert(length <= Length, "Cannot slice the NibblePath beyond its Length");
+        return new NibblePath(ref _span, _odd, (byte)length);
+    }
 
     public byte this[int nibble] => GetAt(nibble);
 
