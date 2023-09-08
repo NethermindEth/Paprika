@@ -238,10 +238,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         {
             // materialize path so that it can be closure captured
             var results = new byte[NibbleSet.NibbleCount][];
+            var commits = new IChildCommit[NibbleSet.NibbleCount];
 
             // parallel calculation
 #if USE_PARALLEL
-            var synchronized = commit.AsSynchronized();
             Parallel.For((long)0, NibbleSet.NibbleCount, nibble =>
 #else
             var synchronized = commit;
@@ -249,11 +249,18 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
 #endif
             {
                 var childPath = NibblePath.FromKey(stackalloc byte[1] { (byte)(nibble << NibblePath.NibbleShift) }, 0).SliceTo(1);
-                results[nibble] = Compute(Key.Merkle(childPath), synchronized, trieType).Span.ToArray();
+                var child = commits[nibble] = commit.GetChild();
+                results[nibble] = Compute(Key.Merkle(childPath), child, trieType).Span.ToArray();
 #if !USE_PARALLEL
             }
 #else
             });
+
+            foreach (var childCommit in commits)
+            {
+                childCommit.Commit();
+                childCommit.Dispose();
+            }
 #endif
             // write all results in the stream
             for (byte i = 0; i < NibbleSet.NibbleCount; i++)

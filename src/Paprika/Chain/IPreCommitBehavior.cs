@@ -44,12 +44,22 @@ public interface ICommit
     /// </summary>
     void Visit(CommitAction action, TrieType type) => throw new Exception("No visitor available for this commit");
 
-    ICommit AsSynchronized() =>
-        throw new Exception($"No {nameof(AsSynchronized)} available for commit of type {GetType()}");
+    /// <summary>
+    /// Gets the child commit that is a thread-safe write-through commit.
+    /// </summary>
+    /// <returns>A child commit.</returns>
+    IChildCommit GetChild() => throw new Exception($"No {nameof(GetChild)} available for this commit");
+}
+
+public interface IChildCommit : ICommit, IDisposable
+{
+    /// <summary>
+    /// Commits to the parent
+    /// </summary>
+    void Commit();
 }
 
 /// <summary>
 /// A delegate to be called on the each key that that the commit contains.
 /// </summary>
 public delegate void CommitAction(in Key key, ReadOnlySpan<byte> value);
-

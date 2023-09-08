@@ -498,43 +498,53 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-        ICommit ICommit.AsSynchronized() => new SynchronizedCommit(this);
+        IChildCommit ICommit.GetChild() => new ChildCommit(new PooledSpanDictionary(Pool, true, false), this);
 
-        private class SynchronizedCommit : ICommit
+
+        class ChildCommit : IChildCommit
         {
-            private readonly ICommit _commit;
-            private readonly ReaderWriterLockSlim _lock = new();
+            private readonly PooledSpanDictionary _dict;
+            private readonly ICommit _parent;
 
-            public SynchronizedCommit(ICommit commit)
+            public ChildCommit(PooledSpanDictionary dictionary, ICommit parent)
             {
-                _commit = commit;
+                _dict = dictionary;
+                _parent = parent;
             }
+
+            public void Dispose() => _dict.Dispose();
 
             public ReadOnlySpanOwner<byte> Get(scoped in Key key)
             {
-                _lock.EnterReadLock();
-                try
+                var hash = GetHash(key);
+                var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+
+                if (_dict.TryGet(keyWritten, hash, out var result))
                 {
-                    return _commit.Get(key);
+                    return new ReadOnlySpanOwner<byte>(result, null);
                 }
-                finally
-                {
-                    _lock.ExitReadLock();
-                }
+
+                return _parent.Get(key);
             }
 
             public void Set(in Key key, in ReadOnlySpan<byte> payload)
             {
-                _lock.EnterWriteLock();
-                try
+                var hash = GetHash(key);
+                var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+
+                _dict.Set(keyWritten, hash, payload);
+            }
+
+            public void Commit()
+            {
+                foreach (var kvp in _dict)
                 {
-                    _commit.Set(key, payload);
-                }
-                finally
-                {
-                    _lock.ExitWriteLock();
+                    Key.ReadFrom(kvp.Key, out var key);
+                    _parent.Set(key, kvp.Value);
                 }
             }
+
+            public override string ToString() => _dict.ToString();
         }
 
         private ReadOnlySpanOwner<byte> Get(scoped in Key key)
