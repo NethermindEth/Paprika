@@ -390,11 +390,13 @@ public class Blockchain : IAsyncDisposable
             // rent pages for the bloom
             _bloom = new HashSet<int>();
 
-            _state = new PooledSpanDictionary(Pool);
-            _storage = new PooledSpanDictionary(Pool);
+            // as pre-commit can use parallelism, make the pooled dictionaries concurrent friendly:
+            // 1. make the dictionary preserve once written values, which means that it can repeatedly read and set without worrying of ordering operations
+            // 2. set dictionary so that it allows concurrent readers
 
-            // as pre-commit can be run in parallel, make the dictionary preserve once written values.
-            _preCommit = new PooledSpanDictionary(Pool, true);
+            _state = new PooledSpanDictionary(Pool, true, true);
+            _storage = new PooledSpanDictionary(Pool, true, true);
+            _preCommit = new PooledSpanDictionary(Pool, true, true);
         }
 
         /// <summary>

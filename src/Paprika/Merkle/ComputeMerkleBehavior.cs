@@ -238,12 +238,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         {
             // materialize path so that it can be closure captured
             var results = new byte[NibbleSet.NibbleCount][];
-            var synchronized = commit.AsSynchronized();
 
             // parallel calculation
 #if USE_PARALLEL
+            var synchronized = commit.AsSynchronized();
             Parallel.For((long)0, NibbleSet.NibbleCount, nibble =>
 #else
+            var synchronized = commit;
             for (var nibble = 0; nibble < NibbleSet.NibbleCount; nibble++)
 #endif
             {
