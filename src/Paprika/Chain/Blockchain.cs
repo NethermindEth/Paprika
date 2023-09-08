@@ -392,7 +392,9 @@ public class Blockchain : IAsyncDisposable
 
             _state = new PooledSpanDictionary(Pool);
             _storage = new PooledSpanDictionary(Pool);
-            _preCommit = new PooledSpanDictionary(Pool);
+
+            // as pre-commit can be run in parallel, make the dictionary preserve once written values.
+            _preCommit = new PooledSpanDictionary(Pool, true);
         }
 
         /// <summary>
@@ -494,52 +496,43 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-        IChildCommit ICommit.GetChild() => new ChildCommit(new PooledSpanDictionary(Pool), this);
+        ICommit ICommit.AsSynchronized() => new SynchronizedCommit(this);
 
-        class ChildCommit : IChildCommit
+        private class SynchronizedCommit : ICommit
         {
-            private readonly PooledSpanDictionary _dict;
-            private readonly ICommit _parent;
+            private readonly ICommit _commit;
+            private readonly ReaderWriterLockSlim _lock = new();
 
-            public ChildCommit(PooledSpanDictionary dictionary, ICommit parent)
+            public SynchronizedCommit(ICommit commit)
             {
-                _dict = dictionary;
-                _parent = parent;
+                _commit = commit;
             }
-
-            public void Dispose() => _dict.Dispose();
 
             public ReadOnlySpanOwner<byte> Get(scoped in Key key)
             {
-                var hash = GetHash(key);
-                var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
-
-                if (_dict.TryGet(keyWritten, hash, out var result))
+                _lock.EnterReadLock();
+                try
                 {
-                    return new ReadOnlySpanOwner<byte>(result, null);
+                    return _commit.Get(key);
                 }
-
-                return _parent.Get(key);
+                finally
+                {
+                    _lock.ExitReadLock();
+                }
             }
 
             public void Set(in Key key, in ReadOnlySpan<byte> payload)
             {
-                var hash = GetHash(key);
-                var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
-
-                _dict.Set(keyWritten, hash, payload);
-            }
-
-            public void Commit()
-            {
-                foreach (var kvp in _dict)
+                _lock.EnterWriteLock();
+                try
                 {
-                    Key.ReadFrom(kvp.Key, out var key);
-                    _parent.Set(key, kvp.Value);
+                    _commit.Set(key, payload);
+                }
+                finally
+                {
+                    _lock.ExitWriteLock();
                 }
             }
-
-            public override string ToString() => _dict.ToString();
         }
 
         private ReadOnlySpanOwner<byte> Get(scoped in Key key)

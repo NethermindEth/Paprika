@@ -378,7 +378,8 @@ public static class Program
                 counter++;
             }
 
-            result = $"{worldState.Commit().ToString()?[..8]}...";
+            var obj = worldState.Commit();
+            result = $"{obj.ToString()?[..8]}...";
 
             // finalize
             if (toFinalize.Count >= FinalizeEvery)

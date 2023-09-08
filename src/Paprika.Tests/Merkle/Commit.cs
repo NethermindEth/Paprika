@@ -125,38 +125,31 @@ public class Commit : ICommit
         }
     }
 
-    public IChildCommit GetChild() => new ChildCommit(this);
+    public ICommit AsSynchronized() => new SynchronizedCommit(this);
 
-    class ChildCommit : IChildCommit
+    class SynchronizedCommit : ICommit
     {
         private readonly ICommit _commit;
-        private readonly Dictionary<byte[], byte[]> _data = new(Comparer);
+        private readonly object _sync = new();
 
-        public ChildCommit(ICommit commit)
+        public SynchronizedCommit(ICommit commit)
         {
             _commit = commit;
         }
 
-        public void Dispose() => _data.Clear();
-
         public ReadOnlySpanOwner<byte> Get(scoped in Key key)
         {
-            return _data.TryGetValue(GetKey(key), out var value) ?
-                new ReadOnlySpanOwner<byte>(value, null) :
-                _commit.Get(key);
+            lock (_sync)
+            {
+                return _commit.Get(key);
+            }
         }
 
         public void Set(in Key key, in ReadOnlySpan<byte> payload)
         {
-            _data[GetKey(key)] = payload.ToArray();
-        }
-
-        public void Commit()
-        {
-            foreach (var kvp in _data)
+            lock (_sync)
             {
-                Key.ReadFrom(kvp.Key, out var key);
-                _commit.Set(key, kvp.Value);
+                _commit.Set(key, payload);
             }
         }
     }

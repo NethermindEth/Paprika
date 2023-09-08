@@ -18,6 +18,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
 {
     private const int BufferSize = BufferPool.BufferSize;
     private readonly BufferPool _pool;
+    private readonly bool _preserveOldValues;
     private readonly Dictionary<KeySpan, ValueSpan> _dict;
     private readonly List<Page> _pages = new();
 
@@ -31,9 +32,18 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
 
     private const int InlineKeyPointer = -1;
 
-    public PooledSpanDictionary(BufferPool pool)
+    /// <summary>
+    /// Initializes a new pooled dictionary instance.
+    /// </summary>
+    /// <param name="pool">The pool to take data from and return to.</param>
+    /// <param name="preserveOldValues">Whether dictionary should preserve previous values or aggressively reuse memory when possible.</param>
+    /// <remarks>
+    /// Set <paramref name="preserveOldValues"/> to true, if the data written once should not be overwritten.
+    /// </remarks>
+    public PooledSpanDictionary(BufferPool pool, bool preserveOldValues = false)
     {
         _pool = pool;
+        _preserveOldValues = preserveOldValues;
         _dict = new Dictionary<KeySpan, ValueSpan>(this);
 
         AllocateNewPage();
@@ -66,12 +76,15 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
             return;
         }
 
-        // key does exist, write value
-        if (refValue.Length == data.Length)
+        if (!_preserveOldValues)
         {
-            // data lengths are equal, write in-situ
-            data.CopyTo(GetAt(refValue));
-            return;
+            // if old values does not need to be preserved, try to reuse memory
+            if (refValue.Length == data.Length)
+            {
+                // data lengths are equal, write in-situ
+                data.CopyTo(GetAt(refValue));
+                return;
+            }
         }
 
         refValue = BuildValue(data);

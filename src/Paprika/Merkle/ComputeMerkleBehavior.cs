@@ -1,3 +1,5 @@
+#define USE_PARALLEL
+
 using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -200,7 +202,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
     private KeccakOrRlp EncodeBranch(Key key, ICommit commit, scoped in Node.Branch branch, TrieType trieType)
     {
         // run: for the state trie, only for the root and with all children set
-        var runInParallel = false;//trieType == TrieType.State && key.Path.IsEmpty && branch.Children.AllSet;
+        var runStateRootInParallel = trieType == TrieType.State && key.Path.IsEmpty && branch.Children.AllSet;
 
         var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
 
@@ -211,7 +213,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
             Position = initialShift
         };
 
-        if (!runInParallel)
+        if (!runStateRootInParallel)
         {
             const int additionalBytesForNibbleAppending = 1;
             Span<byte> childSpan = stackalloc byte[key.Path.MaxByteLength + additionalBytesForNibbleAppending];
@@ -235,27 +237,23 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         else
         {
             // materialize path so that it can be closure captured
-            var pathData = key.Path.WriteTo(stackalloc byte[key.Path.MaxByteLength]).ToArray();
             var results = new byte[NibbleSet.NibbleCount][];
-            var childCommits = Enumerable.Range(0, NibbleSet.NibbleCount).Select(i => commit.GetChild()).ToArray();
+            var synchronized = commit.AsSynchronized();
 
             // parallel calculation
-            for (int nibble = 0; nibble < NibbleSet.NibbleCount; nibble++)
-            //Parallel.For((long)0, NibbleSet.NibbleCount, nibble =>
+#if USE_PARALLEL
+            Parallel.For((long)0, NibbleSet.NibbleCount, nibble =>
+#else
+            for (var nibble = 0; nibble < NibbleSet.NibbleCount; nibble++)
+#endif
             {
-                NibblePath.ReadFrom(pathData, out var path);
-                var childPath = path.AppendNibble((byte)nibble, stackalloc byte[path.MaxByteLength + 1]);
-                results[nibble] = Compute(Key.Merkle(childPath), childCommits[nibble], trieType).Span.ToArray();
+                var childPath = NibblePath.FromKey(stackalloc byte[1] { (byte)(nibble << NibblePath.NibbleShift) }, 0).SliceTo(1);
+                results[nibble] = Compute(Key.Merkle(childPath), synchronized, trieType).Span.ToArray();
+#if !USE_PARALLEL
             }
-            //});
-
-            // commit all the children
-            foreach (var child in childCommits)
-            {
-                child.Commit();
-                child.Dispose();
-            }
-
+#else
+            });
+#endif
             // write all results in the stream
             for (byte i = 0; i < NibbleSet.NibbleCount; i++)
             {
@@ -381,7 +379,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         private Key Build(Key key) => Key.Raw(NibblePath.FromKey(_keccak), key.Type, key.Path);
 
         public void Visit(CommitAction action, TrieType type) => throw new Exception("Should not be called");
-        public IChildCommit GetChild() => throw new Exception("Should not be called");
     }
 
     private class StorageHandler

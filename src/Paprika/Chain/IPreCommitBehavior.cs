@@ -44,19 +44,8 @@ public interface ICommit
     /// </summary>
     void Visit(CommitAction action, TrieType type) => throw new Exception("No visitor available for this commit");
 
-    /// <summary>
-    /// Gets the child commit that is a thread-safe write-through commit.
-    /// </summary>
-    /// <returns>A child commit.</returns>
-    IChildCommit GetChild() => throw new Exception($"No {nameof(GetChild)} available for this commit");
-}
-
-public interface IChildCommit : ICommit, IDisposable
-{
-    /// <summary>
-    /// Commits to the parent
-    /// </summary>
-    void Commit();
+    ICommit AsSynchronized() =>
+        throw new Exception($"No {nameof(AsSynchronized)} available for commit of type {GetType()}");
 }
 
 /// <summary>
