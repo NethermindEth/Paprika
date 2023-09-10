@@ -76,7 +76,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         _reads = _meter.CreateCounter<long>("Reads", "Reads", "The number of reads db handles");
         _writes = _meter.CreateCounter<long>("Writes", "Writes", "The number of writes db handles");
         _commits = _meter.CreateCounter<long>("Commits", "Commits", "The number of batch commits db handles");
-        _commitDuration = _meter.CreateHistogram<float>("Commit duration", "ms", "The time it takes to perform a commit");
+        _commitDuration =
+            _meter.CreateHistogram<float>("Commit duration", "ms", "The time it takes to perform a commit");
         _commitPageCountTotal = _meter.CreateHistogram<int>("Commit page count (total)", "pages",
             "The number of pages flushed during the commit");
         _commitPageCountReused = _meter.CreateHistogram<int>("Commit page count (reused)", "pages",
@@ -93,6 +94,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
     private void ReportRead(long number = 1) => _reads.Add(number);
     private void ReportWrite() => _writes.Add(1);
+
     private void ReportCommit(TimeSpan elapsed)
     {
         _commits.Add(1);
@@ -155,7 +157,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         lock (_batchLock)
         {
             var batchId = Root.Header.BatchId;
-            var batch = new ReadOnlyBatch(this, batchId, Root.Data.DataRoot, Root.Data.Metadata, Root.Data.NextFreePage, name);
+            var batch = new ReadOnlyBatch(this, batchId, Root.Data.DataRoot, Root.Data.Metadata, Root.Data.NextFreePage,
+                name);
             _batchesReadOnly.Add(batch);
             return batch;
         }
@@ -231,14 +234,18 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
     private Page GetAtForWriting(DbAddress address, bool reused) => _manager.GetAtForWriting(address, reused);
 
+    /// <summary>
+    /// Sets the new root but does not bump the _lastRoot that should be done in a lock.
+    /// </summary>
     private DbAddress SetNewRoot(RootPage root)
     {
-        _lastRoot += 1;
-        var pageAddress = _lastRoot % _historyDepth;
+        var pageAddress = (_lastRoot + 1) % _historyDepth;
 
         root.CopyTo(_roots[pageAddress]);
         return DbAddress.Page((uint)pageAddress);
     }
+
+    private void CommitNewRoot() => _lastRoot += 1;
 
     class ReadOnlyBatch : IReadOnlyBatch, IReadOnlyBatchContext
     {
@@ -444,6 +451,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             lock (_db._batchLock)
             {
+                _db.CommitNewRoot();
                 Debug.Assert(ReferenceEquals(this, _db._batchCurrent));
                 _db._batchCurrent = null;
             }
