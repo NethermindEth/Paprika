@@ -3,6 +3,7 @@
 using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Diagnostics.Metrics;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -24,7 +25,7 @@ namespace Paprika.Merkle;
 /// that if there's an update for the given key, the key should be first read and worked with,
 /// only to be updated at the end of the processing. Otherwise, the data using zero-copy could be overwritten.
 /// </remarks>
-public class ComputeMerkleBehavior : IPreCommitBehavior
+public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 {
     /// <summary>
     /// The upper boundary of memory needed to write RLP of any Merkle node.
@@ -40,6 +41,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
     private readonly bool _fullMerkle;
     private readonly int _minimumTreeLevelToMemoizeKeccak;
     private readonly int _memoizeKeccakEvery;
+    private readonly Meter _meter;
+    private readonly Histogram<long> _stateRootHashCompute;
+    private readonly Histogram<long> _storageRootsHashCompute;
 
     public ComputeMerkleBehavior(bool fullMerkle = false,
         int minimumTreeLevelToMemoizeKeccak = DefaultMinimumTreeLevelToMemoizeKeccak,
@@ -48,6 +52,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         _fullMerkle = fullMerkle;
         _minimumTreeLevelToMemoizeKeccak = minimumTreeLevelToMemoizeKeccak;
         _memoizeKeccakEvery = memoizeKeccakEvery;
+
+        _meter = new Meter("Paprika.Merkle");
+        _stateRootHashCompute = _meter.CreateHistogram<long>("State root compute", "ms",
+            "How long it takes to calculate the root hash");
+        _storageRootsHashCompute = _meter.CreateHistogram<long>("Storage roots compute", "ms",
+            "How long it takes to calculate storage roots");
     }
 
     public object BeforeCommit(ICommit commit)
@@ -83,10 +93,18 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
         // 4. recalculate root hash
         if (_fullMerkle)
         {
+            var sw = Stopwatch.StartNew();
+
             CalculateStorageRoots(commit, storage);
+
+            _storageRootsHashCompute.Record(sw.ElapsedMilliseconds);
+
+            sw.Restart();
 
             var root = Key.Merkle(NibblePath.Empty);
             var rootKeccak = Compute(root, commit, TrieType.State);
+
+            _stateRootHashCompute.Record(sw.ElapsedMilliseconds);
 
             Debug.Assert(rootKeccak.DataType == KeccakOrRlp.Type.Keccak);
 
@@ -248,7 +266,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
             for (var nibble = 0; nibble < NibbleSet.NibbleCount; nibble++)
 #endif
             {
-                var childPath = NibblePath.FromKey(stackalloc byte[1] { (byte)(nibble << NibblePath.NibbleShift) }, 0).SliceTo(1);
+                var childPath = NibblePath.FromKey(stackalloc byte[1] { (byte)(nibble << NibblePath.NibbleShift) }, 0)
+                    .SliceTo(1);
                 var child = commits[nibble] = commit.GetChild();
                 results[nibble] = Compute(Key.Merkle(childPath), child, trieType).Span.ToArray();
 #if !USE_PARALLEL
@@ -808,4 +827,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior
             }
         }
     }
+
+    public void Dispose() => _meter.Dispose();
 }
