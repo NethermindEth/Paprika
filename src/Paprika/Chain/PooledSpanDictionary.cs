@@ -31,6 +31,8 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
 
     private readonly object _key;
 
+    private static readonly ThreadLocal<byte[]> ConcurrentBuffers = new(() => new byte[KeyBytesCount]);
+
     private byte[] KeyBuffer =>
         _allowConcurrentReaders ? Unsafe.As<ThreadLocal<byte[]>>(_key).Value! : Unsafe.As<byte[]>(_key);
 
@@ -55,9 +57,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         _allowConcurrentReaders = allowConcurrentReaders;
         _dict = new Dictionary<KeySpan, ValueSpan>(this);
 
-        _key = allowConcurrentReaders
-            ? new ThreadLocal<byte[]>(() => new byte[KeyBytesCount])
-            : new byte[KeyBytesCount];
+        _key = allowConcurrentReaders ? ConcurrentBuffers : new byte[KeyBytesCount];
 
         AllocateNewPage();
     }
