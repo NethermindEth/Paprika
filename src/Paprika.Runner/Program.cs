@@ -34,9 +34,11 @@ public static class Program
         new(100, 1000, 1 * Gb, false, TimeSpan.FromSeconds(5), false, false);
 
     private static readonly Case InMemorySmall =
-        new(5_000, 1000, 11 * Gb, false, TimeSpan.FromSeconds(5), false, false);
+        new(10_000, 1000, 11 * Gb, false, TimeSpan.FromSeconds(5), false, false);
+    private static readonly Case InMemoryMedium =
+        new(50_000, 1000, 32 * Gb, false, TimeSpan.FromSeconds(5), false, false);
     private static readonly Case
-        InMemoryBig = new(100_000, 1000, 48 * Gb, false, TimeSpan.FromSeconds(5), false, false);
+        InMemoryBig = new(100_000, 1000, 56 * Gb, false, TimeSpan.FromSeconds(5), false, false);
     private static readonly Case DiskSmallNoFlush =
         new(50_000, 1000, 11 * Gb, true, TimeSpan.FromSeconds(5), false, false);
     private static readonly Case DiskSmallFlushFile =
@@ -148,7 +150,7 @@ public static class Program
                     ctx.Refresh();
                 }));
 
-            var preCommit = new ComputeMerkleBehavior(true, 2, 1);
+            using var preCommit = new ComputeMerkleBehavior(true, 2, 1);
             //IPreCommitBehavior preCommit = null;
 
             await using (var blockchain = new Blockchain(db, preCommit, config.FlushEvery, 1000, reporter.Observe))
