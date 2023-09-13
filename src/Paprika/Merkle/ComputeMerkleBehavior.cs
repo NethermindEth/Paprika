@@ -554,7 +554,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
 
         // read the existing one
-        Node.ReadFrom(owner.Span, out var type, out var leaf, out var ext, out var branch);
+        var leftover = Node.ReadFrom(owner.Span, out var type, out var leaf, out var ext, out var branch);
         switch (type)
         {
             case Node.Type.Leaf:
@@ -623,9 +623,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         or DeleteStatus.ExtensionToLeaf
                         or DeleteStatus.BranchToLeafOrExtension)
                     {
-                        if (branch.HasKeccak)
+                        // if either has the keccak or has the leftover rlp, clean
+                        if (branch.HasKeccak || leftover.IsEmpty == false)
                         {
-                            // reset keccak
+                            // reset
                             commit.SetBranch(key, branch.Children);
                         }
 
