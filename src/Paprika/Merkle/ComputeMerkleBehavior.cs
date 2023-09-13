@@ -4,6 +4,7 @@ using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Diagnostics.Metrics;
+using System.Runtime.InteropServices;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -117,6 +118,18 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         return "not full merkle";
     }
 
+    public ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data)
+    {
+        if (key.Type != DataType.Merkle)
+            return data;
+
+        if (Node.Header.Peek(data).NodeType != Node.Type.Branch)
+            return data;
+
+        // trim the cached rlp from branches
+        return Node.Branch.GetOnlyBranchData(data);
+    }
+
     private void CalculateStorageRoots(ICommit commit, StorageHandler storage)
     {
         Span<byte> accountSpan = stackalloc byte[Account.MaxByteCount];
@@ -171,7 +184,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             return Keccak.EmptyTreeHash;
         }
 
-        Node.ReadFrom(owner.Span, out var type, out var leaf, out var ext, out var branch);
+        var leftover = Node.ReadFrom(owner.Span, out var type, out var leaf, out var ext, out var branch);
         switch (type)
         {
             case Node.Type.Leaf:
@@ -185,7 +198,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     return branch.Keccak;
                 }
 
-                return EncodeBranch(key, commit, branch, trieType);
+                return EncodeBranch(key, commit, branch, trieType, leftover, owner.IsOwnedBy(commit));
             default:
                 throw new ArgumentOutOfRangeException();
         }
@@ -217,12 +230,42 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         return keccakOrRlp;
     }
 
-    private KeccakOrRlp EncodeBranch(Key key, ICommit commit, scoped in Node.Branch branch, TrieType trieType)
+    private KeccakOrRlp EncodeBranch(Key key, ICommit commit, scoped in Node.Branch branch, TrieType trieType,
+        ReadOnlySpan<byte> previousRlp, bool isOwnedByCommit)
     {
         // run: for the state trie, only for the root and with all children set
         var runStateRootInParallel = trieType == TrieType.State && key.Path.IsEmpty && branch.Children.AllSet;
 
+        var memoize = ShouldMemoizeBranchKeccak(key.Path);
         var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
+
+        byte[]? rlpMemoization = null;
+        RlpMemo memo = default;
+
+        if (memoize)
+        {
+            Span<byte> data;
+
+            if (isOwnedByCommit && previousRlp.IsEmpty == false)
+            {
+                data = MakeRlpWritable(previousRlp);
+            }
+            else
+            {
+                rlpMemoization = ArrayPool<byte>.Shared.Rent(RlpMemo.Size);
+                data = rlpMemoization.AsSpan(0, RlpMemo.Size);
+                if (previousRlp.IsEmpty)
+                {
+                    data.Clear();
+                }
+                else
+                {
+                    previousRlp.CopyTo(data);
+                }
+            }
+
+            memo = new RlpMemo(data);
+        }
 
         // leave for length preamble
         const int initialShift = Rlp.MaxLengthOfLength + 1;
@@ -240,15 +283,27 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             {
                 if (branch.Children[i])
                 {
+                    if (memoize && memo.TryGetKeccak(i, out var keccak))
+                    {
+                        // keccak from cache
+                        stream.Encode(keccak);
+                        continue;
+                    }
+
                     var childPath = key.Path.AppendNibble(i, childSpan);
                     var value = Compute(Key.Merkle(childPath), commit, trieType);
 
                     // it's either Keccak or a span. Both are encoded the same ways
                     stream.Encode(value.Span);
+
+                    if (memoize) memo.Set(value, i);
                 }
                 else
                 {
                     stream.EncodeEmptyArray();
+
+                    // TODO: might be not needed
+                    if (memoize) memo.Clear(i);
                 }
             }
         }
@@ -285,7 +340,20 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             for (byte i = 0; i < NibbleSet.NibbleCount; i++)
             {
                 // it's either Keccak or a span. Both are encoded the same ways
-                stream.Encode(results[i]);
+                var value = results[i];
+
+                stream.Encode(value);
+                if (memoize)
+                {
+                    if (value.Length == Keccak.Size)
+                    {
+                        memo.SetRaw(value, i);
+                    }
+                    else
+                    {
+                        memo.Clear(i);
+                    }
+                }
             }
         }
 
@@ -304,15 +372,25 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         ArrayPool<byte>.Shared.Return(bytes);
 
-        if (result.DataType == KeccakOrRlp.Type.Keccak && ShouldMemoizeBranchKeccak(key.Path))
+        if (result.DataType == KeccakOrRlp.Type.Keccak && memoize)
         {
             // Memoize only if Keccak and falls into the criteria.
             // Storing RLP for an embedded node is useless as it can be easily re-calculated.
-            commit.SetBranch(key, branch.Children, new Keccak(result.Span));
+            commit.SetBranch(key, branch.Children, new Keccak(result.Span), memo.Raw);
         }
+
+        if (rlpMemoization != null)
+            ArrayPool<byte>.Shared.Return(rlpMemoization);
 
         return result;
     }
+
+    /// <summary>
+    /// Makes the RLP writable. Should be used only after ensuring that the current <see cref="ICommit"/>
+    /// is the owner of the span. This can be done by using <see cref="ReadOnlySpanOwner{T}.IsOwnedBy"/>.
+    /// </summary>
+    private static Span<byte> MakeRlpWritable(ReadOnlySpan<byte> previousRlp) =>
+        MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(previousRlp), previousRlp.Length);
 
     private bool ShouldMemoizeBranchKeccak(in NibblePath branchPath)
     {
@@ -476,7 +554,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
 
         // read the existing one
-        Node.ReadFrom(owner.Span, out var type, out var leaf, out var ext, out var branch);
+        var leftover = Node.ReadFrom(owner.Span, out var type, out var leaf, out var ext, out var branch);
         switch (type)
         {
             case Node.Type.Leaf:
@@ -545,9 +623,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         or DeleteStatus.ExtensionToLeaf
                         or DeleteStatus.BranchToLeafOrExtension)
                     {
-                        if (branch.HasKeccak)
+                        // if either has the keccak or has the leftover rlp, clean
+                        if (branch.HasKeccak || leftover.IsEmpty == false)
                         {
-                            // reset keccak
+                            // reset
                             commit.SetBranch(key, branch.Children);
                         }
 
@@ -673,7 +752,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             }
 
             // read the existing one
-            Node.ReadFrom(owner.Span, out var type, out var leaf, out var ext, out var branch);
+            var leftover = Node.ReadFrom(owner.Span, out var type, out var leaf, out var ext, out var branch);
             switch (type)
             {
                 case Node.Type.Leaf:
@@ -805,20 +884,39 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 case Node.Type.Branch:
                     {
                         var nibble = path[i];
-                        if (branch.HasKeccak)
+                        Span<byte> rlp = default;
+                        byte[]? array = default;
+
+                        if (leftover.Length == RlpMemo.Size)
                         {
-                            // branch has keccak, this means it was not written yet, needs to be dirtied
+                            if (owner.IsOwnedBy(commit))
+                            {
+                                rlp = MakeRlpWritable(leftover);
+                            }
+                            else
+                            {
+                                array = ArrayPool<byte>.Shared.Rent(RlpMemo.Size);
+                                rlp = array.AsSpan(0, RlpMemo.Size);
+                                leftover.CopyTo(rlp);
+                            }
+
+                            var memo = new RlpMemo(rlp);
+                            memo.Clear(nibble);
+                        }
+
+                        if (rlp.IsEmpty)
+                        {
+                            // update branch as is, as there's no rlp
                             commit.SetBranch(key, branch.Children.Set(nibble));
                         }
                         else
                         {
-                            if (branch.Children[nibble] && !branch.HasKeccak)
-                            {
-                                // if child is set and there's no keccak for the branch, everything set as needed
-                                continue;
-                            }
+                            commit.SetBranch(key, branch.Children.Set(nibble), rlp);
+                        }
 
-                            commit.SetBranch(key, branch.Children.Set(nibble));
+                        if (array != null)
+                        {
+                            ArrayPool<byte>.Shared.Return(array);
                         }
                     }
                     break;

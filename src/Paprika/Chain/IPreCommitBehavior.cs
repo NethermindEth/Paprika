@@ -1,4 +1,5 @@
-﻿using Paprika.Data;
+﻿using System.Buffers;
+using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Utils;
 
@@ -14,7 +15,15 @@ public interface IPreCommitBehavior
     /// Executed just before commit.
     /// </summary>
     /// <param name="commit">The object representing the commit.</param>
-    public object BeforeCommit(ICommit commit);
+    object BeforeCommit(ICommit commit);
+
+    /// <summary>
+    /// Inspects the data allowing it to overwrite them if needed, before the commit is applied to the database.
+    /// </summary>
+    /// <param name="key">The key related to data.</param>
+    /// <param name="data">The data.</param>
+    /// <returns>The data that should be put in place.</returns>
+    ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data) => data;
 }
 
 /// <summary>
@@ -38,6 +47,21 @@ public interface ICommit
     /// Sets the value under the given key.
     /// </summary>
     void Set(in Key key, in ReadOnlySpan<byte> payload);
+
+    /// <summary>
+    /// Sets the value under the given key.
+    /// </summary>
+    void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
+    {
+        var total = payload0.Length + payload1.Length;
+        var bytes = ArrayPool<byte>.Shared.Rent(total);
+        payload0.CopyTo(bytes);
+        payload1.CopyTo(bytes.AsSpan(payload0.Length));
+
+        Set(key, bytes.AsSpan(0, total));
+
+        ArrayPool<byte>.Shared.Return(bytes);
+    }
 
     /// <summary>
     /// Visits the given <paramref name="type"/> of the changes in the given commit.
