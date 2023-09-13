@@ -75,7 +75,11 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         return false;
     }
 
-    public void Set(scoped ReadOnlySpan<byte> key, int hash, ReadOnlySpan<byte> data)
+    public void Set(scoped ReadOnlySpan<byte> key, int hash, ReadOnlySpan<byte> data) =>
+        Set(key, hash, data, ReadOnlySpan<byte>.Empty);
+
+
+    public void Set(scoped ReadOnlySpan<byte> key, int hash, ReadOnlySpan<byte> data0, ReadOnlySpan<byte> data1)
     {
         var mixed = Mix(hash);
 
@@ -85,23 +89,30 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         if (Unsafe.IsNullRef(ref refValue))
         {
             // key, does not exist
-            _dict.Add(BuildKey(key, mixed), BuildValue(data));
+            _dict.Add(BuildKey(key, mixed), BuildValue(data0, data1));
             return;
         }
 
         if (!_preserveOldValues)
         {
+            var size = data0.Length + data1.Length;
+
             // if old values does not need to be preserved, try to reuse memory
-            if (refValue.Length == data.Length)
+            if (refValue.Length == size)
             {
                 // data lengths are equal, write in-situ
-                data.CopyTo(GetAt(refValue));
+                var span = GetAt(refValue);
+
+                data0.CopyTo(span);
+                data1.CopyTo(span.Slice(data1.Length));
+
                 return;
             }
         }
 
-        refValue = BuildValue(data);
+        refValue = BuildValue(data0, data1);
     }
+
 
     public Enumerator GetEnumerator() => new(this);
 
@@ -158,7 +169,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
 
     private KeySpan BuildKey(ReadOnlySpan<byte> key, ushort hash) => new(hash, Write(key), (ushort)key.Length);
 
-    private ValueSpan BuildValue(ReadOnlySpan<byte> value) => new(Write(value), (ushort)value.Length);
+    private ValueSpan BuildValue(ReadOnlySpan<byte> value0, ReadOnlySpan<byte> value1) => new(Write(value0, value1), (ushort)(value0.Length + value1.Length));
 
     private static ushort Mix(int hash) => unchecked((ushort)((hash >> 16) ^ hash));
 
@@ -175,17 +186,36 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         return _pages[pageNo].Span.Slice(offset, value.Length);
     }
 
-    private int Write(ReadOnlySpan<byte> toWrite)
+    private int Write(ReadOnlySpan<byte> data)
     {
-        if (BufferSize - _position < toWrite.Length)
+        var size = data.Length;
+
+        if (BufferSize - _position < size)
         {
             // not enough memory
             AllocateNewPage();
         }
 
-        toWrite.CopyTo(_current.Span.Slice(_position));
+        data.CopyTo(_current.Span.Slice(_position));
         var pointer = _position + (_pages.Count - 1) * BufferSize;
-        _position += toWrite.Length;
+        _position += size;
+        return pointer;
+    }
+
+    private int Write(ReadOnlySpan<byte> data, ReadOnlySpan<byte> data1)
+    {
+        var size = data.Length + data1.Length;
+
+        if (BufferSize - _position < size)
+        {
+            // not enough memory
+            AllocateNewPage();
+        }
+
+        data.CopyTo(_current.Span.Slice(_position));
+        data1.CopyTo(_current.Span.Slice(_position + data.Length));
+        var pointer = _position + (_pages.Count - 1) * BufferSize;
+        _position += size;
         return pointer;
     }
 

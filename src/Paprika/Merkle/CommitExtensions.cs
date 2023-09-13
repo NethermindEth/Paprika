@@ -23,10 +23,16 @@ public static class CommitExtensions
         commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
     }
 
-    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, Keccak keccak)
+    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, ReadOnlySpan<byte> rlp)
+    {
+        var branch = new Node.Branch(children);
+        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), rlp);
+    }
+
+    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, Keccak keccak, ReadOnlySpan<byte> rlp)
     {
         var branch = new Node.Branch(children, keccak);
-        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
+        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), rlp);
     }
 
     public static void SetExtension(this ICommit commit, in Key key, in NibblePath path)

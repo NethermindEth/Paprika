@@ -101,6 +101,8 @@ public static partial class Node
             return source.Slice(Size);
         }
 
+        public static Header Peek(ReadOnlySpan<byte> source) => new(source[0]);
+
         public bool Equals(in Header other)
         {
             return _header.Equals(other._header);
@@ -331,6 +333,27 @@ public static partial class Node
 
             return leftover;
         }
+
+        /// <summary>
+        /// Skips the branch at source, returning just the leftover.
+        /// </summary>
+        public static ReadOnlySpan<byte> Skip(ReadOnlySpan<byte> source)
+        {
+            Header.ReadFrom(source, out var header);
+            return source.Slice(GetBranchDataLength(header));
+        }
+
+        /// <summary>
+        /// Gets only branch data cleaning any leftovers.
+        /// </summary>
+        public static ReadOnlySpan<byte> GetOnlyBranchData(ReadOnlySpan<byte> source)
+        {
+            Header.ReadFrom(source, out var header);
+            return source[..GetBranchDataLength(header)];
+        }
+
+        private static int GetBranchDataLength(Header header) =>
+            Header.Size + NibbleSet.MaxByteSize + (HeaderHasKeccak(header) ? Keccak.Size : 0);
 
         public bool Equals(in Branch other)
         {

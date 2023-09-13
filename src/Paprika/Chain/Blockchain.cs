@@ -483,9 +483,19 @@ public class Blockchain : IAsyncDisposable
             dict.Set(key.WriteTo(stackalloc byte[key.MaxByteLength]), hash, payload);
         }
 
+        private void SetImpl(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1, PooledSpanDictionary dict)
+        {
+            var hash = GetHash(key);
+            _bloom.Add(hash);
+
+            dict.Set(key.WriteTo(stackalloc byte[key.MaxByteLength]), hash, payload0, payload1);
+        }
+
         ReadOnlySpanOwner<byte> ICommit.Get(scoped in Key key) => Get(key);
 
         void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload) => SetImpl(key, payload, _preCommit);
+
+        void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1) => SetImpl(key, payload0, payload1, _preCommit);
 
         void ICommit.Visit(CommitAction action, TrieType type)
         {
@@ -533,6 +543,14 @@ public class Blockchain : IAsyncDisposable
                 var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
                 _dict.Set(keyWritten, hash, payload);
+            }
+
+            public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
+            {
+                var hash = GetHash(key);
+                var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+
+                _dict.Set(keyWritten, hash, payload0, payload1);
             }
 
             public void Commit()
@@ -672,12 +690,15 @@ public class Blockchain : IAsyncDisposable
             Apply(batch, _preCommit);
         }
 
-        private static void Apply(IBatch batch, PooledSpanDictionary dict)
+        private void Apply(IBatch batch, PooledSpanDictionary dict)
         {
+            var preCommit = _blockchain._preCommit;
+
             foreach (var kvp in dict)
             {
                 Key.ReadFrom(kvp.Key, out var key);
-                batch.SetRaw(key, kvp.Value);
+                var data = preCommit == null ? kvp.Value : preCommit.InspectBeforeApply(key, kvp.Value);
+                batch.SetRaw(key, data);
             }
         }
 
