@@ -21,4 +21,9 @@ public readonly ref struct ReadOnlySpanOwner<T>
     /// Disposes the owner provided as <see cref="IDisposable"/> once.
     /// </summary>
     public void Dispose() => _owner?.Dispose();
+
+    /// <summary>
+    /// Answers whether this span is owned and provided by <paramref name="owner"/>.
+    /// </summary>
+    public bool IsOwnedBy(object owner) => ReferenceEquals(owner, _owner);
 }
