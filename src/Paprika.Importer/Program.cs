@@ -5,20 +5,43 @@ using Nethermind.Db;
 using Nethermind.Db.Rocks;
 using Nethermind.Db.Rocks.Config;
 using Nethermind.Logging;
+using Nethermind.Serialization.Rlp;
 using Nethermind.State;
 using Nethermind.Trie.Pruning;
 
 Console.WriteLine("Hello, World!");
 
-var settings = new RocksDbSettings(DbNames.State, DbNames.State);
+// StandardDbInitializer
+// MemoryHintMan
+// public int? StateDbBlockSize { get; set; } = 4 * 1024;
 
-using var state = new DbOnTheRocks(@"C:\Users\Szymon\ethereum\execution\nethermind_db\sepolia", settings, DbConfig.Default, LimboLogs.Instance);
-using var store = new TrieStore(state, LimboLogs.Instance);
-var trie = new StateTree(store, LimboLogs.Instance);
+const string path = @"C:\Users\Szymon\ethereum\execution\nethermind_db\sepolia";
+var logs = LimboLogs.Instance;
+var cfg = DbConfig.Default;
 
-// https://sepolia.etherscan.io/block/0x77f53fbcafe5d70031154923852b234daa9acddcb7b3212b936b19116d93c15b
-var rootHash = new Keccak("0x4f32764e59eccac237bc6fc78b24f97ad17336906209ab537eedea3240567e7d");
+using var state = new DbOnTheRocks(path, new RocksDbSettings(DbNames.State, DbNames.State), cfg, logs);
+using var blockInfos = new DbOnTheRocks(path, new RocksDbSettings(DbNames.BlockInfos, DbNames.BlockInfos), cfg, logs);
+using var headers = new DbOnTheRocks(path, new RocksDbSettings(DbNames.Headers, DbNames.Headers), cfg, logs);
+using var store = new TrieStore(state, logs);
 
-trie.RootHash = rootHash;
+var headAddressInDb = Keccak.Zero;
+var headData = blockInfos.Get(headAddressInDb);
+ArgumentNullException.ThrowIfNull(headData, "Block info head not found");
+
+var head = new Keccak(headData);
+var headerData = headers.Get(head);
+ArgumentNullException.ThrowIfNull(headerData, "Header of the head");
+
+var decoder = new HeaderDecoder();
+var headHeader = decoder.Decode(new RlpStream(headerData));
+ArgumentNullException.ThrowIfNull(headHeader, "Head has no header!");
+ArgumentNullException.ThrowIfNull(headHeader.StateRoot, "Head header! has no StateRoot!");
+
+var trie = new StateTree(store, logs)
+{
+    RootHash = headHeader.StateRoot
+};
+
+trie.RootRef!.ResolveNode(store);
 
 Console.WriteLine($"Root: {trie.RootHash}" );
