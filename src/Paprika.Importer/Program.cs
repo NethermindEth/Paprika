@@ -32,8 +32,8 @@ long? bestPersistedState = persistedNumberData is null ? null : new RlpStream(pe
 
 ArgumentNullException.ThrowIfNull(bestPersistedState, "Best persisted state not found");
 
-var chaininfo = blockInfos.Get(bestPersistedState.Value);
-var chainLevel = Rlp.GetStreamDecoder<ChainLevelInfo>()!.Decode(new RlpStream(chaininfo!));
+var info = blockInfos.Get(bestPersistedState.Value);
+var chainLevel = Rlp.GetStreamDecoder<ChainLevelInfo>()!.Decode(new RlpStream(info!));
 
 var main = chainLevel.BlockInfos[0];
 var header = headers.Get(main.BlockHash);
@@ -48,19 +48,22 @@ var trie = new StateTree(store, logs)
 };
 
 var visitor = new PaprikaCopyingVisitor();
-
-Console.WriteLine("Starting visitor...");
+Console.WriteLine("Starting...");
 
 var sw = Stopwatch.StartNew();
-
 var run = Task.Run(() => trie.Accept(visitor, rootHash, true));
+
+// expected count
+const int count = 16146399;
 
 while (true)
 {
     var completed = await Task.WhenAny(Task.Delay(1_000), run);
     if (completed == run)
         break;
-    Console.WriteLine($"Read accounts: {visitor.Accounts}");
+
+    var msg = count > 0 ? $"{(double)visitor.Accounts / count:P2}" : ""; 
+    Console.WriteLine($"Read accounts: {visitor.Accounts,16} {msg}");
 }
 
 Console.WriteLine($"Root: {rootHash} had {visitor.Accounts} accounts in {sw.Elapsed:g}");

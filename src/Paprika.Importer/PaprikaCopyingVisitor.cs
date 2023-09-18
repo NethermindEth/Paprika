@@ -1,4 +1,5 @@
-﻿using Nethermind.Core.Crypto;
+﻿using System.IO.Pipelines;
+using Nethermind.Core.Crypto;
 using Nethermind.Trie;
 
 namespace Paprika.Importer;
@@ -6,6 +7,10 @@ namespace Paprika.Importer;
 public class PaprikaCopyingVisitor : ITreeLeafVisitor
 {
     private long accounts;
+
+    public PaprikaCopyingVisitor()
+    {
+    }
 
     public void VisitLeafAccount(in ValueKeccak account, Nethermind.Core.Account value)
     {
