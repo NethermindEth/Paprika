@@ -129,7 +129,19 @@ public class MemoryMappedPageManager : PointerPageManager
         }
     }
 
-    public override void Flush() => _file.Flush(_flushToDisk);
+    public override void Flush()
+    {
+        if (_flushToDisk)
+        {
+            _file.Flush(true);
+        }
+    }
+
+    public override void ForceFlush()
+    {
+        _whole.Flush();
+        _file.Flush(true);
+    }
 
     public override void Dispose()
     {

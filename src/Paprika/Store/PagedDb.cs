@@ -134,7 +134,16 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
-    public double Megabytes => (double)(int)Root.Data.NextFreePage * Page.PageSize / 1024 / 1024;
+    public double Megabytes
+    {
+        get
+        {
+            lock (_batchLock)
+            {
+                return GetRootSizeInMb(Root);
+            }
+        }
+    }
 
     private RootPage Root => _roots[_lastRoot % _historyDepth];
 
@@ -187,6 +196,9 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             yield return _manager.GetAt(DbAddress.Page(i));
         }
     }
+
+    private static int GetRootSizeInMb(RootPage root) =>
+        (int)((long)root.Data.NextFreePage.Raw * Page.PageSize / 1024 / 1024);
 
     private void DisposeReadOnlyBatch(ReadOnlyBatch batch)
     {
@@ -444,8 +456,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             var newRootPage = _db.SetNewRoot(_root);
 
             // report
-            var size = (long)_root.Data.NextFreePage.Raw * Page.PageSize / 1024 / 1024;
-            _db.ReportDbSize((int)size);
+            _db.ReportDbSize(GetRootSizeInMb(_root));
 
             await _db._manager.FlushRootPage(newRootPage, options);
 
@@ -705,4 +716,6 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     }
 
     public void Flush() => _manager.Flush();
+
+    public void ForceFlush() => _manager.ForceFlush();
 }

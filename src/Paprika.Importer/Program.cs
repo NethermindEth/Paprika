@@ -12,7 +12,9 @@ using Nethermind.Trie.Pruning;
 using Paprika.Chain;
 using Paprika.Importer;
 using Paprika.Merkle;
+using Paprika.Runner;
 using Paprika.Store;
+using Spectre.Console;
 
 const string path = @"C:\Users\Szymon\ethereum\execution\nethermind_db\sepolia";
 var logs = LimboLogs.Instance;
@@ -61,39 +63,58 @@ Directory.CreateDirectory(dataPath);
 Console.WriteLine($"Using persistent DB on disk, located: {dataPath}");
 Console.WriteLine("Initializing db of size {0}GB", size / GB);
 
-using var db = PagedDb.MemoryMappedDb(size, 2, dataPath, false);
-
-using var preCommit = new ComputeMerkleBehavior(true, 2, 1);
-await using var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 1000);
-
-var visitor = new PaprikaCopyingVisitor(blockchain, 1_000);
-
-Console.WriteLine("Starting...");
+using var reporter = new MetricsReporter();
+Task reportingTask;
+var spectre = new CancellationTokenSource();
 
 var sw = Stopwatch.StartNew();
-var copy = Task.Run(() => visitor.Copy());
 
-var run = Task.Run(() => trie.Accept(visitor, rootHash, true));
-
-// expected count
-const int count = 16146399;
-
-while (true)
+using var db = PagedDb.MemoryMappedDb(size, 2, dataPath, false);
+using var preCommit = new ComputeMerkleBehavior(true, 2, 1);
+await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 1000, () => reporter.Observe()))
 {
-    var completed = await Task.WhenAny(Task.Delay(1_000), run);
-    if (completed == run)
-        break;
+    const int sepoliaAccountCount = 16146399;
 
-    var msg = count > 0 ? $"{(double)visitor.Accounts / count:P2}" : "";
-    Console.WriteLine($"Read accounts: {visitor.Accounts,16} {msg}");
+    var visitor = new PaprikaCopyingVisitor(blockchain, 2_000, sepoliaAccountCount);
+    Console.WriteLine("Starting...");
+
+    var copyingTask = Task.Run(() => visitor.Copy());
+    var visitorTask = Task.Run(() => trie.Accept(visitor, rootHash, true));
+    reportingTask = Task.Run(() => AnsiConsole.Live(reporter.Renderer)
+        .StartAsync(async ctx =>
+        {
+            while (spectre.IsCancellationRequested == false)
+            {
+                reporter.Observe();
+                ctx.Refresh();
+                await Task.Delay(500);
+            }
+
+            // the final report
+            reporter.Observe();
+            ctx.Refresh();
+        }));
+
+    // expected count
+    while (true)
+    {
+        var completed = await Task.WhenAny(Task.Delay(1_000), visitorTask);
+        if (completed == visitorTask)
+            break;
+    }
+
+    visitor.Finish();
+
+    Console.WriteLine("Awaiting writes to finish...");
+    await copyingTask;
 }
 
-visitor.Finish();
+db.ForceFlush();
 
-Console.WriteLine("Awaiting writes to finish...");
-await copy;
+spectre.Cancel();
+await reportingTask;
 
-Console.WriteLine($"Root: {rootHash} had {visitor.Accounts} accounts in {sw.Elapsed:g}");
+Console.WriteLine($"Root: {rootHash} imported to Paprika accounts in {sw.Elapsed:g}");
 
 return;
 

@@ -10,7 +10,12 @@
     <ItemGroup>
       <ProjectReference Include="..\..\..\nethermind\src\Nethermind\Nethermind.Db.Rocks\Nethermind.Db.Rocks.csproj" />
       <ProjectReference Include="..\..\..\nethermind\src\Nethermind\Nethermind.Db\Nethermind.Db.csproj" />
+      <ProjectReference Include="..\Paprika.Runner\Paprika.Runner.csproj" />
       <ProjectReference Include="..\Paprika\Paprika.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <PackageReference Include="Spectre.Console" Version="0.47.1-preview.0.23" />
     </ItemGroup>
 
 </Project>
