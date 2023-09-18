@@ -12,10 +12,55 @@ namespace Paprika.Importer;
 
 public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 {
+    struct Item
+    {
+        private readonly ValueKeccak _account;
+
+        // account
+        private readonly Nethermind.Core.Account? _accountValue;
+
+        // storage
+        private readonly ValueKeccak _storage;
+        private readonly byte[]? _data;
+
+        public Item(ValueKeccak account, Nethermind.Core.Account accountValue)
+        {
+            _account = account;
+            _accountValue = accountValue;
+        }
+
+        public Item(ValueKeccak account, ValueKeccak storage, byte[] data)
+        {
+            _account = account;
+            _storage = storage;
+            _data = data;
+        }
+
+        public void Apply(IWorldState block)
+        {
+            var addr = AsPaprika(_account);
+
+            if (_accountValue != null)
+            {
+                var v = _accountValue;
+
+                var codeHash = AsPaprika(v.CodeHash);
+                var storageRoot = AsPaprika(v.StorageRoot);
+
+                block.SetAccount(addr, new Account(v.Balance, v.Nonce, codeHash, storageRoot));
+            }
+            else
+            {
+                block.SetStorage(addr, AsPaprika(_storage), _data);
+            }
+        }
+    }
+
+
     private readonly Blockchain _blockchain;
     private readonly int _batchSize;
     private readonly int _expectedAccountCount;
-    private readonly Channel<(ValueKeccak, Nethermind.Core.Account)> _channel;
+    private readonly Channel<Item> _channel;
 
     private readonly Meter _meter;
     private readonly MetricsExtensions.IAtomicIntGauge _accountsGauge;
@@ -32,7 +77,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 
         var options = new UnboundedChannelOptions
         { SingleReader = true, SingleWriter = true, AllowSynchronousContinuations = false };
-        _channel = Channel.CreateUnbounded<(ValueKeccak, Nethermind.Core.Account)>(options);
+        _channel = Channel.CreateUnbounded<Item>(options);
 
         _batchSize = batchSize;
         _expectedAccountCount = expectedAccountCount;
@@ -48,7 +93,12 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
             _accountsGauge.Set(incremented / (_expectedAccountCount / 100));
         }
 
-        Debug.Assert(_channel.Writer.TryWrite((account, value)));
+        Debug.Assert(_channel.Writer.TryWrite(new(account, value)));
+    }
+
+    public void VisitLeafStorage(in ValueKeccak account, in ValueKeccak storage, ReadOnlySpan<byte> value)
+    {
+        Debug.Assert(_channel.Writer.TryWrite(new(account, storage, value.ToArray())));
     }
 
     public void Finish() => _channel.Writer.Complete();
@@ -70,13 +120,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
             while (i < _batchSize && reader.TryRead(out var item))
             {
                 i++;
-
-                var addr = AsPaprika(item.Item1);
-                var v = item.Item2;
-
-                var codeHash = AsPaprika(v.CodeHash);
-                var storageRoot = AsPaprika(v.StorageRoot);
-                block.SetAccount(addr, new Account(v.Balance, v.Nonce, codeHash, storageRoot));
+                item.Apply(block);
             }
 
             // commit & finalize
@@ -96,16 +140,11 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
         return k;
     }
 
-    private static Keccak AsPaprika(Nethermind.Core.Crypto.ValueKeccak keccak)
+    private static Keccak AsPaprika(ValueKeccak keccak)
     {
         Unsafe.SkipInit(out Keccak k);
         keccak.Bytes.CopyTo(k.BytesAsSpan);
         return k;
-    }
-
-    public void VisitLeafStorage(in ValueKeccak account, in ValueKeccak storage, ReadOnlySpan<byte> value)
-    {
-        throw new NotImplementedException();
     }
 
     public void Dispose() => _meter.Dispose();

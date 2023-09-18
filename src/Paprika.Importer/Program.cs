@@ -78,8 +78,7 @@ await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds
     var visitor = new PaprikaCopyingVisitor(blockchain, 2_000, sepoliaAccountCount);
     Console.WriteLine("Starting...");
 
-    var copyingTask = Task.Run(() => visitor.Copy());
-    var visitorTask = Task.Run(() => trie.Accept(visitor, rootHash, true));
+    var copyingTask = visitor.Copy();
     reportingTask = Task.Run(() => AnsiConsole.Live(reporter.Renderer)
         .StartAsync(async ctx =>
         {
@@ -95,14 +94,7 @@ await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds
             ctx.Refresh();
         }));
 
-    // expected count
-    while (true)
-    {
-        var completed = await Task.WhenAny(Task.Delay(1_000), visitorTask);
-        if (completed == visitorTask)
-            break;
-    }
-
+    trie.Accept(visitor, rootHash, true);
     visitor.Finish();
 
     Console.WriteLine("Awaiting writes to finish...");

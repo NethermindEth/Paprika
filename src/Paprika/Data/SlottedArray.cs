@@ -545,7 +545,6 @@ public readonly ref struct SlottedArray
         /// </summary>
         public static ushort GetHash(in Key key)
         {
-            // TODO: ensure this is called once!
             unchecked
             {
                 // do not use type in the hash, it's compared separately
