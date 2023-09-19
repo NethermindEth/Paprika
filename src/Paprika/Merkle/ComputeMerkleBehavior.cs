@@ -147,6 +147,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             // read the existing account
             var key = Key.Account(accountAddress);
             using var accountOwner = commit.Get(key);
+
+            Debug.Assert(accountOwner.IsEmpty == false, "The account should exist");
+
             Account.ReadFrom(accountOwner.Span, out var account);
 
             // update it

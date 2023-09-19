@@ -190,8 +190,8 @@ public class DbTests
             var header = page.Header;
 
             header.BatchId.Should().BeGreaterThan(0);
-            header.PageType.Should().BeOneOf(PageType.Abandoned, PageType.Standard, PageType.MassiveStorageTree);
-            if (header.PageType is PageType.MassiveStorageTree or PageType.Abandoned)
+            header.PageType.Should().BeOneOf(PageType.Abandoned, PageType.Standard, PageType.PrefixPage);
+            if (header.PageType is PageType.PrefixPage or PageType.Abandoned)
             {
                 header.TreeLevel.Should().BeGreaterOrEqualTo(0);
             }

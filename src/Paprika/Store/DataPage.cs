@@ -44,15 +44,25 @@ public readonly unsafe struct DataPage : IPage
             return new DataPage(writable).Set(ctx);
         }
 
-        var map = new SlottedArray(Data.DataSpan);
-
-        // if written value is a storage cell, try to find the storage tree first
-        if (TryFindExistingStorageTreeForCellOf(map, ctx.Key, out var storageTreeAddress))
+        if (Header.PageType == PageType.PrefixPage && ctx.IsPrefixed == false)
         {
-            // tree exists, write in it
-            WriteStorageCellInStorageTrie(ctx, storageTreeAddress, map);
-            return _page;
+            if (TryExtractPrefixed(ctx.Key, out var prefixed))
+            {
+                // prefixes match, just amend the context
+                return Set(new SetContext(prefixed, ctx.Data, ctx.Batch, true));
+            }
+
+            // This page is the top of the prefix tree. Create a new parent page and push this page as a child.
+            // As prefixes are checked with EndsWith, no need to do truncation
+            var parent = ctx.Batch.GetNewPage(out _, true);
+            parent.Header.PageType = Header.PageType;
+
+            parent = new DataPage(parent).Set(ctx);
+            new DataPage(parent).Data.Buckets[ctx.Key.Path.FirstNibble] = ctx.Batch.GetAddress(this.AsPage());
+            return parent;
         }
+
+        var map = new SlottedArray(Data.DataSpan);
 
         var path = ctx.Key.Path;
         var isDelete = ctx.Data.IsEmpty;
@@ -81,15 +91,7 @@ public readonly unsafe struct DataPage : IPage
         }
 
         // the map is full, extraction must follow
-        var biggestNibbleStats = map.GetBiggestNibbleStats();
-        var biggestNibble = biggestNibbleStats.nibble;
-
-        // first test should that be a storage tree
-        if (TryExtractAsStorageTree(biggestNibbleStats, ctx, map))
-        {
-            // storage cells extracted, set the value now
-            return Set(ctx);
-        }
+        var biggestNibble = map.GetBiggestNibble();
 
         // try get the child page
         ref var address = ref Data.Buckets[biggestNibble];
@@ -97,7 +99,13 @@ public readonly unsafe struct DataPage : IPage
 
         if (address.IsNull)
         {
-            // there is no child page, create one
+            // there is no child page, create one. First try to build a prefix
+            if (TryExtractAsPrefixTree(biggestNibble, ctx, map, out address))
+            {
+                // the page has been extracted, retry set
+                return Set(ctx);
+            }
+
             child = ctx.Batch.GetNewPage(out Data.Buckets[biggestNibble], true);
             child.Header.TreeLevel = (byte)(Header.TreeLevel + 1);
             child.Header.PageType = Header.PageType;
@@ -150,20 +158,29 @@ public readonly unsafe struct DataPage : IPage
         private const int Size = Page.PageSize - PageHeader.Size;
 
         public const int BucketCount = 16;
+        private const int BucketSize = BucketCount * DbAddress.Size;
+
+        private const int PrefixSizeLongAligned = 40;
+        private const int PrefixSize = NibblePath.FullKeccakByteLength > PrefixSizeLongAligned
+            ? NibblePath.FullKeccakByteLength
+            : PrefixSizeLongAligned;
 
         /// <summary>
         /// The size of the raw byte data held in this page. Must be long aligned.
         /// </summary>
-        private const int DataSize = Size - BucketCount * DbAddress.Size;
+        private const int DataSize = Size - BucketSize - PrefixSize;
 
         private const int DataOffset = Size - DataSize;
-
         /// <summary>
         /// The first field of buckets.
         /// </summary>
         [FieldOffset(0)] private DbAddress Bucket;
 
         public Span<DbAddress> Buckets => MemoryMarshal.CreateSpan(ref Bucket, BucketCount);
+
+        [FieldOffset(BucketSize)]
+        private byte PrefixStart;
+        public Span<byte> AccountPrefix => MemoryMarshal.CreateSpan(ref PrefixStart, PrefixSize);
 
         /// <summary>
         /// The first item of map of frames to allow ref to it.
@@ -176,19 +193,45 @@ public readonly unsafe struct DataPage : IPage
         public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
     }
 
-    public bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
+    /// <summary>
+    /// Tries to match and extract the prefixed key for <see cref="PageType.PrefixPage"/>.
+    /// </summary>
+    private bool TryExtractPrefixed(in Key key, out Key prefixed)
     {
+        // This is a prefixed page and the key has the storage path.
+        // This means, that it didn't have it's prefix checked & extracted.
+        NibblePath.ReadFrom(Data.AccountPrefix, out var accountPrefix);
+
+        // If prefix is different, fail
+        if (accountPrefix.EndsWith(key.Path) == false)
+        {
+            prefixed = default;
+            return false;
+        }
+
+        // prefix is right
+        prefixed = Key.Raw(key.StoragePath, key.Type, NibblePath.Empty);
+        return true;
+    }
+
+    public bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result) =>
+        TryGet(key, false, batch, out result);
+
+    private bool TryGet(Key key, bool isPrefixed, IPageResolver batch, out ReadOnlySpan<byte> result)
+    {
+        if (Header.PageType == PageType.PrefixPage && !isPrefixed)
+        {
+            if (TryExtractPrefixed(key, out var prefixed) == false)
+            {
+                result = default;
+                return false;
+            }
+
+            return TryGet(prefixed, true, batch, out result);
+        }
+
         // read in-page
         var map = new SlottedArray(Data.DataSpan);
-
-        // try first storage tree
-        if (TryFindExistingStorageTreeForCellOf(map, key, out var storageTreeAddress))
-        {
-            var storageTree = new DataPage(batch.GetAt(storageTreeAddress));
-            var inTreeAddress = BuildStorageTreeKey(key);
-
-            return storageTree.TryGet(inTreeAddress, batch, out result);
-        }
 
         // try regular map
         if (map.TryGet(key, out result))
@@ -205,7 +248,7 @@ public readonly unsafe struct DataPage : IPage
             // non-null page jump, follow it!
             if (bucket.IsNull == false)
             {
-                return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), batch, out result);
+                return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), isPrefixed, batch, out result);
             }
         }
 
@@ -233,131 +276,49 @@ public readonly unsafe struct DataPage : IPage
             Payload.BucketCount - emptyBuckets, new SlottedArray(Data.DataSpan).Count);
     }
 
-    private static bool TryFindExistingStorageTreeForCellOf(in SlottedArray map, in Key key,
-        out DbAddress storageTreeAddress)
+    private static bool TryExtractAsPrefixTree(byte nibble, in SetContext ctx, in SlottedArray map, out DbAddress address)
     {
-        if (key.Type != DataType.StorageCell ||
-            (key.Type != DataType.Merkle && key.StoragePath.IsEmpty))
-        {
-            storageTreeAddress = default;
-            return false;
-        }
-
-        // proceed only if it's a StorageCell or a Merkle for Storage
-        var storageTreeRootKey = Key.StorageTreeRootPageAddress(key.Path);
-        if (map.TryGet(storageTreeRootKey, out var rawPageAddress))
-        {
-            storageTreeAddress = DbAddress.Read(rawPageAddress);
-            return true;
-        }
-
-        storageTreeAddress = default;
-        return false;
-    }
-
-    private static bool TryExtractAsStorageTree((byte nibble, double storageCellPercentageInPage) biggestNibbleStats,
-        in SetContext ctx, in SlottedArray map)
-    {
-        // A prerequisite to plan a massive storage tree is to have at least 90% of the page occupied by a single nibble
-        // storage cells. If then they share the same key, we're ready to extract
-        var hasEnoughOfStorageCells = biggestNibbleStats.storageCellPercentageInPage > 0.9;
-
-        if (hasEnoughOfStorageCells == false)
-            return false;
-
-        var nibble = biggestNibbleStats.nibble;
-
         // required as enumerator destroys paths when enumeration moves to the next value
         Span<byte> accountPathBytes = stackalloc byte[ctx.Key.Path.MaxByteLength];
-        NibblePath accountPath = default;
+        NibblePath accountPath = NibblePath.Empty;
 
         // assert that all StorageCells have the same prefix
         foreach (var item in map.EnumerateNibble(nibble))
         {
-            if (item.Type == DataType.StorageCell)
+            if (accountPath.Equals(NibblePath.Empty))
             {
-                if (accountPath.Equals(NibblePath.Empty))
-                {
-                    NibblePath.ReadFrom(item.Key.Path.WriteTo(accountPathBytes), out accountPath);
-                }
-                else
-                {
-                    if (item.Key.Path.Equals(accountPath) == false)
-                    {
-                        // If there's at least one item that has a different key, it won't be a massive storage tree.
-                        return false;
-                    }
-                }
+                // deep copy
+                NibblePath.ReadFrom(item.Key.Path.WriteTo(accountPathBytes), out accountPath);
+            }
+            else if (item.Key.Path.Equals(accountPath) == false)
+            {
+                // If there's at least one item that has a different key, it will be a regular page
+                address = default;
+                return false;
             }
         }
 
-        var storage = ctx.Batch.GetNewPage(out _, true);
+        var prefixPage = ctx.Batch.GetNewPage(out address, true);
 
         // this is the top page of the massive storage tree
-        storage.Header.TreeLevel = 0;
-        storage.Header.PageType = PageType.MassiveStorageTree;
+        prefixPage.Header.TreeLevel = 0;
+        prefixPage.Header.PageType = PageType.PrefixPage;
 
-        var dataPage = new DataPage(storage);
+        var dataPage = new DataPage(prefixPage);
+
+        // store prefix
+        accountPath.WriteTo(dataPage.Data.AccountPrefix);
 
         foreach (var item in map.EnumerateNibble(nibble))
         {
-            // no need to check whether the path is the same because it was checked above.
-            if (item.Type == DataType.StorageCell)
-            {
-                // it's ok to use item.Key, the enumerator does not changes the additional key bytes
-                var key = Key.StorageTreeStorageCell(item.Key);
+            // Extract the prefix and store items under their raw keys of storage.
+            var key = Key.Raw(item.Key.StoragePath, item.Type, NibblePath.Empty);
+            dataPage = new DataPage(dataPage.Set(new SetContext(key, item.RawData, ctx.Batch)));
 
-                dataPage = new DataPage(dataPage.Set(new SetContext(key, item.RawData,
-                    ctx.Batch)));
-
-                // fast delete by enumerator item
-                map.Delete(item);
-            }
-        }
-
-        // storage cells moved, plant the trie
-        var storageTreeAddress = ctx.Batch.GetAddress(dataPage.AsPage());
-        Span<byte> span = stackalloc byte[4];
-        storageTreeAddress.Write(span);
-        if (map.TrySet(Key.StorageTreeRootPageAddress(accountPath), span) == false)
-        {
-            throw new Exception("Critical error. Map should have been cleaned and ready to accept the write");
+            // fast delete by enumerator item
+            map.Delete(item);
         }
 
         return true;
-    }
-
-    private static void WriteStorageCellInStorageTrie(SetContext ctx,
-        DbAddress storageTreeRootPageAddress, in SlottedArray map)
-    {
-        var storageTree = ctx.Batch.GetAt(storageTreeRootPageAddress);
-
-        // build a new key, based just on the storage key as the root is addressed by the account address
-
-        var inTreeAddress = BuildStorageTreeKey(ctx.Key);
-
-        var updatedStorageTree =
-            new DataPage(storageTree).Set(new SetContext(inTreeAddress, ctx.Data, ctx.Batch));
-
-        if (updatedStorageTree.Raw != storageTree.Raw)
-        {
-            // the tree was COWed, need to write back in place
-            Span<byte> update = stackalloc byte[4];
-            ctx.Batch.GetAddress(updatedStorageTree).Write(update);
-            if (map.TrySet(Key.StorageTreeRootPageAddress(ctx.Key.Path), update) == false)
-            {
-                throw new Exception("Could not update the storage root. " +
-                                    "It should always be possible as tge previous one is existing");
-            }
-        }
-    }
-
-    private static Key BuildStorageTreeKey(in Key key)
-    {
-        Debug.Assert(key.Type == DataType.StorageCell || key.Type == DataType.Merkle);
-
-        return key.Type == DataType.StorageCell
-            ? Key.StorageTreeStorageCell(key)
-            : Key.Merkle(key.StoragePath);
     }
 }

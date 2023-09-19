@@ -17,21 +17,11 @@ public enum DataType : byte
     StorageCell = 1,
 
     /// <summary>
-    /// [key, 2]-> the DbAddress of the root page of the storage trie,
-    /// </summary>
-    StorageTreeRootPageAddress = 2,
-
-    /// <summary>
-    /// [storageCellIndex, 3]-> the StorageCell index, without the prefix of the account
-    /// </summary>
-    StorageTreeStorageCell = 3,
-
-    /// <summary>
     /// As enums cannot be partial, this is for storing the Merkle.
     /// </summary>
-    Merkle = 4,
+    Merkle = 2,
 
-    // 5, 6 - available
+    // 3, 4, 5, 6 - available
 
     /// <summary>
     /// Special type for <see cref="SlottedArray"/>. 

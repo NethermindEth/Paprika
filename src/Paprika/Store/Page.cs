@@ -74,7 +74,7 @@ public enum PageType : byte
     /// <summary>
     /// The page is a part of the tree use for massive storage accounts.
     /// </summary>
-    MassiveStorageTree = 2,
+    PrefixPage = 2,
 
     Abandoned = 3
 }
