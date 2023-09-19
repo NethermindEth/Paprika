@@ -426,7 +426,7 @@ public static class Program
     private static Keccak GetBigAccountKey()
     {
         Keccak key = default;
-        var random = new Random(17);
+        var random = new Random(RandomSeed + 1);
         random.NextBytes(key.BytesAsSpan);
         return key;
     }
