@@ -88,6 +88,48 @@ public static class TestExtensions
         return new DataPage(page.Set(new SetContext(k, data, batch)));
     }
 
+    public static DataPage SetMerkle(this DataPage page, in Keccak key, ReadOnlySpan<byte> data, IBatchContext batch)
+    {
+        var k = Key.Merkle(NibblePath.FromKey(key));
+        return new DataPage(page.Set(new SetContext(k, data, batch)));
+    }
+
+    public static DataPage SetMerkle(this DataPage page, in Keccak key, in NibblePath storagePath, ReadOnlySpan<byte> data, IBatchContext batch)
+    {
+        var k = Key.Raw(NibblePath.FromKey(key), DataType.Merkle, storagePath);
+        return new DataPage(page.Set(new SetContext(k, data, batch)));
+    }
+
+    public static void ShouldHaveMerkle(this DataPage read, in Keccak key, ReadOnlySpan<byte> expected,
+        IReadOnlyBatchContext batch, int? iteration = null)
+    {
+        var account = Key.Merkle(NibblePath.FromKey(key));
+        var because = $"Merkle for {account.Path.ToString()} should exist.";
+        if (iteration != null)
+        {
+            because += $" Iteration: {iteration}";
+        }
+
+        read.TryGet(account, batch, out var value).Should().BeTrue(because);
+        value.SequenceEqual(expected).Should()
+            .BeTrue($"Expected value is {expected.ToHexString(false)} while actual is {value.ToHexString(false)}");
+    }
+
+    public static void ShouldHaveMerkle(this DataPage read, in Keccak key, NibblePath storagePath, ReadOnlySpan<byte> expected,
+        IReadOnlyBatchContext batch, int? iteration = null)
+    {
+        var k = Key.Raw(NibblePath.FromKey(key), DataType.Merkle, storagePath);
+        var because = $"Merkle for {k.ToString()} should exist.";
+        if (iteration != null)
+        {
+            because += $" Iteration: {iteration}";
+        }
+
+        read.TryGet(k, batch, out var value).Should().BeTrue(because);
+        value.SequenceEqual(expected).Should()
+            .BeTrue($"Expected value is {expected.ToHexString(false)} while actual is {value.ToHexString(false)}");
+    }
+
     public static void ShouldHaveAccount(this DataPage read, in Keccak key, ReadOnlySpan<byte> expected,
         IReadOnlyBatchContext batch, int? iteration = null)
     {

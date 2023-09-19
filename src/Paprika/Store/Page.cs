@@ -55,14 +55,9 @@ public struct PageHeader
     [FieldOffset(4)] public byte PaprikaVersion;
 
     /// <summary>
-    /// The level of the tree the page represents.
-    /// </summary>
-    [FieldOffset(5)] public byte TreeLevel;
-
-    /// <summary>
     /// The type of the page.
     /// </summary>
-    [FieldOffset(6)] public PageType PageType;
+    [FieldOffset(5)] public PageType PageType;
 }
 
 public enum PageType : byte

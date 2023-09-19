@@ -52,13 +52,20 @@ public readonly unsafe struct DataPage : IPage
                 return Set(new SetContext(prefixed, ctx.Data, ctx.Batch, true));
             }
 
-            // This page is the top of the prefix tree. Create a new parent page and push this page as a child.
+            // This page is the top of the prefix tree.
+            // Create a new regular parent page and push this page as a child.
             // As prefixes are checked with EndsWith, no need to do truncation
             var parent = ctx.Batch.GetNewPage(out _, true);
-            parent.Header.PageType = Header.PageType;
-
+            parent.Header.PageType = PageType.Standard;
             parent = new DataPage(parent).Set(ctx);
-            new DataPage(parent).Data.Buckets[ctx.Key.Path.FirstNibble] = ctx.Batch.GetAddress(this.AsPage());
+
+            NibblePath.ReadFrom(Data.AccountPrefix, out var prefix);
+
+            // cut off all the nibbles to align with the length of the current context;
+            var sliced = prefix.SliceFrom(prefix.Length - ctx.Key.Path.Length);
+
+            // point to the first nibble of the sliced path as a child
+            new DataPage(parent).Data.Buckets[sliced.FirstNibble] = ctx.Batch.GetAddress(this.AsPage());
             return parent;
         }
 
@@ -107,7 +114,6 @@ public readonly unsafe struct DataPage : IPage
             }
 
             child = ctx.Batch.GetNewPage(out Data.Buckets[biggestNibble], true);
-            child.Header.TreeLevel = (byte)(Header.TreeLevel + 1);
             child.Header.PageType = Header.PageType;
         }
         else
@@ -301,7 +307,6 @@ public readonly unsafe struct DataPage : IPage
         var prefixPage = ctx.Batch.GetNewPage(out address, true);
 
         // this is the top page of the massive storage tree
-        prefixPage.Header.TreeLevel = 0;
         prefixPage.Header.PageType = PageType.PrefixPage;
 
         var dataPage = new DataPage(prefixPage);
@@ -313,7 +318,7 @@ public readonly unsafe struct DataPage : IPage
         {
             // Extract the prefix and store items under their raw keys of storage.
             var key = Key.Raw(item.Key.StoragePath, item.Type, NibblePath.Empty);
-            dataPage = new DataPage(dataPage.Set(new SetContext(key, item.RawData, ctx.Batch)));
+            dataPage = new DataPage(dataPage.Set(new SetContext(key, item.RawData, ctx.Batch, true)));
 
             // fast delete by enumerator item
             map.Delete(item);

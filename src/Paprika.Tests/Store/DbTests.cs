@@ -191,16 +191,6 @@ public class DbTests
 
             header.BatchId.Should().BeGreaterThan(0);
             header.PageType.Should().BeOneOf(PageType.Abandoned, PageType.Standard, PageType.PrefixPage);
-            if (header.PageType is PageType.PrefixPage or PageType.Abandoned)
-            {
-                header.TreeLevel.Should().BeGreaterOrEqualTo(0);
-            }
-            else
-            {
-                // any non-root data should be bigger than 0
-                header.TreeLevel.Should().BeGreaterThan(0);
-            }
-
             header.PaprikaVersion.Should().Be(1);
         }
     }
