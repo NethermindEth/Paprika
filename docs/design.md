@@ -350,7 +350,7 @@ To address this `Merkle` is implemented as a pre-commit hook. This hook is run w
 1. Visit all the accounts that were not accessed in 2., but were remembered in 1, meaning Accounts that had their storage modified but no changes to codehash, balance, nonce. For each key:
    1. walk through the MPT of Account State to create/amend Trie nodes
 1. Calculate the Root Hash
-   1. a. for each of accounts that had their storage modified (from 1.),
+   1. for each of accounts that had their storage modified (from 1.),
       1. calculate the storage root hash
       1. store it in the account (decode account, encode, set)
    1. calculate the root hash of the State. **Parallel**
