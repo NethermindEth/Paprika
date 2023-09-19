@@ -76,7 +76,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
         _blockchain = blockchain;
 
         var options = new UnboundedChannelOptions
-        { SingleReader = true, SingleWriter = true, AllowSynchronousContinuations = false };
+        { SingleReader = true, SingleWriter = false, AllowSynchronousContinuations = false };
         _channel = Channel.CreateUnbounded<Item>(options);
 
         _batchSize = batchSize;
@@ -93,12 +93,12 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
             _accountsGauge.Set(incremented / (_expectedAccountCount / 100));
         }
 
-        Debug.Assert(_channel.Writer.TryWrite(new(account, value)));
+        _channel.Writer.TryWrite(new(account, value));
     }
 
     public void VisitLeafStorage(in ValueKeccak account, in ValueKeccak storage, ReadOnlySpan<byte> value)
     {
-        Debug.Assert(_channel.Writer.TryWrite(new(account, storage, value.ToArray())));
+        _channel.Writer.TryWrite(new(account, storage, value.ToArray()));
     }
 
     public void Finish() => _channel.Writer.Complete();
@@ -109,6 +109,9 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
         uint number = 1;
 
         var reader = _channel.Reader;
+
+        var finalization = new Queue<Keccak>();
+        const int finalizationDepth = 32;
 
         while (await reader.WaitToReadAsync())
         {
@@ -125,11 +128,21 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 
             // commit & finalize
             block.Commit();
-            _blockchain.Finalize(child);
+
+            finalization.Enqueue(child);
+            if (finalization.Count == finalizationDepth)
+            {
+                _blockchain.Finalize(finalization.Dequeue());
+            }
 
             // update
             number++;
             parent = child;
+        }
+
+        while (finalization.TryDequeue(out var keccak))
+        {
+            _blockchain.Finalize(keccak);
         }
     }
 

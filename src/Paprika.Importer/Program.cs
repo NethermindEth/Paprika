@@ -69,13 +69,15 @@ var spectre = new CancellationTokenSource();
 
 var sw = Stopwatch.StartNew();
 
-using var db = PagedDb.MemoryMappedDb(size, 2, dataPath, false);
+// using var db = PagedDb.MemoryMappedDb(size, 2, dataPath, false);
+using var db = PagedDb.NativeMemoryDb(size, 2);
+
 using var preCommit = new ComputeMerkleBehavior(true, 2, 1);
 await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 1000, () => reporter.Observe()))
 {
     const int sepoliaAccountCount = 16146399;
 
-    var visitor = new PaprikaCopyingVisitor(blockchain, 2_000, sepoliaAccountCount);
+    var visitor = new PaprikaCopyingVisitor(blockchain, 10_000, sepoliaAccountCount);
     Console.WriteLine("Starting...");
 
     var copyingTask = visitor.Copy();
