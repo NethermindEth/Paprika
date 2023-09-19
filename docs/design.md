@@ -102,6 +102,7 @@ There are different types of pages:
 1. `RootPage`
 1. `AbandonedPage`
 1. `DataPage`
+1. `PrefixPage` as a subtype of the `DataPage`
 
 ###### Root page
 
@@ -125,6 +126,14 @@ The biggest caveat is where to store the `AbandonedPage`. The same mechanism is 
 ###### Data Page
 
 A data page is responsible for both storing data in-page and providing a fanout for lower levels of the tree. The data page tries to store as much data as possible inline using the [SlottedArray component](#SlottedArray). If there's no more space, left, it selects a bucket, defined by a nibble. The one with the highest count of items is flushed as a separate page and a pointer to that page is stored in the bucket of the original `DataPage`. This is a bit different approach from using page splits. Instead of splitting the page and updating the parent, the page can flush down some of its data, leaving more space for the new. A single `PageData` can hold roughly 50-100 entries. An entry, again, is described in a `SlottedArray`.
+
+###### PrefixPage
+
+For contracts with a huge number of storage cells, a special kind of `DataPage` is used to extract shared account prefixes. It's called `PageType.PrefixPage`. The prefix pages are a part of the tree, but beside the `DataPage` logic they assert and truncate the shared prefix if needed. They use an additional to check whether the inserted or retrieved key is actually aligned with the stored prefix. If this is not the case, for queries, they return a `Not Found` result. For inserts, they push down themselves by one level and create a regular page in their place.
+
+It's worth to mention that the prefix is checked as a suffix, it requires no amendments whatsoever and can be used as is to check whether the key matches it or not. This is an important property as if pushing down the whole massive storage tree had resulted in its full recalculation, it would have been a terrible design with a large overhead.
+
+Beside prefix extraction and key alteration, the `PrefixPage` behaves as a usual `DataPage`.
 
 ##### Page design in C\#
 
@@ -248,8 +257,7 @@ The `SlottedArray` component is responsible for storing data in-page. It does it
 
 1. `Account` - identifies `(balance, nonce, codeHash, storageRootHash)` of a given account. The entry type is aligned with `Account` of Ethereum. It uses a more efficient encoding though that requires to be translated to RLP later.
 1. `StorageCell` - identifies that the given entry is a storage cell that is kept in-page, alongside other account attributes. To make it unique, the storage cell address is stored as the first 32 bytes of its raw data. It is used for comparisons whenever needed.
-1. `StorageTreeRootPageAddress` - the address of the page that holds the root page of the storage tree. It's optional as for accounts with a small number of storage slots occupied, they will be held in-page. Only if an account's storage becomes really large, it is flushed as a separate subtree.
-1. `StorageTreeStorageCell` - the storage cell that is kept under a tree with the root of `StorageTreeRootPageAddress`. As the storage cell belongs to a single account (it's in its storage tree), no need to prefix it with the account address. The storage cell address will be used as a nibble path.
+1. `Merkle` - identifies a Merkle entry
 
 For example:
 
@@ -331,7 +339,23 @@ The `SlottedArray` can wrap an arbitrary span of memory so it can be used for an
 
 From Ethereum's point of view, any storage mechanism needs to be able to calculate the `StateRootHash`. This hash allows us to verify whether the block state is valid. How it is done and what is used underneath is not important as long as the store mechanism can provide the answer to the ultimate question: _what is the StateRootHash of the given block?_
 
-The Merkle construct is in the making and it will be updated later.
+To address this `Merkle` is implemented as a pre-commit hook. This hook is run when a block is committed to the blockchain. After all, from the point of execution there's no reason to run it before. Merkleization of the tree is split into the following steps executed sequentially:
+
+1. Visit all Storage operations (SSTORE). For each key:
+   1. remember `Account` that `Storage`` belongs to
+   1. walk through the MPT of Account Storage to create/amend Trie nodes. This part is marking paths as dirty
+1. Visit all State operations. For each key:
+   1. check if it was one of the Storage operations. If yes, remove it from the set above
+   1. walk through the MPT of Account State to create/amend Trie nodes
+1. Visit all the accounts that were not accessed in 2., but were remembered in 1, meaning Accounts that had their storage modified but no changes to codehash, balance, nonce. For each key:
+   1. walk through the MPT of Account State to create/amend Trie nodes
+1. Calculate the Root Hash
+   1. a. for each of accounts that had their storage modified (from 1.),
+      1. calculate the storage root hash
+      1. store it in the account (decode account, encode, set)
+   1. calculate the root hash of the State. **Parallel**
+
+It's worth to mention that even though `RLP` of branches is not stored in the database, its transient form is memoized in memory. This greatly improves the overall performance of Merkleization as reduced the number of fetched data from the database (no calls for children). Of course it requires cache invalidation which is done whenever marking the paths is done.
 
 ## Examples
 
@@ -363,44 +387,6 @@ A few remarks:
 1. `UInt256` is always encoded with `BigEndian`, followed by the truncation of leading zeroes and prefixed with the number of bytes used (the prefix is 1 byte)
 1. The navigation is always path-based! Keccaks are stored as described above.
 1. For contracts with a small number of storage cells, no separate tree is created, and storage cell values are stored alongside the other data.
-
-### A contract with a huge storage
-
-Let's consider another contract `0xCD`, deployed but wit ha lot of storage cells (thousands to millions)
-
-1. address: `0xCD`
-1. balance: `0123`
-1. nonce: `02`
-1. code hash: `0xFEDCBA`
-1. storage cells:
-   1. `keccak1` -> `0x00000001`
-   1. `keccak2` -> `0x00000002`
-   1. more...
-   1. `keccakN` -> `0x000FFFFF` (one million)
-
-Which would be stored on one page as:
-
-| Key: Path | Key: Type                    | Key: Additional Key | Byte encoded value                                          |
-| --------- | ---------------------------- | ------------------- | ----------------------------------------------------------- |
-| `0xCD`    | `Account`                    | `_`                 | (`balance` and `nonce` and `codeHash` and `storage root`)   |
-| `0xCD`    | `StorageTreeRootPageAddress` | `_`                 | `02 12 34` (var length big-endian encoding of page `@1234`) |
-
-And on the page under address `@1234`, which is a separate storage trie created for this huge account
-
-| Key: Path | Key: Type                | Key: Additional Key | Byte encoded value             |
-| --------- | ------------------------ | ------------------- | ------------------------------ |
-| `keccak1` | `StorageTreeStorageCell` | `_`                 | `01 01` (`0x00000001` encoded) |
-| `keccak2` | `StorageTreeStorageCell` | `_`                 | `01 02` (`0x00000002` encoded) |
-| `keccak3` | `StorageTreeStorageCell` | `_`                 | `01 03` (`0x00000003` encoded) |
-| ...       | `StorageTreeStorageCell` | `_`                 | `...`                          |
-
-A few remarks:
-
-1. For contracts with a large number of `StorageCells` a separate tree is created, so that the shared prefix (account address) is stored only in the entry with `StorageTreeRootPageAddress`
-1. A separate type `StorageTreeStorageCell` is used to represent an entry in this massive storage trie.
-1. An entry of type `StorageTreeRootPageAddress` provides a page address where to jump to find the storage cells of the given account
-1. `StorageTreeStorageCells` create a usual Paprika trie, with the extraction of the nibble with the biggest count if needed as a separate page
-1. All the entries are stored in [SlottedArray](#SlottedArray), where a small hash `ushort` is used to represent the slot
 
 ## Learning materials
 
