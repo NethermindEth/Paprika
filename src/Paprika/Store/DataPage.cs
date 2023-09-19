@@ -285,7 +285,7 @@ public readonly unsafe struct DataPage : IPage
     private static bool TryExtractAsPrefixTree(byte nibble, in SetContext ctx, in SlottedArray map, out DbAddress address)
     {
         // required as enumerator destroys paths when enumeration moves to the next value
-        Span<byte> accountPathBytes = stackalloc byte[ctx.Key.Path.MaxByteLength];
+        Span<byte> accountPathBytes = stackalloc byte[NibblePath.FullKeccakByteLength];
         NibblePath accountPath = NibblePath.Empty;
 
         // assert that all StorageCells have the same prefix
