@@ -34,7 +34,7 @@ public static class Program
         new(100, 1000, 1 * Gb, false, TimeSpan.FromSeconds(5), false, false);
 
     private static readonly Case InMemorySmall =
-        new(10_000, 1000, 11 * Gb, false, TimeSpan.FromSeconds(5), false, false);
+        new(10_000, 1000, 11 * Gb, false, TimeSpan.FromSeconds(5), false, true);
     private static readonly Case InMemoryMedium =
         new(50_000, 1000, 32 * Gb, false, TimeSpan.FromSeconds(5), false, false);
     private static readonly Case
