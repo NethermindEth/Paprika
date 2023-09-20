@@ -113,6 +113,7 @@ public readonly unsafe struct DataPage : IPage
                 return Set(ctx);
             }
 
+            // create child as the same type as the parent
             child = ctx.Batch.GetNewPage(out Data.Buckets[biggestNibble], true);
             child.Header.PageType = Header.PageType;
         }
@@ -127,7 +128,7 @@ public readonly unsafe struct DataPage : IPage
         foreach (var item in map.EnumerateNibble(biggestNibble))
         {
             var key = item.Key.SliceFrom(NibbleCount);
-            var set = new SetContext(key, item.RawData, ctx.Batch);
+            var set = new SetContext(key, item.RawData, ctx.Batch, ctx.IsPrefixed);
 
             dataPage = new DataPage(dataPage.Set(set));
 

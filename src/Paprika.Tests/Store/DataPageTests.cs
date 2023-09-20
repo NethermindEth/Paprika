@@ -299,7 +299,7 @@ public class DataPageTests : BasePageTests
     }
 
     [Test]
-    public void PrefixTreeExtraction()
+    public void Small_prefix_tree_with_regular()
     {
         var page = AllocPage();
         page.Clear();
@@ -346,6 +346,45 @@ public class DataPageTests : BasePageTests
         for (var i = 0; i < ushort.MaxValue; i++)
         {
             dataPage.ShouldHaveAccount(GetKey(i), GetValue(i), batch);
+        }
+    }
+
+    [Test]
+    public void Massive_prefix_tree()
+    {
+        var page = AllocPage();
+        page.Clear();
+
+        var batch = NewBatch(BatchId);
+        var dataPage = new DataPage(page);
+
+        const int count = 256;
+
+        var account = Keccak.EmptyTreeHash;
+
+        dataPage = dataPage
+            .SetAccount(account, GetValue(0), batch)
+            .SetMerkle(account, GetValue(1), batch);
+
+        for (var i = 0; i < count; i++)
+        {
+            var storage = GetKey(i);
+
+            dataPage = dataPage
+                .SetStorage(account, storage, GetValue(i), batch)
+                .SetMerkle(account, NibblePath.FromKey(storage), GetValue(i), batch);
+        }
+
+        // assert
+        dataPage.ShouldHaveAccount(account, GetValue(0), batch);
+        dataPage.ShouldHaveMerkle(account, GetValue(1), batch);
+
+        for (var i = 0; i < count; i++)
+        {
+            var storage = GetKey(i);
+
+            dataPage.ShouldHaveStorage(account, storage, GetValue(i), batch);
+            dataPage.ShouldHaveMerkle(account, NibblePath.FromKey(storage), GetValue(i), batch);
         }
     }
 }
