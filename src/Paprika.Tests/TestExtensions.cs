@@ -58,7 +58,8 @@ public static class TestExtensions
 
         if (value.SequenceEqual(expected) == false)
         {
-            throw new InvalidOperationException($"Invalid storage value for account number {key.ToString()} @ {storage.ToString()}!");
+            throw new InvalidOperationException($"Invalid storage value for account number {key.ToString()} @ {storage.ToString()}! " +
+                                                $"Expected was '{expected.ToHexString(false)}' while actual '{value.ToHexString(false)}'");
         }
     }
 
