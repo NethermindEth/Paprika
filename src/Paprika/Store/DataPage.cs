@@ -59,13 +59,13 @@ public readonly unsafe struct DataPage : IPage
             parent.Header.PageType = PageType.Standard;
             parent = new DataPage(parent).Set(ctx);
 
+            // read, extract and slice the first nibble
             NibblePath.ReadFrom(Data.AccountPrefix, out var prefix);
-
-            // cut off all the nibbles to align with the length of the current context;
-            var sliced = prefix.SliceFrom(prefix.Length - ctx.Key.Path.Length);
+            var firstNibble = prefix.FirstNibble;
+            prefix.SliceFrom(1).WriteTo(Data.AccountPrefix);
 
             // point to the first nibble of the sliced path as a child
-            new DataPage(parent).Data.Buckets[sliced.FirstNibble] = ctx.Batch.GetAddress(this.AsPage());
+            new DataPage(parent).Data.Buckets[firstNibble] = ctx.Batch.GetAddress(this.AsPage());
             return parent;
         }
 
@@ -128,7 +128,8 @@ public readonly unsafe struct DataPage : IPage
         foreach (var item in map.EnumerateNibble(biggestNibble))
         {
             var key = item.Key.SliceFrom(NibbleCount);
-            var set = new SetContext(key, item.RawData, ctx.Batch, ctx.IsPrefixed);
+            var isPrefixed = Header.PageType == PageType.PrefixPage;
+            var set = new SetContext(key, item.RawData, ctx.Batch, isPrefixed);
 
             dataPage = new DataPage(dataPage.Set(set));
 
@@ -168,6 +169,7 @@ public readonly unsafe struct DataPage : IPage
         private const int BucketSize = BucketCount * DbAddress.Size;
 
         private const int PrefixSizeLongAligned = 40;
+
         private const int PrefixSize = NibblePath.FullKeccakByteLength > PrefixSizeLongAligned
             ? NibblePath.FullKeccakByteLength
             : PrefixSizeLongAligned;
@@ -178,6 +180,7 @@ public readonly unsafe struct DataPage : IPage
         private const int DataSize = Size - BucketSize - PrefixSize;
 
         private const int DataOffset = Size - DataSize;
+
         /// <summary>
         /// The first field of buckets.
         /// </summary>
@@ -185,8 +188,7 @@ public readonly unsafe struct DataPage : IPage
 
         public Span<DbAddress> Buckets => MemoryMarshal.CreateSpan(ref Bucket, BucketCount);
 
-        [FieldOffset(BucketSize)]
-        private byte PrefixStart;
+        [FieldOffset(BucketSize)] private byte PrefixStart;
         public Span<byte> AccountPrefix => MemoryMarshal.CreateSpan(ref PrefixStart, PrefixSize);
 
         /// <summary>
@@ -210,7 +212,7 @@ public readonly unsafe struct DataPage : IPage
         NibblePath.ReadFrom(Data.AccountPrefix, out var accountPrefix);
 
         // If prefix is different, fail
-        if (accountPrefix.EndsWith(key.Path) == false)
+        if (accountPrefix.Equals(key.Path) == false)
         {
             prefixed = default;
             return false;
@@ -255,7 +257,8 @@ public readonly unsafe struct DataPage : IPage
             // non-null page jump, follow it!
             if (bucket.IsNull == false)
             {
-                return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), isPrefixed, batch, out result);
+                return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), isPrefixed, batch,
+                    out result);
             }
         }
 
@@ -283,11 +286,19 @@ public readonly unsafe struct DataPage : IPage
             Payload.BucketCount - emptyBuckets, new SlottedArray(Data.DataSpan).Count);
     }
 
-    private static bool TryExtractAsPrefixTree(byte nibble, in SetContext ctx, in SlottedArray map, out DbAddress address)
+    private static bool TryExtractAsPrefixTree(byte nibble, in SetContext ctx, in SlottedArray map,
+        out DbAddress address)
     {
+        if (ctx.IsPrefixed)
+        {
+            // if this is an already prefixed tree, don't prefix it again
+            address = default;
+            return false;
+        }
+
         // required as enumerator destroys paths when enumeration moves to the next value
         Span<byte> accountPathBytes = stackalloc byte[NibblePath.FullKeccakByteLength];
-        NibblePath accountPath = NibblePath.Empty;
+        var accountPath = NibblePath.Empty;
 
         // assert that all StorageCells have the same prefix
         foreach (var item in map.EnumerateNibble(nibble))
@@ -312,8 +323,8 @@ public readonly unsafe struct DataPage : IPage
 
         var dataPage = new DataPage(prefixPage);
 
-        // store prefix
-        accountPath.WriteTo(dataPage.Data.AccountPrefix);
+        // store prefix but truncated by one nibble as this is the nibble that is extracted
+        accountPath.SliceFrom(1).WriteTo(dataPage.Data.AccountPrefix);
 
         foreach (var item in map.EnumerateNibble(nibble))
         {

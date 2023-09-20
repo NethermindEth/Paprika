@@ -358,7 +358,7 @@ public class DataPageTests : BasePageTests
         var batch = NewBatch(BatchId);
         var dataPage = new DataPage(page);
 
-        const int count = 256;
+        const int count = 10_000;
 
         var account = Keccak.EmptyTreeHash;
 
@@ -369,10 +369,9 @@ public class DataPageTests : BasePageTests
         for (var i = 0; i < count; i++)
         {
             var storage = GetKey(i);
-
             dataPage = dataPage
                 .SetStorage(account, storage, GetValue(i), batch)
-                .SetMerkle(account, NibblePath.FromKey(storage), GetValue(i), batch);
+                .SetMerkle(account, GetMerkleKey(storage, i), GetValue(i), batch);
         }
 
         // assert
@@ -384,7 +383,14 @@ public class DataPageTests : BasePageTests
             var storage = GetKey(i);
 
             dataPage.ShouldHaveStorage(account, storage, GetValue(i), batch);
-            dataPage.ShouldHaveMerkle(account, NibblePath.FromKey(storage), GetValue(i), batch);
+            dataPage.ShouldHaveMerkle(account, GetMerkleKey(storage, i), GetValue(i), batch);
+        }
+
+        return;
+
+        static NibblePath GetMerkleKey(in Keccak storage, int i)
+        {
+            return NibblePath.FromKey(storage).SliceTo(Math.Min(i + 1, NibblePath.KeccakNibbleCount));
         }
     }
 }
