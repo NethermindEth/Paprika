@@ -51,7 +51,6 @@ public static class Program
     private const int RandomSeed = 17;
     private const long Gb = 1024 * 1024 * 1024L;
     private const int UseStorageEveryNAccounts = 10;
-    private const int BigStorageAccountSlotCount = 1_000_000;
 
     public static async Task Main(String[] args)
     {
@@ -206,9 +205,8 @@ public static class Program
 
                 if (config.UseBigStorageAccount)
                 {
-                    var index = i % BigStorageAccountSlotCount;
-                    var storageAddress = GetStorageAddress(index);
-                    var expectedStorageValue = GetBigAccountValue(index);
+                    var storageAddress = GetStorageAddress(i);
+                    var expectedStorageValue = GetBigAccountValue(i);
                     read.AssertStorageValue(bigStorageAccount, storageAddress, expectedStorageValue);
                 }
 
@@ -371,8 +369,7 @@ public static class Program
                         bigStorageAccountCreated = true;
                     }
 
-                    var index = counter % BigStorageAccountSlotCount;
-                    var storageAddress = GetStorageAddress(index);
+                    var storageAddress = GetStorageAddress(counter);
                     var storageValue = GetBigAccountValue(counter);
 
                     worldState.SetStorage(bigStorageAccount, storageAddress, storageValue);
