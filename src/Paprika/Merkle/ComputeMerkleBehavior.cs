@@ -480,7 +480,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         public ReadOnlySpanOwner<byte> Get(scoped in Key key) => _commit.Get(Build(key));
 
         public void Set(in Key key, in ReadOnlySpan<byte> payload) => _commit.Set(Build(key), in payload);
-        
+
         public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
             => _commit.Set(Build(key), payload0, payload1);
 
