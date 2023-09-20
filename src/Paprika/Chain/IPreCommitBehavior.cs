@@ -51,17 +51,7 @@ public interface ICommit
     /// <summary>
     /// Sets the value under the given key.
     /// </summary>
-    void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
-    {
-        var total = payload0.Length + payload1.Length;
-        var bytes = ArrayPool<byte>.Shared.Rent(total);
-        payload0.CopyTo(bytes);
-        payload1.CopyTo(bytes.AsSpan(payload0.Length));
-
-        Set(key, bytes.AsSpan(0, total));
-
-        ArrayPool<byte>.Shared.Return(bytes);
-    }
+    void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1);
 
     /// <summary>
     /// Visits the given <paramref name="type"/> of the changes in the given commit.
