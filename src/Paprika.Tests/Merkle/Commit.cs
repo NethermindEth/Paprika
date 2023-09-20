@@ -107,6 +107,11 @@ public class Commit : ICommit
         }
     }
 
+    void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
+    {
+        ((ICommit)this).Set(key, Concat(payload0, payload1));
+    }
+
     void ICommit.Visit(CommitAction action, TrieType type)
     {
         foreach (var (k, v) in _before)
@@ -126,6 +131,14 @@ public class Commit : ICommit
     }
 
     public IChildCommit GetChild() => new ChildCommit(this);
+
+    private static byte[] Concat(in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
+    {
+        var bytes = new byte[payload0.Length + payload1.Length];
+        payload0.CopyTo(bytes);
+        payload1.CopyTo(bytes.AsSpan(payload0.Length));
+        return bytes;
+    }
 
     class ChildCommit : IChildCommit
     {
@@ -149,6 +162,11 @@ public class Commit : ICommit
         public void Set(in Key key, in ReadOnlySpan<byte> payload)
         {
             _data[GetKey(key)] = payload.ToArray();
+        }
+
+        public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
+        {
+            _data[GetKey(key)] = Concat(payload0, payload1);
         }
 
         public void Commit()

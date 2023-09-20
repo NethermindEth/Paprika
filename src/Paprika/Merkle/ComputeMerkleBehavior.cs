@@ -478,6 +478,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         public void Set(in Key key, in ReadOnlySpan<byte> payload) => _commit.Set(Build(key), in payload);
 
+        public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
+            => _commit.Set(Build(key), payload0, payload1);
+
         /// <summary>
         /// Builds the <see cref="_keccak"/> aware key, treating the path as the path for the storage.
         /// </summary>
