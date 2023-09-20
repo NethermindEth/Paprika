@@ -233,8 +233,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private KeccakOrRlp EncodeBranch(Key key, ICommit commit, scoped in Node.Branch branch, TrieType trieType,
         ReadOnlySpan<byte> previousRlp, bool isOwnedByCommit)
     {
-        // run: for the state trie, only for the root and with all children set
-        var runStateRootInParallel = trieType == TrieType.State && key.Path.IsEmpty && branch.Children.AllSet;
+        // Run in parallel only for the root and with all children set
+        var runStateRootInParallel = key.Path.IsEmpty && branch.Children.AllSet;
 
         var memoize = ShouldMemoizeBranchKeccak(key.Path);
         var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
@@ -481,12 +481,42 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
             => _commit.Set(Build(key), payload0, payload1);
 
+        private Key Build(scoped in Key key) => Build(key, _keccak);
+
         /// <summary>
         /// Builds the <see cref="_keccak"/> aware key, treating the path as the path for the storage.
         /// </summary>
-        private Key Build(Key key) => Key.Raw(NibblePath.FromKey(_keccak), key.Type, key.Path);
+        private static Key Build(scoped in Key key, in Keccak keccak) =>
+            Key.Raw(NibblePath.FromKey(keccak), key.Type, key.Path);
 
         public void Visit(CommitAction action, TrieType type) => throw new Exception("Should not be called");
+
+        public IChildCommit GetChild() => new ChildCommit(_commit.GetChild(), _keccak);
+
+        private class ChildCommit : IChildCommit
+        {
+            private readonly IChildCommit _wrapped;
+            private readonly Keccak _keccak;
+
+            public ChildCommit(IChildCommit wrapped, Keccak keccak)
+            {
+                _wrapped = wrapped;
+                _keccak = keccak;
+            }
+
+            public void Dispose() => _wrapped.Dispose();
+
+            public void Commit() => _wrapped.Commit();
+
+            public ReadOnlySpanOwner<byte> Get(scoped in Key key) => _wrapped.Get(Build(key));
+
+            public void Set(in Key key, in ReadOnlySpan<byte> payload) => _wrapped.Set(Build(key), payload);
+
+            public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1) =>
+                _wrapped.Set(Build(key), payload0, payload1);
+
+            private Key Build(scoped in Key key) => PrefixingCommit.Build(key, _keccak);
+        }
     }
 
     private class StorageHandler
