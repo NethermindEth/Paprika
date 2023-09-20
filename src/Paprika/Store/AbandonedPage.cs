@@ -43,7 +43,6 @@ public readonly struct AbandonedPage : IPage
         // no more space, needs another next AbandonedPage
         var newPage = batch.GetNewPage(out var nextAddr, true);
 
-        newPage.Header.TreeLevel = 0;
         newPage.Header.PageType = PageType.Abandoned;
         newPage.Header.PaprikaVersion = PageHeader.CurrentVersion;
 

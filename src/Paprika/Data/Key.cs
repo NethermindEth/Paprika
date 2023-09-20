@@ -55,18 +55,6 @@ public readonly ref partial struct Key
     public static Key StorageCell(NibblePath path, ReadOnlySpan<byte> keccak) =>
         new(path, DataType.StorageCell, NibblePath.FromKey(keccak));
 
-    /// <summary>
-    /// Builds the key identifying the value of the <see cref="DbAddress"/> for the root of the storage tree.
-    /// </summary>
-    public static Key StorageTreeRootPageAddress(NibblePath path) =>
-        new(path, DataType.StorageTreeRootPageAddress, NibblePath.Empty);
-
-    /// <summary>
-    /// Treat the additional key as the key and drop the additional notion.
-    /// </summary>
-    public static Key StorageTreeStorageCell(Key originalKey) =>
-        new(originalKey.StoragePath, DataType.StorageTreeStorageCell, NibblePath.Empty);
-
     [DebuggerStepThrough]
     public Key SliceFrom(int nibbles) => new(Path.SliceFrom(nibbles), Type, StoragePath);
 

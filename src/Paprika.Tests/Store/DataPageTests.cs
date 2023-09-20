@@ -278,6 +278,7 @@ public class DataPageTests : BasePageTests
             // skip till set
             random.NextKeccak();
         }
+
         {
             var storagePath = NibblePath.FromKey(random.NextKeccak());
             var merkleKey = Key.Raw(account, DataType.Merkle, storagePath);
@@ -294,6 +295,102 @@ public class DataPageTests : BasePageTests
             dataPage.TryGet(merkleKey, batch, out var actual).Should().BeTrue();
             var value = i == deleteAt ? ReadOnlySpan<byte>.Empty : GetValue(i);
             actual.SequenceEqual(value).Should().BeTrue($"Does not match for i: {i} and delete at: {deleteAt}");
+        }
+    }
+
+    [Test]
+    public void Small_prefix_tree_with_regular()
+    {
+        var page = AllocPage();
+        page.Clear();
+
+        var batch = NewBatch(BatchId);
+        var dataPage = new DataPage(page);
+
+        const int count = 19; // this is the number until a prefix tree is extracted
+
+        var account = Keccak.EmptyTreeHash;
+
+        dataPage = dataPage
+            .SetAccount(account, GetValue(0), batch)
+            .SetMerkle(account, GetValue(1), batch);
+
+        for (var i = 0; i < count; i++)
+        {
+            var storage = GetKey(i);
+
+            dataPage = dataPage
+                .SetStorage(account, storage, GetValue(i), batch)
+                .SetMerkle(account, NibblePath.FromKey(storage), GetValue(i), batch);
+        }
+
+        // write 256 more to fill up the page for each nibble
+        for (var i = 0; i < ushort.MaxValue; i++)
+        {
+            dataPage = dataPage.SetAccount(GetKey(i), GetValue(i), batch);
+        }
+
+        // assert
+        dataPage.ShouldHaveAccount(account, GetValue(0), batch);
+        dataPage.ShouldHaveMerkle(account, GetValue(1), batch);
+
+        for (var i = 0; i < count; i++)
+        {
+            var storage = GetKey(i);
+
+            dataPage.ShouldHaveStorage(account, storage, GetValue(i), batch);
+            dataPage.ShouldHaveMerkle(account, NibblePath.FromKey(storage), GetValue(i), batch);
+        }
+
+        // write 256 more to fill up the page for each nibble
+        for (var i = 0; i < ushort.MaxValue; i++)
+        {
+            dataPage.ShouldHaveAccount(GetKey(i), GetValue(i), batch);
+        }
+    }
+
+    [Test]
+    public void Massive_prefix_tree()
+    {
+        var page = AllocPage();
+        page.Clear();
+
+        var batch = NewBatch(BatchId);
+        var dataPage = new DataPage(page);
+
+        const int count = 10_000;
+
+        var account = Keccak.EmptyTreeHash;
+
+        dataPage = dataPage
+            .SetAccount(account, GetValue(0), batch)
+            .SetMerkle(account, GetValue(1), batch);
+
+        for (var i = 0; i < count; i++)
+        {
+            var storage = GetKey(i);
+            dataPage = dataPage
+                .SetStorage(account, storage, GetValue(i), batch)
+                .SetMerkle(account, GetMerkleKey(storage, i), GetValue(i), batch);
+        }
+
+        // assert
+        dataPage.ShouldHaveAccount(account, GetValue(0), batch);
+        dataPage.ShouldHaveMerkle(account, GetValue(1), batch);
+
+        for (var i = 0; i < count; i++)
+        {
+            var storage = GetKey(i);
+
+            dataPage.ShouldHaveStorage(account, storage, GetValue(i), batch);
+            dataPage.ShouldHaveMerkle(account, GetMerkleKey(storage, i), GetValue(i), batch);
+        }
+
+        return;
+
+        static NibblePath GetMerkleKey(in Keccak storage, int i)
+        {
+            return NibblePath.FromKey(storage).SliceTo(Math.Min(i + 1, NibblePath.KeccakNibbleCount));
         }
     }
 }

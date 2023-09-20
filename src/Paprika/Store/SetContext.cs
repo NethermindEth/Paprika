@@ -10,12 +10,14 @@ public readonly ref struct SetContext
     public readonly Key Key;
     public readonly IBatchContext Batch;
     public readonly ReadOnlySpan<byte> Data;
+    public readonly bool IsPrefixed;
 
-    public SetContext(Key key, ReadOnlySpan<byte> data, IBatchContext batch)
+    public SetContext(Key key, ReadOnlySpan<byte> data, IBatchContext batch, bool isPrefixed = false)
     {
         Key = key;
         Batch = batch;
         Data = data;
+        IsPrefixed = isPrefixed;
     }
 
     /// <summary>
