@@ -7,6 +7,7 @@ using HdrHistogram;
 using Nethermind.Int256;
 using Paprika.Chain;
 using Paprika.Crypto;
+using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Store;
 using Paprika.Tests;
@@ -31,7 +32,7 @@ public record Case(uint BlockCount, int AccountsPerBlock, ulong DbFileSize, bool
 public static class Program
 {
     private static readonly Case InMemoryReallySmall =
-        new(100, 1000, 1 * Gb, false, TimeSpan.FromSeconds(5), false, false);
+        new(100, 1000, 1 * Gb, false, TimeSpan.FromSeconds(5), false, true);
 
     private static readonly Case InMemorySmall =
         new(10_000, 1000, 11 * Gb, false, TimeSpan.FromSeconds(5), false, true);
@@ -425,10 +426,8 @@ public static class Program
 
     private static Keccak GetBigAccountKey()
     {
-        Keccak key = default;
-        var random = new Random(RandomSeed + 1);
-        random.NextBytes(key.BytesAsSpan);
-        return key;
+        return NibblePath.Parse("0000000000000000" +
+                                "0123456789ABCDEF").UnsafeAsKeccak;
     }
 
     private static Keccak GetStorageAddress(int counter)
@@ -440,6 +439,5 @@ public static class Program
         return key;
     }
 
-    private static byte[] GetBigAccountValue(int counter) =>
-        (new UInt256((ulong)(counter * 2246822519U), (ulong)(counter * 374761393U))).ToBigEndian();
+    private static byte[] GetBigAccountValue(int counter) => new UInt256(1, (ulong)counter).ToBigEndian();
 }
