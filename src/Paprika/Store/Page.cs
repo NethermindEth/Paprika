@@ -55,14 +55,9 @@ public struct PageHeader
     [FieldOffset(4)] public byte PaprikaVersion;
 
     /// <summary>
-    /// The level of the tree the page represents.
-    /// </summary>
-    [FieldOffset(5)] public byte TreeLevel;
-
-    /// <summary>
     /// The type of the page.
     /// </summary>
-    [FieldOffset(6)] public PageType PageType;
+    [FieldOffset(5)] public PageType PageType;
 }
 
 public enum PageType : byte
@@ -74,7 +69,7 @@ public enum PageType : byte
     /// <summary>
     /// The page is a part of the tree use for massive storage accounts.
     /// </summary>
-    MassiveStorageTree = 2,
+    PrefixPage = 2,
 
     Abandoned = 3
 }

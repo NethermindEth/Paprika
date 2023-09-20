@@ -415,7 +415,6 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 p = GetNewPage(out addr, true);
 
                 p.Header.PageType = PageType.Standard;
-                p.Header.TreeLevel = 1; // the root is level 0, start with 1
             }
             else
             {
@@ -533,7 +532,6 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             var newPage = GetNewPage(out var firstAddr, true);
 
             newPage.Header.PageType = PageType.Abandoned;
-            newPage.Header.TreeLevel = 0;
             newPage.Header.PaprikaVersion = 1;
 
             var first = new AbandonedPage(newPage)

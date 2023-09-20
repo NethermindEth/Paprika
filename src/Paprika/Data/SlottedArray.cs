@@ -212,14 +212,11 @@ public readonly ref struct SlottedArray
     /// <returns>
     /// The nibble and how much of the page is occupied by storage cells that start their key with the nibble.
     /// </returns>
-    public (byte nibble, double storageCellPercentageInPage) GetBiggestNibbleStats()
+    public byte GetBiggestNibble()
     {
         const int bucketCount = 16;
 
-        Span<byte> storageCellCount = stackalloc byte[bucketCount];
         Span<byte> slotCount = stackalloc byte[bucketCount];
-
-        var totalSlotCount = 0;
 
         var to = _header.Low / Slot.Size;
         for (var i = 0; i < to; i++)
@@ -234,13 +231,7 @@ public readonly ref struct SlottedArray
 
                 var index = firstNibble % bucketCount;
 
-                if (slot.Type == DataType.StorageCell)
-                {
-                    storageCellCount[index]++;
-                }
-
                 slotCount[index]++;
-                totalSlotCount++;
             }
         }
 
@@ -256,9 +247,7 @@ public readonly ref struct SlottedArray
             }
         }
 
-        var storageCellPercentageInPage = (double)storageCellCount[maxNibble] / totalSlotCount;
-
-        return ((byte)maxNibble, storageCellPercentageInPage);
+        return (byte)maxNibble;
     }
 
     private static int GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> storageKey,
@@ -365,18 +354,6 @@ public readonly ref struct SlottedArray
     public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> data)
     {
         if (TryGetImpl(key, Slot.GetHash(key), out var span, out _))
-        {
-            data = span;
-            return true;
-        }
-
-        data = default;
-        return false;
-    }
-
-    public bool TryGet(scoped in Key key, ushort hash, out ReadOnlySpan<byte> data)
-    {
-        if (TryGetImpl(key, hash, out var span, out _))
         {
             data = span;
             return true;
