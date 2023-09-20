@@ -480,14 +480,14 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         public ReadOnlySpanOwner<byte> Get(scoped in Key key) => _commit.Get(Build(key));
 
         public void Set(in Key key, in ReadOnlySpan<byte> payload) => _commit.Set(Build(key), in payload);
-
+        
         public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
             => _commit.Set(Build(key), payload0, payload1);
 
         /// <summary>
         /// Builds the <see cref="_keccak"/> aware key, treating the path as the path for the storage.
         /// </summary>
-        private Key Build(Key key) => Key.Raw(NibblePath.FromKey(_keccak), key.Type, key.Path);
+        private Key Build(scoped in Key key) => Key.Raw(NibblePath.FromKey(_keccak), key.Type, key.Path);
 
         public void Visit(CommitAction action, TrieType type) => throw new Exception("Should not be called");
     }
