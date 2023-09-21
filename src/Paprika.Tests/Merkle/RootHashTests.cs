@@ -65,7 +65,7 @@ public class RootHashTests
     [TestCase(10_000, "48864c880bd7610f9bad9aff765844db83c17cab764f5444b43c0076f6cf6c03")]
     public void Big_random(int count, string hexString)
     {
-        var generator = new CaseGenerator(count, 0, hexString);
+        var generator = new CaseGenerator(count, 0);
 
         var commit = new Commit();
 
@@ -84,7 +84,7 @@ public class RootHashTests
     [TestCase(1000, 1000, "4f474648522dc59d4d4a918e301d9d36ac200029027d28605cd2ab32f37321f8")]
     public void Big_random_storage(int count, int storageCount, string hexString)
     {
-        var generator = new CaseGenerator(count, storageCount, hexString);
+        var generator = new CaseGenerator(count, storageCount);
 
         var commit = new Commit();
         generator.Run(commit);
@@ -126,16 +126,20 @@ public class RootHashTests
     {
         private readonly int _count;
         private readonly int _storageCount;
-        private readonly string _rootHash;
 
-        public CaseGenerator(int count, int storageCount, string rootHash)
+        public CaseGenerator(int count, int storageCount)
         {
             _count = count;
             _storageCount = storageCount;
-            _rootHash = rootHash;
         }
 
         public void Run(Commit commit)
+        {
+            Run((ICommit)commit);
+            commit.MergeAfterToBefore();
+        }
+
+        public void Run(ICommit commit)
         {
             Random random = new(13);
             Span<byte> account = stackalloc byte[Account.MaxByteCount];

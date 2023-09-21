@@ -254,4 +254,14 @@ public class Commit : ICommit
 
         return commit;
     }
+
+    public void MergeAfterToBefore()
+    {
+        foreach (var kvp in _after)
+        {
+            _before[kvp.Key] = kvp.Value;
+        }
+
+        _after.Clear();
+    }
 }
