@@ -65,24 +65,16 @@ public class RootHashTests
     [TestCase(10_000, "48864c880bd7610f9bad9aff765844db83c17cab764f5444b43c0076f6cf6c03")]
     public void Big_random(int count, string hexString)
     {
+        var generator = new CaseGenerator(count, 0, hexString);
+
         var commit = new Commit();
 
-        Random random = new(13);
-        Span<byte> account = stackalloc byte[Account.MaxByteCount];
+        generator.Run(commit);
 
-        for (int i = 0; i < count; i++)
-        {
-            var key = random.NextKeccak();
-            uint value = (uint)random.Next();
-            commit.Set(Key.Account(key), new Account(value, value).WriteTo(account));
-        }
+        // assert twice to ensure that the root is not changed
+        AssertRoot(hexString, commit);
 
-        AssertRootFirst(hexString, commit);
-        AssertRootSecond(hexString, commit);
-
-        // use two separate method
-        static void AssertRootFirst(string hex, Commit commit) => AssertRoot(hex, commit);
-        static void AssertRootSecond(string hex, Commit commit) => AssertRoot(hex, commit);
+        AssertRoot(hexString, commit);
     }
 
     [TestCase(1, 1, "954f21233681f1b941ef67b30c85b64bfb009452b7f01b28de28eb4c1d2ca258")]
