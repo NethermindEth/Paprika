@@ -68,14 +68,13 @@ public class RootHashTests
         var commit = new Commit();
 
         Random random = new(13);
-        Span<byte> key = stackalloc byte[32];
         Span<byte> account = stackalloc byte[Account.MaxByteCount];
 
         for (int i = 0; i < count; i++)
         {
-            random.NextBytes(key);
+            var key = random.NextKeccak();
             uint value = (uint)random.Next();
-            commit.Set(Key.Account(new Keccak(key)), new Account(value, value).WriteTo(account));
+            commit.Set(Key.Account(key), new Account(value, value).WriteTo(account));
         }
 
         AssertRootFirst(hexString, commit);
@@ -93,28 +92,10 @@ public class RootHashTests
     [TestCase(1000, 1000, "4f474648522dc59d4d4a918e301d9d36ac200029027d28605cd2ab32f37321f8")]
     public void Big_random_storage(int count, int storageCount, string hexString)
     {
+        var generator = new CaseGenerator(count, storageCount, hexString);
+
         var commit = new Commit();
-
-        Random random = new(13);
-        Span<byte> account = stackalloc byte[Account.MaxByteCount];
-
-        for (var i = 0; i < count; i++)
-        {
-            // account data first
-            var keccak = random.NextKeccak();
-            var value = (uint)random.Next();
-
-            var a = new Account(value, value);
-            commit.Set(Key.Account(keccak), a.WriteTo(account));
-
-            // storage data second
-            for (var j = 0; j < storageCount; j++)
-            {
-                var storageKey = random.NextKeccak();
-                var storageValue = random.Next();
-                commit.Set(Key.StorageCell(NibblePath.FromKey(keccak), storageKey), storageValue.ToByteArray());
-            }
-        }
+        generator.Run(commit);
 
         AssertRoot(hexString, commit);
     }
@@ -147,5 +128,43 @@ public class RootHashTests
         var keccak = new Keccak(Convert.FromHexString(hex));
 
         merkle.RootHash.Should().Be(keccak);
+    }
+
+    class CaseGenerator
+    {
+        private readonly int _count;
+        private readonly int _storageCount;
+        private readonly string _rootHash;
+
+        public CaseGenerator(int count, int storageCount, string rootHash)
+        {
+            _count = count;
+            _storageCount = storageCount;
+            _rootHash = rootHash;
+        }
+
+        public void Run(Commit commit)
+        {
+            Random random = new(13);
+            Span<byte> account = stackalloc byte[Account.MaxByteCount];
+
+            for (var i = 0; i < _count; i++)
+            {
+                // account data first
+                var keccak = random.NextKeccak();
+                var value = (uint)random.Next();
+
+                var a = new Account(value, value);
+                commit.Set(Key.Account(keccak), a.WriteTo(account));
+
+                // storage data second
+                for (var j = 0; j < _storageCount; j++)
+                {
+                    var storageKey = random.NextKeccak();
+                    var storageValue = random.Next();
+                    commit.Set(Key.StorageCell(NibblePath.FromKey(keccak), storageKey), storageValue.ToByteArray());
+                }
+            }
+        }
     }
 }
