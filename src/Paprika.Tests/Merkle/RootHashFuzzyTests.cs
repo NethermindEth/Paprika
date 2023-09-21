@@ -1,4 +1,5 @@
-﻿using System.Reflection;
+﻿using System.Buffers.Binary;
+using System.Reflection;
 using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Chain;
@@ -42,9 +43,10 @@ public class RootHashFuzzyTests
         AssertRoot(generator.RootHash, commit);
     }
 
-    [TestCase(nameof(Accounts_100_Storage_1))]
-    [TestCase(nameof(Accounts_1000_Storage_1000))]
-    public async Task In_memory_run(string test)
+    [TestCase(nameof(Accounts_100_Storage_1), int.MaxValue)]
+    [TestCase(nameof(Accounts_1000_Storage_1000), int.MaxValue)]
+    [TestCase(nameof(Accounts_1_Storage_100), 11)]
+    public async Task In_memory_run(string test, int commitEvery)
     {
         var generator = Build(test);
 
@@ -52,9 +54,7 @@ public class RootHashFuzzyTests
         var merkle = new ComputeMerkleBehavior(true, 2, 2);
         await using var blockchain = new Blockchain(db, merkle);
 
-        using var block = blockchain.StartNew(Keccak.Zero, Keccak.EmptyTreeHash, 1);
-
-        var rootHash = generator.Run(block);
+        var rootHash = generator.Run(blockchain, commitEvery);
         AssertRootHash(rootHash, generator);
     }
 
@@ -137,8 +137,12 @@ public class RootHashFuzzyTests
             }
         }
 
-        public string Run(IWorldState commit)
+        public string Run(Blockchain blockchain, int newBlockEvery = Int32.MaxValue)
         {
+            var counter = 0;
+            
+            var block = blockchain.StartNew(Keccak.Zero, Keccak.EmptyTreeHash, 1);
+            
             var random = GetRandom();
 
             for (var i = 0; i < _count; i++)
@@ -148,24 +152,45 @@ public class RootHashFuzzyTests
                 var value = (uint)random.Next();
 
                 var a = new Account(value, value);
-                commit.SetAccount(keccak, a);
+                block.SetAccount(keccak, a);
+
+                Next(ref counter, newBlockEvery, ref block, blockchain);
 
                 // storage data second
                 for (var j = 0; j < _storageCount; j++)
                 {
                     var storageKey = random.NextKeccak();
                     var storageValue = random.Next();
-                    commit.SetStorage(keccak, storageKey, storageValue.ToByteArray());
+                    block.SetStorage(keccak, storageKey, storageValue.ToByteArray());
+                    
+                    Next(ref counter, newBlockEvery, ref block, blockchain);
                 }
             }
 
-            return commit.Commit().ToString();
+            var rootHash = block.Commit().ToString();
+            block.Dispose();
+            
+            return rootHash;
+
+            static void Next(ref int counter, int newBlockEvery, ref IWorldState block, Blockchain blockchain)
+            {
+                counter++;
+
+                if (counter % newBlockEvery == 0)
+                {
+                    counter = 0;
+                    block.Commit();
+                    block.Dispose();
+
+                    var nextNumber = block.BlockNumber + 1;
+                    Keccak hash = default;
+                    BinaryPrimitives.WriteUInt32LittleEndian(hash.BytesAsSpan, nextNumber);
+                    block = blockchain.StartNew(block.Hash, hash, nextNumber);
+                }
+            }
         }
 
-        private static Random GetRandom()
-        {
-            return new(13);
-        }
+        private static Random GetRandom() => new(13);
     }
 
     private static void AssertRoot(string hex, ICommit commit)
