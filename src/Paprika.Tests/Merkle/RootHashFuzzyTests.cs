@@ -43,6 +43,7 @@ public class RootHashFuzzyTests
     }
 
     [TestCase(nameof(Accounts_100_Storage_1))]
+    [TestCase(nameof(Accounts_1000_Storage_1000))]
     public async Task In_memory_run(string test)
     {
         var generator = Build(test);
@@ -53,9 +54,7 @@ public class RootHashFuzzyTests
 
         using var block = blockchain.StartNew(Keccak.Zero, Keccak.EmptyTreeHash, 1);
 
-        generator.Run(block);
-
-        var rootHash = block.Commit().ToString();
+        var rootHash = generator.Run(block);
         AssertRootHash(rootHash, generator);
     }
 
@@ -138,7 +137,7 @@ public class RootHashFuzzyTests
             }
         }
 
-        public void Run(IWorldState commit)
+        public string Run(IWorldState commit)
         {
             var random = GetRandom();
 
@@ -159,6 +158,8 @@ public class RootHashFuzzyTests
                     commit.SetStorage(keccak, storageKey, storageValue.ToByteArray());
                 }
             }
+
+            return commit.Commit().ToString();
         }
 
         private static Random GetRandom()
