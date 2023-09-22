@@ -415,9 +415,8 @@ public readonly ref struct SlottedArray
                                 slotIndex = i;
                                 return true;
                             }
-
-                            continue;
                         }
+                        else
 
                         // there's the additional key, assert it
                         // do it by slicing off first the encoded and then check the additional
@@ -457,15 +456,16 @@ public readonly ref struct SlottedArray
     private Span<byte> GetSlotPayload(ref Slot slot)
     {
         // assert whether the slot has a previous, if not use data.length
-        int previousSlotAddress = Unsafe.IsAddressLessThan(ref _slots[0], ref slot)
+        var previousSlotAddress = Unsafe.IsAddressLessThan(ref _slots[0], ref slot)
             ? Unsafe.Add(ref slot, -1).ItemAddress
             : _data.Length;
 
-        return _data.Slice(slot.ItemAddress, previousSlotAddress - slot.ItemAddress);
+        var length = previousSlotAddress - slot.ItemAddress;
+        return _data.Slice(slot.ItemAddress, length);
     }
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
-    public struct Slot
+    private struct Slot
     {
         public const int Size = 4;
 
