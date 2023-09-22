@@ -140,9 +140,9 @@ public class RootHashFuzzyTests
         public string Run(Blockchain blockchain, int newBlockEvery = Int32.MaxValue)
         {
             var counter = 0;
-            
+
             var block = blockchain.StartNew(Keccak.Zero, Keccak.EmptyTreeHash, 1);
-            
+
             var random = GetRandom();
 
             for (var i = 0; i < _count; i++)
@@ -162,14 +162,14 @@ public class RootHashFuzzyTests
                     var storageKey = random.NextKeccak();
                     var storageValue = random.Next();
                     block.SetStorage(keccak, storageKey, storageValue.ToByteArray());
-                    
+
                     Next(ref counter, newBlockEvery, ref block, blockchain);
                 }
             }
 
             var rootHash = block.Commit().ToString();
             block.Dispose();
-            
+
             return rootHash;
 
             static void Next(ref int counter, int newBlockEvery, ref IWorldState block, Blockchain blockchain)
