@@ -236,8 +236,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private KeccakOrRlp EncodeBranch(Key key, ICommit commit, scoped in Node.Branch branch, TrieType trieType,
         ReadOnlySpan<byte> previousRlp, bool isOwnedByCommit)
     {
-        // run: for the state trie, only for the root and with all children set
-        var runStateRootInParallel = trieType == TrieType.State && key.Path.IsEmpty && branch.Children.AllSet;
+        // Parallelize at the root level any trie, state or storage, that have all children set.
+        // This heuristic is used to estimate that the tree should be big enough to gain from making this computation
+        // parallel but without calculating and storing additional information how big is the tree.
+        var runInParallel = key.Path.IsEmpty && branch.Children.AllSet;
 
         var memoize = ShouldMemoizeBranchKeccak(key.Path);
         var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
@@ -277,7 +279,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             Position = initialShift
         };
 
-        if (!runStateRootInParallel)
+        if (!runInParallel)
         {
             const int additionalBytesForNibbleAppending = 1;
             Span<byte> childSpan = stackalloc byte[key.Path.MaxByteLength + additionalBytesForNibbleAppending];
@@ -489,7 +491,32 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         /// </summary>
         private Key Build(scoped in Key key) => Key.Raw(NibblePath.FromKey(_keccak), key.Type, key.Path);
 
+        public IChildCommit GetChild() => new ChildCommit(this, _commit.GetChild());
+
         public void Visit(CommitAction action, TrieType type) => throw new Exception("Should not be called");
+
+        private class ChildCommit : IChildCommit
+        {
+            private readonly PrefixingCommit _parent;
+            private readonly IChildCommit _commit;
+
+            public ChildCommit(PrefixingCommit parent, IChildCommit commit)
+            {
+                _parent = parent;
+                _commit = commit;
+            }
+
+            public ReadOnlySpanOwner<byte> Get(scoped in Key key) => _commit.Get(_parent.Build(key));
+
+            public void Set(in Key key, in ReadOnlySpan<byte> payload) => _commit.Set(_parent.Build(key), payload);
+
+            public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1) =>
+                _commit.Set(_parent.Build(key), payload0, payload1);
+
+            public void Dispose() => _commit.Dispose();
+
+            public void Commit() => _commit.Commit();
+        }
     }
 
     private class StorageHandler
@@ -934,3 +961,4 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     public void Dispose() => _meter.Dispose();
 }
+
