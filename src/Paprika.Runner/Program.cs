@@ -381,7 +381,7 @@ public static class Program
             var obj = worldState.Commit();
             result = $"{obj.ToString()?[..8]}...";
 
-            // finalize
+            //finalize
             if (toFinalize.Count >= FinalizeEvery)
             {
                 // finalize first
@@ -423,8 +423,8 @@ public static class Program
 
     private static Keccak GetBigAccountKey()
     {
-        return NibblePath.Parse("0000000000000000" +
-                                "0123456789ABCDEF").UnsafeAsKeccak;
+        const string half = "0102030405060708090A0B0C0D0E0F";
+        return NibblePath.Parse(half + half).UnsafeAsKeccak;
     }
 
     private static Keccak GetStorageAddress(int counter)

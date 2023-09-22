@@ -74,7 +74,14 @@ public readonly ref struct NibblePath
     /// Returns the underlying payload as <see cref="Keccak"/>.
     /// It does it in an unsafe way and requires an external check whether it's possible.
     /// </summary>
-    public ref Keccak UnsafeAsKeccak => ref Unsafe.As<byte, Keccak>(ref _span);
+    public ref Keccak UnsafeAsKeccak
+    {
+        get
+        {
+            Debug.Assert(Length == KeccakNibbleCount);
+            return ref Unsafe.As<byte, Keccak>(ref _span);
+        }
+    }
 
     private NibblePath(ReadOnlySpan<byte> key, int nibbleFrom, int length)
     {
