@@ -57,7 +57,7 @@ if (Directory.Exists(dataPath))
 }
 
 const long GB = 1024 * 1024 * 1024;
-const long size = 16 * GB;
+const long size = 24 * GB;
 
 Directory.CreateDirectory(dataPath);
 Console.WriteLine($"Using persistent DB on disk, located: {dataPath}");
@@ -73,11 +73,11 @@ var sw = Stopwatch.StartNew();
 using var db = PagedDb.NativeMemoryDb(size, 2);
 
 using var preCommit = new ComputeMerkleBehavior(true, 2, 1);
-await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 1000, () => reporter.Observe()))
+await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 100, () => reporter.Observe()))
 {
     const int sepoliaAccountCount = 16146399;
 
-    var visitor = new PaprikaCopyingVisitor(blockchain, 10_000, sepoliaAccountCount);
+    var visitor = new PaprikaCopyingVisitor(blockchain, 2_000, sepoliaAccountCount);
     Console.WriteLine("Starting...");
 
     var copyingTask = visitor.Copy();
