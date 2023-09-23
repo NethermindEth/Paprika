@@ -53,29 +53,22 @@ public static partial class Node
     {
         public const int Size = sizeof(byte);
 
-        private const byte IsDirtyMask = 0b0001;
-        private const int DirtyMaskShift = 0;
-        private const byte Dirty = 0b0001;
-        private const byte NotDirty = 0b0000;
+        private const byte NodeTypeMask = 0b0000_0011;
+        private const int NodeTypeMaskShift = 0;
 
-        private const byte NodeTypeMask = 0b0110;
-        private const int NodeTypeMaskShift = 1;
-
-        private const byte MetadataMask = 0b1111_0000;
-        private const int MetadataMaskShift = 4;
+        private const byte MetadataMask = 0b1111_1100;
+        private const int MetadataMaskShift = 2;
 
         [FieldOffset(0)]
         private readonly byte _header;
 
-        public bool IsDirty => (_header & IsDirtyMask) >> DirtyMaskShift == Dirty;
         public Type NodeType => (Type)((_header & NodeTypeMask) >> NodeTypeMaskShift);
         public byte Metadata => (byte)((_header & MetadataMask) >> MetadataMaskShift);
 
-        public Header(Type nodeType, bool isDirty = true, byte metadata = 0b0000)
+        public Header(Type nodeType, byte metadata = 0b0000)
         {
             _header = (byte)(metadata << MetadataMaskShift);
             _header |= (byte)((byte)nodeType << NodeTypeMaskShift);
-            _header |= isDirty ? Dirty : NotDirty;
         }
 
         private Header(byte header)
@@ -110,7 +103,6 @@ public static partial class Node
 
         public override string ToString() =>
             $"{nameof(Header)} {{ " +
-            $"{nameof(IsDirty)}: {IsDirty}, " +
             $"{nameof(Type)}: {NodeType}, " +
             $"{nameof(Metadata)}: 0b{Convert.ToString(Metadata, 2).PadLeft(4, '0')}" +
             $" }}";
@@ -133,7 +125,7 @@ public static partial class Node
         public Leaf(NibblePath path)
         {
             // leaves shall never be marked as dirty or not. This information will be held by branch
-            Header = new Header(Type.Leaf, false);
+            Header = new Header(Type.Leaf);
             Path = path;
         }
 

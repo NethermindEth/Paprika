@@ -9,31 +9,28 @@ namespace Paprika.Tests.Merkle;
 public class NodeTests
 {
     [Test]
-    [TestCase(Node.Type.Branch, true, 0b0000)]
-    [TestCase(Node.Type.Branch, false, 0b0101)]
-    [TestCase(Node.Type.Leaf, true, 0b0000)]
-    [TestCase(Node.Type.Leaf, false, 0b0000)]
-    [TestCase(Node.Type.Extension, true, 0b0000)]
-    [TestCase(Node.Type.Extension, false, 0b0000)]
-    public void Header_properties(Node.Type nodeType, bool isDirty, byte metadata)
+    [TestCase(Node.Type.Branch, 0b0000)]
+    [TestCase(Node.Type.Branch, 0b0101)]
+    [TestCase(Node.Type.Leaf, 0b0000)]
+    [TestCase(Node.Type.Extension, 0b0000)]
+    public void Header_properties(Node.Type nodeType, byte metadata)
     {
-        var header = new Node.Header(nodeType, isDirty, metadata);
+        var header = new Node.Header(nodeType, metadata);
 
         Assert.That(header.NodeType, Is.EqualTo(nodeType));
-        Assert.That(header.IsDirty, Is.EqualTo(isDirty));
         Assert.That(header.Metadata, Is.EqualTo(metadata));
     }
 
     [Test]
-    [TestCase(Node.Type.Leaf, false, 0b0000)]
-    [TestCase(Node.Type.Extension, false, 0b0000)]
-    [TestCase(Node.Type.Branch, false, 0b0000)]
-    [TestCase(Node.Type.Leaf, true, 0b0000)]
-    [TestCase(Node.Type.Extension, true, 0b0000)]
-    [TestCase(Node.Type.Branch, true, 0b0001)]
-    public void Node_header_read_write(Node.Type nodeType, bool isDirty, byte metadata)
+    [TestCase(Node.Type.Leaf, 0b0000)]
+    [TestCase(Node.Type.Leaf, 0b0001)]
+    [TestCase(Node.Type.Extension, 0b0000)]
+    [TestCase(Node.Type.Extension, 0b0001)]
+    [TestCase(Node.Type.Branch, 0b0000)]
+    [TestCase(Node.Type.Branch, 0b0001)]
+    public void Node_header_read_write(Node.Type nodeType, byte metadata)
     {
-        var header = new Node.Header(nodeType, isDirty, metadata);
+        var header = new Node.Header(nodeType, metadata);
         Span<byte> buffer = stackalloc byte[Node.Header.Size];
 
         var encoded = header.WriteTo(buffer);
@@ -50,7 +47,6 @@ public class NodeTests
         var branch = new Node.Branch(new NibbleSet.Readonly(nibbles), Values.Key0);
 
         Assert.That(branch.Header.NodeType, Is.EqualTo(Node.Type.Branch));
-        Assert.That(branch.Header.IsDirty, Is.True);
         Assert.That(branch.Keccak, Is.EqualTo(Values.Key0));
     }
 
@@ -194,7 +190,6 @@ public class NodeTests
 
         var extension = new Node.Extension(path);
 
-        Assert.That(extension.Header.IsDirty, Is.True);
         Assert.That(extension.Header.NodeType, Is.EqualTo(Node.Type.Extension));
         Assert.That(extension.Path.Equals(path), $"Expected {path.ToString()}, got {extension.Path.ToString()}");
     }
@@ -274,7 +269,7 @@ public class NodeTests
     public void Node_read_sequential()
     {
         var nibblePath = NibblePath.FromKey(new byte[] { 0x1, 0x2, 0x4, 0x5 });
-        const ushort nibbleBitSet = (ushort)0b0000_0011;
+        const ushort nibbleBitSet = 0b0000_0011;
         var keccak = Values.Key0;
 
         var leaf = new Node.Leaf(nibblePath);
