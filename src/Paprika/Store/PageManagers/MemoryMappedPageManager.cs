@@ -6,7 +6,7 @@ namespace Paprika.Store.PageManagers;
 
 public class MemoryMappedPageManager : PointerPageManager
 {
-    private readonly bool _flushToDisk;
+    private readonly PersistenceOptions _options;
 
     /// <summary>
     /// The only option is random access. As Paprika jumps over the file, any prefetching is futile.
@@ -27,7 +27,8 @@ public class MemoryMappedPageManager : PointerPageManager
     private readonly List<Task> _pendingWrites = new();
     private DbAddress[] _toWrite = new DbAddress[1];
 
-    public unsafe MemoryMappedPageManager(ulong size, byte historyDepth, string dir, bool flushToDisk = true) : base(size)
+    public unsafe MemoryMappedPageManager(ulong size, byte historyDepth, string dir,
+        PersistenceOptions options = PersistenceOptions.FlushFile) : base(size)
     {
         Path = System.IO.Path.Combine(dir, PaprikaFileName);
 
@@ -59,7 +60,7 @@ public class MemoryMappedPageManager : PointerPageManager
 
         _whole = _mapped.CreateViewAccessor();
         _whole.SafeMemoryMappedViewHandle.AcquirePointer(ref _ptr);
-        _flushToDisk = flushToDisk;
+        _options = options;
     }
 
     public string Path { get; }
@@ -68,6 +69,9 @@ public class MemoryMappedPageManager : PointerPageManager
 
     public override async ValueTask FlushPages(ICollection<DbAddress> dbAddresses, CommitOptions options)
     {
+        if (_options == PersistenceOptions.MMapOnly)
+            return;
+
         if (options != CommitOptions.DangerNoWrite)
         {
             ScheduleWrites(dbAddresses);
@@ -118,6 +122,9 @@ public class MemoryMappedPageManager : PointerPageManager
 
     public override async ValueTask FlushRootPage(DbAddress root, CommitOptions options)
     {
+        if (_options == PersistenceOptions.MMapOnly)
+            return;
+
         if (options != CommitOptions.DangerNoWrite)
         {
             await WriteAt(root);
@@ -129,7 +136,19 @@ public class MemoryMappedPageManager : PointerPageManager
         }
     }
 
-    public override void Flush() => _file.Flush(_flushToDisk);
+    public override void Flush()
+    {
+        if (_options == PersistenceOptions.MMapOnly)
+            return;
+
+        _file.Flush(true);
+    }
+
+    public override void ForceFlush()
+    {
+        _whole.Flush();
+        _file.Flush(true);
+    }
 
     public override void Dispose()
     {
@@ -179,4 +198,17 @@ public class MemoryMappedPageManager : PointerPageManager
         {
         }
     }
+}
+
+public enum PersistenceOptions
+{
+    /// <summary>
+    /// Do FSYNC/FlushFileBuffers
+    /// </summary>
+    FlushFile,
+
+    /// <summary>
+    /// Don't issue any writes or sync.
+    /// </summary>
+    MMapOnly,
 }

@@ -1,6 +1,5 @@
 ﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using Paprika.Data;
 
 namespace Paprika.Store.PageManagers;
 
@@ -38,6 +37,8 @@ public abstract unsafe class PointerPageManager : IPageManager
     public abstract ValueTask FlushRootPage(DbAddress rootPage, CommitOptions options);
 
     public abstract void Flush();
+
+    public abstract void ForceFlush();
 
     public abstract void Dispose();
 }

@@ -90,7 +90,9 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         new(new NativeMemoryPageManager(size, historyDepth), historyDepth);
 
     public static PagedDb MemoryMappedDb(ulong size, byte historyDepth, string directory, bool flushToDisk = true) =>
-        new(new MemoryMappedPageManager(size, historyDepth, directory, flushToDisk), historyDepth);
+        new(
+            new MemoryMappedPageManager(size, historyDepth, directory,
+                flushToDisk ? PersistenceOptions.FlushFile : PersistenceOptions.MMapOnly), historyDepth);
 
     private void ReportRead(long number = 1) => _reads.Add(number);
     private void ReportWrite() => _writes.Add(1);
