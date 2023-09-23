@@ -83,6 +83,7 @@ public struct NibbleSet
 
     public readonly struct Readonly : IEquatable<Readonly>
     {
+        private const int AllSetValue = 0b1111_1111_1111_1111;
         private readonly ushort _value;
 
         public Readonly(ushort value)
@@ -92,7 +93,7 @@ public struct NibbleSet
 
         public bool this[byte nibble] => new NibbleSet(_value)[nibble];
 
-        public bool AllSet => _value == 0b1111_1111_1111_1111;
+        public bool AllSet => _value == AllSetValue;
 
         public int SetCount => new NibbleSet(_value).SetCount;
         public byte SmallestNibbleSet => new NibbleSet(_value).SmallestNibbleSet;

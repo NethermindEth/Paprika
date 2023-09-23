@@ -9,38 +9,35 @@ namespace Paprika.Tests.Merkle;
 public class NodeTests
 {
     [Test]
-    [TestCase(Node.Type.Branch, true, 0b0000)]
-    [TestCase(Node.Type.Branch, false, 0b0101)]
-    [TestCase(Node.Type.Leaf, true, 0b0000)]
-    [TestCase(Node.Type.Leaf, false, 0b0000)]
-    [TestCase(Node.Type.Extension, true, 0b0000)]
-    [TestCase(Node.Type.Extension, false, 0b0000)]
-    public void Header_properties(Node.Type nodeType, bool isDirty, byte metadata)
+    [TestCase(Node.Type.Branch, 0b0000)]
+    [TestCase(Node.Type.Branch, 0b0101)]
+    [TestCase(Node.Type.Leaf, 0b0000)]
+    [TestCase(Node.Type.Extension, 0b0000)]
+    public void Header_properties(Node.Type nodeType, byte metadata)
     {
-        var header = new Node.Header(nodeType, isDirty, metadata);
+        var header = new Node.Header(nodeType, metadata);
 
-        Assert.That(header.NodeType, Is.EqualTo(nodeType));
-        Assert.That(header.IsDirty, Is.EqualTo(isDirty));
-        Assert.That(header.Metadata, Is.EqualTo(metadata));
+        header.NodeType.Should().Be(nodeType);
+        header.Metadata.Should().Be(metadata);
     }
 
     [Test]
-    [TestCase(Node.Type.Leaf, false, 0b0000)]
-    [TestCase(Node.Type.Extension, false, 0b0000)]
-    [TestCase(Node.Type.Branch, false, 0b0000)]
-    [TestCase(Node.Type.Leaf, true, 0b0000)]
-    [TestCase(Node.Type.Extension, true, 0b0000)]
-    [TestCase(Node.Type.Branch, true, 0b0001)]
-    public void Node_header_read_write(Node.Type nodeType, bool isDirty, byte metadata)
+    [TestCase(Node.Type.Leaf, 0b0000)]
+    [TestCase(Node.Type.Leaf, 0b0001)]
+    [TestCase(Node.Type.Extension, 0b0000)]
+    [TestCase(Node.Type.Extension, 0b0001)]
+    [TestCase(Node.Type.Branch, 0b0000)]
+    [TestCase(Node.Type.Branch, 0b0001)]
+    public void Node_header_read_write(Node.Type nodeType, byte metadata)
     {
-        var header = new Node.Header(nodeType, isDirty, metadata);
+        var header = new Node.Header(nodeType, metadata);
         Span<byte> buffer = stackalloc byte[Node.Header.Size];
 
         var encoded = header.WriteTo(buffer);
         var leftover = Node.Header.ReadFrom(encoded, out var decoded);
 
-        Assert.That(leftover.Length, Is.Zero);
-        Assert.That(decoded.Equals(header), $"Expected {header.ToString()}, got {decoded.ToString()}");
+        leftover.Length.Should().Be(0);
+        decoded.Should().Be(header, $"Expected {header.ToString()}, got {decoded.ToString()}");
     }
 
     [Test]
@@ -49,9 +46,8 @@ public class NodeTests
         ushort nibbles = 0b0000_0000_0000_0011;
         var branch = new Node.Branch(new NibbleSet.Readonly(nibbles), Values.Key0);
 
-        Assert.That(branch.Header.NodeType, Is.EqualTo(Node.Type.Branch));
-        Assert.That(branch.Header.IsDirty, Is.True);
-        Assert.That(branch.Keccak, Is.EqualTo(Values.Key0));
+        branch.Header.NodeType.Should().Be(Node.Type.Branch);
+        branch.Keccak.Should().Be(Values.Key0);
     }
 
     [Test]
@@ -87,7 +83,7 @@ public class NodeTests
 
         foreach (var nibble in expected)
         {
-            Assert.That(branch.Children[nibble], $"Nibble {nibble} was expected to be set, but it's not");
+            branch.Children[nibble].Should().BeTrue($"Nibble {nibble} was expected to be set, but it's not");
         }
     }
 
@@ -97,7 +93,7 @@ public class NodeTests
         ushort nibbles = 0b0110_1001_0101_1010;
         var branch = new Node.Branch(new NibbleSet.Readonly(nibbles));
 
-        Assert.That(branch.Keccak, Is.EqualTo(Keccak.Zero));
+        branch.Keccak.Should().Be(Keccak.Zero);
     }
 
     private static object[] _branchReadWriteCases =
@@ -117,8 +113,8 @@ public class NodeTests
         var encoded = branch.WriteTo(buffer);
         var leftover = Node.Branch.ReadFrom(encoded, out var decoded);
 
-        Assert.That(leftover.Length, Is.Zero);
-        Assert.That(decoded.Equals(branch), $"Expected {branch.ToString()}, got {decoded.ToString()}");
+        leftover.Length.Should().Be(0);
+        decoded.Equals(branch).Should().BeTrue($"Expected {branch.ToString()}, got {decoded.ToString()}");
     }
 
     [Test]
@@ -133,8 +129,8 @@ public class NodeTests
         var encoded = branch.WriteTo(buffer);
         var leftover = Node.Branch.ReadFrom(encoded, out var decoded);
 
-        Assert.That(leftover.Length, Is.Zero);
-        Assert.That(decoded.Equals(branch), $"Expected {branch.ToString()}, got {decoded.ToString()}");
+        leftover.Length.Should().Be(0);
+        decoded.Equals(branch).Should().BeTrue($"Expected {branch.ToString()}, got {decoded.ToString()}");
     }
 
     [Test]
@@ -150,8 +146,8 @@ public class NodeTests
         Span<byte> hasKeccakBuffer = stackalloc byte[hasKeccak.MaxByteLength];
         var encodedHasKeccak = hasKeccak.WriteTo(hasKeccakBuffer);
 
-        Assert.That(noKeccak.MaxByteLength, Is.LessThan(hasKeccak.MaxByteLength));
-        Assert.That(encodedNoKeccak.Length, Is.LessThan(encodedHasKeccak.Length));
+        noKeccak.MaxByteLength.Should().BeLessThan(hasKeccak.MaxByteLength);
+        encodedNoKeccak.Length.Should().BeLessThan(encodedHasKeccak.Length);
     }
 
     [Test]
@@ -161,8 +157,8 @@ public class NodeTests
 
         var leaf = new Node.Leaf(path);
 
-        Assert.That(leaf.Header.NodeType, Is.EqualTo(Node.Type.Leaf));
-        Assert.That(leaf.Path.Equals(path), $"Expected {path.ToString()}, got {leaf.Path.ToString()}");
+        leaf.Header.NodeType.Should().Be(Node.Type.Leaf);
+        leaf.Path.Equals(path).Should().BeTrue($"Expected {path.ToString()}, got {leaf.Path.ToString()}");
     }
 
     private static object[] _leafReadWriteCases =
@@ -183,8 +179,8 @@ public class NodeTests
         var encoded = leaf.WriteTo(buffer);
         var leftover = Node.Leaf.ReadFrom(encoded, out var decoded);
 
-        Assert.That(leftover.Length, Is.Zero);
-        Assert.That(decoded.Equals(leaf), $"Expected {leaf.ToString()}, got {decoded.ToString()}");
+        leftover.Length.Should().Be(0);
+        decoded.Equals(leaf).Should().BeTrue($"Expected {leaf.ToString()}, got {decoded.ToString()}");
     }
 
     [Test]
@@ -194,9 +190,8 @@ public class NodeTests
 
         var extension = new Node.Extension(path);
 
-        Assert.That(extension.Header.IsDirty, Is.True);
-        Assert.That(extension.Header.NodeType, Is.EqualTo(Node.Type.Extension));
-        Assert.That(extension.Path.Equals(path), $"Expected {path.ToString()}, got {extension.Path.ToString()}");
+        extension.Header.NodeType.Should().Be(Node.Type.Extension);
+        extension.Path.Equals(path).Should().BeTrue($"Expected {path.ToString()}, got {extension.Path.ToString()}");
     }
 
     private static object[] _extensionReadWriteCases =
@@ -217,8 +212,8 @@ public class NodeTests
         var encoded = extension.WriteTo(buffer);
         var leftover = Node.Extension.ReadFrom(encoded, out var decoded);
 
-        Assert.That(leftover.Length, Is.Zero);
-        Assert.That(decoded.Equals(extension), $"Expected {extension.ToString()}, got {decoded.ToString()}");
+        leftover.Length.Should().Be(0);
+        decoded.Equals(extension).Should().BeTrue($"Expected {extension.ToString()}, got {decoded.ToString()}");
     }
 
     [Test]
@@ -232,9 +227,9 @@ public class NodeTests
         var encoded = leaf.WriteTo(buffer);
         var leftover = Node.ReadFrom(encoded, out var nodeType, out var actual, out _, out _);
 
-        Assert.That(leftover.Length, Is.Zero);
-        Assert.That(nodeType, Is.EqualTo(Node.Type.Leaf));
-        Assert.That(actual.Equals(leaf));
+        leftover.Length.Should().Be(0);
+        nodeType.Should().Be(Node.Type.Leaf);
+        actual.Equals(leaf).Should().BeTrue();
     }
 
     [Test]
@@ -248,9 +243,9 @@ public class NodeTests
         var encoded = extension.WriteTo(buffer);
         var leftover = Node.ReadFrom(encoded, out var nodeType, out _, out var actual, out _);
 
-        Assert.That(leftover.Length, Is.Zero);
-        Assert.That(nodeType, Is.EqualTo(Node.Type.Extension));
-        Assert.That(actual.Equals(extension));
+        leftover.Length.Should().Be(0);
+        nodeType.Should().Be(Node.Type.Extension);
+        actual.Equals(extension).Should().BeTrue();
     }
 
     [Test]
@@ -265,16 +260,16 @@ public class NodeTests
         var encoded = branch.WriteTo(buffer);
         var leftover = Node.ReadFrom(encoded, out var nodeType, out _, out _, out var actual);
 
-        Assert.That(leftover.Length, Is.Zero);
-        Assert.That(nodeType, Is.EqualTo(Node.Type.Branch));
-        Assert.That(actual.Equals(branch));
+        leftover.Length.Should().Be(0);
+        nodeType.Should().Be(Node.Type.Branch);
+        actual.Equals(branch).Should().BeTrue();
     }
 
     [Test]
     public void Node_read_sequential()
     {
         var nibblePath = NibblePath.FromKey(new byte[] { 0x1, 0x2, 0x4, 0x5 });
-        const ushort nibbleBitSet = (ushort)0b0000_0011;
+        const ushort nibbleBitSet = 0b0000_0011;
         var keccak = Values.Key0;
 
         var leaf = new Node.Leaf(nibblePath);
@@ -291,9 +286,9 @@ public class NodeTests
         readLeftover = Node.ReadFrom(readLeftover, out _, out _, out var actualExtension, out _);
         _ = Node.ReadFrom(readLeftover, out _, out _, out _, out var actualBranch);
 
-        Assert.That(actualLeaf.Equals(leaf));
-        Assert.That(actualExtension.Equals(extension));
-        Assert.That(actualBranch.Equals(branch));
+        actualLeaf.Equals(leaf).Should().BeTrue();
+        actualExtension.Equals(extension).Should().BeTrue();
+        actualBranch.Equals(branch).Should().BeTrue();
     }
 
     [Test]
