@@ -241,7 +241,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         // parallel but without calculating and storing additional information how big is the tree.
         var runInParallel = key.Path.IsEmpty && branch.Children.AllSet;
 
-        var memoize = ShouldMemoizeBranchKeccak(key.Path);
+        var memoize = ShouldMemoizeBranchRlp(key.Path);
         var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
 
         byte[]? rlpMemoization = null;
@@ -377,11 +377,18 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         ArrayPool<byte>.Shared.Return(bytes);
 
-        if (result.DataType == KeccakOrRlp.Type.Keccak && memoize)
+        if (result.DataType == KeccakOrRlp.Type.Keccak)
         {
             // Memoize only if Keccak and falls into the criteria.
             // Storing RLP for an embedded node is useless as it can be easily re-calculated.
-            commit.SetBranch(key, branch.Children, new Keccak(result.Span), memo.Raw);
+            if (ShouldMemoizeBranchKeccak(key.Path))
+            {
+                commit.SetBranch(key, branch.Children, new Keccak(result.Span), memo.Raw);
+            }
+            else
+            {
+                commit.SetBranch(key, branch.Children, memo.Raw);
+            }
         }
 
         if (rlpMemoization != null)
@@ -396,6 +403,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     private static Span<byte> MakeRlpWritable(ReadOnlySpan<byte> previousRlp) =>
         MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(previousRlp), previousRlp.Length);
+
+    private bool ShouldMemoizeBranchRlp(in NibblePath branchPath)
+    {
+        // a simple condition to memoize only more nested RLPs
+        return branchPath.Length >= 1;
+    }
 
     private bool ShouldMemoizeBranchKeccak(in NibblePath branchPath)
     {
