@@ -32,8 +32,8 @@ long? bestPersistedState = persistedNumberData is null ? null : new RlpStream(pe
 
 ArgumentNullException.ThrowIfNull(bestPersistedState, "Best persisted state not found");
 
-var info = blockInfos.Get(bestPersistedState.Value);
-var chainLevel = Rlp.GetStreamDecoder<ChainLevelInfo>()!.Decode(new RlpStream(info!));
+var bestPersisted = blockInfos.Get(bestPersistedState.Value);
+var chainLevel = Rlp.GetStreamDecoder<ChainLevelInfo>()!.Decode(new RlpStream(bestPersisted!));
 
 var main = chainLevel.BlockInfos[0];
 var header = headers.Get(main.BlockHash);
@@ -63,7 +63,17 @@ Directory.CreateDirectory(dataPath);
 Console.WriteLine($"Using persistent DB on disk, located: {dataPath}");
 Console.WriteLine("Initializing db of size {0}GB", size / GB);
 
+// reporting
+const string metrics = "Metrics";
+const string stats = "Stats";
+
+var layout = new Layout("Runner")
+    .SplitRows(new Layout(metrics), new Layout(stats));
+
 using var reporter = new MetricsReporter();
+layout[metrics].Update(reporter.Renderer);
+layout[stats].Update(new Panel("Statistics will appear here after the import finishes").Header("Statistics").Expand());
+
 Task reportingTask;
 var spectre = new CancellationTokenSource();
 
@@ -81,12 +91,13 @@ await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds
     Console.WriteLine("Starting...");
 
     var copyingTask = visitor.Copy();
-    reportingTask = Task.Run(() => AnsiConsole.Live(reporter.Renderer)
+    reportingTask = Task.Run(() => AnsiConsole.Live(layout)
         .StartAsync(async ctx =>
         {
             while (spectre.IsCancellationRequested == false)
             {
                 reporter.Observe();
+
                 ctx.Refresh();
                 await Task.Delay(500);
             }
@@ -104,6 +115,9 @@ await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds
 }
 
 db.ForceFlush();
+
+using var read = db.BeginReadOnlyBatch("Statistics");
+StatisticsForPagedDb.Report(layout[stats], read);
 
 spectre.Cancel();
 await reportingTask;
