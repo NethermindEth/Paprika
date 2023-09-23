@@ -57,7 +57,7 @@ if (Directory.Exists(dataPath))
 }
 
 const long GB = 1024 * 1024 * 1024;
-const long size = 24 * GB;
+const long size = 32 * GB;
 
 Directory.CreateDirectory(dataPath);
 Console.WriteLine($"Using persistent DB on disk, located: {dataPath}");
@@ -69,10 +69,10 @@ var spectre = new CancellationTokenSource();
 
 var sw = Stopwatch.StartNew();
 
-// using var db = PagedDb.MemoryMappedDb(size, 2, dataPath, false);
+//using var db = PagedDb.MemoryMappedDb(size, 2, dataPath, false);
 using var db = PagedDb.NativeMemoryDb(size, 2);
 
-using var preCommit = new ComputeMerkleBehavior(true, 2, 1);
+using var preCommit = new ComputeMerkleBehavior(true, 2, 2);
 await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 100, () => reporter.Observe()))
 {
     const int sepoliaAccountCount = 16146399;
