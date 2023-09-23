@@ -96,10 +96,7 @@ public static partial class Node
 
         public static Header Peek(ReadOnlySpan<byte> source) => new(source[0]);
 
-        public bool Equals(in Header other)
-        {
-            return _header.Equals(other._header);
-        }
+        public bool Equals(in Header other) => _header.Equals(other._header);
 
         public override string ToString() =>
             $"{nameof(Header)} {{ " +
