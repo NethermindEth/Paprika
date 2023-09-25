@@ -207,17 +207,17 @@ public readonly ref struct SlottedArray
         public NibbleEnumerator GetEnumerator() => this;
     }
 
+    public const int BucketCount = 16;
+
     /// <summary>
     /// Gets the nibble representing the biggest bucket and provides stats to the caller.
     /// </summary>
     /// <returns>
     /// The nibble and how much of the page is occupied by storage cells that start their key with the nibble.
     /// </returns>
-    public byte GetBiggestNibble()
+    public void GatherSizeStatistics(Span<ushort> buckets)
     {
-        const int bucketCount = 16;
-
-        Span<byte> slotCount = stackalloc byte[bucketCount];
+        Debug.Assert(buckets.Length == BucketCount);
 
         var to = _header.Low / Slot.Size;
         for (var i = 0; i < to; i++)
@@ -230,25 +230,11 @@ public readonly ref struct SlottedArray
                 var payload = GetSlotPayload(ref slot);
                 var firstNibble = NibblePath.ReadFirstNibble(payload);
 
-                var index = firstNibble % bucketCount;
+                var index = firstNibble % BucketCount;
 
-                slotCount[index]++;
+                buckets[index] += (ushort)(payload.Length + Slot.Size);
             }
         }
-
-        var maxNibble = 0;
-
-        for (int nibble = 1; nibble < bucketCount; nibble++)
-        {
-            var currentCount = slotCount[nibble];
-            var maxCount = slotCount[maxNibble];
-            if (currentCount > maxCount)
-            {
-                maxNibble = nibble;
-            }
-        }
-
-        return (byte)maxNibble;
     }
 
     private static int GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> storageKey,
