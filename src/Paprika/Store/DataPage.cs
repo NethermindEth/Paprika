@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Reflection.Metadata;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
@@ -98,7 +99,7 @@ public readonly unsafe struct DataPage : IPage
         }
 
         // the map is full, extraction must follow
-        var biggestNibble = map.GetBiggestNibble();
+        var biggestNibble = SelectNibbleToFlush(map, Data.Buckets, ctx.Batch);
 
         // try get the child page
         ref var address = ref Data.Buckets[biggestNibble];
@@ -141,6 +142,51 @@ public readonly unsafe struct DataPage : IPage
 
         // The page has some of the values flushed down, try to add again.
         return Set(ctx);
+    }
+
+    private static byte SelectNibbleToFlush(SlottedArray map, ReadOnlySpan<DbAddress> buckets, IBatchContext ctx)
+    {
+        const int count = SlottedArray.BucketCount;
+
+        Span<ushort> stats = stackalloc ushort[count];
+        map.GatherSizeStatistics(stats);
+
+        byte biggestIndex = 0;
+        for (byte i = 1; i < count; i++)
+        {
+            if (stats[i] > stats[biggestIndex])
+            {
+                biggestIndex = i;
+            }
+        }
+
+        var hasAnyChildren = buckets.IndexOfAnyExcept(DbAddress.Null) != -1;
+        if (!hasAnyChildren)
+        {
+            return biggestIndex;
+        }
+
+        // Some children are there, select the one that can hold the payload
+        for (byte i = 0; i < count; i++)
+        {
+            if (stats[i] > 0)
+            {
+                // there are some data for i
+                var child = buckets[i];
+                if (child.IsNull == false)
+                {
+                    var capacityLeft = new DataPage(ctx.GetAt(child)).Map.CapacityLeft;
+                    if (stats[i] < capacityLeft * 0.9)
+                    {
+                        // its enough of space to flush underneath, even with some 0.9 fill cap
+                        return i;
+                    }
+                }
+            }
+        }
+
+        // there are children but no one was found to flush to, select the biggest anyway
+        return biggestIndex;
     }
 
     private Page DeleteInMap(SetContext ctx, SlottedArray map)
@@ -240,7 +286,7 @@ public readonly unsafe struct DataPage : IPage
         }
 
         // read in-page
-        var map = new SlottedArray(Data.DataSpan);
+        var map = Map;
 
         // try regular map
         if (map.TryGet(key, out result))
@@ -266,6 +312,8 @@ public readonly unsafe struct DataPage : IPage
         return false;
     }
 
+    private SlottedArray Map => new(Data.DataSpan);
+
     public void Report(IReporter reporter, IPageResolver resolver, int level)
     {
         var emptyBuckets = 0;
@@ -282,8 +330,14 @@ public readonly unsafe struct DataPage : IPage
             }
         }
 
-        reporter.ReportDataUsage(level,
-            Payload.BucketCount - emptyBuckets, new SlottedArray(Data.DataSpan).Count);
+        var slotted = new SlottedArray(Data.DataSpan);
+
+        foreach (var item in slotted.EnumerateAll())
+        {
+            reporter.ReportItem(item.Key, item.RawData);
+        }
+
+        reporter.ReportDataUsage(level, Payload.BucketCount - emptyBuckets, slotted.Count, slotted.CapacityLeft);
     }
 
     private static bool TryExtractAsPrefixTree(byte nibble, in SetContext ctx, in SlottedArray map,

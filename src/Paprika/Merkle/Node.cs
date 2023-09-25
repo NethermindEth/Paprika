@@ -10,9 +10,9 @@ public static partial class Node
 {
     public enum Type : byte
     {
-        Leaf,
-        Extension,
-        Branch,
+        Leaf = 0,
+        Extension = 1,
+        Branch = 2,
     }
 
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Type nodeType, out Leaf leaf, out Extension extension, out Branch branch)

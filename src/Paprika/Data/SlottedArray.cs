@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paprika.Merkle;
 using Paprika.Store;
 using Paprika.Utils;
 
@@ -206,17 +207,17 @@ public readonly ref struct SlottedArray
         public NibbleEnumerator GetEnumerator() => this;
     }
 
+    public const int BucketCount = 16;
+
     /// <summary>
     /// Gets the nibble representing the biggest bucket and provides stats to the caller.
     /// </summary>
     /// <returns>
     /// The nibble and how much of the page is occupied by storage cells that start their key with the nibble.
     /// </returns>
-    public byte GetBiggestNibble()
+    public void GatherSizeStatistics(Span<ushort> buckets)
     {
-        const int bucketCount = 16;
-
-        Span<byte> slotCount = stackalloc byte[bucketCount];
+        Debug.Assert(buckets.Length == BucketCount);
 
         var to = _header.Low / Slot.Size;
         for (var i = 0; i < to; i++)
@@ -229,25 +230,11 @@ public readonly ref struct SlottedArray
                 var payload = GetSlotPayload(ref slot);
                 var firstNibble = NibblePath.ReadFirstNibble(payload);
 
-                var index = firstNibble % bucketCount;
+                var index = firstNibble % BucketCount;
 
-                slotCount[index]++;
+                buckets[index] += (ushort)(payload.Length + Slot.Size);
             }
         }
-
-        var maxNibble = 0;
-
-        for (int nibble = 1; nibble < bucketCount; nibble++)
-        {
-            var currentCount = slotCount[nibble];
-            var maxCount = slotCount[maxNibble];
-            if (currentCount > maxCount)
-            {
-                maxNibble = nibble;
-            }
-        }
-
-        return (byte)maxNibble;
     }
 
     private static int GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> storageKey,
@@ -363,7 +350,8 @@ public readonly ref struct SlottedArray
         return false;
     }
 
-    [OptimizationOpportunity(OptimizationType.CPU, "key encoding is delayed but it might be called twice, here + TrySet")]
+    [OptimizationOpportunity(OptimizationType.CPU,
+        "key encoding is delayed but it might be called twice, here + TrySet")]
     private bool TryGetImpl(scoped in Key key, ushort hash, out Span<byte> data, out int slotIndex)
     {
         var to = _header.Low / Slot.Size;
@@ -481,8 +469,8 @@ public readonly ref struct SlottedArray
             set => Raw = (ushort)((Raw & ~AddressMask) | value);
         }
 
-        private const int DataTypeShift = 13;
-        private const ushort DataTypeMask = 0b1110_0000_0000_0000;
+        private const int DataTypeShift = 14;
+        private const ushort DataTypeMask = 0b1100_0000_0000_0000;
 
         /// <summary>
         /// The data type contained in this slot.
