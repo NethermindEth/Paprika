@@ -12,48 +12,80 @@ public static class StatisticsForPagedDb
     {
         reportTo.Update(new Panel("Gathering statistics...").Header("Paprika tree statistics").Expand());
 
-        var stats = new StatisticsReporter();
-        read.Report(stats);
-        var table = new Table();
-
-        table.AddColumn(new TableColumn("Level of Paprika tree"));
-        table.AddColumn(new TableColumn("Child page count"));
-        table.AddColumn(new TableColumn("Entries in page"));
-
-        foreach (var (key, level) in stats.Levels)
+        try
         {
-            table.AddRow(
-                new Text(key.ToString()),
-                WriteHistogram(level.ChildCount),
-                WriteHistogram(level.Entries));
+            var stats = new StatisticsReporter();
+            read.Report(stats);
+            var table = new Table();
+
+            table.AddColumn(new TableColumn("Level of Paprika tree"));
+            table.AddColumn(new TableColumn("Child page count"));
+            table.AddColumn(new TableColumn("Entries in page"));
+            table.AddColumn(new TableColumn("Capacity left (bytes)"));
+
+            foreach (var (key, level) in stats.Levels)
+            {
+                table.AddRow(
+                    new Text(key.ToString()),
+                    WriteHistogram(level.ChildCount),
+                    WriteHistogram(level.Entries),
+                    WriteHistogram(level.CapacityLeft));
+            }
+
+            var mb = (long)stats.PageCount * Page.PageSize / 1024 / 1024;
+
+            var types = string.Join(", ", stats.PageTypes.Select(kvp => $"{kvp.Key}: {kvp.Value}"));
+
+            // histogram description
+            var sb = new StringBuilder();
+            sb.Append("Histogram percentiles: ");
+            foreach (var percentile in Percentiles)
+            {
+                sb.Append($"[{percentile.color}]P{percentile.value}: {percentile.value}th percentile [/] ");
+            }
+
+            var report = new Layout()
+                .SplitRows(
+                    new Layout(
+                            new Rows(
+                                new Markup(sb.ToString()),
+                                new Text(""),
+                                new Text("General stats:"),
+                                new Text($"1. Size of this Paprika tree: {mb}MB"),
+                                new Text($"2. Types of pages: {types}"),
+                                WriteHistogram(stats.PageAge, "3. Age of pages: "),
+                                WriteSizePerType(stats.Sizes, "4. Size per entry type:")))
+                        .Size(8),
+                    new Layout(table.Expand()));
+
+            reportTo.Update(new Panel(report).Header("Paprika tree statistics").Expand());
         }
+        catch (Exception e)
+        {
+            var paragraph = new Paragraph();
 
-        var mb = (long)stats.PageCount * Page.PageSize / 1024 / 1024;
+            var style = new Style().Foreground(Color.Red);
+            paragraph.Append(e.Message, style);
+            paragraph.Append(e.StackTrace!, style);
 
-        var types = string.Join(", ", stats.PageTypes.Select(kvp => $"{kvp.Key}: {kvp.Value}"));
+            reportTo.Update(new Panel(paragraph).Header("Paprika tree statistics").Expand());
+        }
+    }
 
-        // histogram description
+    private static IRenderable WriteSizePerType(long[] sizes, string prefix)
+    {
         var sb = new StringBuilder();
-        sb.Append("Histogram percentiles: ");
-        foreach (var percentile in Percentiles)
+        sb.Append(prefix);
+
+        for (var i = 0; i < sizes.Length; i++)
         {
-            sb.Append($"[{percentile.color}]P{percentile.value}: {percentile.value}th percentile [/] ");
+            var mb = sizes[i] / 1024 / 1024;
+            var name = StatisticsReporter.GetNameForSize(i);
+
+            sb.Append($" {name}:{mb}MB");
         }
 
-        var report = new Layout()
-            .SplitRows(
-                new Layout(
-                        new Rows(
-                            new Markup(sb.ToString()),
-                            new Text(""),
-                            new Text("General stats:"),
-                            new Text($"1. Size of this Paprika tree: {mb}MB"),
-                            new Text($"2. Types of pages: {types}"),
-                            WriteHistogram(stats.PageAge, "2. Age of pages: ")))
-                    .Size(7),
-                new Layout(table.Expand()));
-
-        reportTo.Update(new Panel(report).Header("Paprika tree statistics").Expand());
+        return new Markup(sb.ToString());
     }
 
     private static IRenderable WriteHistogram(HistogramBase histogram, string prefix = "")

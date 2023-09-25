@@ -21,10 +21,8 @@ public enum DataType : byte
     /// </summary>
     Merkle = 2,
 
-    // 3, 4, 5, 6 - available
-
     /// <summary>
     /// Special type for <see cref="SlottedArray"/>. 
     /// </summary>
-    Deleted = 7,
+    Deleted = 3,
 }

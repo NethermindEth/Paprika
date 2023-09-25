@@ -3,7 +3,6 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Text;
-using HdrHistogram;
 using Nethermind.Int256;
 using Paprika.Chain;
 using Paprika.Crypto;
@@ -12,7 +11,6 @@ using Paprika.Merkle;
 using Paprika.Store;
 using Paprika.Tests;
 using Spectre.Console;
-using Spectre.Console.Rendering;
 
 [assembly: ExcludeFromCodeCoverage]
 
