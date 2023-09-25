@@ -282,8 +282,14 @@ public readonly unsafe struct DataPage : IPage
             }
         }
 
-        reporter.ReportDataUsage(level,
-            Payload.BucketCount - emptyBuckets, new SlottedArray(Data.DataSpan).Count);
+        var slotted = new SlottedArray(Data.DataSpan);
+
+        foreach (var item in slotted.EnumerateAll())
+        {
+            reporter.ReportItem(item.Key, item.RawData);
+        }
+
+        reporter.ReportDataUsage(level, Payload.BucketCount - emptyBuckets, slotted.Count, slotted.CapacityLeft);
     }
 
     private static bool TryExtractAsPrefixTree(byte nibble, in SetContext ctx, in SlottedArray map,

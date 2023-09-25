@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paprika.Merkle;
 using Paprika.Store;
 using Paprika.Utils;
 
@@ -363,7 +364,8 @@ public readonly ref struct SlottedArray
         return false;
     }
 
-    [OptimizationOpportunity(OptimizationType.CPU, "key encoding is delayed but it might be called twice, here + TrySet")]
+    [OptimizationOpportunity(OptimizationType.CPU,
+        "key encoding is delayed but it might be called twice, here + TrySet")]
     private bool TryGetImpl(scoped in Key key, ushort hash, out Span<byte> data, out int slotIndex)
     {
         var to = _header.Low / Slot.Size;
@@ -481,8 +483,8 @@ public readonly ref struct SlottedArray
             set => Raw = (ushort)((Raw & ~AddressMask) | value);
         }
 
-        private const int DataTypeShift = 13;
-        private const ushort DataTypeMask = 0b1110_0000_0000_0000;
+        private const int DataTypeShift = 14;
+        private const ushort DataTypeMask = 0b1100_0000_0000_0000;
 
         /// <summary>
         /// The data type contained in this slot.
