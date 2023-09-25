@@ -26,7 +26,7 @@ using var headers = new DbOnTheRocks(path, GetSettings(DbNames.Headers), cfg, lo
 using var store = new TrieStore(state, logs);
 
 // from BlockTree.cs
-byte[] stateHeadHashDbEntryAddress = new byte[16];
+var stateHeadHashDbEntryAddress = new byte[16];
 var persistedNumberData = blockInfos.Get(stateHeadHashDbEntryAddress);
 long? bestPersistedState = persistedNumberData is null ? null : new RlpStream(persistedNumberData).DecodeLong();
 
@@ -49,19 +49,21 @@ var trie = new StateTree(store, logs)
 
 var dir = Directory.GetCurrentDirectory();
 var dataPath = Path.Combine(dir, "db");
-
-if (Directory.Exists(dataPath))
-{
-    Console.WriteLine("Deleting previous db...");
-    Directory.Delete(dataPath, true);
-}
+var dbExists = Directory.Exists(dataPath);
 
 const long GB = 1024 * 1024 * 1024;
 const long size = 32 * GB;
 
-Directory.CreateDirectory(dataPath);
-Console.WriteLine($"Using persistent DB on disk, located: {dataPath}");
-Console.WriteLine("Initializing db of size {0}GB", size / GB);
+if (dbExists)
+{
+    Console.WriteLine($"DB detected at {dataPath}. Will run just statistics...");
+}
+else
+{
+    Directory.CreateDirectory(dataPath);
+    Console.WriteLine($"Using persistent DB on disk, located: {dataPath}");
+    Console.WriteLine("Initializing db of size {0}GB", size / GB);
+}
 
 // reporting
 const string metrics = "Metrics";
@@ -74,47 +76,51 @@ using var reporter = new MetricsReporter();
 layout[metrics].Update(reporter.Renderer);
 layout[stats].Update(new Panel("Statistics will appear here after the import finishes").Header("Statistics").Expand());
 
-Task reportingTask;
 var spectre = new CancellationTokenSource();
+var reportingTask = Task.Run(() => AnsiConsole.Live(dbExists ? layout.GetLayout(stats) : layout)
+    .StartAsync(async ctx =>
+    {
+        while (spectre.IsCancellationRequested == false)
+        {
+            reporter.Observe();
+
+            ctx.Refresh();
+            await Task.Delay(500);
+        }
+
+        // the final report
+        reporter.Observe();
+        ctx.Refresh();
+    }));
 
 var sw = Stopwatch.StartNew();
 
-//using var db = PagedDb.MemoryMappedDb(size, 2, dataPath, false);
-using var db = PagedDb.NativeMemoryDb(size, 2);
+using var db = PagedDb.MemoryMappedDb(size, 2, dataPath, false);
+//using var db = PagedDb.NativeMemoryDb(size, 2);
 
-using var preCommit = new ComputeMerkleBehavior(true, 2, 2);
-await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 100, () => reporter.Observe()))
+if (dbExists == false)
 {
-    const int sepoliaAccountCount = 16146399;
+    using var preCommit = new ComputeMerkleBehavior(true, 2, 2);
+    await using (var blockchain =
+                 new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 100, () => reporter.Observe()))
+    {
+        const int sepoliaAccountCount = 16146399;
 
-    var visitor = new PaprikaCopyingVisitor(blockchain, 2_000, sepoliaAccountCount);
-    Console.WriteLine("Starting...");
+        var visitor = new PaprikaCopyingVisitor(blockchain, 2_000, sepoliaAccountCount);
+        Console.WriteLine("Starting...");
 
-    var copyingTask = visitor.Copy();
-    reportingTask = Task.Run(() => AnsiConsole.Live(layout)
-        .StartAsync(async ctx =>
-        {
-            while (spectre.IsCancellationRequested == false)
-            {
-                reporter.Observe();
+        var copyingTask = visitor.Copy();
 
-                ctx.Refresh();
-                await Task.Delay(500);
-            }
 
-            // the final report
-            reporter.Observe();
-            ctx.Refresh();
-        }));
+        trie.Accept(visitor, rootHash, true);
+        visitor.Finish();
 
-    trie.Accept(visitor, rootHash, true);
-    visitor.Finish();
+        Console.WriteLine("Awaiting writes to finish...");
+        await copyingTask;
+    }
 
-    Console.WriteLine("Awaiting writes to finish...");
-    await copyingTask;
+    db.ForceFlush();
 }
-
-db.ForceFlush();
 
 using var read = db.BeginReadOnlyBatch("Statistics");
 StatisticsForPagedDb.Report(layout[stats], read);
