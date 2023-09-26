@@ -8,7 +8,7 @@ namespace Paprika.Runner;
 
 public static class StatisticsForPagedDb
 {
-    public static void Report(Layout reportTo, IReadOnlyBatch read)
+    public static void Report(Layout reportTo, IReadOnlyBatch read, bool splitPageTypes = false)
     {
         reportTo.Update(new Panel("Gathering statistics...").Header("Paprika tree statistics").Expand());
 
@@ -16,20 +16,50 @@ public static class StatisticsForPagedDb
         {
             var stats = new StatisticsReporter();
             read.Report(stats);
-            var table = new Table();
 
-            table.AddColumn(new TableColumn("Level of Paprika tree"));
-            table.AddColumn(new TableColumn("Child page count"));
-            table.AddColumn(new TableColumn("Entries in page"));
-            table.AddColumn(new TableColumn("Capacity left (bytes)"));
+            var levelStats = new Table();
+            levelStats.AddColumn(new TableColumn("Level of Paprika tree"));
+            levelStats.AddColumn(new TableColumn("Child page count"));
+
+            if (splitPageTypes)
+            {
+                levelStats.AddColumn(new TableColumn("Entries in page (Standard)"));
+                levelStats.AddColumn(new TableColumn("Capacity left (Standard)"));
+                levelStats.AddColumn(new TableColumn("Entries in page (Prefixed)"));
+                levelStats.AddColumn(new TableColumn("Capacity left (Prefixed)"));
+            }
+            else
+            {
+                levelStats.AddColumn(new TableColumn("Entries in page"));
+                levelStats.AddColumn(new TableColumn("Capacity left (bytes)"));
+            }
 
             foreach (var (key, level) in stats.Levels)
             {
-                table.AddRow(
-                    new Text(key.ToString()),
-                    WriteHistogram(level.ChildCount),
-                    WriteHistogram(level.Entries),
-                    WriteHistogram(level.CapacityLeft));
+                if (splitPageTypes)
+                {
+                    levelStats.AddRow(
+                        new Text(key.ToString()),
+                        WriteHistogram(level.ChildCount),
+                        WriteHistogram(level.StandardEntries),
+                        WriteHistogram(level.StandardCapacityLeft),
+                        WriteHistogram(level.PrefixedEntries),
+                        WriteHistogram(level.PrefixedCapacityLeft));
+                }
+                else
+                {
+                    var entries = level.PrefixedEntries;
+                    entries.Add(level.StandardEntries);
+
+                    var capacity = level.PrefixedCapacityLeft;
+                    capacity.Add(level.StandardCapacityLeft);
+
+                    levelStats.AddRow(
+                        new Text(key.ToString()),
+                        WriteHistogram(level.ChildCount),
+                        WriteHistogram(entries),
+                        WriteHistogram(capacity));
+                }
             }
 
             var mb = (long)stats.PageCount * Page.PageSize / 1024 / 1024;
@@ -54,9 +84,10 @@ public static class StatisticsForPagedDb
                                 new Text($"1. Size of this Paprika tree: {mb}MB"),
                                 new Text($"2. Types of pages: {types}"),
                                 WriteHistogram(stats.PageAge, "3. Age of pages: "),
-                                WriteSizePerType(stats.Sizes, "4. Size per entry type:")))
+                                WriteSizePerType(stats.Sizes, "3. Size per entry type:")
+                                ))
                         .Size(8),
-                    new Layout(table.Expand()));
+                    new Layout(levelStats.Expand()));
 
             reportTo.Update(new Panel(report).Header("Paprika tree statistics").Expand());
         }
@@ -102,8 +133,15 @@ public static class StatisticsForPagedDb
 
         string Percentile(int percentile, string color)
         {
-            var value = histogram.GetValueAtPercentile(percentile);
-            return $"[{color}]P{percentile}: {value,2}[/] ";
+            try
+            {
+                var value = histogram.GetValueAtPercentile(percentile);
+                return $"[{color}]P{percentile}: {value,2}[/] ";
+            }
+            catch (Exception e)
+            {
+                return $"[{color}]P{percentile}: N/A[/] ";
+            }
         }
     }
 
