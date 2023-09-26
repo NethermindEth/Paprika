@@ -123,7 +123,7 @@ if (dbExists == false)
 }
 
 using var read = db.BeginReadOnlyBatch("Statistics");
-StatisticsForPagedDb.Report(layout[stats], read);
+StatisticsForPagedDb.Report(layout[stats], read, true);
 
 spectre.Cancel();
 await reportingTask;
