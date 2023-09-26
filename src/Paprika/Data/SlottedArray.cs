@@ -113,6 +113,24 @@ public readonly ref struct SlottedArray
 
     public NibbleEnumerator EnumerateAll() => new(this, NibbleEnumerator.AllNibbles);
 
+    /// <summary>
+    /// Counts entries that are pushable down.
+    /// </summary>
+    public int CountPushableDown()
+    {
+        var to = _header.Low / Slot.Size;
+        var count = 0;
+
+        for (var i = 0; i < to; i++)
+        {
+            ref readonly var slot = ref _slots[i];
+            if (slot.Type != DataType.Deleted && !slot.PathNotEmpty)
+                count++;
+        }
+
+        return count;
+    }
+
     public ref struct NibbleEnumerator
     {
         public const byte AllNibbles = byte.MaxValue;
@@ -272,7 +290,7 @@ public readonly ref struct SlottedArray
 
     private void Deframent()
     {
-        // s as data were fitting before, the will fit after so all the checks can be skipped
+        // As data were fitting before, the will fit after so all the checks can be skipped
         var size = _raw.Length;
         var array = ArrayPool<byte>.Shared.Rent(size);
         var span = array.AsSpan(0, size);

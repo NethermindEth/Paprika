@@ -1,5 +1,4 @@
-﻿using System.Runtime.InteropServices;
-using HdrHistogram;
+﻿using HdrHistogram;
 using Paprika.Data;
 using Paprika.Merkle;
 
@@ -10,7 +9,7 @@ namespace Paprika.Store;
 /// </summary>
 public interface IReporter
 {
-    void ReportDataUsage(int level, int filledBuckets, int entriesPerPage, int capacityLeft);
+    void ReportDataUsage(PageType type, int level, int filledBuckets, int entriesPerPage, int capacityLeft);
 
     /// <summary>
     /// Reports how many batches ago the page was updated.
@@ -28,10 +27,11 @@ public class StatisticsReporter : IReporter
 
     private const int SizeCount = (int)(DataType.Merkle + (byte)Node.Type.Branch) + 1;
     public readonly long[] Sizes = new long[SizeCount];
+    public readonly SortedDictionary<int, IntHistogram> SizeHistograms = new();
 
-    public readonly IntHistogram PageAge = new(1_000_000_000, 5);
+    public readonly IntHistogram PageAge = new(uint.MaxValue, 5);
 
-    public void ReportDataUsage(int level, int filledBuckets, int entriesPerPage, int capacityLeft)
+    public void ReportDataUsage(PageType type, int level, int filledBuckets, int entriesPerPage, int capacityLeft)
     {
         if (Levels.TryGetValue(level, out var lvl) == false)
         {
@@ -41,8 +41,17 @@ public class StatisticsReporter : IReporter
         PageCount++;
 
         lvl.ChildCount.RecordValue(filledBuckets);
-        lvl.Entries.RecordValue(entriesPerPage);
-        lvl.CapacityLeft.RecordValue(capacityLeft);
+
+        if (type == PageType.Standard)
+        {
+            lvl.StandardEntries.RecordValue(entriesPerPage);
+            lvl.StandardCapacityLeft.RecordValue(capacityLeft);
+        }
+        else
+        {
+            lvl.PrefixedEntries.RecordValue(entriesPerPage);
+            lvl.PrefixedCapacityLeft.RecordValue(capacityLeft);
+        }
     }
 
     public void ReportPage(uint ageInBatches, PageType type)
@@ -54,8 +63,20 @@ public class StatisticsReporter : IReporter
 
     public void ReportItem(in Key key, ReadOnlySpan<byte> rawData)
     {
-        var keyEstimatedLength = key.Path.MaxByteLength + key.StoragePath.MaxByteLength;
-        Sizes[GetKey(key, rawData)] += rawData.Length + keyEstimatedLength;
+        var index = GetKey(key, rawData);
+
+        // total size
+        const int slottedArraySlot = 4;
+        var keyEstimatedLength = key.Path.MaxByteLength + key.StoragePath.MaxByteLength + slottedArraySlot;
+        var total = rawData.Length + keyEstimatedLength;
+        Sizes[index] += total;
+
+        if (!SizeHistograms.TryGetValue(index, out var histogram))
+        {
+            SizeHistograms[index] = histogram = new IntHistogram(1000, 3);
+        }
+
+        histogram.RecordValue(total);
     }
 
     private static int GetKey(in Key key, in ReadOnlySpan<byte> data)
@@ -87,7 +108,11 @@ public class StatisticsReporter : IReporter
     public class Level
     {
         public readonly IntHistogram ChildCount = new(1000, 5);
-        public readonly IntHistogram Entries = new(1000, 5);
-        public readonly IntHistogram CapacityLeft = new(10000, 5);
+
+        public readonly IntHistogram StandardEntries = new(1000, 5);
+        public readonly IntHistogram StandardCapacityLeft = new(10000, 5);
+
+        public readonly IntHistogram PrefixedEntries = new(1000, 5);
+        public readonly IntHistogram PrefixedCapacityLeft = new(10000, 5);
     }
 }
