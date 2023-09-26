@@ -1,7 +1,7 @@
 ﻿using System.Diagnostics;
-using System.Reflection.Metadata;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paprika.Crypto;
 using Paprika.Data;
 
 namespace Paprika.Store;
@@ -125,23 +125,53 @@ public readonly unsafe struct DataPage : IPage
         }
 
         var dataPage = new DataPage(child);
+        var batch = ctx.Batch;
 
+        // flush down soft
+        dataPage = FlushDown(map, biggestNibble, dataPage, batch, true);
+        address = ctx.Batch.GetAddress(dataPage.AsPage());
+
+        // check whether there's a space in map
+        if (map.TrySet(ctx.Key, ctx.Data))
+        {
+            return _page;
+        }
+
+        // flush down: force
+        dataPage = FlushDown(map, biggestNibble, dataPage, batch, false);
+        address = ctx.Batch.GetAddress(dataPage.AsPage());
+
+        // The page has some of the values flushed down, try to add again.
+        return Set(ctx);
+    }
+
+    private DataPage FlushDown(in SlottedArray map, byte biggestNibble, DataPage destination, IBatchContext batch, bool tryAllocFree)
+    {
         foreach (var item in map.EnumerateNibble(biggestNibble))
         {
             var key = item.Key.SliceFrom(NibbleCount);
-            var isPrefixed = Header.PageType == PageType.PrefixPage;
-            var set = new SetContext(key, item.RawData, ctx.Batch, isPrefixed);
+            if (tryAllocFree && !destination.MayAcceptKeyInAllocFreeWay(key))
+            {
+                // skip items that will result in creating an additional page for now
+                continue;
+            }
 
-            dataPage = new DataPage(dataPage.Set(set));
+            var set = new SetContext(key, item.RawData, batch, Header.PageType == PageType.PrefixPage);
+            destination = new DataPage(destination.Set(set));
 
             // use the special delete for the item that is much faster than map.Delete(item.Key);
             map.Delete(item);
         }
 
-        address = ctx.Batch.GetAddress(dataPage.AsPage());
+        return destination;
+    }
 
-        // The page has some of the values flushed down, try to add again.
-        return Set(ctx);
+    /// <summary>
+    /// Checks whether the key can be added to the page and it will not result in an automatic page allocation.
+    /// </summary>
+    private bool MayAcceptKeyInAllocFreeWay(in Key key)
+    {
+        return Header.PageType == PageType.Standard || TryExtractPrefixed(key, out _);
     }
 
     private static byte SelectNibbleToFlush(SlottedArray map, ReadOnlySpan<DbAddress> buckets, IBatchContext ctx)
@@ -175,7 +205,8 @@ public readonly unsafe struct DataPage : IPage
                 var child = buckets[i];
                 if (child.IsNull == false)
                 {
-                    var capacityLeft = new DataPage(ctx.GetAt(child)).Map.CapacityLeft;
+                    var childPage = new DataPage(ctx.GetAt(child));
+                    var capacityLeft = childPage.Map.CapacityLeft;
                     if (stats[i] < capacityLeft * 0.9)
                     {
                         // its enough of space to flush underneath, even with some 0.9 fill cap
@@ -337,7 +368,7 @@ public readonly unsafe struct DataPage : IPage
             reporter.ReportItem(item.Key, item.RawData);
         }
 
-        reporter.ReportDataUsage(level, Payload.BucketCount - emptyBuckets, slotted.Count, slotted.CapacityLeft);
+        reporter.ReportDataUsage(Header.PageType, level, Payload.BucketCount - emptyBuckets, slotted.Count, slotted.CapacityLeft);
     }
 
     private static bool TryExtractAsPrefixTree(byte nibble, in SetContext ctx, in SlottedArray map,
@@ -354,6 +385,8 @@ public readonly unsafe struct DataPage : IPage
         Span<byte> accountPathBytes = stackalloc byte[NibblePath.FullKeccakByteLength];
         var accountPath = NibblePath.Empty;
 
+        var count = 0;
+
         // assert that all StorageCells have the same prefix
         foreach (var item in map.EnumerateNibble(nibble))
         {
@@ -368,6 +401,15 @@ public readonly unsafe struct DataPage : IPage
                 address = default;
                 return false;
             }
+
+            count++;
+        }
+
+        // Extract prefix only if all the entries share the prefix. Otherwise, fault with extraction
+        if (count < map.CountPushableDown())
+        {
+            address = default;
+            return false;
         }
 
         var prefixPage = ctx.Batch.GetNewPage(out address, true);
