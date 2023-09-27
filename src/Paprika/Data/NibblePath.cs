@@ -174,7 +174,7 @@ public readonly ref struct NibblePath
     /// Sets a <paramref name="value"/> of the nibble at the given <paramref name="nibble"/> location.
     /// This is unsafe. Use only for owned memory. 
     /// </summary>
-    public void UnsafeSetAt(int nibble, byte countOdd, byte value)
+    private void UnsafeSetAt(int nibble, byte countOdd, byte value)
     {
         ref var b = ref GetRefAt(nibble);
         var shift = GetShift(nibble + countOdd);
@@ -245,6 +245,11 @@ public readonly ref struct NibblePath
 
         return source.Slice(0, GetSpanLength(length, odd) + PreambleLength);
     }
+
+    private static readonly byte[] Bytes = Enumerable
+        .Range(0, byte.MaxValue + 1).Select(b => (byte)b)
+        .ToArray();
+    public static NibblePath OfByte(byte value) => FromKey(Bytes.AsSpan(value, 1));
 
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out NibblePath nibblePath)
     {

@@ -1,4 +1,5 @@
-﻿using HdrHistogram;
+﻿using System.Runtime.InteropServices;
+using HdrHistogram;
 using Paprika.Data;
 using Paprika.Merkle;
 
@@ -25,9 +26,8 @@ public class StatisticsReporter : IReporter
     public readonly Dictionary<PageType, int> PageTypes = new();
     public int PageCount;
 
-    private const int SizeCount = (int)(DataType.Merkle + (byte)Node.Type.Branch) + 1;
-    public readonly long[] Sizes = new long[SizeCount];
-    public readonly SortedDictionary<int, IntHistogram> SizeHistograms = new();
+    public readonly Dictionary<int, long> Sizes = new();
+    public readonly Dictionary<int, IntHistogram> SizeHistograms = new();
 
     public readonly IntHistogram PageAge = new(uint.MaxValue, 5);
 
@@ -42,16 +42,8 @@ public class StatisticsReporter : IReporter
 
         lvl.ChildCount.RecordValue(filledBuckets);
 
-        if (type == PageType.Standard)
-        {
-            lvl.StandardEntries.RecordValue(entriesPerPage);
-            lvl.StandardCapacityLeft.RecordValue(capacityLeft);
-        }
-        else
-        {
-            lvl.PrefixedEntries.RecordValue(entriesPerPage);
-            lvl.PrefixedCapacityLeft.RecordValue(capacityLeft);
-        }
+        lvl.Entries.RecordValue(entriesPerPage);
+        lvl.CapacityLeft.RecordValue(capacityLeft);
     }
 
     public void ReportPage(uint ageInBatches, PageType type)
@@ -69,7 +61,9 @@ public class StatisticsReporter : IReporter
         const int slottedArraySlot = 4;
         var keyEstimatedLength = key.Path.MaxByteLength + key.StoragePath.MaxByteLength + slottedArraySlot;
         var total = rawData.Length + keyEstimatedLength;
-        Sizes[index] += total;
+        
+        ref var value = ref CollectionsMarshal.GetValueRefOrAddDefault(Sizes, index, out _);
+        value += total;
 
         if (!SizeHistograms.TryGetValue(index, out var histogram))
         {
@@ -79,40 +73,40 @@ public class StatisticsReporter : IReporter
         histogram.RecordValue(total);
     }
 
+    private const int KeyShift = 8;
+    private const int KeyDiff = 1;
+    
     private static int GetKey(in Key key, in ReadOnlySpan<byte> data)
     {
-        switch (key.Type)
+        var encoded = (int)key.Type;
+        if ((key.Type & DataType.Merkle) != DataType.Merkle)
         {
-            case DataType.Account:
-                return (int)DataType.Account;
-            case DataType.StorageCell:
-                return (int)DataType.StorageCell;
-            case DataType.Merkle:
-                Node.Header.ReadFrom(data, out var header);
-                return (int)(DataType.Merkle + (byte)header.NodeType);
+            return encoded;
         }
-
-        return 0;
+        
+        Node.Header.ReadFrom(data, out var header);
+        return encoded | (((int)header.NodeType + KeyDiff) << KeyShift);
     }
 
     public static string GetNameForSize(int i)
     {
-        return i switch
+        var type = (DataType)(i & 0xFF);
+        var str = type.ToString().Replace(", ", "-");
+
+        if (i >> KeyShift < KeyDiff)
         {
-            0 => nameof(DataType.Account),
-            1 => nameof(DataType.StorageCell),
-            _ => $"{nameof(DataType.Merkle)}-{((Node.Type)(i - 2)).ToString()}", // merkle
-        };
+            return str;
+        }
+
+        var merkleType = (Node.Type)((i >> KeyShift) - KeyDiff);
+        return $"{str}-{merkleType}";
     }
 
     public class Level
     {
         public readonly IntHistogram ChildCount = new(1000, 5);
 
-        public readonly IntHistogram StandardEntries = new(1000, 5);
-        public readonly IntHistogram StandardCapacityLeft = new(10000, 5);
-
-        public readonly IntHistogram PrefixedEntries = new(1000, 5);
-        public readonly IntHistogram PrefixedCapacityLeft = new(10000, 5);
+        public readonly IntHistogram Entries = new(1000, 5);
+        public readonly IntHistogram CapacityLeft = new(10000, 5);
     }
 }

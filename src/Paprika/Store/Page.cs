@@ -58,6 +58,11 @@ public struct PageHeader
     /// The type of the page.
     /// </summary>
     [FieldOffset(5)] public PageType PageType;
+
+    /// <summary>
+    /// The depth of the tree.
+    /// </summary>
+    [FieldOffset(6)] public byte Level;
 }
 
 public enum PageType : byte
@@ -66,12 +71,7 @@ public enum PageType : byte
 
     Standard = 1,
 
-    /// <summary>
-    /// The page is a part of the tree use for massive storage accounts.
-    /// </summary>
-    PrefixPage = 2,
-
-    Abandoned = 3
+    Abandoned = 2
 }
 
 /// <summary>

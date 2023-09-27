@@ -113,24 +113,6 @@ public readonly ref struct SlottedArray
 
     public NibbleEnumerator EnumerateAll() => new(this, NibbleEnumerator.AllNibbles);
 
-    /// <summary>
-    /// Counts entries that are pushable down.
-    /// </summary>
-    public int CountPushableDown()
-    {
-        var to = _header.Low / Slot.Size;
-        var count = 0;
-
-        for (var i = 0; i < to; i++)
-        {
-            ref readonly var slot = ref _slots[i];
-            if (slot.Type != DataType.Deleted && !slot.PathNotEmpty)
-                count++;
-        }
-
-        return count;
-    }
-
     public ref struct NibbleEnumerator
     {
         public const byte AllNibbles = byte.MaxValue;
@@ -228,11 +210,8 @@ public readonly ref struct SlottedArray
     public const int BucketCount = 16;
 
     /// <summary>
-    /// Gets the nibble representing the biggest bucket and provides stats to the caller.
+    /// Gets the aggregated sizes per nibble.
     /// </summary>
-    /// <returns>
-    /// The nibble and how much of the page is occupied by storage cells that start their key with the nibble.
-    /// </returns>
     public void GatherSizeStatistics(Span<ushort> buckets)
     {
         Debug.Assert(buckets.Length == BucketCount);
@@ -251,6 +230,31 @@ public readonly ref struct SlottedArray
                 var index = firstNibble % BucketCount;
 
                 buckets[index] += (ushort)(payload.Length + Slot.Size);
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Gets the aggregated count of entries per nibble.
+    /// </summary>
+    public void GatherCountStatistics(Span<ushort> buckets)
+    {
+        Debug.Assert(buckets.Length == BucketCount);
+
+        var to = _header.Low / Slot.Size;
+        for (var i = 0; i < to; i++)
+        {
+            ref var slot = ref _slots[i];
+
+            // extract only not deleted and these which have at least one nibble
+            if (slot.Type != DataType.Deleted && slot.PathNotEmpty)
+            {
+                var payload = GetSlotPayload(ref slot);
+                var firstNibble = NibblePath.ReadFirstNibble(payload);
+
+                var index = firstNibble % BucketCount;
+
+                buckets[index] += 1;
             }
         }
     }
@@ -487,8 +491,8 @@ public readonly ref struct SlottedArray
             set => Raw = (ushort)((Raw & ~AddressMask) | value);
         }
 
-        private const int DataTypeShift = 14;
-        private const ushort DataTypeMask = 0b1100_0000_0000_0000;
+        private const int DataTypeShift = 13;
+        private const ushort DataTypeMask = 0b1110_0000_0000_0000;
 
         /// <summary>
         /// The data type contained in this slot.

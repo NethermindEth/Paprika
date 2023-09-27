@@ -8,7 +8,7 @@ namespace Paprika.Runner;
 
 public static class StatisticsForPagedDb
 {
-    public static void Report(Layout reportTo, IReadOnlyBatch read, bool splitPageTypes = false)
+    public static void Report(Layout reportTo, IReadOnlyBatch read)
     {
         reportTo.Update(new Panel("Gathering statistics...").Header("Paprika tree statistics").Expand());
 
@@ -21,45 +21,19 @@ public static class StatisticsForPagedDb
             levelStats.AddColumn(new TableColumn("Level of Paprika tree"));
             levelStats.AddColumn(new TableColumn("Child page count"));
 
-            if (splitPageTypes)
-            {
-                levelStats.AddColumn(new TableColumn("Entries in page (Standard)"));
-                levelStats.AddColumn(new TableColumn("Capacity left (Standard)"));
-                levelStats.AddColumn(new TableColumn("Entries in page (Prefixed)"));
-                levelStats.AddColumn(new TableColumn("Capacity left (Prefixed)"));
-            }
-            else
-            {
-                levelStats.AddColumn(new TableColumn("Entries in page"));
-                levelStats.AddColumn(new TableColumn("Capacity left (bytes)"));
-            }
+            levelStats.AddColumn(new TableColumn("Entries in page"));
+            levelStats.AddColumn(new TableColumn("Capacity left (bytes)"));
 
             foreach (var (key, level) in stats.Levels)
             {
-                if (splitPageTypes)
-                {
-                    levelStats.AddRow(
-                        new Text(key.ToString()),
-                        WriteHistogram(level.ChildCount),
-                        WriteHistogram(level.StandardEntries),
-                        WriteHistogram(level.StandardCapacityLeft),
-                        WriteHistogram(level.PrefixedEntries),
-                        WriteHistogram(level.PrefixedCapacityLeft));
-                }
-                else
-                {
-                    var entries = level.PrefixedEntries;
-                    entries.Add(level.StandardEntries);
+                var entries = level.Entries;
+                var capacity = level.CapacityLeft;
 
-                    var capacity = level.PrefixedCapacityLeft;
-                    capacity.Add(level.StandardCapacityLeft);
-
-                    levelStats.AddRow(
-                        new Text(key.ToString()),
-                        WriteHistogram(level.ChildCount),
-                        WriteHistogram(entries),
-                        WriteHistogram(capacity));
-                }
+                levelStats.AddRow(
+                    new Text(key.ToString()),
+                    WriteHistogram(level.ChildCount),
+                    WriteHistogram(entries),
+                    WriteHistogram(capacity));
             }
 
             var mb = (long)stats.PageCount * Page.PageSize / 1024 / 1024;
@@ -84,7 +58,8 @@ public static class StatisticsForPagedDb
                                 new Text($"1. Size of this Paprika tree: {mb}MB"),
                                 new Text($"2. Types of pages: {types}"),
                                 WriteHistogram(stats.PageAge, "3. Age of pages: "),
-                                WriteSizePerType(stats.Sizes, "3. Size per entry type:")
+                                WriteSizePerType(stats.Sizes, "4. Size per entry type:"),
+                                WriteHistogramSizePerType(stats.SizeHistograms, "5. Median of size per entry type:")
                                 ))
                         .Size(8),
                     new Layout(levelStats.Expand()));
@@ -103,17 +78,31 @@ public static class StatisticsForPagedDb
         }
     }
 
-    private static IRenderable WriteSizePerType(long[] sizes, string prefix)
+    private static IRenderable WriteSizePerType(Dictionary<int, long> sizes, string prefix)
     {
         var sb = new StringBuilder();
         sb.Append(prefix);
 
-        for (var i = 0; i < sizes.Length; i++)
+        foreach (var (index, count) in sizes)
         {
-            var mb = sizes[i] / 1024 / 1024;
-            var name = StatisticsReporter.GetNameForSize(i);
+            var name = StatisticsReporter.GetNameForSize(index);
+            var gb = ((double)count) / 1024 / 1024 / 1024;
+            sb.Append($" {name}:{gb:F1}GB");
+        }
 
-            sb.Append($" {name}:{mb}MB");
+        return new Markup(sb.ToString());
+    }
+    
+    private static IRenderable WriteHistogramSizePerType(Dictionary<int, IntHistogram> sizes, string prefix)
+    {
+        var sb = new StringBuilder();
+        sb.Append(prefix);
+
+        foreach (var (index, histogram) in sizes)
+        {
+            var name = StatisticsReporter.GetNameForSize(index);
+            var median = histogram.GetValueAtPercentile(50);
+            sb.Append($" {name}: {median:F1} bytes");
         }
 
         return new Markup(sb.ToString());

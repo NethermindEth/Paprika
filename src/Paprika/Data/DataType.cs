@@ -3,6 +3,7 @@
 /// <summary>
 /// Represents the type of data stored in the <see cref="SlottedArray"/>.
 /// </summary>
+[Flags]
 public enum DataType : byte
 {
     /// <summary>
@@ -25,4 +26,6 @@ public enum DataType : byte
     /// Special type for <see cref="SlottedArray"/>. 
     /// </summary>
     Deleted = 3,
+
+    Compressed = 4,
 }

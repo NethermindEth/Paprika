@@ -24,6 +24,11 @@ public interface IBatchContext : IReadOnlyBatchContext
     /// Checks whether the page was written during this batch.
     /// </summary>
     bool WasWritten(DbAddress addr);
+    
+    /// <summary>
+    /// Abandon this page from this batch on.
+    /// </summary>
+    void RegisterForFutureReuse(Page page);
 }
 
 public interface IReadOnlyBatchContext : IPageResolver
