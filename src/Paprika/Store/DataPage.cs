@@ -18,6 +18,8 @@ namespace Paprika.Store;
 /// </remarks>
 public readonly unsafe struct DataPage : IPage
 {
+    public const int BucketCount = 16;
+
     private readonly Page _page;
 
     [DebuggerStepThrough]
@@ -98,8 +100,18 @@ public readonly unsafe struct DataPage : IPage
             return _page;
         }
 
-        // the map is full, extraction must follow
-        var biggestNibble = SelectNibbleToFlush(map, Data.Buckets, ctx.Batch);
+        // There's no more room in this page. We need to make some, but in a way that will not over-allocate pages.
+        // To make it work:
+        // 1. find amongst existing children pages that have some capacity left.
+        // 2. sort them from the most empty to the least empty
+        // 3. loop through them, and flush down the given nibble in a way that will not allocate anything in them
+        // 4. after each spin of the loop, try to write map
+        // 5. if after walking through all of the pages there's still no place, flush down the biggest nibble
+        if (TryFlushDownSoftAndWrite(ctx, map))
+            return _page;
+
+        // Flushing down to existing pages didn't make space for this entry, flush the biggest nibble forcefully.
+        var biggestNibble = FindBiggestNibble(map);
 
         // try get the child page
         ref var address = ref Data.Buckets[biggestNibble];
@@ -107,11 +119,16 @@ public readonly unsafe struct DataPage : IPage
 
         if (address.IsNull)
         {
-            // there is no child page, create one. First try to build a prefix
-            if (TryExtractAsPrefixTree(biggestNibble, ctx, map, out address))
+            var noOtherChildren = Data.Buckets.IndexOfAnyExcept(DbAddress.Null) == -1;
+            if (noOtherChildren)
             {
-                // the page has been extracted, retry set
-                return Set(ctx);
+                // try to create a prefix child only if there are no other children at this page.
+                // If they are, this looks like a regular page
+                if (TryExtractAsPrefixTree(biggestNibble, ctx, map, out address))
+                {
+                    // the page has been extracted, retry set
+                    return Set(ctx);
+                }
             }
 
             // create child as the same type as the parent
@@ -127,16 +144,6 @@ public readonly unsafe struct DataPage : IPage
         var dataPage = new DataPage(child);
         var batch = ctx.Batch;
 
-        // flush down soft
-        dataPage = FlushDown(map, biggestNibble, dataPage, batch, true);
-        address = ctx.Batch.GetAddress(dataPage.AsPage());
-
-        // check whether there's a space in map
-        if (map.TrySet(ctx.Key, ctx.Data))
-        {
-            return _page;
-        }
-
         // flush down: force
         dataPage = FlushDown(map, biggestNibble, dataPage, batch, false);
         address = ctx.Batch.GetAddress(dataPage.AsPage());
@@ -145,15 +152,73 @@ public readonly unsafe struct DataPage : IPage
         return Set(ctx);
     }
 
-    private DataPage FlushDown(in SlottedArray map, byte biggestNibble, DataPage destination, IBatchContext batch, bool tryAllocFree)
+    private bool TryFlushDownSoftAndWrite(SetContext ctx, SlottedArray map)
     {
-        foreach (var item in map.EnumerateNibble(biggestNibble))
+        // TODO: Change this algorithm into a simple bit-map that is memoized in page.
+        // Softly flushed map would memoize whether a page was flushed softly.
+        // Here, select only these that were not
+
+        Span<ushort> capacities = stackalloc ushort[BucketCount];
+        Span<byte> nibbles = stackalloc byte[BucketCount];
+
+        for (byte i = 0; i < BucketCount; i++)
+        {
+            nibbles[i] = i;
+
+            var childAddress = Data.Buckets[i];
+            if (childAddress.IsNull == false)
+            {
+                capacities[i] = (ushort)new DataPage(ctx.Batch.GetAt(childAddress)).Map.CapacityLeft;
+            }
+        }
+
+        capacities.Sort(nibbles);
+        var start = capacities.IndexOfAnyExcept((ushort)0);
+
+        if (start == -1)
+            return false;
+
+        // contains sorted from the smallest to the biggest capacity
+        var nibblesWithSomeCapacity = nibbles.Slice(start);
+        for (var i = nibblesWithSomeCapacity.Length - 1; i >= 0; i--)
+        {
+            var nibble = nibblesWithSomeCapacity[i];
+            ref var childAddress = ref Data.Buckets[nibble];
+            Debug.Assert(childAddress.IsNull == false, "Only an existing child should be selected for flush down");
+
+            var page = new DataPage(ctx.Batch.GetAt(childAddress));
+            page = FlushDown(map, nibble, page, ctx.Batch, true);
+
+            // update the child address
+            childAddress = ctx.Batch.GetAddress(page.AsPage());
+
+            // try write again to the map
+            if (map.TrySet(ctx.Key, ctx.Data))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private DataPage FlushDown(in SlottedArray map, byte nibble, DataPage destination, IBatchContext batch, bool tryAllocFree)
+    {
+        const int minimumCapacity = 96;
+
+        foreach (var item in map.EnumerateNibble(nibble))
         {
             var key = item.Key.SliceFrom(NibbleCount);
             if (tryAllocFree && !destination.MayAcceptKeyInAllocFreeWay(key))
             {
                 // skip items that will result in creating an additional page for now
                 continue;
+            }
+
+            if (tryAllocFree && destination.Map.CapacityLeft < minimumCapacity)
+            {
+                // if there's not that much space left in the child, break this loop
+                break;
             }
 
             var set = new SetContext(key, item.RawData, batch, Header.PageType == PageType.PrefixPage);
@@ -174,7 +239,7 @@ public readonly unsafe struct DataPage : IPage
         return Header.PageType == PageType.Standard || TryExtractPrefixed(key, out _);
     }
 
-    private static byte SelectNibbleToFlush(SlottedArray map, ReadOnlySpan<DbAddress> buckets, IBatchContext ctx)
+    private static byte FindBiggestNibble(SlottedArray map)
     {
         const int count = SlottedArray.BucketCount;
 
@@ -190,33 +255,6 @@ public readonly unsafe struct DataPage : IPage
             }
         }
 
-        var hasAnyChildren = buckets.IndexOfAnyExcept(DbAddress.Null) != -1;
-        if (!hasAnyChildren)
-        {
-            return biggestIndex;
-        }
-
-        // Some children are there, select the one that can hold the payload
-        for (byte i = 0; i < count; i++)
-        {
-            if (stats[i] > 0)
-            {
-                // there are some data for i
-                var child = buckets[i];
-                if (child.IsNull == false)
-                {
-                    var childPage = new DataPage(ctx.GetAt(child));
-                    var capacityLeft = childPage.Map.CapacityLeft;
-                    if (stats[i] < capacityLeft * 0.9)
-                    {
-                        // its enough of space to flush underneath, even with some 0.9 fill cap
-                        return i;
-                    }
-                }
-            }
-        }
-
-        // there are children but no one was found to flush to, select the biggest anyway
         return biggestIndex;
     }
 
@@ -242,7 +280,6 @@ public readonly unsafe struct DataPage : IPage
     {
         private const int Size = Page.PageSize - PageHeader.Size;
 
-        public const int BucketCount = 16;
         private const int BucketSize = BucketCount * DbAddress.Size;
 
         private const int PrefixSizeLongAligned = 40;
@@ -368,7 +405,7 @@ public readonly unsafe struct DataPage : IPage
             reporter.ReportItem(item.Key, item.RawData);
         }
 
-        reporter.ReportDataUsage(Header.PageType, level, Payload.BucketCount - emptyBuckets, slotted.Count, slotted.CapacityLeft);
+        reporter.ReportDataUsage(Header.PageType, level, BucketCount - emptyBuckets, slotted.Count, slotted.CapacityLeft);
     }
 
     private static bool TryExtractAsPrefixTree(byte nibble, in SetContext ctx, in SlottedArray map,
