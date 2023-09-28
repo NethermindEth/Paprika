@@ -19,7 +19,7 @@ namespace Paprika.Store;
 /// </remarks>
 public readonly unsafe struct DataPage : IPage
 {
-    public const int BucketCount = 16;
+    private const int BucketCount = 16;
 
     private readonly Page _page;
 
@@ -30,7 +30,7 @@ public readonly unsafe struct DataPage : IPage
 
     public ref Payload Data => ref Unsafe.AsRef<Payload>(_page.Payload);
 
-    public const int NibbleCount = 1;
+    private const int NibbleCount = 1;
 
     /// <summary>
     /// Sets values for the given <see cref="SetContext.Key"/>
@@ -214,7 +214,10 @@ public readonly unsafe struct DataPage : IPage
         var start = capacities.IndexOfAnyExcept((ushort)0);
 
         if (start == -1)
+        {
+            // no child pages with non-zero capacities, default
             return false;
+        }
 
         // contains sorted from the smallest to the biggest capacity
         var nibblesWithSomeCapacity = nibbles.Slice(start);

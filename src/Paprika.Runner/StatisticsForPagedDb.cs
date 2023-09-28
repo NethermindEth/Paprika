@@ -53,7 +53,6 @@ public static class StatisticsForPagedDb
                     new Layout(
                             new Rows(
                                 new Markup(sb.ToString()),
-                                new Text(""),
                                 new Text("General stats:"),
                                 new Text($"1. Size of this Paprika tree: {mb}MB"),
                                 new Text($"2. Types of pages: {types}"),
@@ -61,7 +60,7 @@ public static class StatisticsForPagedDb
                                 WriteSizePerType(stats.Sizes, "4. Size per entry type:"),
                                 WriteHistogramSizePerType(stats.SizeHistograms, "5. Median of size per entry type:")
                                 ))
-                        .Size(8),
+                        .Size(10),
                     new Layout(levelStats.Expand()));
 
             reportTo.Update(new Panel(report).Header("Paprika tree statistics").Expand());
@@ -92,7 +91,7 @@ public static class StatisticsForPagedDb
 
         return new Markup(sb.ToString());
     }
-    
+
     private static IRenderable WriteHistogramSizePerType(Dictionary<int, IntHistogram> sizes, string prefix)
     {
         var sb = new StringBuilder();
@@ -102,7 +101,7 @@ public static class StatisticsForPagedDb
         {
             var name = StatisticsReporter.GetNameForSize(index);
             var median = histogram.GetValueAtPercentile(50);
-            sb.Append($" {name}: {median:F1} bytes");
+            sb.Append($" {name}: {median} bytes");
         }
 
         return new Markup(sb.ToString());

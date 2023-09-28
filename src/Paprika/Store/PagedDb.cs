@@ -660,7 +660,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public override bool WasWritten(DbAddress addr) => _written.Contains(addr);
 
-        protected override void RegisterForFutureReuse(Page page)
+        public override void RegisterForFutureReuse(Page page)
         {
             var addr = _db.GetAddress(page);
             _abandoned.Enqueue(addr);

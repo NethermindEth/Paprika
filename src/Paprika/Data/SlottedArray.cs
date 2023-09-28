@@ -233,7 +233,7 @@ public readonly ref struct SlottedArray
             }
         }
     }
-    
+
     /// <summary>
     /// Gets the aggregated count of entries per nibble.
     /// </summary>

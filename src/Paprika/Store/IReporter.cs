@@ -61,7 +61,7 @@ public class StatisticsReporter : IReporter
         const int slottedArraySlot = 4;
         var keyEstimatedLength = key.Path.MaxByteLength + key.StoragePath.MaxByteLength + slottedArraySlot;
         var total = rawData.Length + keyEstimatedLength;
-        
+
         ref var value = ref CollectionsMarshal.GetValueRefOrAddDefault(Sizes, index, out _);
         value += total;
 
@@ -75,7 +75,7 @@ public class StatisticsReporter : IReporter
 
     private const int KeyShift = 8;
     private const int KeyDiff = 1;
-    
+
     private static int GetKey(in Key key, in ReadOnlySpan<byte> data)
     {
         var encoded = (int)key.Type;
@@ -83,7 +83,7 @@ public class StatisticsReporter : IReporter
         {
             return encoded;
         }
-        
+
         Node.Header.ReadFrom(data, out var header);
         return encoded | (((int)header.NodeType + KeyDiff) << KeyShift);
     }
