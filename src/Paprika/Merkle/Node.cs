@@ -216,12 +216,11 @@ public static partial class Node
     public readonly ref struct Branch
     {
         public int MaxByteLength => Header.Size +
-                                    NibbleSet.MaxByteSize +
+                                    (HeaderHasAllSet(Header) ? 0 : NibbleSet.MaxByteSize) +
                                     (HeaderHasKeccak(Header) ? Keccak.Size : 0);
 
-        private const int HeaderMetadataKeccakMask = 0b0001;
-        private const int NoKeccak = 0;
-        private const int KeccakSet = 1;
+        private const byte HeaderMetadataKeccakMask = 0b0000_0001;
+        private const byte HeaderMetadataAllChildrenSetMask = 0b0000_0010;
 
         public readonly Header Header;
         public readonly NibbleSet.Readonly Children;
@@ -243,7 +242,10 @@ public static partial class Node
 
         public Branch(NibbleSet.Readonly children, Keccak keccak)
         {
-            Header = new Header(Type.Branch, metadata: KeccakSet);
+            var allSet = children.AllSet ? HeaderMetadataAllChildrenSetMask : 0;
+            var hasKeccak = keccak == default ? 0 : HeaderMetadataKeccakMask;
+
+            Header = new Header(Type.Branch, metadata: (byte)(hasKeccak | allSet));
 
             Assert(children);
 
@@ -261,7 +263,7 @@ public static partial class Node
 
         public Branch(NibbleSet.Readonly children)
         {
-            Header = new Header(Type.Branch, metadata: NoKeccak);
+            Header = new Header(Type.Branch, metadata: (byte)(children.AllSet ? HeaderMetadataAllChildrenSetMask : 0));
 
             Assert(children);
 
@@ -271,7 +273,7 @@ public static partial class Node
 
         private static Header ValidateHeaderKeccak(Header header, bool shouldHaveKeccak)
         {
-            var expected = shouldHaveKeccak ? KeccakSet : NoKeccak;
+            var expected = shouldHaveKeccak ? HeaderMetadataKeccakMask : 0;
             var actual = header.Metadata & HeaderMetadataKeccakMask;
 
             Debug.Assert(actual == expected,
@@ -283,7 +285,10 @@ public static partial class Node
         public bool HasKeccak => HeaderHasKeccak(Header);
 
         private static bool HeaderHasKeccak(Header header) =>
-            (header.Metadata & HeaderMetadataKeccakMask) == KeccakSet;
+            (header.Metadata & HeaderMetadataKeccakMask) == HeaderMetadataKeccakMask;
+
+        private static bool HeaderHasAllSet(Header header) =>
+            (header.Metadata & HeaderMetadataAllChildrenSetMask) == HeaderMetadataAllChildrenSetMask;
 
         public Span<byte> WriteTo(Span<byte> output)
         {
@@ -294,7 +299,12 @@ public static partial class Node
         public Span<byte> WriteToWithLeftover(Span<byte> output)
         {
             var leftover = Header.WriteToWithLeftover(output);
-            leftover = Children.WriteToWithLeftover(leftover);
+
+            if (!Children.AllSet)
+            {
+                // write children only if not all set. All set is encoded in the header
+                leftover = Children.WriteToWithLeftover(leftover);
+            }
 
             if (HeaderHasKeccak(Header))
             {
@@ -308,7 +318,15 @@ public static partial class Node
         {
             var leftover = Header.ReadFrom(source, out var header);
 
-            leftover = NibbleSet.Readonly.ReadFrom(leftover, out var children);
+            NibbleSet.Readonly children;
+            if (HeaderHasAllSet(header))
+            {
+                children = NibbleSet.Readonly.All;
+            }
+            else
+            {
+                leftover = NibbleSet.Readonly.ReadFrom(leftover, out children);
+            }
 
             if (HeaderHasKeccak(header))
             {
@@ -342,7 +360,9 @@ public static partial class Node
         }
 
         private static int GetBranchDataLength(Header header) =>
-            Header.Size + NibbleSet.MaxByteSize + (HeaderHasKeccak(header) ? Keccak.Size : 0);
+            Header.Size +
+            (HeaderHasAllSet(header) ? 0 : NibbleSet.MaxByteSize) +
+            (HeaderHasKeccak(header) ? Keccak.Size : 0);
 
         public bool Equals(in Branch other)
         {

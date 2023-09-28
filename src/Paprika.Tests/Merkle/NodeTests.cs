@@ -150,6 +150,24 @@ public class NodeTests
         encodedNoKeccak.Length.Should().BeLessThan(encodedHasKeccak.Length);
     }
 
+    [TestCase(true)]
+    [TestCase(false)]
+    public void Branch_all_set(bool keccak)
+    {
+        var branch = new Node.Branch(NibbleSet.Readonly.All, keccak ? Values.Key0 : default);
+
+        Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
+        var encoded = branch.WriteTo(buffer);
+
+        encoded.Length.Should().Be(1 + (keccak ? Keccak.Size : 0), "Full branch should encode to one byte");
+
+        var leftover = Node.Branch.ReadFrom(encoded, out var decoded);
+
+        leftover.Length.Should().Be(0);
+
+        decoded.Equals(branch).Should().BeTrue($"Expected {branch.ToString()}, got {decoded.ToString()}");
+    }
+
     [Test]
     public void Leaf_properties()
     {
