@@ -1,8 +1,6 @@
-﻿using System.Buffers;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Paprika.Crypto;
 using Paprika.Data;
 
 namespace Paprika.Store;
@@ -49,7 +47,7 @@ public readonly unsafe struct DataPage : IPage
         }
 
         var map = new SlottedArray(Data.DataSpan);
-        var key = TryCompress(ctx.Key);
+        var key = ctx.Key;
 
         var path = key.Path;
         var isDelete = ctx.Data.IsEmpty;
@@ -75,19 +73,6 @@ public readonly unsafe struct DataPage : IPage
         if (map.TrySet(key, ctx.Data))
         {
             return _page;
-        }
-
-        // The map is full. The plan for this is the following:
-        // 1. try apply the dictionary compression
-        // 2. try to flush down softly
-        // 3. try to flush down with force the biggest nibble
-        if (TryCompressMap(map))
-        {
-            // compression occured, try to write again
-            if (map.TrySet(key, ctx.Data))
-            {
-                return _page;
-            }
         }
 
         if (TryFlushDownSoftAndWrite(key, ctx.Data, ctx.Batch, map))
@@ -122,65 +107,6 @@ public readonly unsafe struct DataPage : IPage
 
         // The page has some of the values flushed down, try to add again.
         return Set(ctx);
-    }
-
-    private bool TryCompressMap(in SlottedArray map)
-    {
-        if (Header.Level < DictionaryCompression.CompressFromLevel)
-            return false;
-
-        if (!Data.Compression.HasMoreSpace)
-            return false;
-
-        var dictionary = new Dictionary<int, int>();
-
-        foreach (var item in map.EnumerateAll())
-        {
-            if (IsCompressible(item.Key))
-            {
-                var hashCode = item.Key.Path.GetHashCode();
-                ref var count = ref CollectionsMarshal.GetValueRefOrAddDefault(dictionary, hashCode, out _);
-                count++;
-            }
-        }
-
-        if (dictionary.Count == 0)
-            return false;
-
-        // find max and compress it away
-        var max = dictionary.Max(kvp => kvp.Value);
-        var maxKey = dictionary.First(kvp => kvp.Value == max).Key;
-
-        // assigned compressed
-        foreach (var item in Map.EnumerateAll())
-        {
-            if (IsCompressible(item.Key))
-            {
-                var hashCode = item.Key.Path.GetHashCode();
-                if (hashCode == maxKey)
-                {
-                    Data.Compression.Assign(item.Key.Path);
-                    break;
-                }
-            }
-        }
-
-        // copy over
-        var size = Data.DataSpan.Length;
-        var array = ArrayPool<byte>.Shared.Rent(size);
-        var bytes = array.AsSpan(0, size);
-        bytes.Clear();
-
-        var copy = new SlottedArray(bytes);
-        foreach (var item in map.EnumerateAll())
-        {
-            copy.TrySet(TryCompress(item.Key), item.RawData);
-        }
-
-        bytes.CopyTo(Data.DataSpan);
-        ArrayPool<byte>.Shared.Return(array);
-
-        return true;
     }
 
     private bool TryFlushDownSoftAndWrite(in Key key, in ReadOnlySpan<byte> data, IBatchContext batch, in SlottedArray map)
@@ -312,7 +238,7 @@ public readonly unsafe struct DataPage : IPage
         /// <summary>
         /// The size of the raw byte data held in this page. Must be long aligned.
         /// </summary>
-        private const int DataSize = Size - BucketSize - DictionaryCompression.Size;
+        private const int DataSize = Size - BucketSize;
 
         private const int DataOffset = Size - DataSize;
 
@@ -322,8 +248,6 @@ public readonly unsafe struct DataPage : IPage
         [FieldOffset(0)] private DbAddress Bucket;
 
         public Span<DbAddress> Buckets => MemoryMarshal.CreateSpan(ref Bucket, BucketCount);
-
-        [FieldOffset(BucketSize)] public DictionaryCompression Compression;
 
         /// <summary>
         /// The first item of map of frames to allow ref to it.
@@ -336,132 +260,35 @@ public readonly unsafe struct DataPage : IPage
         public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
     }
 
-    /// <summary>
-    /// This structure provides an in-page dictionary compression,
-    /// allowing to store to up to <see cref="MaxPrefixCount"/> nibbles paths extracted.
-    /// </summary>
-    [StructLayout(LayoutKind.Explicit, Size = Size)]
-    public struct DictionaryCompression
-    {
-        public const int CompressFromLevel = 3;
-        public const int MinimalPathLength = 2;
-
-        public const int Size = MaxPrefixCount * AccountSize + sizeof(long);
-
-        private const int AccountSize = Keccak.Size;
-        private const int MaxPrefixCount = 2;
-
-        [FieldOffset(0)]
-        private byte pathStart;
-
-        private Span<byte> this[byte index] =>
-            MemoryMarshal.CreateSpan(ref Unsafe.Add(ref pathStart, index * AccountSize), AccountSize);
-
-        [FieldOffset(MaxPrefixCount * AccountSize)]
-        private byte Count;
-
-        [FieldOffset(MaxPrefixCount * AccountSize + 1)]
-        private byte NibbleStart;
-
-        private Span<byte> NibblePairs => MemoryMarshal.CreateSpan(ref NibbleStart, AccountSize);
-
-        public bool HasMoreSpace => Count < MaxPrefixCount;
-
-        public byte Assign(in NibblePath path)
-        {
-            if (!HasMoreSpace)
-                throw new Exception("Filled compression");
-
-            var id = Count;
-            Count++;
-            path.WriteTo(this[id]);
-            NibblePairs[id] = GetTwoNibbles(path);
-
-            return id;
-        }
-
-        private static byte GetTwoNibbles(in NibblePath path) =>
-            (byte)((path.GetAt(0) << NibblePath.NibbleShift) | path.GetAt(1));
-
-        public bool TryFindCompressed(in NibblePath path, out byte id)
-        {
-            var search = GetTwoNibbles(path);
-
-            for (byte i = 0; i < Count; i++)
-            {
-                if (NibblePairs[i] == search)
-                {
-                    NibblePath.ReadFrom(this[i], out var compressed);
-                    if (compressed.Equals(path))
-                    {
-                        id = i;
-                        return true;
-                    }
-                }
-            }
-
-            id = default;
-            return false;
-        }
-    }
-
-
     public bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result) =>
         TryGet(key, (IPageResolver)batch, out result);
 
     private bool TryGet(Key key, IPageResolver batch, out ReadOnlySpan<byte> result)
     {
-        scoped var k = TryCompress(key);
-
         // read in-page
         var map = Map;
 
         // try regular map
-        if (map.TryGet(k, out result))
+        if (map.TryGet(key, out result))
         {
             return true;
         }
 
         // path longer than 0, try to find in child
-        if (k.Path.Length > 0)
+        if (key.Path.Length > 0)
         {
             // try to go deeper only if the path is long enough
-            var bucket = Data.Buckets[k.Path.FirstNibble];
+            var bucket = Data.Buckets[key.Path.FirstNibble];
 
             // non-null page jump, follow it!
             if (bucket.IsNull == false)
             {
-                return new DataPage(batch.GetAt(bucket)).TryGet(k.SliceFrom(NibbleCount), batch, out result);
+                return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), batch, out result);
             }
         }
 
         result = default;
         return false;
-    }
-
-    private Key TryCompress(in Key key)
-    {
-        if (Header.Level < DictionaryCompression.CompressFromLevel)
-            return key;
-
-        if (!IsCompressible(key))
-            return key;
-
-        if (!Data.Compression.TryFindCompressed(key.Path, out var id))
-            return key;
-
-        Debug.Assert(Header.Level <= 32);
-        var actual = (byte)(Header.Level << 2 | id);
-
-        return Key.Raw(key.StoragePath, key.Type | DataType.Compressed, NibblePath.OfByte(actual));
-    }
-
-    private static bool IsCompressible(in Key key)
-    {
-        // compress only merkle for storage or storage
-        return key.Path.Length > DictionaryCompression.MinimalPathLength
-               && (key.Type & DataType.Compressed) != DataType.Compressed
-               && key.StoragePath.Length > 0;
     }
 
     private SlottedArray Map => new(Data.DataSpan);
