@@ -246,6 +246,15 @@ public readonly ref struct NibblePath
         return source.Slice(0, GetSpanLength(length, odd) + PreambleLength);
     }
 
+    public ReadOnlySpan<byte> RawSpan
+    {
+        get
+        {
+            var lenght = GetSpanLength(Length, _odd);
+            return MemoryMarshal.CreateSpan(ref _span, lenght);
+        }
+    }
+
     private static readonly byte[] Bytes = Enumerable
         .Range(0, byte.MaxValue + 1).Select(b => (byte)b)
         .ToArray();
