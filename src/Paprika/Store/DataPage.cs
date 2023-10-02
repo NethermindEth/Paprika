@@ -36,32 +36,37 @@ public readonly unsafe struct DataPage : IPage
     /// <returns>
     /// The actual page which handled the set operation. Due to page being COWed, it may be a different page.
     /// </returns>
+    //TODO: [SkipLocalsInit]
     public Page Set(in SetContext ctx)
     {
-        if (Header.BatchId != ctx.Batch.BatchId)
+        var size = StoreKey.GetMaxByteSize(ctx.Key);
+        var key = StoreKey.Encode(ctx.Key, stackalloc byte[size]);
+        return Set(key, ctx.Data, ctx.Batch);
+    }
+
+    private Page Set(in StoreKey key, in ReadOnlySpan<byte> data, IBatchContext batch)
+    {
+        if (Header.BatchId != batch.BatchId)
         {
             // the page is from another batch, meaning, it's readonly. Copy
-            var writable = ctx.Batch.GetWritableCopy(_page);
+            var writable = batch.GetWritableCopy(_page);
 
-            return new DataPage(writable).Set(ctx);
+            return new DataPage(writable).Set(key, data, batch);
         }
 
         var map = new SlottedArray(Data.DataSpan);
-        var key = ctx.Key;
-
-        var path = key.Path;
-        var isDelete = ctx.Data.IsEmpty;
+        var isDelete = data.IsEmpty;
 
         if (isDelete)
         {
-            if (path.Length < NibbleCount)
+            if (key.NibbleCount < NibbleCount)
             {
                 // path cannot be held on a lower level so delete in here
                 return DeleteInMap(key, map);
             }
 
             // path is not empty, so it might have a child page underneath with data, let's try
-            var childPageAddress = Data.Buckets[path.FirstNibble];
+            var childPageAddress = Data.Buckets[GetNibbleForThisLevel(key)];
             if (childPageAddress.IsNull)
             {
                 // there's no lower level, delete in map
@@ -70,12 +75,12 @@ public readonly unsafe struct DataPage : IPage
         }
 
         // try write in map
-        if (map.TrySet(key, ctx.Data))
+        if (map.TrySet(key.Payload, data))
         {
             return _page;
         }
 
-        if (TryFlushDownSoftAndWrite(key, ctx.Data, ctx.Batch, map))
+        if (TryFlushDownSoftAndWrite(key, data, batch, map))
             return _page;
 
         // Flushing down to existing pages didn't make space for this entry, flush the biggest nibble forcefully.
@@ -88,28 +93,35 @@ public readonly unsafe struct DataPage : IPage
         if (address.IsNull)
         {
             // create child as the same type as the parent
-            child = ctx.Batch.GetNewPage(out Data.Buckets[biggestNibble], true);
+            child = batch.GetNewPage(out Data.Buckets[biggestNibble], true);
             child.Header.PageType = Header.PageType;
             child.Header.Level = (byte)(Header.Level + 1);
         }
         else
         {
             // the child page is not-null, retrieve it
-            child = ctx.Batch.GetAt(address);
+            child = batch.GetAt(address);
         }
 
         var dataPage = new DataPage(child);
-        var batch = ctx.Batch;
 
         // flush down: force
         dataPage = FlushDown(map, biggestNibble, dataPage, batch, false);
-        address = ctx.Batch.GetAddress(dataPage.AsPage());
+        address = batch.GetAddress(dataPage.AsPage());
 
         // The page has some of the values flushed down, try to add again.
-        return Set(ctx);
+        return Set(key, data, batch);
     }
 
-    private bool TryFlushDownSoftAndWrite(in Key key, in ReadOnlySpan<byte> data, IBatchContext batch, in SlottedArray map)
+    private byte GetNibbleForThisLevel(in StoreKey key) => key.GetNibbleAt(IsEvenLevel ? 0 : 1);
+
+    private bool IsEvenLevel => Header.Level % 2 == 0;
+
+    private static byte NibbleSelectorEven(in ReadOnlySpan<byte> key) => new StoreKey(key).GetNibbleAt(0);
+    private static byte NibbleSelectorOdd(in ReadOnlySpan<byte> key) => new StoreKey(key).GetNibbleAt(1);
+
+    private bool TryFlushDownSoftAndWrite(in StoreKey key, in ReadOnlySpan<byte> data, IBatchContext batch,
+        in SlottedArray map)
     {
         // There's no more room in this page. We need to make some, but in a way that will not over-allocate pages.
         // To make it work:
@@ -160,7 +172,7 @@ public readonly unsafe struct DataPage : IPage
             childAddress = batch.GetAddress(page.AsPage());
 
             // try write again to the map
-            if (map.TrySet(key, data))
+            if (map.TrySet(key.Payload, data))
             {
                 return true;
             }
@@ -169,13 +181,19 @@ public readonly unsafe struct DataPage : IPage
         return false;
     }
 
-    private static DataPage FlushDown(in SlottedArray map, byte nibble, DataPage destination, IBatchContext batch, bool tryAllocFree)
+    private DataPage FlushDown(in SlottedArray map, byte nibble, DataPage destination, IBatchContext batch,
+        bool tryAllocFree)
     {
         const int minimumCapacity = 128;
 
-        foreach (var item in map.EnumerateNibble(nibble))
+        NibbleSelector selector = IsEvenLevel ? NibbleSelectorEven : NibbleSelectorOdd;
+
+        foreach (var item in map.EnumerateAll())
         {
-            var key = item.Key.SliceFrom(NibbleCount);
+            if (selector(item.Key) != nibble)
+            {
+                continue;
+            }
 
             if (tryAllocFree && destination.Map.CapacityLeft < minimumCapacity)
             {
@@ -183,8 +201,9 @@ public readonly unsafe struct DataPage : IPage
                 break;
             }
 
-            var set = new SetContext(key, item.RawData, batch);
-            destination = new DataPage(destination.Set(set));
+            var key = TrimOneNibble(new StoreKey(item.Key));
+
+            destination = new DataPage(destination.Set(key, item.RawData, batch));
 
             // use the special delete for the item that is much faster than map.Delete(item.Key);
             map.Delete(item);
@@ -193,12 +212,23 @@ public readonly unsafe struct DataPage : IPage
         return destination;
     }
 
-    private static byte FindMostFrequentNibble(SlottedArray map)
+    private StoreKey TrimOneNibble(StoreKey key)
+    {
+        if (IsEvenLevel == false)
+        {
+            // it's an odd level so we need to slice two
+            key = key.SliceTwoNibbles();
+        }
+
+        return key;
+    }
+
+    private byte FindMostFrequentNibble(SlottedArray map)
     {
         const int count = SlottedArray.BucketCount;
 
         Span<ushort> stats = stackalloc ushort[count];
-        map.GatherCountStatistics(stats);
+        map.GatherCountStatistics(stats, IsEvenLevel ? NibbleSelectorEven : NibbleSelectorOdd);
 
         byte biggestIndex = 0;
         for (byte i = 1; i < count; i++)
@@ -212,9 +242,9 @@ public readonly unsafe struct DataPage : IPage
         return biggestIndex;
     }
 
-    private Page DeleteInMap(in Key key, SlottedArray map)
+    private Page DeleteInMap(in StoreKey key, SlottedArray map)
     {
-        map.Delete(key);
+        map.Delete(key.Payload);
         if (map.Count == 0 && Data.Buckets.IndexOfAnyExcept(DbAddress.Null) == -1)
         {
             // map is empty, buckets are empty, page is empty
@@ -260,30 +290,36 @@ public readonly unsafe struct DataPage : IPage
         public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
     }
 
-    public bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result) =>
-        TryGet(key, (IPageResolver)batch, out result);
+    public bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
+    {
+        var k = StoreKey.Encode(key, stackalloc byte[StoreKey.GetMaxByteSize(key)]);
+        return TryGet(k, (IPageResolver)batch, out result);
+    }
 
-    private bool TryGet(Key key, IPageResolver batch, out ReadOnlySpan<byte> result)
+    private bool TryGet(StoreKey key, IPageResolver batch, out ReadOnlySpan<byte> result)
     {
         // read in-page
         var map = Map;
 
         // try regular map
-        if (map.TryGet(key, out result))
+        if (map.TryGet(key.Payload, out result))
         {
             return true;
         }
 
         // path longer than 0, try to find in child
-        if (key.Path.Length > 0)
+        if (key.NibbleCount > 0)
         {
             // try to go deeper only if the path is long enough
-            var bucket = Data.Buckets[key.Path.FirstNibble];
+            var bucket = Data.Buckets[GetNibbleForThisLevel(key)];
 
             // non-null page jump, follow it!
             if (bucket.IsNull == false)
             {
-                return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), batch, out result);
+                var child = new DataPage(batch.GetAt(bucket));
+                key = TrimOneNibble(key);
+
+                return child.TryGet(TrimOneNibble(key), batch, out result);
             }
         }
 
@@ -313,9 +349,10 @@ public readonly unsafe struct DataPage : IPage
 
         foreach (var item in slotted.EnumerateAll())
         {
-            reporter.ReportItem(item.Key, item.RawData);
+            reporter.ReportItem(new StoreKey(item.Key), item.RawData);
         }
 
-        reporter.ReportDataUsage(Header.PageType, level, BucketCount - emptyBuckets, slotted.Count, slotted.CapacityLeft);
+        reporter.ReportDataUsage(Header.PageType, level, BucketCount - emptyBuckets, slotted.Count,
+            slotted.CapacityLeft);
     }
 }

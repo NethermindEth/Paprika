@@ -17,7 +17,7 @@ public interface IReporter
     /// </summary>
     void ReportPage(uint ageInBatches, PageType type);
 
-    void ReportItem(in Key key, ReadOnlySpan<byte> rawData);
+    void ReportItem(in StoreKey key, ReadOnlySpan<byte> rawData);
 }
 
 public class StatisticsReporter : IReporter
@@ -53,13 +53,13 @@ public class StatisticsReporter : IReporter
         PageTypes[type] = value + 1;
     }
 
-    public void ReportItem(in Key key, ReadOnlySpan<byte> rawData)
+    public void ReportItem(in StoreKey key, ReadOnlySpan<byte> rawData)
     {
         var index = GetKey(key, rawData);
 
         // total size
         const int slottedArraySlot = 4;
-        var keyEstimatedLength = key.Path.MaxByteLength + key.StoragePath.MaxByteLength + slottedArraySlot;
+        var keyEstimatedLength = key.Payload.Length + slottedArraySlot;
         var total = rawData.Length + keyEstimatedLength;
 
         ref var value = ref CollectionsMarshal.GetValueRefOrAddDefault(Sizes, index, out _);
@@ -76,7 +76,7 @@ public class StatisticsReporter : IReporter
     private const int KeyShift = 8;
     private const int KeyDiff = 1;
 
-    private static int GetKey(in Key key, in ReadOnlySpan<byte> data)
+    private static int GetKey(in StoreKey key, in ReadOnlySpan<byte> data)
     {
         var encoded = (int)key.Type;
         if ((key.Type & DataType.Merkle) != DataType.Merkle)

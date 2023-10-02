@@ -2,25 +2,26 @@
 using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Store;
 
 namespace Paprika.Tests.Data;
 
 public class SlottedArrayTests
 {
-    private static NibblePath Key0 => NibblePath.FromKey(new byte[] { 0x12, 0x34, 0x56, 0x78, 0xAB });
+    private static NibblePath Key0 => NibblePath.FromKey(Values.Key0);
     private static ReadOnlySpan<byte> Data0 => new byte[] { 23 };
 
-    private static NibblePath Key1 => NibblePath.FromKey(new byte[] { 0x12, 0x34, 0x56, 0x78, 0xCD });
+    private static NibblePath Key1 => NibblePath.FromKey(Values.Key1);
     private static ReadOnlySpan<byte> Data1 => new byte[] { 29, 31 };
 
-    private static NibblePath Key2 => NibblePath.FromKey(new byte[] { 19, 21, 23, 29, 23 });
+    private static NibblePath Key2 => NibblePath.FromKey(Values.Key2);
     private static ReadOnlySpan<byte> Data2 => new byte[] { 37, 39 };
 
     private static ReadOnlySpan<byte> Data3 => new byte[] { 39, 41, 43 };
 
-    private static readonly Keccak StorageCell0 = Keccak.Compute(new byte[] { 2, 43, 4, 5, 34 });
-    private static readonly Keccak StorageCell1 = Keccak.Compute(new byte[] { 2, 43, 4, });
-    private static readonly Keccak StorageCell2 = Keccak.Compute(new byte[] { 2, 43, });
+    private static readonly Keccak StorageCell0 = Values.Key3;
+    private static readonly Keccak StorageCell1 = Values.Key4;
+    private static readonly Keccak StorageCell2 = Values.Key5;
 
     [Test]
     public void Set_Get_Delete_Get_AnotherSet()
@@ -32,48 +33,14 @@ public class SlottedArrayTests
 
         map.GetAssert(Key.Account(Key0), Data0);
 
-        map.Delete(Key.Account(Key0)).Should().BeTrue("Should find and delete entry");
-        map.TryGet(Key.Account(Key0), out _).Should().BeFalse("The entry shall no longer exist");
+        map.DeleteAssert(Key.Account(Key0));
+        map.GetShouldFail(Key.Account(Key0));
 
         // should be ready to accept some data again
 
-        map.TrySet(Key.Account(Key1), Data1).Should().BeTrue("Should have memory after previous delete");
+        map.SetAssert(Key.Account(Key1), Data1, "Should have memory after previous delete");
 
         map.GetAssert(Key.Account(Key1), Data1);
-    }
-
-    [TestCase(0, 10)]
-    [TestCase(0, 9)]
-    [TestCase(1, 9)]
-    [TestCase(1, 8)]
-    public void Enumerate_nibble(int from, int length)
-    {
-        Span<byte> span = stackalloc byte[256];
-        var map = new SlottedArray(span);
-
-        var path0 = Key0.SliceFrom(from).SliceTo(length);
-        var path1 = Key1.SliceFrom(from).SliceTo(length);
-
-        var key0 = Key.Account(path0);
-        var key1 = Key.Account(path1);
-
-        map.SetAssert(key0, Data0);
-        map.SetAssert(key1, Data1);
-
-        Console.WriteLine($"Expected keys: {key0.Path.ToString()} and {key1.Path.ToString()}");
-        Console.WriteLine("Actual: ");
-
-        using var e = map.EnumerateNibble(key0.Path.FirstNibble);
-
-        e.MoveNext().Should().BeTrue();
-        e.Current.Key.Path.ToString().Should().Be(path0.ToString());
-        e.Current.RawData.SequenceEqual(Data0).Should().BeTrue();
-
-        e.MoveNext().Should().BeTrue();
-        e.Current.Key.Path.ToString().Should().Be(path1.ToString());
-        e.Current.RawData.SequenceEqual(Data1).Should().BeTrue();
-
-        e.MoveNext().Should().BeFalse();
     }
 
     [Test]
@@ -82,9 +49,9 @@ public class SlottedArrayTests
         Span<byte> span = stackalloc byte[256];
         var map = new SlottedArray(span);
 
-        var key0 = Key.Account(Key0);
-        var key1 = Key.Account(Key2);
-        var key2 = Key.Account(NibblePath.Empty);
+        var key0 = Span<byte>.Empty;
+        Span<byte> key1 = stackalloc byte[1] { 7 };
+        Span<byte> key2 = stackalloc byte[2] { 7, 13 };
 
         map.SetAssert(key0, Data0);
         map.SetAssert(key1, Data1);
@@ -93,15 +60,15 @@ public class SlottedArrayTests
         using var e = map.EnumerateAll();
 
         e.MoveNext().Should().BeTrue();
-        e.Current.Key.Path.ToString().Should().Be(Key0.ToString());
+        e.Current.Key.SequenceEqual(key0).Should().BeTrue();
         e.Current.RawData.SequenceEqual(Data0).Should().BeTrue();
 
         e.MoveNext().Should().BeTrue();
-        e.Current.Key.Path.ToString().Should().Be(Key2.ToString());
+        e.Current.Key.SequenceEqual(key1).Should().BeTrue();
         e.Current.RawData.SequenceEqual(Data1).Should().BeTrue();
 
         e.MoveNext().Should().BeTrue();
-        e.Current.Key.Path.ToString().Should().Be(NibblePath.Empty.ToString());
+        e.Current.Key.SequenceEqual(key2).Should().BeTrue();
         e.Current.RawData.SequenceEqual(Data2).Should().BeTrue();
 
         e.MoveNext().Should().BeFalse();
@@ -114,22 +81,18 @@ public class SlottedArrayTests
         Span<byte> span = stackalloc byte[40];
         var map = new SlottedArray(span);
 
-        map.TrySet(Key.Account(Key0), Data0).Should().BeTrue();
-        map.TrySet(Key.Account(Key1), Data1).Should().BeTrue();
+        map.SetAssert(Key.Account(Key0), Data0);
+        map.SetAssert(Key.Account(Key1), Data1);
 
-        map.Delete(Key.Account(Key0)).Should().BeTrue();
+        map.DeleteAssert(Key.Account(Key0));
 
-        map.TrySet(Key.Account(Key2), Data2).Should()
-            .BeTrue("Should retrieve space by running internally the defragmentation");
+        map.SetAssert(Key.Account(Key2), Data2, "Should retrieve space by running internally the defragmentation");
 
         // should contains no key0, key1 and key2 now
-        map.TryGet(Key.Account(Key0), out var retrieved).Should().BeFalse();
+        map.GetShouldFail(Key.Account(Key0));
 
-        map.TryGet(Key.Account(Key1), out retrieved).Should().BeTrue();
-        Data1.SequenceEqual(retrieved).Should().BeTrue();
-
-        map.TryGet(Key.Account(Key2), out retrieved).Should().BeTrue();
-        Data2.SequenceEqual(retrieved).Should().BeTrue();
+        map.GetAssert(Key.Account(Key1), Data1);
+        map.GetAssert(Key.Account(Key2), Data2);
     }
 
     [Test]
@@ -191,14 +154,33 @@ public class SlottedArrayTests
 
 file static class FixedMapTestExtensions
 {
-    public static void SetAssert(this SlottedArray map, in Key key, ReadOnlySpan<byte> data)
+    public static void SetAssert(this SlottedArray map, in Key key, ReadOnlySpan<byte> data, string? because = null)
     {
-        map.TrySet(key, data).Should().BeTrue("TrySet should succeed");
+        var storeKey = StoreKey.Encode(key, stackalloc byte[StoreKey.GetMaxByteSize(key)]);
+        map.TrySet(storeKey.Payload, data).Should().BeTrue(because ?? "TrySet should succeed");
+    }
+
+    public static void SetAssert(this SlottedArray map, in ReadOnlySpan<byte> key, ReadOnlySpan<byte> data, string? because = null)
+    {
+        map.TrySet(key, data).Should().BeTrue(because ?? "TrySet should succeed");
+    }
+
+    public static void DeleteAssert(this SlottedArray map, in Key key)
+    {
+        var storeKey = StoreKey.Encode(key, stackalloc byte[StoreKey.GetMaxByteSize(key)]);
+        map.Delete(storeKey.Payload).Should().BeTrue("Delete should succeed");
     }
 
     public static void GetAssert(this SlottedArray map, in Key key, ReadOnlySpan<byte> expected)
     {
-        map.TryGet(key, out var actual).Should().BeTrue();
+        var storeKey = StoreKey.Encode(key, stackalloc byte[StoreKey.GetMaxByteSize(key)]);
+        map.TryGet(storeKey.Payload, out var actual).Should().BeTrue();
         actual.SequenceEqual(expected).Should().BeTrue("Actual data should equal expected");
+    }
+
+    public static void GetShouldFail(this SlottedArray map, in Key key)
+    {
+        var storeKey = StoreKey.Encode(key, stackalloc byte[StoreKey.GetMaxByteSize(key)]);
+        map.TryGet(storeKey.Payload, out var actual).Should().BeFalse("The key should not exist");
     }
 }

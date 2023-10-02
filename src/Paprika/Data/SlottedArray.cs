@@ -2,7 +2,6 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Paprika.Merkle;
 using Paprika.Store;
 using Paprika.Utils;
 
@@ -38,7 +37,7 @@ public readonly ref struct SlottedArray
         _slots = MemoryMarshal.Cast<byte, Slot>(_data);
     }
 
-    public bool TrySet(in Key key, ReadOnlySpan<byte> data, ushort? keyHash = default)
+    public bool TrySet(in ReadOnlySpan<byte> key, ReadOnlySpan<byte> data, ushort? keyHash = default)
     {
         var hash = keyHash ?? Slot.GetHash(key);
 
@@ -55,11 +54,8 @@ public readonly ref struct SlottedArray
             DeleteImpl(index);
         }
 
-        var encodedKey = key.Path.WriteTo(stackalloc byte[key.Path.MaxByteLength]);
-        var encodedStorageKey = key.StoragePath.WriteTo(stackalloc byte[key.StoragePath.MaxByteLength]);
-
         // does not exist yet, calculate total memory needed
-        var total = GetTotalSpaceRequired(encodedKey, encodedStorageKey, data);
+        var total = GetTotalSpaceRequired(key, data);
 
         if (_header.Taken + total + Slot.Size > _data.Length)
         {
@@ -86,15 +82,13 @@ public readonly ref struct SlottedArray
         // write slot
         slot.Hash = hash;
         slot.ItemAddress = (ushort)(_data.Length - _header.High - total);
-        slot.Type = key.Type;
-        slot.PathNotEmpty = !key.Path.IsEmpty;
 
-        // write item: key, additionalKey, data
+        // write item: length_key, key, data
         var dest = _data.Slice(slot.ItemAddress, total);
 
-        encodedKey.CopyTo(dest);
-        encodedStorageKey.CopyTo(dest.Slice(encodedKey.Length));
-        data.CopyTo(dest.Slice(encodedKey.Length + encodedStorageKey.Length));
+        dest[0] = (byte)key.Length;
+        key.CopyTo(dest.Slice(KeyLengthLength));
+        data.CopyTo(dest.Slice(KeyLengthLength + key.Length));
 
         // commit low and high
         _header.Low += Slot.Size;
@@ -109,21 +103,13 @@ public readonly ref struct SlottedArray
 
     public int CapacityLeft => _data.Length - _header.Taken;
 
-    public NibbleEnumerator EnumerateNibble(byte nibble) => new(this, nibble);
+    public Enumerator EnumerateAll() =>
+        new(this);
 
-    public NibbleEnumerator EnumerateAll() => new(this, NibbleEnumerator.AllNibbles);
-
-    public ref struct NibbleEnumerator
+    public ref struct Enumerator
     {
-        public const byte AllNibbles = byte.MaxValue;
-
         /// <summary>The map being enumerated.</summary>
         private readonly SlottedArray _map;
-
-        /// <summary>
-        /// The nibble being enumerated.
-        /// </summary>
-        private readonly byte _nibble;
 
         /// <summary>The next index to yield.</summary>
         private int _index;
@@ -131,10 +117,9 @@ public readonly ref struct SlottedArray
         private readonly byte[] _bytes;
         private Item _current;
 
-        internal NibbleEnumerator(SlottedArray map, byte nibble)
+        internal Enumerator(SlottedArray map)
         {
             _map = map;
-            _nibble = nibble;
             _index = -1;
             _bytes = ArrayPool<byte>.Shared.Rent(128);
         }
@@ -148,10 +133,7 @@ public readonly ref struct SlottedArray
 
             ref var slot = ref _map._slots[index];
 
-            while (index < to &&
-                   (slot.Type == DataType.Deleted || // filter out deleted
-                    (_nibble != AllNibbles &&
-                     (!slot.PathNotEmpty || NibblePath.ReadFirstNibble(_map.GetSlotPayload(ref slot)) != _nibble))))
+            while (index < to && slot.IsDeleted) // filter out deleted
             {
                 // move by 1
                 index += 1;
@@ -175,10 +157,12 @@ public readonly ref struct SlottedArray
             ref var slot = ref _map._slots[_index];
             var span = _map.GetSlotPayload(ref slot);
 
-            var leftover = NibblePath.ReadFrom(span, out NibblePath path);
-            var data = NibblePath.ReadFrom(leftover, out NibblePath storagePath);
+            var keyLenght = span[0];
 
-            return new Item(Key.Raw(path, slot.Type, storagePath), data, _index, slot.Type);
+            var key = span.Slice(KeyLengthLength, keyLenght);
+            var data = span.Slice(KeyLengthLength + keyLenght);
+
+            return new Item(key, data, _index);
         }
 
         public void Dispose()
@@ -190,21 +174,19 @@ public readonly ref struct SlottedArray
         public readonly ref struct Item
         {
             public int Index { get; }
-            public DataType Type { get; }
-            public Key Key { get; }
+            public ReadOnlySpan<byte> Key { get; }
             public ReadOnlySpan<byte> RawData { get; }
 
-            public Item(Key key, ReadOnlySpan<byte> rawData, int index, DataType type)
+            public Item(ReadOnlySpan<byte> key, ReadOnlySpan<byte> rawData, int index)
             {
                 Index = index;
-                Type = type;
                 Key = key;
                 RawData = rawData;
             }
         }
 
         // a shortcut to not allocate, just copy the enumerator
-        public NibbleEnumerator GetEnumerator() => this;
+        public Enumerator GetEnumerator() => this;
     }
 
     public const int BucketCount = 16;
@@ -212,7 +194,7 @@ public readonly ref struct SlottedArray
     /// <summary>
     /// Gets the aggregated sizes per nibble.
     /// </summary>
-    public void GatherSizeStatistics(Span<ushort> buckets)
+    public void GatherSizeStatistics(Span<ushort> buckets, NibbleSelector selector)
     {
         Debug.Assert(buckets.Length == BucketCount);
 
@@ -222,14 +204,14 @@ public readonly ref struct SlottedArray
             ref var slot = ref _slots[i];
 
             // extract only not deleted and these which have at least one nibble
-            if (slot.Type != DataType.Deleted && slot.PathNotEmpty)
+            if (slot.IsDeleted == false)
             {
                 var payload = GetSlotPayload(ref slot);
-                var firstNibble = NibblePath.ReadFirstNibble(payload);
-
-                var index = firstNibble % BucketCount;
-
-                buckets[index] += (ushort)(payload.Length + Slot.Size);
+                var first = selector(payload);
+                if (first < BucketCount)
+                {
+                    buckets[first] += (ushort)(payload.Length + Slot.Size);
+                }
             }
         }
     }
@@ -237,7 +219,7 @@ public readonly ref struct SlottedArray
     /// <summary>
     /// Gets the aggregated count of entries per nibble.
     /// </summary>
-    public void GatherCountStatistics(Span<ushort> buckets)
+    public void GatherCountStatistics(Span<ushort> buckets, NibbleSelector selector)
     {
         Debug.Assert(buckets.Length == BucketCount);
 
@@ -247,29 +229,29 @@ public readonly ref struct SlottedArray
             ref var slot = ref _slots[i];
 
             // extract only not deleted and these which have at least one nibble
-            if (slot.Type != DataType.Deleted && slot.PathNotEmpty)
+            if (slot.IsDeleted == false)
             {
                 var payload = GetSlotPayload(ref slot);
-                var firstNibble = NibblePath.ReadFirstNibble(payload);
-
-                var index = firstNibble % BucketCount;
-
-                buckets[index] += 1;
+                var first = selector(payload);
+                if (first < BucketCount)
+                {
+                    buckets[first] += 1;
+                }
             }
         }
     }
 
-    private static int GetTotalSpaceRequired(ReadOnlySpan<byte> key, ReadOnlySpan<byte> storageKey,
-        ReadOnlySpan<byte> data)
+    private const int KeyLengthLength = 1;
+    private static int GetTotalSpaceRequired(in ReadOnlySpan<byte> key, ReadOnlySpan<byte> data)
     {
-        return key.Length + data.Length + storageKey.Length;
+        return KeyLengthLength + key.Length + data.Length;
     }
 
     /// <summary>
     /// Warning! This does not set any tombstone so the reader won't be informed about a delete,
     /// just will miss the value.
     /// </summary>
-    public bool Delete(in Key key)
+    public bool Delete(in ReadOnlySpan<byte> key)
     {
         if (TryGetImpl(key, Slot.GetHash(key), out _, out var index))
         {
@@ -280,12 +262,12 @@ public readonly ref struct SlottedArray
         return false;
     }
 
-    public void Delete(in NibbleEnumerator.Item item) => DeleteImpl(item.Index);
+    public void Delete(in Enumerator.Item item) => DeleteImpl(item.Index);
 
     private void DeleteImpl(int index)
     {
         // mark as deleted first
-        _slots[index].Type = DataType.Deleted;
+        _slots[index].IsDeleted = true;
         _header.Deleted++;
 
         // always try to compact after delete
@@ -306,7 +288,7 @@ public readonly ref struct SlottedArray
         for (int i = 0; i < count; i++)
         {
             var copyFrom = _slots[i];
-            if (copyFrom.Type != DataType.Deleted)
+            if (copyFrom.IsDeleted == false)
             {
                 var fromSpan = GetSlotPayload(ref _slots[i]);
 
@@ -318,8 +300,6 @@ public readonly ref struct SlottedArray
 
                 copyTo.Hash = copyFrom.Hash;
                 copyTo.ItemAddress = high;
-                copyTo.Type = copyFrom.Type;
-                copyTo.PathNotEmpty = copyFrom.PathNotEmpty;
 
                 copy._header.Low += Slot.Size;
                 copy._header.High = (ushort)(copy._header.High + fromSpan.Length);
@@ -341,7 +321,7 @@ public readonly ref struct SlottedArray
         // start with the last written and perform checks and cleanup till all the deleted are gone
         var index = Count - 1;
 
-        while (index >= 0 && _slots[index].Type == DataType.Deleted)
+        while (index >= 0 && _slots[index].IsDeleted)
         {
             // undo writing low
             _header.Low -= Slot.Size;
@@ -360,7 +340,7 @@ public readonly ref struct SlottedArray
         }
     }
 
-    public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> data)
+    public bool TryGet(in ReadOnlySpan<byte> key, out ReadOnlySpan<byte> data)
     {
         if (TryGetImpl(key, Slot.GetHash(key), out var span, out _))
         {
@@ -374,7 +354,7 @@ public readonly ref struct SlottedArray
 
     [OptimizationOpportunity(OptimizationType.CPU,
         "key encoding is delayed but it might be called twice, here + TrySet")]
-    private bool TryGetImpl(scoped in Key key, ushort hash, out Span<byte> data, out int slotIndex)
+    private bool TryGetImpl(scoped in ReadOnlySpan<byte> key, ushort hash, out Span<byte> data, out int slotIndex)
     {
         var to = _header.Low / Slot.Size;
 
@@ -394,10 +374,6 @@ public readonly ref struct SlottedArray
             return false;
         }
 
-        // encode keys only if there
-        var encodedKey = key.Path.WriteTo(stackalloc byte[key.Path.MaxByteLength]);
-        var encodedStorageKey = key.StoragePath.WriteTo(stackalloc byte[key.StoragePath.MaxByteLength]);
-
         while (index != notFound)
         {
             // move offset to the given position
@@ -408,34 +384,16 @@ public readonly ref struct SlottedArray
                 var i = offset / 2;
 
                 ref var slot = ref _slots[i];
-                if (slot.Type == key.Type)
+                if (slot.IsDeleted == false)
                 {
                     var actual = GetSlotPayload(ref slot);
 
                     // The StartsWith check assumes that all the keys have the same length.
-                    if (actual.StartsWith(encodedKey))
+                    if (actual[0] == key.Length && actual.Slice(KeyLengthLength).StartsWith(key))
                     {
-                        if (key.StoragePath.IsEmpty)
-                        {
-                            // the searched storage path is empty, but need to ensure that it starts right
-                            // the empty path is encoded as "[0]", compare manually
-                            if (actual[encodedKey.Length] == 0)
-                            {
-                                data = actual.Slice(encodedKey.Length + NibblePath.EmptyEncodedLength);
-                                slotIndex = i;
-                                return true;
-                            }
-                        }
-                        else
-
-                        // there's the additional key, assert it
-                        // do it by slicing off first the encoded and then check the additional
-                        if (actual.Slice(encodedKey.Length).StartsWith(encodedStorageKey))
-                        {
-                            data = actual.Slice(encodedKey.Length + encodedStorageKey.Length);
-                            slotIndex = i;
-                            return true;
-                        }
+                        data = actual.Slice(KeyLengthLength + key.Length);
+                        slotIndex = i;
+                        return true;
                     }
                 }
             }
@@ -491,28 +449,15 @@ public readonly ref struct SlottedArray
             set => Raw = (ushort)((Raw & ~AddressMask) | value);
         }
 
-        private const int DataTypeShift = 13;
-        private const ushort DataTypeMask = 0b1110_0000_0000_0000;
+        private const ushort DeletedMask = 0b0010_0000_0000_0000;
 
         /// <summary>
         /// The data type contained in this slot.
         /// </summary>
-        public DataType Type
+        public bool IsDeleted
         {
-            get => (DataType)((Raw & DataTypeMask) >> DataTypeShift);
-            set => Raw = (ushort)((Raw & ~DataTypeMask) | (ushort)((byte)value << DataTypeShift));
-        }
-
-        private const int NotEmptyPathShift = 12;
-        private const ushort NotEmptyPathMask = 1 << NotEmptyPathShift;
-
-        /// <summary>
-        /// Shows whether the path that is encoded is empty or not.
-        /// </summary>
-        public bool PathNotEmpty
-        {
-            get => (Raw & NotEmptyPathMask) == NotEmptyPathMask;
-            set => Raw = (ushort)((Raw & ~NotEmptyPathMask) | (ushort)((value ? 1 : 0) << NotEmptyPathShift));
+            get => (Raw & DeletedMask) == DeletedMask;
+            set => Raw = (ushort)((Raw & ~DeletedMask) | (ushort)(value ? DeletedMask : 0));
         }
 
         [FieldOffset(0)] private ushort Raw;
@@ -530,20 +475,22 @@ public readonly ref struct SlottedArray
         /// <summary>
         /// Builds the hash for the key.
         /// </summary>
-        public static ushort GetHash(in Key key)
+        public static ushort GetHash(in ReadOnlySpan<byte> key)
         {
-            unchecked
+            return key.Length switch
             {
-                // do not use type in the hash, it's compared separately
-                var hashCode = key.Path.GetHashCode() ^ key.StoragePath.GetHashCode();
-                return (ushort)(hashCode ^ (hashCode >> 16));
-            }
+                0 => 0,
+                1 => key[0],
+
+                // The last byte may provide not the best entropy as the last byte for StoreKey may be half empty. Mix it with a middle one.
+                _ => (ushort)((key[0] << 8) | (byte)(key[^1] ^ key[key.Length / 2]))
+            };
         }
 
         public override string ToString()
         {
             return
-                $"{nameof(Type)}: {Type}, {nameof(Hash)}: {Hash}, {nameof(ItemAddress)}: {ItemAddress}";
+                $"{nameof(Hash)}: {Hash}, {nameof(ItemAddress)}: {ItemAddress}";
         }
     }
 

@@ -15,7 +15,7 @@ public class StoreKeyTests
 
         var key = Key.Merkle(NibblePath.Empty);
 
-        StoreKey.GetByteSize(key).Should().Be(size);
+        StoreKey.GetMaxByteSize(key).Should().Be(size);
         var s = StoreKey.Encode(key, stackalloc byte[size]);
 
         s.Type.Should().Be(DataType.Merkle);
@@ -32,7 +32,7 @@ public class StoreKeyTests
         var path = NibblePath.FromKey(stackalloc byte[1] { nibble << NibblePath.NibbleShift }).SliceTo(1);
         var key = Key.Merkle(path);
 
-        StoreKey.GetByteSize(key).Should().Be(size);
+        StoreKey.GetMaxByteSize(key).Should().Be(size);
         var s = StoreKey.Encode(key, stackalloc byte[size]);
 
         s.Type.Should().Be(key.Type);
@@ -52,7 +52,7 @@ public class StoreKeyTests
         var path = NibblePath.FromKey(stackalloc byte[1] { (byte)payload });
         var key = Key.Merkle(path);
 
-        StoreKey.GetByteSize(key).Should().Be(size);
+        StoreKey.GetMaxByteSize(key).Should().Be(size);
         var s = StoreKey.Encode(key, stackalloc byte[size]);
 
         s.Type.Should().Be(key.Type);
@@ -70,7 +70,7 @@ public class StoreKeyTests
 
         var key = Key.Account(keccak);
 
-        StoreKey.GetByteSize(key).Should().Be(size);
+        StoreKey.GetMaxByteSize(key).Should().Be(size);
         var s = StoreKey.Encode(key, stackalloc byte[size]);
 
         s.Type.Should().Be(key.Type);
@@ -93,7 +93,7 @@ public class StoreKeyTests
         var path = NibblePath.FromKey(stackalloc byte[1] { nibble << NibblePath.NibbleShift }).SliceTo(1);
         var key = Key.Raw(keccak, DataType.Merkle, path);
 
-        StoreKey.GetByteSize(key).Should().Be(size);
+        StoreKey.GetMaxByteSize(key).Should().Be(size);
         var s = StoreKey.Encode(key, stackalloc byte[size]);
 
         s.Type.Should().Be(key.Type);
@@ -114,7 +114,7 @@ public class StoreKeyTests
         var path = NibblePath.FromKey(stackalloc byte[1] { 0xA1 });
         var key = Key.Merkle(path);
 
-        StoreKey.GetByteSize(key).Should().Be(size);
+        StoreKey.GetMaxByteSize(key).Should().Be(size);
         var s = StoreKey.Encode(key, stackalloc byte[size]);
 
         var sliced = s.SliceTwoNibbles();

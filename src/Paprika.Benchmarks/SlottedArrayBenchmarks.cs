@@ -21,8 +21,7 @@ public class SlottedArrayBenchmarks
         while (true)
         {
             BinaryPrimitives.WriteInt32LittleEndian(key, _to);
-            var path = NibblePath.FromKey(key);
-            if (map.TrySet(Key.Account(path), key) == false)
+            if (map.TrySet(key, key) == false)
             {
                 // filled
                 break;
@@ -46,8 +45,7 @@ public class SlottedArrayBenchmarks
         for (int i = 0; i < _to; i++)
         {
             BinaryPrimitives.WriteInt32LittleEndian(key, i);
-            var path = NibblePath.FromKey(key);
-            if (map.TrySet(Key.Account(path), key))
+            if (map.TrySet(key, key))
             {
                 count++;
             }
@@ -68,8 +66,7 @@ public class SlottedArrayBenchmarks
         for (var i = 0; i < _to; i++)
         {
             BinaryPrimitives.WriteInt32LittleEndian(key, i);
-            var path = NibblePath.FromKey(key);
-            if (map.TryGet(Key.Account(path), out var data))
+            if (map.TryGet(key, out var data))
             {
                 result += data.Length;
             }
@@ -90,8 +87,7 @@ public class SlottedArrayBenchmarks
         for (int i = _to; i < _to * 2; i++)
         {
             BinaryPrimitives.WriteInt32LittleEndian(key, i);
-            var path = NibblePath.FromKey(key);
-            if (map.TryGet(Key.Account(path), out _) == false)
+            if (map.TryGet(key, out _) == false)
             {
                 result += 1;
             }

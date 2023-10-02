@@ -6,19 +6,22 @@ namespace Paprika.Store;
 
 public readonly ref struct StoreKey
 {
-    public readonly ReadOnlySpan<byte> Data;
+    public readonly ReadOnlySpan<byte> Payload;
 
-    private StoreKey(ReadOnlySpan<byte> data)
+    public StoreKey(ReadOnlySpan<byte> payload)
     {
-        Data = data;
+        Payload = payload;
     }
 
-    private const byte TypeMask = 0b0000_0011;
+    /// <summary>
+    /// See <see cref="DataType"/> values.
+    /// </summary>
+    private const byte TypeMask = 0b0000_0111;
     private const byte LastByteMask = 0b1111_0000;
-    private const byte OddNibbles = 0b0000_0100;
-    private const byte OddNibblesShift = 2;
+    private const byte OddNibbles = 0b0000_1000;
+    private const byte OddNibblesShift = 3;
 
-    public static int GetByteSize(in Key key)
+    public static int GetMaxByteSize(in Key key)
     {
         return key.Path.Length == NibblePath.KeccakNibbleCount
             ? Keccak.Size + GetNibblePathLength(key.StoragePath)
@@ -72,18 +75,18 @@ public readonly ref struct StoreKey
     {
         Debug.Assert(offset < NibbleCount);
 
-        var b = Data[offset / 2];
+        var b = Payload[offset / 2];
         var odd = offset & 1;
         return (byte)((b >> ((1 - odd) * NibblePath.NibbleShift)) & 0x0F);
     }
 
-    public int NibbleCount => (Data.Length - 1) * 2 + ((Data[^1] & OddNibbles) >> OddNibblesShift);
+    public int NibbleCount => (Payload.Length - 1) * 2 + ((Payload[^1] & OddNibbles) >> OddNibblesShift);
 
     public StoreKey SliceTwoNibbles()
     {
         Debug.Assert(NibbleCount >= 2);
-        return new StoreKey(Data[1..]);
+        return new StoreKey(Payload[1..]);
     }
 
-    public DataType Type => (DataType)(Data[^1] & TypeMask);
+    public DataType Type => (DataType)(Payload[^1] & TypeMask);
 }
