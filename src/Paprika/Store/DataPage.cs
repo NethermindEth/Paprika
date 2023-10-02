@@ -80,20 +80,17 @@ public readonly unsafe struct DataPage : IPage
             return _page;
         }
 
-        if (TryFlushDownSoftAndWrite(key, data, batch, map))
-            return _page;
-
-        // Flushing down to existing pages didn't make space for this entry, flush the biggest nibble forcefully.
-        var biggestNibble = FindMostFrequentNibble(map);
+        // Find most frequent nibble
+        var nibble = FindMostFrequentNibble(map);
 
         // try get the child page
-        ref var address = ref Data.Buckets[biggestNibble];
+        ref var address = ref Data.Buckets[nibble];
         Page child;
 
         if (address.IsNull)
         {
             // create child as the same type as the parent
-            child = batch.GetNewPage(out Data.Buckets[biggestNibble], true);
+            child = batch.GetNewPage(out Data.Buckets[nibble], true);
             child.Header.PageType = Header.PageType;
             child.Header.Level = (byte)(Header.Level + 1);
         }
@@ -105,8 +102,7 @@ public readonly unsafe struct DataPage : IPage
 
         var dataPage = new DataPage(child);
 
-        // flush down: force
-        dataPage = FlushDown(map, biggestNibble, dataPage, batch, false);
+        dataPage = FlushDown(map, nibble, dataPage, batch);
         address = batch.GetAddress(dataPage.AsPage());
 
         // The page has some of the values flushed down, try to add again.
@@ -117,75 +113,17 @@ public readonly unsafe struct DataPage : IPage
 
     private bool IsEvenLevel => Header.Level % 2 == 0;
 
-    private static byte NibbleSelectorEven(in ReadOnlySpan<byte> key) => new StoreKey(key).GetNibbleAt(0);
-    private static byte NibbleSelectorOdd(in ReadOnlySpan<byte> key) => new StoreKey(key).GetNibbleAt(1);
+    private static byte NibbleSelectorEven(in ReadOnlySpan<byte> key) => NibbleSelector(key, 0);
+    private static byte NibbleSelectorOdd(in ReadOnlySpan<byte> key) => NibbleSelector(key, 1);
 
-    private bool TryFlushDownSoftAndWrite(in StoreKey key, in ReadOnlySpan<byte> data, IBatchContext batch,
-        in SlottedArray map)
+    private static byte NibbleSelector(in ReadOnlySpan<byte> key, int odd)
     {
-        // There's no more room in this page. We need to make some, but in a way that will not over-allocate pages.
-        // To make it work:
-        // 1. find amongst existing children pages that have some capacity left.
-        // 2. sort them from the most empty to the least empty
-        // 3. loop through them, and flush down the given nibble in a way that will not allocate anything in them
-        // 4. after each spin of the loop, try to write map
-
-        // TODO: Change this algorithm into a simple bit-map that is memoized in page.
-        // Softly flushed map would memoize whether a page was flushed softly.
-        // Here, select only these that were not
-
-        Span<ushort> capacities = stackalloc ushort[BucketCount];
-        Span<byte> nibbles = stackalloc byte[BucketCount];
-
-        for (byte i = 0; i < BucketCount; i++)
-        {
-            nibbles[i] = i;
-
-            var childAddress = Data.Buckets[i];
-            if (childAddress.IsNull == false)
-            {
-                capacities[i] = (ushort)new DataPage(batch.GetAt(childAddress)).Map.CapacityLeft;
-            }
-        }
-
-        capacities.Sort(nibbles);
-        var start = capacities.IndexOfAnyExcept((ushort)0);
-
-        if (start == -1)
-        {
-            // no child pages with non-zero capacities, default
-            return false;
-        }
-
-        // contains sorted from the smallest to the biggest capacity
-        var nibblesWithSomeCapacity = nibbles.Slice(start);
-        for (var i = nibblesWithSomeCapacity.Length - 1; i >= 0; i--)
-        {
-            var nibble = nibblesWithSomeCapacity[i];
-            ref var childAddress = ref Data.Buckets[nibble];
-            Debug.Assert(childAddress.IsNull == false, "Only an existing child should be selected for flush down");
-
-            var page = new DataPage(batch.GetAt(childAddress));
-            page = FlushDown(map, nibble, page, batch, true);
-
-            // update the child address
-            childAddress = batch.GetAddress(page.AsPage());
-
-            // try write again to the map
-            if (map.TrySet(key.Payload, data))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        var store = new StoreKey(key);
+        return store.NibbleCount == odd ? byte.MaxValue : store.GetNibbleAt(odd);
     }
 
-    private DataPage FlushDown(in SlottedArray map, byte nibble, DataPage destination, IBatchContext batch,
-        bool tryAllocFree)
+    private DataPage FlushDown(in SlottedArray map, byte nibble, DataPage destination, IBatchContext batch)
     {
-        const int minimumCapacity = 128;
-
         NibbleSelector selector = IsEvenLevel ? NibbleSelectorEven : NibbleSelectorOdd;
 
         foreach (var item in map.EnumerateAll())
@@ -195,13 +133,7 @@ public readonly unsafe struct DataPage : IPage
                 continue;
             }
 
-            if (tryAllocFree && destination.Map.CapacityLeft < minimumCapacity)
-            {
-                // if there's not that much space left in the child, break this loop
-                break;
-            }
-
-            var key = TrimOneNibble(new StoreKey(item.Key));
+            var key = Trim(new StoreKey(item.Key));
 
             destination = new DataPage(destination.Set(key, item.RawData, batch));
 
@@ -212,7 +144,7 @@ public readonly unsafe struct DataPage : IPage
         return destination;
     }
 
-    private StoreKey TrimOneNibble(StoreKey key)
+    private StoreKey Trim(StoreKey key)
     {
         if (IsEvenLevel == false)
         {
@@ -311,15 +243,16 @@ public readonly unsafe struct DataPage : IPage
         if (key.NibbleCount > 0)
         {
             // try to go deeper only if the path is long enough
-            var bucket = Data.Buckets[GetNibbleForThisLevel(key)];
+            var nibble = GetNibbleForThisLevel(key);
+            var bucket = Data.Buckets[nibble];
 
             // non-null page jump, follow it!
             if (bucket.IsNull == false)
             {
                 var child = new DataPage(batch.GetAt(bucket));
-                key = TrimOneNibble(key);
+                var trimmed  = Trim(key);
 
-                return child.TryGet(TrimOneNibble(key), batch, out result);
+                return child.TryGet(trimmed, batch, out result);
             }
         }
 

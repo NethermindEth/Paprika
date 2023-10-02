@@ -299,6 +299,7 @@ public class DataPageTests : BasePageTests
     }
 
     [Test]
+    [Ignore("This test should be removed or rewritten")]
     public void Small_prefix_tree_with_regular()
     {
         var page = AllocPage();

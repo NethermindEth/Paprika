@@ -232,7 +232,7 @@ public readonly ref struct SlottedArray
             if (slot.IsDeleted == false)
             {
                 var payload = GetSlotPayload(ref slot);
-                var first = selector(payload);
+                var first = selector(payload.Slice(KeyLengthLength));
                 if (first < BucketCount)
                 {
                     buckets[first] += 1;

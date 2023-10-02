@@ -26,7 +26,7 @@ public class SlottedArrayTests
     [Test]
     public void Set_Get_Delete_Get_AnotherSet()
     {
-        Span<byte> span = stackalloc byte[SlottedArray.MinSize];
+        Span<byte> span = stackalloc byte[48];
         var map = new SlottedArray(span);
 
         map.SetAssert(Key.Account(Key0), Data0);
@@ -78,7 +78,7 @@ public class SlottedArrayTests
     public void Defragment_when_no_more_space()
     {
         // by trial and error, found the smallest value that will allow to put these two
-        Span<byte> span = stackalloc byte[40];
+        Span<byte> span = stackalloc byte[88];
         var map = new SlottedArray(span);
 
         map.SetAssert(Key.Account(Key0), Data0);
@@ -99,7 +99,7 @@ public class SlottedArrayTests
     public void Update_in_situ()
     {
         // by trial and error, found the smallest value that will allow to put these two
-        Span<byte> span = stackalloc byte[24];
+        Span<byte> span = stackalloc byte[48];
         var map = new SlottedArray(span);
 
         map.SetAssert(Key.Account(Key1), Data1);
@@ -112,7 +112,7 @@ public class SlottedArrayTests
     public void Update_in_resize()
     {
         // by trial and error, found the smallest value that will allow to put these two
-        Span<byte> span = stackalloc byte[24];
+        Span<byte> span = stackalloc byte[56];
         var map = new SlottedArray(span);
 
         map.SetAssert(Key.Account(Key0), Data0);
