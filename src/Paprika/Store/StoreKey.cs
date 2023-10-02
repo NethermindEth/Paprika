@@ -21,8 +21,15 @@ public readonly ref struct StoreKey
     private const byte OddNibbles = 0b0000_1000;
     private const byte OddNibblesShift = 3;
 
+    public const int MaxByteSize = Keccak.Size + Keccak.Size + 1;
+    
     public static int GetMaxByteSize(in Key key)
     {
+        if (key.IsAccountCompressed)
+        {
+            return key.Path.Length / 2 + GetNibblePathLength(key.StoragePath);
+        }
+        
         return key.Path.Length == NibblePath.KeccakNibbleCount
             ? Keccak.Size + GetNibblePathLength(key.StoragePath)
             : GetNibblePathLength(key.Path);
@@ -35,21 +42,20 @@ public readonly ref struct StoreKey
         }
     }
 
-    public static StoreKey Encode(in Key key, Span<byte> destination)
+    public static StoreKey Encode(scoped in Key key, Span<byte> destination)
     {
         int written;
-        if (key.Path.Length == NibblePath.KeccakNibbleCount)
+        if (key.Path.Length == NibblePath.KeccakNibbleCount || key.IsAccountCompressed)
         {
-            key.Path.RawSpan.CopyTo(destination);
-            written = Keccak.Size;
+            var raw = key.Path.RawSpan;
+            raw.CopyTo(destination);
+            written = raw.Length;
 
-            written += Write(key.StoragePath, destination.Slice(Keccak.Size), key.Type);
+            written += Write(key.StoragePath, destination.Slice(raw.Length), key.Type);
             return new StoreKey(destination.Slice(0, written));
         }
-        else
-        {
-            written = Write(key.Path, destination, key.Type);
-        }
+
+        written = Write(key.Path, destination, key.Type);
 
         return new StoreKey(destination.Slice(0, written));
 

@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
@@ -168,8 +169,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         lock (_batchLock)
         {
             var batchId = Root.Header.BatchId;
-            var batch = new ReadOnlyBatch(this, batchId, Root.Data.DataRoot, Root.Data.Metadata, Root.Data.NextFreePage,
-                name);
+            var batch = new ReadOnlyBatch(this, batchId, Root.Data.DataRoot, Root.Data.IdRoot, Root.Data.Metadata,
+                Root.Data.NextFreePage, name);
             _batchesReadOnly.Add(batch);
             return batch;
         }
@@ -261,21 +262,31 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
     private void CommitNewRoot() => _lastRoot += 1;
 
+    private static bool ShouldCompress(in Key key) => key.Path.Length == NibblePath.KeccakNibbleCount;
+
+    private static StoreKey BuildCompressed(scoped in Key key, ReadOnlySpan<byte> compressed, in Span<byte> outputSpan)
+    {
+        var raw = Key.Raw(NibblePath.FromKey(compressed), key.Type | DataType.CompressedAccount, key.StoragePath);
+        return StoreKey.Encode(in raw, outputSpan);
+    }
+
     class ReadOnlyBatch : IReadOnlyBatch, IReadOnlyBatchContext
     {
         private readonly PagedDb _db;
         private volatile bool _disposed;
 
         private readonly DbAddress _rootDataPage;
+        private readonly DbAddress _rootIdPage;
         private readonly DbAddress _nextFreePage;
         private readonly string _name;
         private long _reads;
 
-        public ReadOnlyBatch(PagedDb db, uint batchId, DbAddress rootDataPage, Metadata metadata,
+        public ReadOnlyBatch(PagedDb db, uint batchId, DbAddress rootDataPage, DbAddress rootIdPage, Metadata metadata,
             DbAddress nextFreePage, string name)
         {
             _db = db;
             _rootDataPage = rootDataPage;
+            _rootIdPage = rootIdPage;
             _nextFreePage = nextFreePage;
             _name = name;
             BatchId = batchId;
@@ -305,7 +316,32 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 return false;
             }
 
-            return new DataPage(GetAt(addr)).TryGet(key, this, out result);
+            Span<byte> span = stackalloc byte[StoreKey.MaxByteSize];
+            scoped StoreKey storeKey;
+
+            if (ShouldCompress(key) && _rootIdPage.IsNull == false)
+            {
+                // full extraction of key possible, get it
+                var ids = new DataPage(GetAt(_rootIdPage));
+                var idKey = new StoreKey(key.Path.RawSpan);
+
+                // try fetch existing first
+                if (ids.TryGet(idKey, this, out var compressed))
+                {
+                    storeKey = BuildCompressed(key, compressed, span);
+                }
+                else
+                {
+                    result = default;
+                    return false;
+                }
+            }
+            else
+            {
+                storeKey = StoreKey.Encode(in key, span);
+            }
+
+            return new DataPage(GetAt(addr)).TryGet(storeKey, this, out result);
         }
 
         public void Report(IReporter reporter)
@@ -329,6 +365,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public override string ToString() => $"{nameof(ReadOnlyBatch)}, Name: {_name}, BatchId: {BatchId}";
     }
+
 
     class Batch : BatchContextBase, IBatch
     {
@@ -389,7 +426,32 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 return false;
             }
 
-            return new DataPage(GetAt(addr)).TryGet(key, this, out result);
+            Span<byte> span = stackalloc byte[StoreKey.MaxByteSize];
+            scoped StoreKey storeKey;
+
+            if (ShouldCompress(key) && _root.Data.IdRoot.IsNull == false)
+            {
+                // full extraction of key possible, get it
+                var ids = new DataPage(GetAt(_root.Data.IdRoot));
+                var idKey = new StoreKey(key.Path.RawSpan);
+
+                // try fetch existing first
+                if (ids.TryGet(idKey, this, out var compressed))
+                {
+                    storeKey = BuildCompressed(key, compressed, span);
+                }
+                else
+                {
+                    result = default;
+                    return false;
+                }
+            }
+            else
+            {
+                storeKey = StoreKey.Encode(in key, span);
+            }
+
+            return new DataPage(GetAt(addr)).TryGet(storeKey, this, out result);
         }
 
         public void SetMetadata(uint blockNumber, in Keccak blockHash)
@@ -401,31 +463,60 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         {
             _db.ReportWrite();
 
-            ref var addr = ref TryGetPageAlloc(out var page);
-            var updated = page.Set(new SetContext(key, rawData, this));
-            addr = _db.GetAddress(updated);
-        }
+            Span<byte> span = stackalloc byte[StoreKey.MaxByteSize];
 
-        private ref DbAddress TryGetPageAlloc(out DataPage page)
-        {
-            CheckDisposed();
+            scoped StoreKey storeKey;
 
-            ref var addr = ref _root.Data.DataRoot;
-            Page p;
-            if (addr.IsNull)
+            if (ShouldCompress(key))
             {
-                p = GetNewPage(out addr, true);
+                // full extraction of key possible, get it
+                var ids = new DataPage(TryGetPageAlloc(ref _root.Data.IdRoot));
+                var idKey = new StoreKey(key.Path.RawSpan);
 
-                p.Header.PageType = PageType.Standard;
+                // try fetch existing first
+                if (ids.TryGet(idKey, this, out var result))
+                {
+                    storeKey = BuildCompressed(key, result, span);
+                }
+                else
+                {
+                    _root.Data.AccountCounter++;
+                    Span<byte> id = stackalloc byte[sizeof(uint)];
+                    BinaryPrimitives.WriteUInt32LittleEndian(id, _root.Data.AccountCounter);
+
+                    // update root
+                    _root.Data.IdRoot = GetAddress(ids.Set(idKey, id, this));
+
+                    // build compressed key
+                    storeKey = BuildCompressed(key, id, span);
+                }
             }
             else
             {
-                p = GetAt(addr);
+                storeKey = StoreKey.Encode(in key, span);
             }
 
-            page = new DataPage(p);
+            var data = TryGetPageAlloc(ref _root.Data.DataRoot);
+            var updated = new DataPage(data).Set(storeKey, rawData, this);
+            _root.Data.DataRoot = _db.GetAddress(updated);
+        }
 
-            return ref addr;
+        private Page TryGetPageAlloc(ref DbAddress addr)
+        {
+            CheckDisposed();
+
+            Page page;
+            if (addr.IsNull)
+            {
+                page = GetNewPage(out addr, true);
+                page.Header.PageType = PageType.Standard;
+            }
+            else
+            {
+                page = GetAt(addr);
+            }
+
+            return page;
         }
 
         private void CheckDisposed()

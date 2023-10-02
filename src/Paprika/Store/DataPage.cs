@@ -44,7 +44,7 @@ public readonly unsafe struct DataPage : IPage
         return Set(key, ctx.Data, ctx.Batch);
     }
 
-    private Page Set(in StoreKey key, in ReadOnlySpan<byte> data, IBatchContext batch)
+    public Page Set(in StoreKey key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
         if (Header.BatchId != batch.BatchId)
         {
@@ -296,7 +296,7 @@ public readonly unsafe struct DataPage : IPage
         return TryGet(k, (IPageResolver)batch, out result);
     }
 
-    private bool TryGet(StoreKey key, IPageResolver batch, out ReadOnlySpan<byte> result)
+    public bool TryGet(scoped StoreKey key, IPageResolver batch, out ReadOnlySpan<byte> result)
     {
         // read in-page
         var map = Map;

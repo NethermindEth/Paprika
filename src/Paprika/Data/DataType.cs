@@ -23,9 +23,7 @@ public enum DataType : byte
     Merkle = 2,
 
     /// <summary>
-    /// Special type for <see cref="SlottedArray"/>. 
+    /// The account compressed with the identity tree.
     /// </summary>
-    Deleted = 3,
-
-    Compressed = 4,
+    CompressedAccount = 4,
 }

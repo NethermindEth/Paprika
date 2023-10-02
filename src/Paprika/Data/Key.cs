@@ -91,6 +91,8 @@ public readonly ref partial struct Key
         return leftover;
     }
 
+    public bool IsAccountCompressed => ((Type & DataType.CompressedAccount) == DataType.CompressedAccount);
+
     [SkipLocalsInit]
     public override int GetHashCode()
     {
