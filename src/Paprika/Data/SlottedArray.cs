@@ -389,11 +389,15 @@ public readonly ref struct SlottedArray
                     var actual = GetSlotPayload(ref slot);
 
                     // The StartsWith check assumes that all the keys have the same length.
-                    if (actual[0] == key.Length && actual.Slice(KeyLengthLength).StartsWith(key))
+                    var length = key.Length;
+                    if (actual[0] == length)
                     {
-                        data = actual.Slice(KeyLengthLength + key.Length);
-                        slotIndex = i;
-                        return true;
+                        if (actual.Slice(KeyLengthLength, length).SequenceEqual(key))
+                        {
+                            data = actual.Slice(KeyLengthLength + length);
+                            slotIndex = i;
+                            return true;
+                        }
                     }
                 }
             }

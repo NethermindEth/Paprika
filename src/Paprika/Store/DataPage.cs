@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text.Json.Serialization.Metadata;
 using Paprika.Data;
 
 namespace Paprika.Store;
@@ -113,13 +114,18 @@ public readonly unsafe struct DataPage : IPage
 
     private bool IsEvenLevel => Header.Level % 2 == 0;
 
-    private static byte NibbleSelectorEven(in ReadOnlySpan<byte> key) => NibbleSelector(key, 0);
-    private static byte NibbleSelectorOdd(in ReadOnlySpan<byte> key) => NibbleSelector(key, 1);
+    private const byte NibbleNotAvailable = byte.MaxValue;
 
-    private static byte NibbleSelector(in ReadOnlySpan<byte> key, int odd)
+    private static byte NibbleSelectorEven(in ReadOnlySpan<byte> key)
     {
         var store = new StoreKey(key);
-        return store.NibbleCount == odd ? byte.MaxValue : store.GetNibbleAt(odd);
+        return store.NibbleCount < 1 ? NibbleNotAvailable : store.GetNibbleAt(0);
+    }
+
+    private static byte NibbleSelectorOdd(in ReadOnlySpan<byte> key)
+    {
+        var store = new StoreKey(key);
+        return store.NibbleCount < 2 ? NibbleNotAvailable : store.GetNibbleAt(1);
     }
 
     private DataPage FlushDown(in SlottedArray map, byte nibble, DataPage destination, IBatchContext batch)
@@ -133,9 +139,9 @@ public readonly unsafe struct DataPage : IPage
                 continue;
             }
 
-            var key = Trim(new StoreKey(item.Key));
+            var trimmed = Trim(new StoreKey(item.Key));
 
-            destination = new DataPage(destination.Set(key, item.RawData, batch));
+            destination = new DataPage(destination.Set(trimmed, item.RawData, batch));
 
             // use the special delete for the item that is much faster than map.Delete(item.Key);
             map.Delete(item);
@@ -250,7 +256,10 @@ public readonly unsafe struct DataPage : IPage
             if (bucket.IsNull == false)
             {
                 var child = new DataPage(batch.GetAt(bucket));
-                var trimmed  = Trim(key);
+                var trimmed = Trim(key);
+
+                Debug.Assert(trimmed.Payload.Length > 0,
+                    "Trimmed {StoreKey} cannot be empty because it would result in loosing the type ");
 
                 return child.TryGet(trimmed, batch, out result);
             }

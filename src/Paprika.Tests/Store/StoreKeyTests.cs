@@ -121,4 +121,24 @@ public class StoreKeyTests
 
         sliced.NibbleCount.Should().Be(0);
     }
+
+    [Test]
+    public void Distinct()
+    {
+        var k = Keccak.EmptyTreeHash;
+        var unique = new HashSet<int>();
+
+        Encode(Key.Account(k), unique);
+        Encode(Key.Merkle(NibblePath.FromKey(k)), unique);
+        Encode(Key.Merkle(NibblePath.Empty), unique);
+
+        static void Encode(in Key key, HashSet<int> set)
+        {
+            var encoded = StoreKey.Encode(key, stackalloc byte[StoreKey.MaxByteSize]);
+            var hash = new HashCode();
+            hash.AddBytes(encoded.Payload);
+
+            set.Add(hash.ToHashCode()).Should().BeTrue();
+        }
+    }
 }

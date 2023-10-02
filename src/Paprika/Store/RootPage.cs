@@ -46,12 +46,12 @@ public readonly unsafe struct RootPage : IPage
         /// The first of the data pages.
         /// </summary>
         [FieldOffset(DbAddress.Size)] public DbAddress DataRoot;
-        
+
         /// <summary>
         /// The root of the id pages.
         /// </summary>
         [FieldOffset(DbAddress.Size * 2)] public DbAddress IdRoot;
-        
+
         /// <summary>
         /// The account counter
         /// </summary>

@@ -18,7 +18,7 @@ public enum DataType : byte
     StorageCell = 1,
 
     /// <summary>
-    /// As enums cannot be partial, this is for storing the Merkle.
+    /// [key, 2] The Merkle entry, either with storage or not
     /// </summary>
     Merkle = 2,
 

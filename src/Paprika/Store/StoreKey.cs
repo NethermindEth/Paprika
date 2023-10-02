@@ -22,14 +22,14 @@ public readonly ref struct StoreKey
     private const byte OddNibblesShift = 3;
 
     public const int MaxByteSize = Keccak.Size + Keccak.Size + 1;
-    
+
     public static int GetMaxByteSize(in Key key)
     {
         if (key.IsAccountCompressed)
         {
             return key.Path.Length / 2 + GetNibblePathLength(key.StoragePath);
         }
-        
+
         return key.Path.Length == NibblePath.KeccakNibbleCount
             ? Keccak.Size + GetNibblePathLength(key.StoragePath)
             : GetNibblePathLength(key.Path);
@@ -64,15 +64,18 @@ public readonly ref struct StoreKey
             var raw = path.RawSpan;
             raw.CopyTo(destination);
 
+            var t = (byte)type;
+            Debug.Assert(t <= TypeMask, "Type should be selectable by mask");
+
             if (path.Length % 2 == 0)
             {
                 // even path, write last byte
-                destination[raw.Length] = (byte)type;
+                destination[raw.Length] = t;
                 return raw.Length + 1;
             }
 
             ref var last = ref destination[raw.Length - 1];
-            last = (byte)((last & LastByteMask) | OddNibbles | (byte)type);
+            last = (byte)((last & LastByteMask) | OddNibbles | t);
             return raw.Length;
         }
     }
