@@ -98,4 +98,6 @@ public readonly ref struct StoreKey
     }
 
     public DataType Type => (DataType)(Payload[^1] & TypeMask);
+
+    public override string ToString() => Payload.ToHexString(false);
 }
