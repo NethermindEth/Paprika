@@ -5,6 +5,7 @@ using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
+using Paprika.Merkle;
 using Paprika.Store;
 using static Paprika.Tests.Values;
 
@@ -110,12 +111,14 @@ public class BlockchainTests
     public async Task BiggerTest()
     {
         const int blockCount = 10;
-        const int perBlock = 1000;
+        const int perBlock = 1_000;
 
-        using var db = PagedDb.NativeMemoryDb(128 * Mb, 2);
+        using var db = PagedDb.NativeMemoryDb(256 * Mb, 2);
         var counter = 0;
 
-        await using (var blockchain = new Blockchain(db))
+        var behavior = new ComputeMerkleBehavior(true, 2, 2);
+
+        await using (var blockchain = new Blockchain(db, behavior))
         {
             var previousBlock = Keccak.Zero;
 
@@ -165,7 +168,7 @@ public class BlockchainTests
             {
                 var key = BuildKey(counter);
 
-                read.ShouldHaveAccount(key, GetAccount(counter));
+                read.ShouldHaveAccount(key, GetAccount(counter), true);
                 read.ShouldHaveStorage(key, key, ((UInt256)counter).ToBigEndian());
 
                 counter++;

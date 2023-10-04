@@ -459,8 +459,41 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _root.Data.Metadata = new Metadata(blockNumber, blockHash);
         }
 
+        private static readonly byte[] Missing =
+            Convert.FromHexString("b4f9ca85d895c78abf9feef175a068b588efd20915b72578bc12043f9465c4ad");
+
+        private static byte[]? Data = null;
+        private static int clock = 0;
+
         public void SetRaw(in Key key, ReadOnlySpan<byte> rawData)
         {
+            if (Data == null)
+            {
+                if (key.Type == DataType.Account)
+                {
+                    if (key.Path.UnsafeAsKeccak.BytesAsSpan.SequenceEqual(Missing))
+                    {
+                        Data = rawData.ToArray();
+                        Debugger.Break();
+                    }
+                }
+            }
+            else
+            {
+                if (TryGet(Key.Account(NibblePath.FromKey(Missing)), out var actual) == false)
+                {
+                    Debugger.Break();
+                }
+                else if (actual.SequenceEqual(Data) == false)
+                {
+                    Debugger.Break();
+                }
+                else
+                {
+                    clock++;
+                }
+            }
+
             _db.ReportWrite();
 
             Span<byte> span = stackalloc byte[StoreKey.MaxByteSize];

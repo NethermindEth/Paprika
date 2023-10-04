@@ -60,14 +60,16 @@ public readonly unsafe struct DataPage : IPage
 
         if (isDelete)
         {
-            if (key.NibbleCount < NibbleCount)
+            var selected = SelectorForThisLevel(key.Payload);
+
+            if (selected == NibbleNotAvailable)
             {
                 // path cannot be held on a lower level so delete in here
                 return DeleteInMap(key, map);
             }
 
             // path is not empty, so it might have a child page underneath with data, let's try
-            var childPageAddress = Data.Buckets[GetNibbleForThisLevel(key)];
+            var childPageAddress = Data.Buckets[selected];
             if (childPageAddress.IsNull)
             {
                 // there's no lower level, delete in map
@@ -110,11 +112,11 @@ public readonly unsafe struct DataPage : IPage
         return Set(key, data, batch);
     }
 
-    private byte GetNibbleForThisLevel(in StoreKey key) => key.GetNibbleAt(IsEvenLevel ? 0 : 1);
-
     private bool IsEvenLevel => Header.Level % 2 == 0;
 
     private const byte NibbleNotAvailable = byte.MaxValue;
+
+    private NibbleSelector SelectorForThisLevel => IsEvenLevel ? NibbleSelectorEven : NibbleSelectorOdd;
 
     private static byte NibbleSelectorEven(in ReadOnlySpan<byte> key)
     {
@@ -130,7 +132,7 @@ public readonly unsafe struct DataPage : IPage
 
     private DataPage FlushDown(in SlottedArray map, byte nibble, DataPage destination, IBatchContext batch)
     {
-        NibbleSelector selector = IsEvenLevel ? NibbleSelectorEven : NibbleSelectorOdd;
+        var selector = SelectorForThisLevel;
 
         foreach (var item in map.EnumerateAll())
         {
@@ -139,7 +141,8 @@ public readonly unsafe struct DataPage : IPage
                 continue;
             }
 
-            var trimmed = Trim(new StoreKey(item.Key));
+            var key = new StoreKey(item.Key);
+            var trimmed = TrimForNextLevel(key);
 
             destination = new DataPage(destination.Set(trimmed, item.RawData, batch));
 
@@ -150,7 +153,7 @@ public readonly unsafe struct DataPage : IPage
         return destination;
     }
 
-    private StoreKey Trim(StoreKey key)
+    private StoreKey TrimForNextLevel(StoreKey key)
     {
         if (IsEvenLevel == false)
         {
@@ -166,7 +169,7 @@ public readonly unsafe struct DataPage : IPage
         const int count = SlottedArray.BucketCount;
 
         Span<ushort> stats = stackalloc ushort[count];
-        map.GatherCountStatistics(stats, IsEvenLevel ? NibbleSelectorEven : NibbleSelectorOdd);
+        map.GatherCountStatistics(stats, SelectorForThisLevel);
 
         byte biggestIndex = 0;
         for (byte i = 1; i < count; i++)
@@ -231,7 +234,7 @@ public readonly unsafe struct DataPage : IPage
     public bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
         var k = StoreKey.Encode(key, stackalloc byte[StoreKey.GetMaxByteSize(key)]);
-        return TryGet(k, (IPageResolver)batch, out result);
+        return TryGet(k, batch, out result);
     }
 
     public bool TryGet(scoped StoreKey key, IPageResolver batch, out ReadOnlySpan<byte> result)
@@ -245,18 +248,16 @@ public readonly unsafe struct DataPage : IPage
             return true;
         }
 
-        // path longer than 0, try to find in child
-        if (key.NibbleCount > 0)
+        var selected = SelectorForThisLevel(key.Payload);
+        if (selected != NibbleNotAvailable)
         {
-            // try to go deeper only if the path is long enough
-            var nibble = GetNibbleForThisLevel(key);
-            var bucket = Data.Buckets[nibble];
+            var bucket = Data.Buckets[selected];
 
             // non-null page jump, follow it!
             if (bucket.IsNull == false)
             {
                 var child = new DataPage(batch.GetAt(bucket));
-                var trimmed = Trim(key);
+                var trimmed = TrimForNextLevel(key);
 
                 Debug.Assert(trimmed.Payload.Length > 0,
                     "Trimmed {StoreKey} cannot be empty because it would result in loosing the type ");

@@ -93,7 +93,7 @@ public readonly ref struct StoreKey
 
     public StoreKey SliceTwoNibbles()
     {
-        Debug.Assert(NibbleCount >= 2);
+        Debug.Assert(Payload.Length > 1, "Trim to zero length of the payload is not allowed");
         return new StoreKey(Payload[1..]);
     }
 
