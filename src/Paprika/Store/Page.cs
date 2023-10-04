@@ -71,7 +71,9 @@ public enum PageType : byte
 
     Standard = 1,
 
-    Abandoned = 2
+    Identity = 2,
+
+    Abandoned = 3,
 }
 
 /// <summary>

@@ -424,7 +424,7 @@ public class DataPageTests : BasePageTests
                 var accountKey = Key.Raw(path, compressedAccount, NibblePath.Empty);
                 var accountStoreKey = StoreKey.Encode(accountKey, store);
 
-                dataPage = new DataPage(dataPage.Set(accountStoreKey, accountValue, batch));
+                dataPage = new DataPage(dataPage.Set(NibblePath.FromKey(accountStoreKey.Payload), accountValue, batch));
             }
 
             // merkle
@@ -432,7 +432,7 @@ public class DataPageTests : BasePageTests
                 var merkleKey = Key.Raw(path, compressedMerkle, NibblePath.Empty);
                 var merkleStoreKey = StoreKey.Encode(merkleKey, store);
 
-                dataPage = new DataPage(dataPage.Set(merkleStoreKey, merkleValue, batch));
+                dataPage = new DataPage(dataPage.Set(NibblePath.FromKey(merkleStoreKey.Payload), merkleValue, batch));
             }
         }
 
@@ -446,7 +446,7 @@ public class DataPageTests : BasePageTests
                 var accountKey = Key.Raw(path, compressedAccount, NibblePath.Empty);
                 var accountStoreKey = StoreKey.Encode(accountKey, store);
 
-                dataPage.TryGet(accountStoreKey, batch, out var value).Should().BeTrue();
+                dataPage.TryGet(NibblePath.FromKey(accountStoreKey.Payload), batch, out var value).Should().BeTrue();
                 value.SequenceEqual(accountValue).Should().BeTrue();
             }
 
@@ -455,7 +455,7 @@ public class DataPageTests : BasePageTests
                 var merkleKey = Key.Raw(path, compressedMerkle, NibblePath.Empty);
                 var merkleStoreKey = StoreKey.Encode(merkleKey, store);
 
-                dataPage.TryGet(merkleStoreKey, batch, out var value).Should().BeTrue();
+                dataPage.TryGet(NibblePath.FromKey(merkleStoreKey.Payload), batch, out var value).Should().BeTrue();
                 value.SequenceEqual(merkleValue).Should().BeTrue();
             }
         }

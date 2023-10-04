@@ -42,10 +42,10 @@ public readonly unsafe struct DataPage : IPage
     {
         var size = StoreKey.GetMaxByteSize(ctx.Key);
         var key = StoreKey.Encode(ctx.Key, stackalloc byte[size]);
-        return Set(key, ctx.Data, ctx.Batch);
+        return Set(NibblePath.FromKey(key.Payload), ctx.Data, ctx.Batch);
     }
 
-    public Page Set(in StoreKey key, in ReadOnlySpan<byte> data, IBatchContext batch)
+    public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
         if (Header.BatchId != batch.BatchId)
         {
@@ -60,16 +60,14 @@ public readonly unsafe struct DataPage : IPage
 
         if (isDelete)
         {
-            var selected = SelectorForThisLevel(key.Payload);
-
-            if (selected == NibbleNotAvailable)
+            if (key.Length == 0)
             {
                 // path cannot be held on a lower level so delete in here
                 return DeleteInMap(key, map);
             }
 
             // path is not empty, so it might have a child page underneath with data, let's try
-            var childPageAddress = Data.Buckets[selected];
+            var childPageAddress = Data.Buckets[key.FirstNibble];
             if (childPageAddress.IsNull)
             {
                 // there's no lower level, delete in map
@@ -78,7 +76,7 @@ public readonly unsafe struct DataPage : IPage
         }
 
         // try write in map
-        if (map.TrySet(key.Payload, data))
+        if (map.TrySet(key.RawSpan, data))
         {
             return _page;
         }
@@ -112,39 +110,34 @@ public readonly unsafe struct DataPage : IPage
         return Set(key, data, batch);
     }
 
-    private bool IsEvenLevel => Header.Level % 2 == 0;
-
-    private const byte NibbleNotAvailable = byte.MaxValue;
-
-    private NibbleSelector SelectorForThisLevel => IsEvenLevel ? NibbleSelectorEven : NibbleSelectorOdd;
-
-    private static byte NibbleSelectorEven(in ReadOnlySpan<byte> key)
-    {
-        var store = new StoreKey(key);
-        return store.NibbleCount < 1 ? NibbleNotAvailable : store.GetNibbleAt(0);
-    }
-
-    private static byte NibbleSelectorOdd(in ReadOnlySpan<byte> key)
-    {
-        var store = new StoreKey(key);
-        return store.NibbleCount < 2 ? NibbleNotAvailable : store.GetNibbleAt(1);
-    }
-
     private DataPage FlushDown(in SlottedArray map, byte nibble, DataPage destination, IBatchContext batch)
     {
-        var selector = SelectorForThisLevel;
-
         foreach (var item in map.EnumerateAll())
         {
-            if (selector(item.Key) != nibble)
-            {
+            var key = NibblePath.FromKey(item.Key);
+            if (key.IsEmpty) // empty keys are left in page
                 continue;
-            }
 
-            var key = new StoreKey(item.Key);
-            var trimmed = TrimForNextLevel(key);
+            key = key.SliceFrom(TreeLevelOddity); // for odd levels, slice by 1
+            if (key.IsEmpty)
+                continue;
 
-            destination = new DataPage(destination.Set(trimmed, item.RawData, batch));
+            if (key.FirstNibble != nibble)
+                continue;
+
+            var sliced = key.SliceFrom(1);
+            if (sliced.IsEmpty)
+                continue;
+
+            // 012345
+            //  12345
+            // A12345
+            // B12345
+            // Header.Level == 1 && path == 12345
+
+            // TODO: minimal setup + slicedpath.
+
+            destination = new DataPage(destination.Set(sliced, item.RawData, batch));
 
             // use the special delete for the item that is much faster than map.Delete(item.Key);
             map.Delete(item);
@@ -153,23 +146,30 @@ public readonly unsafe struct DataPage : IPage
         return destination;
     }
 
-    private StoreKey TrimForNextLevel(StoreKey key)
-    {
-        if (IsEvenLevel == false)
-        {
-            // it's an odd level so we need to slice two
-            key = key.SliceTwoNibbles();
-        }
-
-        return key;
-    }
+    private int TreeLevelOddity => Header.Level % 2;
 
     private byte FindMostFrequentNibble(SlottedArray map)
     {
         const int count = SlottedArray.BucketCount;
 
         Span<ushort> stats = stackalloc ushort[count];
-        map.GatherCountStatistics(stats, SelectorForThisLevel);
+
+        if (TreeLevelOddity == 0)
+        {
+            map.GatherCountStatistics(stats, static span =>
+            {
+                var path = NibblePath.FromKey(span);
+                return path.Length > 0 ? path.FirstNibble : byte.MaxValue;
+            });
+        }
+        else
+        {
+            map.GatherCountStatistics(stats, static span =>
+            {
+                var path = NibblePath.FromKey(span);
+                return path.Length > 1 ? path.GetAt(1) : byte.MaxValue;
+            });
+        }
 
         byte biggestIndex = 0;
         for (byte i = 1; i < count; i++)
@@ -183,9 +183,9 @@ public readonly unsafe struct DataPage : IPage
         return biggestIndex;
     }
 
-    private Page DeleteInMap(in StoreKey key, SlottedArray map)
+    private Page DeleteInMap(in NibblePath key, SlottedArray map)
     {
-        map.Delete(key.Payload);
+        map.Delete(key.RawSpan);
         if (map.Count == 0 && Data.Buckets.IndexOfAnyExcept(DbAddress.Null) == -1)
         {
             // map is empty, buckets are empty, page is empty
@@ -234,36 +234,33 @@ public readonly unsafe struct DataPage : IPage
     public bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
         var k = StoreKey.Encode(key, stackalloc byte[StoreKey.GetMaxByteSize(key)]);
-        return TryGet(k, batch, out result);
+        return TryGet(NibblePath.FromKey(k.Payload), batch, out result);
     }
 
-    public bool TryGet(scoped StoreKey key, IPageResolver batch, out ReadOnlySpan<byte> result)
+    public bool TryGet(scoped NibblePath key, IPageResolver batch, out ReadOnlySpan<byte> result)
     {
         // read in-page
         var map = Map;
 
         // try regular map
-        if (map.TryGet(key.Payload, out result))
+        if (map.TryGet(key.RawSpan, out result))
         {
             return true;
         }
 
-        var selected = SelectorForThisLevel(key.Payload);
-        if (selected != NibbleNotAvailable)
+        if (key.Length == 0)
         {
-            var bucket = Data.Buckets[selected];
+            return false;
+        }
 
-            // non-null page jump, follow it!
-            if (bucket.IsNull == false)
-            {
-                var child = new DataPage(batch.GetAt(bucket));
-                var trimmed = TrimForNextLevel(key);
+        var selected = key.FirstNibble;
+        var bucket = Data.Buckets[selected];
 
-                Debug.Assert(trimmed.Payload.Length > 0,
-                    "Trimmed {StoreKey} cannot be empty because it would result in loosing the type ");
-
-                return child.TryGet(trimmed, batch, out result);
-            }
+        // non-null page jump, follow it!
+        if (bucket.IsNull == false)
+        {
+            var child = new DataPage(batch.GetAt(bucket));
+            return child.TryGet(key.SliceFrom(1), batch, out result);
         }
 
         result = default;

@@ -235,17 +235,8 @@ public readonly ref struct NibblePath
     private static int GetSpanLength(byte length, int odd) => (length + 1 + odd) / 2;
 
     /// <summary>
-    /// Extracts raw span that can be read as the nibble path from the source.
+    /// Gets the raw underlying span behind the path, removing the odd encoding.
     /// </summary>
-    public static ReadOnlySpan<byte> RawExtract(ReadOnlySpan<byte> source)
-    {
-        var b = source[0];
-        var length = (byte)(b >> LengthShift);
-        var odd = b & OddBit;
-
-        return source.Slice(0, GetSpanLength(length, odd) + PreambleLength);
-    }
-
     public ReadOnlySpan<byte> RawSpan
     {
         get
@@ -254,11 +245,6 @@ public readonly ref struct NibblePath
             return MemoryMarshal.CreateSpan(ref _span, lenght);
         }
     }
-
-    private static readonly byte[] Bytes = Enumerable
-        .Range(0, byte.MaxValue + 1).Select(b => (byte)b)
-        .ToArray();
-    public static NibblePath OfByte(byte value) => FromKey(Bytes.AsSpan(value, 1));
 
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out NibblePath nibblePath)
     {

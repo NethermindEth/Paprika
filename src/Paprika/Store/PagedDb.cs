@@ -326,7 +326,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 var idKey = new StoreKey(key.Path.RawSpan);
 
                 // try fetch existing first
-                if (ids.TryGet(idKey, this, out var compressed))
+                if (ids.TryGet(NibblePath.FromKey(idKey.Payload), this, out var compressed))
                 {
                     storeKey = BuildCompressed(key, compressed, span);
                 }
@@ -341,7 +341,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 storeKey = StoreKey.Encode(in key, span);
             }
 
-            return new DataPage(GetAt(addr)).TryGet(storeKey, this, out result);
+            return new DataPage(GetAt(addr)).TryGet(NibblePath.FromKey(storeKey.Payload), this, out result);
         }
 
         public void Report(IReporter reporter)
@@ -436,7 +436,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 var idKey = new StoreKey(key.Path.RawSpan);
 
                 // try fetch existing first
-                if (ids.TryGet(idKey, this, out var compressed))
+                if (ids.TryGet(NibblePath.FromKey(idKey.Payload), this, out var compressed))
                 {
                     storeKey = BuildCompressed(key, compressed, span);
                 }
@@ -451,7 +451,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 storeKey = StoreKey.Encode(in key, span);
             }
 
-            return new DataPage(GetAt(addr)).TryGet(storeKey, this, out result);
+            return new DataPage(GetAt(addr)).TryGet(NibblePath.FromKey(storeKey.Payload), this, out result);
         }
 
         public void SetMetadata(uint blockNumber, in Keccak blockHash)
@@ -459,41 +459,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _root.Data.Metadata = new Metadata(blockNumber, blockHash);
         }
 
-        private static readonly byte[] Missing =
-            Convert.FromHexString("b4f9ca85d895c78abf9feef175a068b588efd20915b72578bc12043f9465c4ad");
-
-        private static byte[]? Data = null;
-        private static int clock = 0;
-
         public void SetRaw(in Key key, ReadOnlySpan<byte> rawData)
         {
-            if (Data == null)
-            {
-                if (key.Type == DataType.Account)
-                {
-                    if (key.Path.UnsafeAsKeccak.BytesAsSpan.SequenceEqual(Missing))
-                    {
-                        Data = rawData.ToArray();
-                        Debugger.Break();
-                    }
-                }
-            }
-            else
-            {
-                if (TryGet(Key.Account(NibblePath.FromKey(Missing)), out var actual) == false)
-                {
-                    Debugger.Break();
-                }
-                else if (actual.SequenceEqual(Data) == false)
-                {
-                    Debugger.Break();
-                }
-                else
-                {
-                    clock++;
-                }
-            }
-
             _db.ReportWrite();
 
             Span<byte> span = stackalloc byte[StoreKey.MaxByteSize];
@@ -503,11 +470,10 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             if (ShouldCompress(key))
             {
                 // full extraction of key possible, get it
-                var ids = new DataPage(TryGetPageAlloc(ref _root.Data.IdRoot));
-                var idKey = new StoreKey(key.Path.RawSpan);
+                var ids = new DataPage(TryGetPageAlloc(ref _root.Data.IdRoot, PageType.Identity));
 
                 // try fetch existing first
-                if (ids.TryGet(idKey, this, out var result))
+                if (ids.TryGet(key.Path, this, out var result))
                 {
                     storeKey = BuildCompressed(key, result, span);
                 }
@@ -518,7 +484,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                     BinaryPrimitives.WriteUInt32LittleEndian(id, _root.Data.AccountCounter);
 
                     // update root
-                    _root.Data.IdRoot = GetAddress(ids.Set(idKey, id, this));
+                    _root.Data.IdRoot = GetAddress(ids.Set(key.Path, id, this));
 
                     // build compressed key
                     storeKey = BuildCompressed(key, id, span);
@@ -529,12 +495,12 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 storeKey = StoreKey.Encode(in key, span);
             }
 
-            var data = TryGetPageAlloc(ref _root.Data.DataRoot);
-            var updated = new DataPage(data).Set(storeKey, rawData, this);
+            var data = TryGetPageAlloc(ref _root.Data.DataRoot, PageType.Standard);
+            var updated = new DataPage(data).Set(NibblePath.FromKey(storeKey.Payload), rawData, this);
             _root.Data.DataRoot = _db.GetAddress(updated);
         }
 
-        private Page TryGetPageAlloc(ref DbAddress addr)
+        private Page TryGetPageAlloc(ref DbAddress addr, PageType pageType)
         {
             CheckDisposed();
 
@@ -542,7 +508,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             if (addr.IsNull)
             {
                 page = GetNewPage(out addr, true);
-                page.Header.PageType = PageType.Standard;
+                page.Header.PageType = pageType;
             }
             else
             {

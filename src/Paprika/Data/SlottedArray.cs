@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paprika.Crypto;
 using Paprika.Store;
 using Paprika.Utils;
 
@@ -82,6 +83,7 @@ public readonly ref struct SlottedArray
         // write slot
         slot.Hash = hash;
         slot.ItemAddress = (ushort)(_data.Length - _header.High - total);
+        slot.IsDeleted = false;
 
         // write item: length_key, key, data
         var dest = _data.Slice(slot.ItemAddress, total);
@@ -340,7 +342,7 @@ public readonly ref struct SlottedArray
         }
     }
 
-    public bool TryGet(in ReadOnlySpan<byte> key, out ReadOnlySpan<byte> data)
+    public bool TryGet(ReadOnlySpan<byte> key, out ReadOnlySpan<byte> data)
     {
         if (TryGetImpl(key, Slot.GetHash(key), out var span, out _))
         {
@@ -499,6 +501,19 @@ public readonly ref struct SlottedArray
     }
 
     public override string ToString() => $"{nameof(Count)}: {Count}, {nameof(CapacityLeft)}: {CapacityLeft}";
+
+    public IEnumerable<string> MaterializeAllKeys()
+    {
+        var list = new List<string>();
+        foreach (var item in EnumerateAll())
+        {
+            list.Add(item.Key.ToHexString(false));
+        }
+
+        list.Sort(StringComparer.InvariantCultureIgnoreCase);
+
+        return list;
+    }
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Header

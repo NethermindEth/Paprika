@@ -191,7 +191,7 @@ public class DbTests
             var header = page.Header;
 
             header.BatchId.Should().BeGreaterThan(0);
-            header.PageType.Should().BeOneOf(PageType.Abandoned, PageType.Standard);
+            header.PageType.Should().BeOneOf(PageType.Abandoned, PageType.Standard, PageType.Identity);
             header.PaprikaVersion.Should().Be(1);
         }
     }
