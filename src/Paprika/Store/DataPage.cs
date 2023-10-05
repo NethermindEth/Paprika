@@ -2,9 +2,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Text.Json.Serialization.Metadata;
 using Paprika.Data;
-using Paprika.Merkle;
 
 namespace Paprika.Store;
 
