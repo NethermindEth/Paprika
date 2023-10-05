@@ -1,8 +1,10 @@
-﻿using System.Diagnostics;
+﻿using System.Buffers;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json.Serialization.Metadata;
 using Paprika.Data;
+using Paprika.Merkle;
 
 namespace Paprika.Store;
 
@@ -28,8 +30,6 @@ public readonly unsafe struct DataPage : IPage
     public ref PageHeader Header => ref _page.Header;
 
     public ref Payload Data => ref Unsafe.AsRef<Payload>(_page.Payload);
-
-    private const int NibbleCount = 1;
 
     /// <summary>
     /// Sets values for the given <see cref="SetContext.Key"/>
@@ -60,18 +60,26 @@ public readonly unsafe struct DataPage : IPage
 
         if (isDelete)
         {
-            if (key.Length == 0)
+            // delete locally
+            if (LeafCount <= MaxLeafCount)
             {
-                // path cannot be held on a lower level so delete in here
-                return DeleteInMap(key, map);
+                map.Delete(key.RawSpan);
+                for (var i = 0; i < MaxLeafCount; i++)
+                {
+                    // TODO: consider checking whether the array contains the data first,
+                    // only then make it writable as it results in a COW
+                    if (TryGetWritableLeaf(i, batch, out var leaf)) leaf.Delete(key.RawSpan);
+                }
+
+                return _page;
             }
 
-            // path is not empty, so it might have a child page underneath with data, let's try
             var childPageAddress = Data.Buckets[key.FirstNibble];
             if (childPageAddress.IsNull)
             {
                 // there's no lower level, delete in map
-                return DeleteInMap(key, map);
+                map.Delete(key.RawSpan);
+                return _page;
             }
         }
 
@@ -79,6 +87,80 @@ public readonly unsafe struct DataPage : IPage
         if (map.TrySet(key.RawSpan, data))
         {
             return _page;
+        }
+
+        // if no Descendants, create first leaf
+        if (LeafCount == 0)
+        {
+            TryGetWritableLeaf(0, batch, out var leaf, true);
+            this.LeafCount = 1;
+        }
+
+        if (LeafCount <= MaxLeafCount)
+        {
+            // try get the newest
+            TryGetWritableLeaf(LeafCount - 1, batch, out var newest);
+
+            // move as many as possible to the first leaf and try to re-add
+            var anyMoved = map.MoveTo(newest) > 0;
+
+            if (anyMoved && map.TrySet(key.RawSpan, data))
+            {
+                return _page;
+            }
+
+            this.LeafCount += 1;
+
+            if (LeafCount <= MaxLeafCount)
+            {
+                // still within leafs count
+                TryGetWritableLeaf(LeafCount - 1, batch, out newest, true);
+
+                map.MoveTo(newest);
+                if (map.TrySet(key.RawSpan, data))
+                {
+                    return _page;
+                }
+
+                Debug.Fail("Shall never enter here as new entries are copied to the map");
+                return _page;
+            }
+
+            // copy leafs and clear the buckets as they will be used by child pages now
+            Span<DbAddress> leafs = stackalloc DbAddress[MaxLeafCount];
+            Data.Buckets.Slice(0, MaxLeafCount).CopyTo(leafs);
+            Data.Buckets.Clear();
+
+            // need to deep copy the page, first memoize the map which has the newest data
+            var bytes = ArrayPool<byte>.Shared.Rent(Data.DataSpan.Length);
+            var copy = bytes.AsSpan(0, Data.DataSpan.Length);
+            Data.DataSpan.CopyTo(copy);
+
+            // clear the map
+            Data.DataSpan.Clear();
+
+            // as oldest go first, iterate in the same direction
+            foreach (var leaf in leafs)
+            {
+                var leafPage = batch.GetAt(leaf);
+                batch.RegisterForFutureReuse(leafPage);
+                var leafMap = GetLeafSlottedArray(leafPage);
+
+                foreach (var item in leafMap.EnumerateAll())
+                {
+                    Set(NibblePath.FromKey(item.Key), item.RawData, batch);
+                }
+            }
+
+            foreach (var item in new SlottedArray(copy).EnumerateAll())
+            {
+                Set(NibblePath.FromKey(item.Key), item.RawData, batch);
+            }
+
+            ArrayPool<byte>.Shared.Return(bytes);
+
+            // set the actual data
+            return Set(key, data, batch);
         }
 
         // Find most frequent nibble
@@ -129,14 +211,6 @@ public readonly unsafe struct DataPage : IPage
             if (sliced.IsEmpty)
                 continue;
 
-            // 012345
-            //  12345
-            // A12345
-            // B12345
-            // Header.Level == 1 && path == 12345
-
-            // TODO: minimal setup + slicedpath.
-
             destination = new DataPage(destination.Set(sliced, item.RawData, batch));
 
             // use the special delete for the item that is much faster than map.Delete(item.Key);
@@ -146,7 +220,48 @@ public readonly unsafe struct DataPage : IPage
         return destination;
     }
 
+    private ref byte LeafCount => ref Header.Metadata;
+    private const byte MaxLeafCount = 6;
+
+    private bool TryGetWritableLeaf(int index, IBatchContext batch, out SlottedArray leaf,
+        bool allocateOnMissing = false)
+    {
+        ref var addr = ref Data.Buckets[index];
+
+        Page page;
+
+        if (addr.IsNull)
+        {
+            if (!allocateOnMissing)
+            {
+                leaf = default;
+                return false;
+            }
+
+            page = batch.GetNewPage(out addr, true);
+            page.Header.PageType = PageType.Leaf;
+            page.Header.Level = 0;
+        }
+        else
+        {
+            page = batch.GetAt(addr);
+        }
+
+        // ensure writable
+        if (page.Header.BatchId != batch.BatchId)
+        {
+            page = batch.GetWritableCopy(page);
+            addr = batch.GetAddress(page);
+        }
+
+        leaf = GetLeafSlottedArray(page);
+        return true;
+    }
+
+    private static SlottedArray GetLeafSlottedArray(Page page) => new(new Span<byte>(page.Payload, Payload.Size));
+
     private int TreeLevelOddity => Header.Level % 2;
+
 
     private byte FindMostFrequentNibble(SlottedArray map)
     {
@@ -183,18 +298,6 @@ public readonly unsafe struct DataPage : IPage
         return biggestIndex;
     }
 
-    private Page DeleteInMap(in NibblePath key, SlottedArray map)
-    {
-        map.Delete(key.RawSpan);
-        if (map.Count == 0 && Data.Buckets.IndexOfAnyExcept(DbAddress.Null) == -1)
-        {
-            // map is empty, buckets are empty, page is empty
-            // TODO: for now, leave as is 
-        }
-
-        return _page;
-    }
-
     /// <summary>
     /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
     /// These buckets is used to store up to <see cref="DataSize"/> entries before flushing them down as other pages
@@ -203,7 +306,7 @@ public readonly unsafe struct DataPage : IPage
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     public struct Payload
     {
-        private const int Size = Page.PageSize - PageHeader.Size;
+        public const int Size = Page.PageSize - PageHeader.Size;
         private const int BucketSize = BucketCount * DbAddress.Size;
 
         /// <summary>
@@ -248,7 +351,21 @@ public readonly unsafe struct DataPage : IPage
             return true;
         }
 
-        if (key.Length == 0)
+        if (LeafCount is > 0 and <= MaxLeafCount)
+        {
+            // start with the oldest
+            for (var i = LeafCount - 1; i >= 0; i--)
+            {
+                var leafMap = GetLeafSlottedArray(batch.GetAt(Data.Buckets[i]));
+                if (leafMap.TryGet(key.RawSpan, out result))
+                    return true;
+            }
+
+            result = default;
+            return false;
+        }
+
+        if (key.IsEmpty) // empty keys are left in page
         {
             return false;
         }
@@ -273,15 +390,36 @@ public readonly unsafe struct DataPage : IPage
     {
         var emptyBuckets = 0;
 
-        foreach (var bucket in Data.Buckets)
+        if (LeafCount <= MaxLeafCount)
         {
-            if (bucket.IsNull)
+            foreach (var leaf in Data.Buckets.Slice(0, LeafCount))
             {
-                emptyBuckets++;
+                var page = resolver.GetAt(leaf);
+                var leafMap = GetLeafSlottedArray(page);
+
+                foreach (var item in leafMap.EnumerateAll())
+                {
+                    reporter.ReportItem(new StoreKey(item.Key), item.RawData);
+                }
+
+                reporter.ReportDataUsage(page.Header.PageType, level + 1, 0, leafMap.Count,
+                    leafMap.CapacityLeft);
             }
-            else
+
+            emptyBuckets = BucketCount - LeafCount;
+        }
+        else
+        {
+            foreach (var bucket in Data.Buckets)
             {
-                new DataPage(resolver.GetAt(bucket)).Report(reporter, resolver, level + 1);
+                if (bucket.IsNull)
+                {
+                    emptyBuckets++;
+                }
+                else
+                {
+                    new DataPage(resolver.GetAt(bucket)).Report(reporter, resolver, level + 1);
+                }
             }
         }
 

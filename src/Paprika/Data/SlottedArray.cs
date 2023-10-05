@@ -191,6 +191,29 @@ public readonly ref struct SlottedArray
         public Enumerator GetEnumerator() => this;
     }
 
+    /// <summary>
+    /// Tries to move as many items as possible from this map to the destination map.
+    /// </summary>
+    /// <remarks>
+    /// Returns how many items were moved.
+    /// </remarks>
+    public int MoveTo(in SlottedArray destination)
+    {
+        var count = 0;
+
+        foreach (var item in EnumerateAll())
+        {
+            // try copy all, even if one is not copyable the other might
+            if (destination.TrySet(item.Key, item.RawData))
+            {
+                count++;
+                Delete(item);
+            }
+        }
+
+        return count;
+    }
+
     public const int BucketCount = 16;
 
     /// <summary>
