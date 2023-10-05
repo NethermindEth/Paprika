@@ -34,4 +34,4 @@ jobs:
         submodules: true
     - name: Format
       run: |
-        dotnet format whitespace src/ --folder --verify-no-changes
+        dotnet format whitespace src/Paprika.sln --verify-no-changes
