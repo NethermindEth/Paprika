@@ -174,7 +174,7 @@ public readonly ref struct NibblePath
     /// Sets a <paramref name="value"/> of the nibble at the given <paramref name="nibble"/> location.
     /// This is unsafe. Use only for owned memory. 
     /// </summary>
-    public void UnsafeSetAt(int nibble, byte countOdd, byte value)
+    private void UnsafeSetAt(int nibble, byte countOdd, byte value)
     {
         ref var b = ref GetRefAt(nibble);
         var shift = GetShift(nibble + countOdd);
@@ -235,15 +235,15 @@ public readonly ref struct NibblePath
     private static int GetSpanLength(byte length, int odd) => (length + 1 + odd) / 2;
 
     /// <summary>
-    /// Extracts raw span that can be read as the nibble path from the source.
+    /// Gets the raw underlying span behind the path, removing the odd encoding.
     /// </summary>
-    public static ReadOnlySpan<byte> RawExtract(ReadOnlySpan<byte> source)
+    public ReadOnlySpan<byte> RawSpan
     {
-        var b = source[0];
-        var length = (byte)(b >> LengthShift);
-        var odd = b & OddBit;
-
-        return source.Slice(0, GetSpanLength(length, odd) + PreambleLength);
+        get
+        {
+            var lenght = GetSpanLength(Length, _odd);
+            return MemoryMarshal.CreateSpan(ref _span, lenght);
+        }
     }
 
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out NibblePath nibblePath)

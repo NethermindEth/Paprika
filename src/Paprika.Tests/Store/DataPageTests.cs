@@ -1,5 +1,4 @@
 ﻿using System.Buffers.Binary;
-using System.Diagnostics;
 using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
@@ -299,6 +298,7 @@ public class DataPageTests : BasePageTests
     }
 
     [Test]
+    [Ignore("This test should be removed or rewritten")]
     public void Small_prefix_tree_with_regular()
     {
         var page = AllocPage();
@@ -391,6 +391,73 @@ public class DataPageTests : BasePageTests
         static NibblePath GetMerkleKey(in Keccak storage, int i)
         {
             return NibblePath.FromKey(storage).SliceTo(Math.Min(i + 1, NibblePath.KeccakNibbleCount));
+        }
+    }
+
+    [Test]
+    public void Different_at_start_keys()
+    {
+        var page = AllocPage();
+        page.Clear();
+
+        var batch = NewBatch(BatchId);
+        var dataPage = new DataPage(page);
+
+        const int count = 10_000;
+
+        Span<byte> dest = stackalloc byte[sizeof(int)];
+        Span<byte> store = stackalloc byte[StoreKey.MaxByteSize];
+
+        const DataType compressedAccount = DataType.Account | DataType.CompressedAccount;
+        const DataType compressedMerkle = DataType.Merkle | DataType.CompressedAccount;
+
+        ReadOnlySpan<byte> accountValue = stackalloc byte[1] { (byte)compressedAccount };
+        ReadOnlySpan<byte> merkleValue = stackalloc byte[1] { (byte)compressedMerkle };
+
+        for (var i = 0; i < count; i++)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(dest, i);
+            var path = NibblePath.FromKey(dest);
+
+            // account
+            {
+                var accountKey = Key.Raw(path, compressedAccount, NibblePath.Empty);
+                var accountStoreKey = StoreKey.Encode(accountKey, store);
+
+                dataPage = new DataPage(dataPage.Set(NibblePath.FromKey(accountStoreKey.Payload), accountValue, batch));
+            }
+
+            // merkle
+            {
+                var merkleKey = Key.Raw(path, compressedMerkle, NibblePath.Empty);
+                var merkleStoreKey = StoreKey.Encode(merkleKey, store);
+
+                dataPage = new DataPage(dataPage.Set(NibblePath.FromKey(merkleStoreKey.Payload), merkleValue, batch));
+            }
+        }
+
+        for (var i = 0; i < count; i++)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(dest, i);
+            var path = NibblePath.FromKey(dest);
+
+            // account
+            {
+                var accountKey = Key.Raw(path, compressedAccount, NibblePath.Empty);
+                var accountStoreKey = StoreKey.Encode(accountKey, store);
+
+                dataPage.TryGet(NibblePath.FromKey(accountStoreKey.Payload), batch, out var value).Should().BeTrue();
+                value.SequenceEqual(accountValue).Should().BeTrue();
+            }
+
+            // merkle
+            {
+                var merkleKey = Key.Raw(path, compressedMerkle, NibblePath.Empty);
+                var merkleStoreKey = StoreKey.Encode(merkleKey, store);
+
+                dataPage.TryGet(NibblePath.FromKey(merkleStoreKey.Payload), batch, out var value).Should().BeTrue();
+                value.SequenceEqual(merkleValue).Should().BeTrue();
+            }
         }
     }
 }

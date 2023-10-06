@@ -20,4 +20,9 @@ public interface IPageManager : IDisposable, IPageResolver
     /// Flushes underlying buffers.
     /// </summary>
     void Flush();
+
+    /// <summary>
+    /// Forces to flush the underlying no matter what flags they are
+    /// </summary>
+    void ForceFlush();
 }

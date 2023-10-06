@@ -47,7 +47,11 @@ public readonly struct Account : IEquatable<Account>
 
     public static bool operator !=(Account left, Account right) => !left.Equals(right);
 
-    public override string ToString() => $"{nameof(Nonce)}: {Nonce}, {nameof(Balance)}: {Balance}";
+    public override string ToString() =>
+        $"{nameof(Nonce)}: {Nonce}, " +
+        $"{nameof(Balance)}: {Balance}, " +
+        $"{nameof(CodeHash)}: {CodeHash}" +
+        $"{nameof(StorageRootHash)}: {StorageRootHash}";
 
     public const int MaxByteCount = BigPreambleLength + // preamble 
                                     Serializer.Uint256Size + // balance

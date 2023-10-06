@@ -1,7 +1,7 @@
-﻿using System.Diagnostics;
+﻿using System.Buffers;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Paprika.Crypto;
 using Paprika.Data;
 
 namespace Paprika.Store;
@@ -18,7 +18,7 @@ namespace Paprika.Store;
 /// </remarks>
 public readonly unsafe struct DataPage : IPage
 {
-    public const int BucketCount = 16;
+    private const int BucketCount = 16;
 
     private readonly Page _page;
 
@@ -29,200 +29,187 @@ public readonly unsafe struct DataPage : IPage
 
     public ref Payload Data => ref Unsafe.AsRef<Payload>(_page.Payload);
 
-    public const int NibbleCount = 1;
-
     /// <summary>
     /// Sets values for the given <see cref="SetContext.Key"/>
     /// </summary>
     /// <returns>
     /// The actual page which handled the set operation. Due to page being COWed, it may be a different page.
     /// </returns>
+    //TODO: [SkipLocalsInit]
     public Page Set(in SetContext ctx)
     {
-        if (Header.BatchId != ctx.Batch.BatchId)
+        var size = StoreKey.GetMaxByteSize(ctx.Key);
+        var key = StoreKey.Encode(ctx.Key, stackalloc byte[size]);
+        return Set(NibblePath.FromKey(key.Payload), ctx.Data, ctx.Batch);
+    }
+
+    public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
+    {
+        if (Header.BatchId != batch.BatchId)
         {
             // the page is from another batch, meaning, it's readonly. Copy
-            var writable = ctx.Batch.GetWritableCopy(_page);
+            var writable = batch.GetWritableCopy(_page);
 
-            return new DataPage(writable).Set(ctx);
-        }
-
-        if (Header.PageType == PageType.PrefixPage && ctx.IsPrefixed == false)
-        {
-            if (TryExtractPrefixed(ctx.Key, out var prefixed))
-            {
-                // prefixes match, just amend the context
-                return Set(new SetContext(prefixed, ctx.Data, ctx.Batch, true));
-            }
-
-            // This page is the top of the prefix tree.
-            // Create a new regular parent page and push this page as a child.
-            // As prefixes are checked with EndsWith, no need to do truncation
-            var parent = ctx.Batch.GetNewPage(out _, true);
-            parent.Header.PageType = PageType.Standard;
-            parent = new DataPage(parent).Set(ctx);
-
-            // read, extract and slice the first nibble
-            NibblePath.ReadFrom(Data.AccountPrefix, out var prefix);
-            var firstNibble = prefix.FirstNibble;
-            prefix.SliceFrom(1).WriteTo(Data.AccountPrefix);
-
-            // point to the first nibble of the sliced path as a child
-            new DataPage(parent).Data.Buckets[firstNibble] = ctx.Batch.GetAddress(this.AsPage());
-            return parent;
+            return new DataPage(writable).Set(key, data, batch);
         }
 
         var map = new SlottedArray(Data.DataSpan);
-
-        var path = ctx.Key.Path;
-        var isDelete = ctx.Data.IsEmpty;
+        var isDelete = data.IsEmpty;
 
         if (isDelete)
         {
-            if (path.Length < NibbleCount)
+            // delete locally
+            if (LeafCount <= MaxLeafCount)
             {
-                // path cannot be held on a lower level so delete in here
-                return DeleteInMap(ctx, map);
+                map.Delete(key.RawSpan);
+                for (var i = 0; i < MaxLeafCount; i++)
+                {
+                    // TODO: consider checking whether the array contains the data first,
+                    // only then make it writable as it results in a COW
+                    if (TryGetWritableLeaf(i, batch, out var leaf)) leaf.Delete(key.RawSpan);
+                }
+
+                return _page;
             }
 
-            // path is not empty, so it might have a child page underneath with data, let's try
-            var childPageAddress = Data.Buckets[path.FirstNibble];
+            var childPageAddress = Data.Buckets[key.FirstNibble];
             if (childPageAddress.IsNull)
             {
                 // there's no lower level, delete in map
-                return DeleteInMap(ctx, map);
+                map.Delete(key.RawSpan);
+                return _page;
             }
         }
 
         // try write in map
-        if (map.TrySet(ctx.Key, ctx.Data))
+        if (map.TrySet(key.RawSpan, data))
         {
             return _page;
         }
 
-        // There's no more room in this page. We need to make some, but in a way that will not over-allocate pages.
-        // To make it work:
-        // 1. find amongst existing children pages that have some capacity left.
-        // 2. sort them from the most empty to the least empty
-        // 3. loop through them, and flush down the given nibble in a way that will not allocate anything in them
-        // 4. after each spin of the loop, try to write map
-        // 5. if after walking through all of the pages there's still no place, flush down the biggest nibble
-        if (TryFlushDownSoftAndWrite(ctx, map))
-            return _page;
+        // if no Descendants, create first leaf
+        if (LeafCount == 0)
+        {
+            TryGetWritableLeaf(0, batch, out var leaf, true);
+            this.LeafCount = 1;
+        }
 
-        // Flushing down to existing pages didn't make space for this entry, flush the biggest nibble forcefully.
-        var biggestNibble = FindBiggestNibble(map);
+        if (LeafCount <= MaxLeafCount)
+        {
+            // try get the newest
+            TryGetWritableLeaf(LeafCount - 1, batch, out var newest);
+
+            // move as many as possible to the first leaf and try to re-add
+            var anyMoved = map.MoveTo(newest) > 0;
+
+            if (anyMoved && map.TrySet(key.RawSpan, data))
+            {
+                return _page;
+            }
+
+            this.LeafCount += 1;
+
+            if (LeafCount <= MaxLeafCount)
+            {
+                // still within leafs count
+                TryGetWritableLeaf(LeafCount - 1, batch, out newest, true);
+
+                map.MoveTo(newest);
+                if (map.TrySet(key.RawSpan, data))
+                {
+                    return _page;
+                }
+
+                Debug.Fail("Shall never enter here as new entries are copied to the map");
+                return _page;
+            }
+
+            // copy leafs and clear the buckets as they will be used by child pages now
+            Span<DbAddress> leafs = stackalloc DbAddress[MaxLeafCount];
+            Data.Buckets.Slice(0, MaxLeafCount).CopyTo(leafs);
+            Data.Buckets.Clear();
+
+            // need to deep copy the page, first memoize the map which has the newest data
+            var bytes = ArrayPool<byte>.Shared.Rent(Data.DataSpan.Length);
+            var copy = bytes.AsSpan(0, Data.DataSpan.Length);
+            Data.DataSpan.CopyTo(copy);
+
+            // clear the map
+            Data.DataSpan.Clear();
+
+            // as oldest go first, iterate in the same direction
+            foreach (var leaf in leafs)
+            {
+                var leafPage = batch.GetAt(leaf);
+                batch.RegisterForFutureReuse(leafPage);
+                var leafMap = GetLeafSlottedArray(leafPage);
+
+                foreach (var item in leafMap.EnumerateAll())
+                {
+                    Set(NibblePath.FromKey(item.Key), item.RawData, batch);
+                }
+            }
+
+            foreach (var item in new SlottedArray(copy).EnumerateAll())
+            {
+                Set(NibblePath.FromKey(item.Key), item.RawData, batch);
+            }
+
+            ArrayPool<byte>.Shared.Return(bytes);
+
+            // set the actual data
+            return Set(key, data, batch);
+        }
+
+        // Find most frequent nibble
+        var nibble = FindMostFrequentNibble(map);
 
         // try get the child page
-        ref var address = ref Data.Buckets[biggestNibble];
+        ref var address = ref Data.Buckets[nibble];
         Page child;
 
         if (address.IsNull)
         {
-            var noOtherChildren = Data.Buckets.IndexOfAnyExcept(DbAddress.Null) == -1;
-            if (noOtherChildren)
-            {
-                // try to create a prefix child only if there are no other children at this page.
-                // If they are, this looks like a regular page
-                if (TryExtractAsPrefixTree(biggestNibble, ctx, map, out address))
-                {
-                    // the page has been extracted, retry set
-                    return Set(ctx);
-                }
-            }
-
             // create child as the same type as the parent
-            child = ctx.Batch.GetNewPage(out Data.Buckets[biggestNibble], true);
+            child = batch.GetNewPage(out Data.Buckets[nibble], true);
             child.Header.PageType = Header.PageType;
+            child.Header.Level = (byte)(Header.Level + 1);
         }
         else
         {
             // the child page is not-null, retrieve it
-            child = ctx.Batch.GetAt(address);
+            child = batch.GetAt(address);
         }
 
         var dataPage = new DataPage(child);
-        var batch = ctx.Batch;
 
-        // flush down: force
-        dataPage = FlushDown(map, biggestNibble, dataPage, batch, false);
-        address = ctx.Batch.GetAddress(dataPage.AsPage());
+        dataPage = FlushDown(map, nibble, dataPage, batch);
+        address = batch.GetAddress(dataPage.AsPage());
 
         // The page has some of the values flushed down, try to add again.
-        return Set(ctx);
+        return Set(key, data, batch);
     }
 
-    private bool TryFlushDownSoftAndWrite(SetContext ctx, SlottedArray map)
+    private DataPage FlushDown(in SlottedArray map, byte nibble, DataPage destination, IBatchContext batch)
     {
-        // TODO: Change this algorithm into a simple bit-map that is memoized in page.
-        // Softly flushed map would memoize whether a page was flushed softly.
-        // Here, select only these that were not
-
-        Span<ushort> capacities = stackalloc ushort[BucketCount];
-        Span<byte> nibbles = stackalloc byte[BucketCount];
-
-        for (byte i = 0; i < BucketCount; i++)
+        foreach (var item in map.EnumerateAll())
         {
-            nibbles[i] = i;
-
-            var childAddress = Data.Buckets[i];
-            if (childAddress.IsNull == false)
-            {
-                capacities[i] = (ushort)new DataPage(ctx.Batch.GetAt(childAddress)).Map.CapacityLeft;
-            }
-        }
-
-        capacities.Sort(nibbles);
-        var start = capacities.IndexOfAnyExcept((ushort)0);
-
-        if (start == -1)
-            return false;
-
-        // contains sorted from the smallest to the biggest capacity
-        var nibblesWithSomeCapacity = nibbles.Slice(start);
-        for (var i = nibblesWithSomeCapacity.Length - 1; i >= 0; i--)
-        {
-            var nibble = nibblesWithSomeCapacity[i];
-            ref var childAddress = ref Data.Buckets[nibble];
-            Debug.Assert(childAddress.IsNull == false, "Only an existing child should be selected for flush down");
-
-            var page = new DataPage(ctx.Batch.GetAt(childAddress));
-            page = FlushDown(map, nibble, page, ctx.Batch, true);
-
-            // update the child address
-            childAddress = ctx.Batch.GetAddress(page.AsPage());
-
-            // try write again to the map
-            if (map.TrySet(ctx.Key, ctx.Data))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private DataPage FlushDown(in SlottedArray map, byte nibble, DataPage destination, IBatchContext batch, bool tryAllocFree)
-    {
-        const int minimumCapacity = 96;
-
-        foreach (var item in map.EnumerateNibble(nibble))
-        {
-            var key = item.Key.SliceFrom(NibbleCount);
-            if (tryAllocFree && !destination.MayAcceptKeyInAllocFreeWay(key))
-            {
-                // skip items that will result in creating an additional page for now
+            var key = NibblePath.FromKey(item.Key);
+            if (key.IsEmpty) // empty keys are left in page
                 continue;
-            }
 
-            if (tryAllocFree && destination.Map.CapacityLeft < minimumCapacity)
-            {
-                // if there's not that much space left in the child, break this loop
-                break;
-            }
+            key = key.SliceFrom(TreeLevelOddity); // for odd levels, slice by 1
+            if (key.IsEmpty)
+                continue;
 
-            var set = new SetContext(key, item.RawData, batch, Header.PageType == PageType.PrefixPage);
-            destination = new DataPage(destination.Set(set));
+            if (key.FirstNibble != nibble)
+                continue;
+
+            var sliced = key.SliceFrom(1);
+            if (sliced.IsEmpty)
+                continue;
+
+            destination = new DataPage(destination.Set(sliced, item.RawData, batch));
 
             // use the special delete for the item that is much faster than map.Delete(item.Key);
             map.Delete(item);
@@ -231,20 +218,71 @@ public readonly unsafe struct DataPage : IPage
         return destination;
     }
 
-    /// <summary>
-    /// Checks whether the key can be added to the page and it will not result in an automatic page allocation.
-    /// </summary>
-    private bool MayAcceptKeyInAllocFreeWay(in Key key)
+    private ref byte LeafCount => ref Header.Metadata;
+    private const byte MaxLeafCount = 6;
+
+    private bool TryGetWritableLeaf(int index, IBatchContext batch, out SlottedArray leaf,
+        bool allocateOnMissing = false)
     {
-        return Header.PageType == PageType.Standard || TryExtractPrefixed(key, out _);
+        ref var addr = ref Data.Buckets[index];
+
+        Page page;
+
+        if (addr.IsNull)
+        {
+            if (!allocateOnMissing)
+            {
+                leaf = default;
+                return false;
+            }
+
+            page = batch.GetNewPage(out addr, true);
+            page.Header.PageType = PageType.Leaf;
+            page.Header.Level = 0;
+        }
+        else
+        {
+            page = batch.GetAt(addr);
+        }
+
+        // ensure writable
+        if (page.Header.BatchId != batch.BatchId)
+        {
+            page = batch.GetWritableCopy(page);
+            addr = batch.GetAddress(page);
+        }
+
+        leaf = GetLeafSlottedArray(page);
+        return true;
     }
 
-    private static byte FindBiggestNibble(SlottedArray map)
+    private static SlottedArray GetLeafSlottedArray(Page page) => new(new Span<byte>(page.Payload, Payload.Size));
+
+    private int TreeLevelOddity => Header.Level % 2;
+
+
+    private byte FindMostFrequentNibble(SlottedArray map)
     {
         const int count = SlottedArray.BucketCount;
 
         Span<ushort> stats = stackalloc ushort[count];
-        map.GatherSizeStatistics(stats);
+
+        if (TreeLevelOddity == 0)
+        {
+            map.GatherCountStatistics(stats, static span =>
+            {
+                var path = NibblePath.FromKey(span);
+                return path.Length > 0 ? path.FirstNibble : byte.MaxValue;
+            });
+        }
+        else
+        {
+            map.GatherCountStatistics(stats, static span =>
+            {
+                var path = NibblePath.FromKey(span);
+                return path.Length > 1 ? path.GetAt(1) : byte.MaxValue;
+            });
+        }
 
         byte biggestIndex = 0;
         for (byte i = 1; i < count; i++)
@@ -258,18 +296,6 @@ public readonly unsafe struct DataPage : IPage
         return biggestIndex;
     }
 
-    private Page DeleteInMap(SetContext ctx, SlottedArray map)
-    {
-        map.Delete(ctx.Key);
-        if (map.Count == 0 && Data.Buckets.IndexOfAnyExcept(DbAddress.Null) == -1)
-        {
-            // map is empty, buckets are empty, page is empty
-            // TODO: for now, leave as is 
-        }
-
-        return _page;
-    }
-
     /// <summary>
     /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
     /// These buckets is used to store up to <see cref="DataSize"/> entries before flushing them down as other pages
@@ -278,20 +304,13 @@ public readonly unsafe struct DataPage : IPage
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     public struct Payload
     {
-        private const int Size = Page.PageSize - PageHeader.Size;
-
+        public const int Size = Page.PageSize - PageHeader.Size;
         private const int BucketSize = BucketCount * DbAddress.Size;
-
-        private const int PrefixSizeLongAligned = 40;
-
-        private const int PrefixSize = NibblePath.FullKeccakByteLength > PrefixSizeLongAligned
-            ? NibblePath.FullKeccakByteLength
-            : PrefixSizeLongAligned;
 
         /// <summary>
         /// The size of the raw byte data held in this page. Must be long aligned.
         /// </summary>
-        private const int DataSize = Size - BucketSize - PrefixSize;
+        private const int DataSize = Size - BucketSize;
 
         private const int DataOffset = Size - DataSize;
 
@@ -301,9 +320,6 @@ public readonly unsafe struct DataPage : IPage
         [FieldOffset(0)] private DbAddress Bucket;
 
         public Span<DbAddress> Buckets => MemoryMarshal.CreateSpan(ref Bucket, BucketCount);
-
-        [FieldOffset(BucketSize)] private byte PrefixStart;
-        public Span<byte> AccountPrefix => MemoryMarshal.CreateSpan(ref PrefixStart, PrefixSize);
 
         /// <summary>
         /// The first item of map of frames to allow ref to it.
@@ -316,64 +332,50 @@ public readonly unsafe struct DataPage : IPage
         public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
     }
 
-    /// <summary>
-    /// Tries to match and extract the prefixed key for <see cref="PageType.PrefixPage"/>.
-    /// </summary>
-    private bool TryExtractPrefixed(in Key key, out Key prefixed)
+    public bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
-        // This is a prefixed page and the key has the storage path.
-        // This means, that it didn't have it's prefix checked & extracted.
-        NibblePath.ReadFrom(Data.AccountPrefix, out var accountPrefix);
-
-        // If prefix is different, fail
-        if (accountPrefix.Equals(key.Path) == false)
-        {
-            prefixed = default;
-            return false;
-        }
-
-        // prefix is right
-        prefixed = Key.Raw(key.StoragePath, key.Type, NibblePath.Empty);
-        return true;
+        var k = StoreKey.Encode(key, stackalloc byte[StoreKey.GetMaxByteSize(key)]);
+        return TryGet(NibblePath.FromKey(k.Payload), batch, out result);
     }
 
-    public bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result) =>
-        TryGet(key, false, batch, out result);
-
-    private bool TryGet(Key key, bool isPrefixed, IPageResolver batch, out ReadOnlySpan<byte> result)
+    public bool TryGet(scoped NibblePath key, IPageResolver batch, out ReadOnlySpan<byte> result)
     {
-        if (Header.PageType == PageType.PrefixPage && !isPrefixed)
-        {
-            if (TryExtractPrefixed(key, out var prefixed) == false)
-            {
-                result = default;
-                return false;
-            }
-
-            return TryGet(prefixed, true, batch, out result);
-        }
-
         // read in-page
         var map = Map;
 
         // try regular map
-        if (map.TryGet(key, out result))
+        if (map.TryGet(key.RawSpan, out result))
         {
             return true;
         }
 
-        // path longer than 0, try to find in child
-        if (key.Path.Length > 0)
+        if (LeafCount is > 0 and <= MaxLeafCount)
         {
-            // try to go deeper only if the path is long enough
-            var bucket = Data.Buckets[key.Path.FirstNibble];
-
-            // non-null page jump, follow it!
-            if (bucket.IsNull == false)
+            // start with the oldest
+            for (var i = LeafCount - 1; i >= 0; i--)
             {
-                return new DataPage(batch.GetAt(bucket)).TryGet(key.SliceFrom(NibbleCount), isPrefixed, batch,
-                    out result);
+                var leafMap = GetLeafSlottedArray(batch.GetAt(Data.Buckets[i]));
+                if (leafMap.TryGet(key.RawSpan, out result))
+                    return true;
             }
+
+            result = default;
+            return false;
+        }
+
+        if (key.IsEmpty) // empty keys are left in page
+        {
+            return false;
+        }
+
+        var selected = key.FirstNibble;
+        var bucket = Data.Buckets[selected];
+
+        // non-null page jump, follow it!
+        if (bucket.IsNull == false)
+        {
+            var child = new DataPage(batch.GetAt(bucket));
+            return child.TryGet(key.SliceFrom(1), batch, out result);
         }
 
         result = default;
@@ -386,15 +388,36 @@ public readonly unsafe struct DataPage : IPage
     {
         var emptyBuckets = 0;
 
-        foreach (var bucket in Data.Buckets)
+        if (LeafCount <= MaxLeafCount)
         {
-            if (bucket.IsNull)
+            foreach (var leaf in Data.Buckets.Slice(0, LeafCount))
             {
-                emptyBuckets++;
+                var page = resolver.GetAt(leaf);
+                var leafMap = GetLeafSlottedArray(page);
+
+                foreach (var item in leafMap.EnumerateAll())
+                {
+                    reporter.ReportItem(new StoreKey(item.Key), item.RawData);
+                }
+
+                reporter.ReportDataUsage(page.Header.PageType, level + 1, 0, leafMap.Count,
+                    leafMap.CapacityLeft);
             }
-            else
+
+            emptyBuckets = BucketCount - LeafCount;
+        }
+        else
+        {
+            foreach (var bucket in Data.Buckets)
             {
-                new DataPage(resolver.GetAt(bucket)).Report(reporter, resolver, level + 1);
+                if (bucket.IsNull)
+                {
+                    emptyBuckets++;
+                }
+                else
+                {
+                    new DataPage(resolver.GetAt(bucket)).Report(reporter, resolver, level + 1);
+                }
             }
         }
 
@@ -402,73 +425,10 @@ public readonly unsafe struct DataPage : IPage
 
         foreach (var item in slotted.EnumerateAll())
         {
-            reporter.ReportItem(item.Key, item.RawData);
+            reporter.ReportItem(new StoreKey(item.Key), item.RawData);
         }
 
-        reporter.ReportDataUsage(Header.PageType, level, BucketCount - emptyBuckets, slotted.Count, slotted.CapacityLeft);
-    }
-
-    private static bool TryExtractAsPrefixTree(byte nibble, in SetContext ctx, in SlottedArray map,
-        out DbAddress address)
-    {
-        if (ctx.IsPrefixed)
-        {
-            // if this is an already prefixed tree, don't prefix it again
-            address = default;
-            return false;
-        }
-
-        // required as enumerator destroys paths when enumeration moves to the next value
-        Span<byte> accountPathBytes = stackalloc byte[NibblePath.FullKeccakByteLength];
-        var accountPath = NibblePath.Empty;
-
-        var count = 0;
-
-        // assert that all StorageCells have the same prefix
-        foreach (var item in map.EnumerateNibble(nibble))
-        {
-            if (accountPath.Equals(NibblePath.Empty))
-            {
-                // deep copy
-                NibblePath.ReadFrom(item.Key.Path.WriteTo(accountPathBytes), out accountPath);
-            }
-            else if (item.Key.Path.Equals(accountPath) == false)
-            {
-                // If there's at least one item that has a different key, it will be a regular page
-                address = default;
-                return false;
-            }
-
-            count++;
-        }
-
-        // Extract prefix only if all the entries share the prefix. Otherwise, fault with extraction
-        if (count < map.CountPushableDown())
-        {
-            address = default;
-            return false;
-        }
-
-        var prefixPage = ctx.Batch.GetNewPage(out address, true);
-
-        // this is the top page of the massive storage tree
-        prefixPage.Header.PageType = PageType.PrefixPage;
-
-        var dataPage = new DataPage(prefixPage);
-
-        // store prefix but truncated by one nibble as this is the nibble that is extracted
-        accountPath.SliceFrom(1).WriteTo(dataPage.Data.AccountPrefix);
-
-        foreach (var item in map.EnumerateNibble(nibble))
-        {
-            // Extract the prefix and store items under their raw keys of storage.
-            var key = Key.Raw(item.Key.StoragePath, item.Type, NibblePath.Empty);
-            dataPage = new DataPage(dataPage.Set(new SetContext(key, item.RawData, ctx.Batch, true)));
-
-            // fast delete by enumerator item
-            map.Delete(item);
-        }
-
-        return true;
+        reporter.ReportDataUsage(Header.PageType, level, BucketCount - emptyBuckets, slotted.Count,
+            slotted.CapacityLeft);
     }
 }

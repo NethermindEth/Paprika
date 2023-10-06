@@ -1,6 +1,5 @@
 ﻿using System.Buffers.Binary;
 using FluentAssertions;
-using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -28,12 +27,23 @@ public static class TestExtensions
         value.SequenceEqual(expected);
     }
 
-    public static void ShouldHaveAccount(this IReadOnlyBatch read, in Keccak key, in Account expected)
+    public static void ShouldHaveAccount(this IReadOnlyBatch read, in Keccak key, in Account expected,
+        bool skipStorageRootCheck = false)
     {
-        var raw = expected.WriteTo(stackalloc byte[Account.MaxByteCount]);
-
         read.TryGet(Key.Account(key), out var value).Should().BeTrue();
-        value.SequenceEqual(raw).Should().BeTrue();
+
+        if (skipStorageRootCheck)
+        {
+            Account.ReadFrom(value, out var actual);
+            actual.Balance.Should().Be(expected.Balance);
+            actual.Nonce.Should().Be(expected.Nonce);
+            actual.CodeHash.Should().Be(expected.CodeHash);
+        }
+        else
+        {
+            var raw = expected.WriteTo(stackalloc byte[Account.MaxByteCount]);
+            value.SequenceEqual(raw).Should().BeTrue();
+        }
     }
 
     public static Account GetAccount(this IReadOnlyBatch read, in Keccak key)
@@ -42,7 +52,6 @@ public static class TestExtensions
         {
             Assert.Fail($"Key: {key.ToString()} should exist.");
         }
-
 
         Account.ReadFrom(value, out var account);
         return account;

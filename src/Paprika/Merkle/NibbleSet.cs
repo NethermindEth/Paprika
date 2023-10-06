@@ -93,6 +93,8 @@ public struct NibbleSet
 
         public bool this[byte nibble] => new NibbleSet(_value)[nibble];
 
+        public static Readonly All => new(AllSetValue);
+
         public bool AllSet => _value == AllSetValue;
 
         public int SetCount => new NibbleSet(_value).SetCount;

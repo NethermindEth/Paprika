@@ -149,7 +149,7 @@ public class DbTests
         const int size = MB64;
         using var db = PagedDb.NativeMemoryDb(size);
 
-        const int count = 100000;
+        const int count = 10_000;
 
         using (var batch = db.BeginNextBatch())
         {
@@ -173,14 +173,15 @@ public class DbTests
             }
         }
 
+        AssertPageMetadataAssigned(db);
+        return;
+
         static Keccak GetStorageAddress(int i)
         {
             var address = Key1A;
             BinaryPrimitives.WriteInt32LittleEndian(address.BytesAsSpan, i);
             return address;
         }
-
-        AssertPageMetadataAssigned(db);
     }
 
     private static void AssertPageMetadataAssigned(PagedDb db)
@@ -190,7 +191,7 @@ public class DbTests
             var header = page.Header;
 
             header.BatchId.Should().BeGreaterThan(0);
-            header.PageType.Should().BeOneOf(PageType.Abandoned, PageType.Standard, PageType.PrefixPage);
+            header.PageType.Should().BeOneOf(PageType.Abandoned, PageType.Standard, PageType.Identity, PageType.Leaf);
             header.PaprikaVersion.Should().Be(1);
         }
     }

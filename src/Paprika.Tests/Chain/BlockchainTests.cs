@@ -5,6 +5,7 @@ using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
+using Paprika.Merkle;
 using Paprika.Store;
 using static Paprika.Tests.Values;
 
@@ -110,51 +111,50 @@ public class BlockchainTests
     public async Task BiggerTest()
     {
         const int blockCount = 10;
-        const int perBlock = 1000;
+        const int perBlock = 1_000;
 
-        using var db = PagedDb.NativeMemoryDb(128 * Mb, 2);
-
-        await using var blockchain = new Blockchain(db);
-
+        using var db = PagedDb.NativeMemoryDb(256 * Mb, 2);
         var counter = 0;
 
-        var previousBlock = Keccak.Zero;
+        var behavior = new ComputeMerkleBehavior(true, 2, 2);
 
-        for (var i = 1; i < blockCount + 1; i++)
+        await using (var blockchain = new Blockchain(db, behavior))
         {
-            var hash = BuildKey(i);
+            var previousBlock = Keccak.Zero;
 
-            using var block = blockchain.StartNew(previousBlock, hash, (uint)i);
-
-            for (var j = 0; j < perBlock; j++)
+            for (var i = 1; i < blockCount + 1; i++)
             {
-                var key = BuildKey(counter);
+                var hash = BuildKey(i);
 
-                block.SetAccount(key, GetAccount(counter));
-                block.SetStorage(key, key, ((UInt256)counter).ToBigEndian());
+                using var block = blockchain.StartNew(previousBlock, hash, (uint)i);
 
-                counter++;
+                for (var j = 0; j < perBlock; j++)
+                {
+                    var key = BuildKey(counter);
+
+                    block.SetAccount(key, GetAccount(counter));
+                    block.SetStorage(key, key, ((UInt256)counter).ToBigEndian());
+
+                    counter++;
+                }
+
+                // commit first
+                block.Commit();
+
+                if (i > 1)
+                {
+                    blockchain.Finalize(previousBlock);
+                }
+
+                previousBlock = hash;
             }
 
-            // commit first
-            block.Commit();
+            // make next visible
+            using var next = blockchain.StartNew(previousBlock, BuildKey(blockCount + 1), (uint)blockCount + 1);
+            next.Commit();
 
-            if (i > 1)
-            {
-                blockchain.Finalize(previousBlock);
-            }
-
-            previousBlock = hash;
+            blockchain.Finalize(previousBlock);
         }
-
-        // make next visible
-        using var next = blockchain.StartNew(previousBlock, BuildKey(blockCount + 1), (uint)blockCount + 1);
-        next.Commit();
-
-        blockchain.Finalize(previousBlock);
-
-        // for now, to monitor the block chain, requires better handling of ref-counting on finalized
-        await Task.Delay(1000);
 
         using var read = db.BeginReadOnlyBatch();
 
@@ -168,7 +168,7 @@ public class BlockchainTests
             {
                 var key = BuildKey(counter);
 
-                read.ShouldHaveAccount(key, GetAccount(counter));
+                read.ShouldHaveAccount(key, GetAccount(counter), true);
                 read.ShouldHaveStorage(key, key, ((UInt256)counter).ToBigEndian());
 
                 counter++;

@@ -58,20 +58,38 @@ public struct PageHeader
     /// The type of the page.
     /// </summary>
     [FieldOffset(5)] public PageType PageType;
+
+    /// <summary>
+    /// The depth of the tree.
+    /// </summary>
+    [FieldOffset(6)] public byte Level;
+
+    /// <summary>
+    /// Internal metadata of the given page.
+    /// </summary>
+    [FieldOffset(7)] public byte Metadata;
 }
 
 public enum PageType : byte
 {
     None = 0,
 
+    /// <summary>
+    /// A standard Paprika page with a fan-out of 16.
+    /// </summary>
     Standard = 1,
 
     /// <summary>
-    /// The page is a part of the tree use for massive storage accounts.
+    /// A page that is a Standard page but holds the account identity mappin.
     /// </summary>
-    PrefixPage = 2,
+    Identity = 2,
 
-    Abandoned = 3
+    Abandoned = 3,
+
+    /// <summary>
+    /// The leaf page that represents a part of the page.
+    /// </summary>
+    Leaf = 4,
 }
 
 /// <summary>

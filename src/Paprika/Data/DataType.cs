@@ -3,6 +3,7 @@
 /// <summary>
 /// Represents the type of data stored in the <see cref="SlottedArray"/>.
 /// </summary>
+[Flags]
 public enum DataType : byte
 {
     /// <summary>
@@ -17,12 +18,12 @@ public enum DataType : byte
     StorageCell = 1,
 
     /// <summary>
-    /// As enums cannot be partial, this is for storing the Merkle.
+    /// [key, 2] The Merkle entry, either with storage or not
     /// </summary>
     Merkle = 2,
 
     /// <summary>
-    /// Special type for <see cref="SlottedArray"/>. 
+    /// The account compressed with the identity tree.
     /// </summary>
-    Deleted = 3,
+    CompressedAccount = 4,
 }
