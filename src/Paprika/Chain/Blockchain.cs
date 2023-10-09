@@ -621,6 +621,16 @@ public class Blockchain : IAsyncDisposable
             if (succeeded)
                 return owner;
 
+            if (key.Type is DataType.Account or DataType.StorageCell)
+            {
+                if (_destroyed.Contains(key.Path.UnsafeAsKeccak))
+                {
+                    // The key is account or the storage cell that belongs to a history of a destroyed account. Default
+                    succeeded = true;
+                    return default;
+                }
+            }
+
             var expected = BlockNumber - 1;
 
             // walk all the blocks locally
