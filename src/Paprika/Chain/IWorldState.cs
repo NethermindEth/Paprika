@@ -8,11 +8,10 @@ namespace Paprika.Chain;
 public interface IWorldState : IDisposable
 {
     Keccak Hash { get; }
-    Keccak ParentHash { get; }
+
     uint BlockNumber { get; }
 
-    // TODO: consider providing non allocating API, where the caller provides memory to write to.
-    public byte[] GetStorage(in Keccak address, in Keccak storage);
+    public Span<byte> GetStorage(in Keccak address, in Keccak storage, Span<byte> destination);
 
     public void SetAccount(in Keccak address, in Account account);
 
