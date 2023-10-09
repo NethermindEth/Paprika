@@ -428,17 +428,19 @@ public class Blockchain : IAsyncDisposable
 
         private BufferPool Pool => _blockchain._pool;
 
-        public byte[] GetStorage(in Keccak address, in Keccak storage)
+        public Span<byte> GetStorage(in Keccak address, in Keccak storage, Span<byte> destination)
         {
             var key = Key.StorageCell(NibblePath.FromKey(address), storage);
 
             using var owner = Get(key);
 
             // check the span emptiness
-            if (owner.Span.IsEmpty)
-                return Array.Empty<byte>();
+            var data = owner.Span;
+            if (data.IsEmpty)
+                return Span<byte>.Empty;
 
-            return owner.Span.ToArray();
+            data.CopyTo(destination);
+            return destination.Slice(0, data.Length);
         }
 
         public Account GetAccount(in Keccak address)
