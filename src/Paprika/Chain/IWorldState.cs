@@ -11,13 +11,18 @@ public interface IWorldState : IDisposable
 
     uint BlockNumber { get; }
 
-    public Span<byte> GetStorage(in Keccak address, in Keccak storage, Span<byte> destination);
+    void SetAccount(in Keccak address, in Account account);
 
-    public void SetAccount(in Keccak address, in Account account);
+    Account GetAccount(in Keccak address);
 
-    public Account GetAccount(in Keccak address);
+    /// <summary>
+    /// Destroys the given account.
+    /// </summary>
+    void DestroyAccount(in Keccak address);
 
-    public void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value);
+    Span<byte> GetStorage(in Keccak address, in Keccak storage, Span<byte> destination);
+
+    void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value);
 
     /// <summary>
     /// Commits the block to the chain allowing to build upon it.

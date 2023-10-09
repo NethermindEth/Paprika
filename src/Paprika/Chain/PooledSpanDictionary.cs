@@ -1,4 +1,5 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -113,6 +114,17 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         refValue = BuildValue(data0, data1);
     }
 
+    public void Clean(scoped ReadOnlySpan<byte> key, int hash)
+    {
+        var mixed = Mix(hash);
+        var tempKey = BuildKeyTemp(key, mixed);
+
+        ref var entry = ref CollectionsMarshal.GetValueRefOrNullRef(_dict, tempKey);
+        Debug.Assert(Unsafe.IsNullRef(ref entry) == false, "Can be used only to clean the existing entries");
+
+        // empty value span produces an empty span
+        entry = default;
+    }
 
     public Enumerator GetEnumerator() => new(this);
 
