@@ -59,7 +59,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 
     private readonly Blockchain _blockchain;
     private readonly int _batchSize;
-    private readonly int _expectedAccountCount;
+    private readonly int? _expectedAccountCount;
     private readonly Channel<Item> _channel;
 
     private readonly Meter _meter;
@@ -67,11 +67,12 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 
     private int _accounts;
 
-    public PaprikaCopyingVisitor(Blockchain blockchain, int batchSize, int expectedAccountCount)
+    public PaprikaCopyingVisitor(Blockchain blockchain, int batchSize, int? expectedAccountCount)
     {
         _meter = new Meter("Paprika.Importer");
 
-        _accountsGauge = _meter.CreateAtomicObservableGauge("Accounts imported", "%");
+        var accountsUnit = expectedAccountCount.HasValue ? "%" : "count";
+        _accountsGauge = _meter.CreateAtomicObservableGauge("Accounts imported", accountsUnit);
 
         _blockchain = blockchain;
 
@@ -90,7 +91,14 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
         // update occasionally
         if (incremented % 100 == 0)
         {
-            _accountsGauge.Set(incremented / (_expectedAccountCount / 100));
+            if (_expectedAccountCount != null)
+            {
+                _accountsGauge.Set(incremented / (_expectedAccountCount.Value / 100));
+            }
+            else
+            {
+                _accountsGauge.Set(incremented);
+            }
         }
 
         _channel.Writer.TryWrite(new(account, value));

@@ -16,7 +16,8 @@ using Paprika.Runner;
 using Paprika.Store;
 using Spectre.Console;
 
-const string path = @"C:\Users\Szymon\ethereum\execution\nethermind_db\sepolia";
+const string path = @"C:\Users\Szymon\ethereum\mainnet";
+
 var logs = LimboLogs.Instance;
 var cfg = DbConfig.Default;
 
@@ -37,7 +38,6 @@ var chainLevel = Rlp.GetStreamDecoder<ChainLevelInfo>()!.Decode(new RlpStream(be
 
 var main = chainLevel.BlockInfos[0];
 var header = headers.Get(main.BlockHash);
-
 var headerDecoded = Rlp.GetStreamDecoder<BlockHeader>()!.Decode(new RlpStream(header!));
 
 var rootHash = headerDecoded.StateRoot!;
@@ -52,7 +52,7 @@ var dataPath = Path.Combine(dir, "db");
 var dbExists = Directory.Exists(dataPath);
 
 const long GB = 1024 * 1024 * 1024;
-const long size = 32 * GB;
+var size = (path.Contains("mainnet") ? 256 : 32) * GB;
 
 if (dbExists)
 {
@@ -106,7 +106,7 @@ if (dbExists == false)
     {
         const int sepoliaAccountCount = 16146399;
 
-        var visitor = new PaprikaCopyingVisitor(blockchain, 2_000, sepoliaAccountCount);
+        var visitor = new PaprikaCopyingVisitor(blockchain, 2_000, null);
         Console.WriteLine("Starting...");
 
         var copyingTask = visitor.Copy();
