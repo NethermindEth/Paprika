@@ -726,6 +726,14 @@ public class Blockchain : IAsyncDisposable
 
         public void Apply(IBatch batch)
         {
+            if (_destroyed.Count > 0)
+            {
+                foreach (var account in _destroyed)
+                {
+                    batch.Destroy(NibblePath.FromKey(account));
+                }
+            }
+
             Apply(batch, _state);
             Apply(batch, _storage);
             Apply(batch, _preCommit);

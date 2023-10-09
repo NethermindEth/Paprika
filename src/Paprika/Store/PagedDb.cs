@@ -500,6 +500,25 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _root.Data.DataRoot = _db.GetAddress(updated);
         }
 
+        public void Destroy(in NibblePath account)
+        {
+            _db.ReportWrite();
+
+            // Get the id page
+            var ids = new DataPage(TryGetPageAlloc(ref _root.Data.IdRoot, PageType.Identity));
+
+            // Ensure that it exists
+            if (!ids.TryGet(account, this, out _))
+            {
+                return;
+            }
+
+            // Write empty data so that it is a delete
+            _root.Data.IdRoot = GetAddress(ids.Set(account, ReadOnlySpan<byte>.Empty, this));
+
+            // TODO: there' no garbage collection now while it should as data with the given prefix are left dangling
+        }
+
         private Page TryGetPageAlloc(ref DbAddress addr, PageType pageType)
         {
             CheckDisposed();
