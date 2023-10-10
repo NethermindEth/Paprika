@@ -451,7 +451,7 @@ public class Blockchain : IAsyncDisposable
                     Key.ReadFrom(kvp.Key, out var key);
                     if (key.Path.Equals(searched))
                     {
-                        dict.Clean(kvp.Key, GetHash(key));
+                        dict.Destroy(kvp.Key, GetHash(key));
                     }
                 }
             }
@@ -480,7 +480,7 @@ public class Blockchain : IAsyncDisposable
 
             // check the span emptiness
             if (owner.Span.IsEmpty)
-                return default;
+                return new Account(0, 0);
 
             Account.ReadFrom(owner.Span, out var result);
             return result;

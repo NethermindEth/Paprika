@@ -50,7 +50,7 @@ public class DbTests
                 var expected = GetValue(i);
 
                 read.ShouldHaveAccount(key, expected);
-                read.ShouldHaveStorage(key, key, expected);
+                read.AssertStorageValue(key, key, expected);
             }
         }
     }
@@ -169,7 +169,7 @@ public class DbTests
             for (int i = 0; i < count; i++)
             {
                 var address = GetStorageAddress(i);
-                read.ShouldHaveStorage(Key0, address, GetValue(i));
+                read.AssertStorageValue(Key0, address, GetValue(i));
             }
         }
 

@@ -38,6 +38,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         _allowConcurrentReaders ? Unsafe.As<ThreadLocal<byte[]>>(_key).Value! : Unsafe.As<byte[]>(_key);
 
     private const int InlineKeyPointer = -1;
+    private const int ValueDestroyedPointer = -2;
 
     /// <summary>
     /// Initializes a new pooled dictionary instance.
@@ -114,7 +115,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         refValue = BuildValue(data0, data1);
     }
 
-    public void Clean(scoped ReadOnlySpan<byte> key, int hash)
+    public void Destroy(scoped ReadOnlySpan<byte> key, int hash)
     {
         var mixed = Mix(hash);
         var tempKey = BuildKeyTemp(key, mixed);
@@ -123,11 +124,15 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         Debug.Assert(Unsafe.IsNullRef(ref entry) == false, "Can be used only to clean the existing entries");
 
         // empty value span produces an empty span
-        entry = default;
+        entry = new ValueSpan(ValueDestroyedPointer, 0);
     }
 
     public Enumerator GetEnumerator() => new(this);
 
+    /// <summary>
+    /// Enumerator walks through all the values beside the ones that were destroyed in this dictionary
+    /// with <see cref="PooledSpanDictionary.Destroy"/>.
+    /// </summary>
     public ref struct Enumerator
     {
         private Dictionary<KeySpan, ValueSpan>.Enumerator _enumerator;
@@ -139,7 +144,15 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
             _dictionary = dictionary;
         }
 
-        public bool MoveNext() => _enumerator.MoveNext();
+        public bool MoveNext()
+        {
+            bool moved;
+            do
+            {
+                moved = _enumerator.MoveNext();
+            } while (moved && _enumerator.Current.Value.IsDestroyed);
+            return moved;
+        }
 
         public KeyValue Current
         {
@@ -181,7 +194,8 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
 
     private KeySpan BuildKey(ReadOnlySpan<byte> key, ushort hash) => new(hash, Write(key), (ushort)key.Length);
 
-    private ValueSpan BuildValue(ReadOnlySpan<byte> value0, ReadOnlySpan<byte> value1) => new(Write(value0, value1), (ushort)(value0.Length + value1.Length));
+    private ValueSpan BuildValue(ReadOnlySpan<byte> value0, ReadOnlySpan<byte> value1) =>
+        new(Write(value0, value1), (ushort)(value0.Length + value1.Length));
 
     private static ushort Mix(int hash) => unchecked((ushort)((hash >> 16) ^ hash));
 
@@ -194,6 +208,11 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
 
     private Span<byte> GetAt(ValueSpan value)
     {
+        if (value.Pointer == ValueDestroyedPointer)
+        {
+            return Span<byte>.Empty;
+        }
+
         var pageNo = Math.DivRem(value.Pointer, BufferSize, out var offset);
         return _pages[pageNo].Span.Slice(offset, value.Length);
     }
@@ -269,6 +288,8 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
             Pointer = pointer;
             Length = length;
         }
+
+        public bool IsDestroyed => Pointer == ValueDestroyedPointer;
 
         public override string ToString() => $"{nameof(Pointer)}: {Pointer}, {nameof(Length)}: {Length}";
     }

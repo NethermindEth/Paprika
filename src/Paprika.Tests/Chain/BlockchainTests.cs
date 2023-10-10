@@ -5,6 +5,7 @@ using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
+using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Store;
 using static Paprika.Tests.Values;
@@ -108,6 +109,79 @@ public class BlockchainTests
     }
 
     [Test]
+    public async Task Account_destruction_same_block()
+    {
+        using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
+        await using var blockchain = new Blockchain(db);
+
+        using var block = blockchain.StartNew(Keccak.Zero, Keccak.EmptyTreeHash, 1);
+
+        block.SetAccount(Key0, new Account(1, 1));
+        block.SetStorage(Key0, Key1, stackalloc byte[1] { 1 });
+
+        block.DestroyAccount(Key0);
+        block.GetAccount(Key0).Should().Be(new Account(0, 0));
+        block.AssertNoStorageAt(Key0, Key1);
+    }
+
+    [Test]
+    public async Task Account_destruction_multi_block()
+    {
+        using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
+        await using var blockchain = new Blockchain(db);
+
+        using var block1 = blockchain.StartNew(Keccak.Zero, Keccak.EmptyTreeHash, 1);
+
+        block1.SetAccount(Key0, new Account(1, 1));
+        block1.SetStorage(Key0, Key1, stackalloc byte[1] { 1 });
+
+        block1.Commit();
+
+        using var block2 = blockchain.StartNew(block1.Hash, Key0, 2);
+
+        block2.DestroyAccount(Key0);
+
+        block2.GetAccount(Key0).Should().Be(new Account(0, 0));
+        block2.AssertNoStorageAt(Key0, Key1);
+    }
+
+    [Test]
+    public async Task Account_destruction_database_flushed()
+    {
+        using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
+        await using var blockchain = new Blockchain(db);
+
+        using var block1 = blockchain.StartNew(Keccak.Zero, Keccak.EmptyTreeHash, 1);
+
+        block1.SetAccount(Key0, new Account(1, 1));
+        block1.SetStorage(Key0, Key1, stackalloc byte[1] { 1 });
+
+        block1.Commit();
+
+        blockchain.Finalize(block1.Hash);
+
+        // Poor man's await on finalization flushed
+        await Task.Delay(500);
+
+        using var block2 = blockchain.StartNew(block1.Hash, Key0, 2);
+
+        block2.DestroyAccount(Key0);
+        block2.Commit();
+
+        blockchain.Finalize(block2.Hash);
+
+        // Poor man's await on finalization flushed
+        await Task.Delay(500);
+
+        using var read = db.BeginReadOnlyBatch();
+
+        read.Metadata.BlockNumber.Should().Be(2);
+
+        read.AssertNoAccount(Key0);
+        read.AssertNoStorageAt(Key0, Key1);
+    }
+
+    [Test]
     public async Task BiggerTest()
     {
         const int blockCount = 10;
@@ -169,7 +243,7 @@ public class BlockchainTests
                 var key = BuildKey(counter);
 
                 read.ShouldHaveAccount(key, GetAccount(counter), true);
-                read.ShouldHaveStorage(key, key, ((UInt256)counter).ToBigEndian());
+                read.AssertStorageValue(key, key, ((UInt256)counter).ToBigEndian());
 
                 counter++;
             }
@@ -186,4 +260,12 @@ public class BlockchainTests
     }
 
     private static Keccak Build(string name) => Keccak.Compute(Encoding.UTF8.GetBytes(name));
+}
+
+file static class BlockExtensions
+{
+    public static void AssertNoStorageAt(this IWorldState state, in Keccak address, in Keccak storage)
+    {
+        state.GetStorage(address, storage, stackalloc byte[32]).IsEmpty.Should().BeTrue();
+    }
 }
