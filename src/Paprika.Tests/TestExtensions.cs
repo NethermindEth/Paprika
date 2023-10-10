@@ -46,6 +46,11 @@ public static class TestExtensions
         }
     }
 
+    public static void AssertNoAccount(this IReadOnlyBatch read, in Keccak key)
+    {
+        read.TryGet(Key.Account(key), out _).Should().BeFalse();
+    }
+
     public static Account GetAccount(this IReadOnlyBatch read, in Keccak key)
     {
         if (!read.TryGet(Key.Account(key), out var value))
@@ -72,11 +77,9 @@ public static class TestExtensions
         }
     }
 
-    public static void ShouldHaveStorage(this IReadOnlyBatch read, in Keccak key, in Keccak storage,
-        ReadOnlySpan<byte> expected)
+    public static void AssertNoStorageAt(this IReadOnlyBatch read, in Keccak key, in Keccak storage)
     {
-        read.TryGet(Key.StorageCell(NibblePath.FromKey(key), storage), out var value).Should().BeTrue();
-        value.SequenceEqual(expected);
+        read.TryGet(Key.StorageCell(NibblePath.FromKey(key), storage), out var value).Should().BeFalse();
     }
 
     public static void SetAccount(this IBatch batch, in Keccak key, ReadOnlySpan<byte> value) =>

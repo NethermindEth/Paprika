@@ -346,10 +346,14 @@ public class Blockchain : IAsyncDisposable
         public uint BlockNumber { get; }
 
         /// <summary>
-        /// A simple bloom filter to assert whether the given key was set in a given block,
-        /// used to speed up getting the keys.
+        /// A simple bloom filter to assert whether the given key was set in a given block, used to speed up getting the keys.
         /// </summary>
         private readonly HashSet<int> _bloom;
+
+        /// <summary>
+        /// Stores information about contracts that should have their previous incarnations destroyed.
+        /// </summary>
+        private readonly HashSet<Keccak> _destroyed;
 
         private readonly ReadOnlyBatchCountingRefs _batch;
         private Block[] _ancestors;
@@ -390,6 +394,8 @@ public class Blockchain : IAsyncDisposable
             // rent pages for the bloom
             _bloom = new HashSet<int>();
 
+            _destroyed = new HashSet<Keccak>();
+
             // as pre-commit can use parallelism, make the pooled dictionaries concurrent friendly:
             // 1. make the dictionary preserve once written values, which means that it can repeatedly read and set without worrying of ordering operations
             // 2. set dictionary so that it allows concurrent readers
@@ -428,6 +434,29 @@ public class Blockchain : IAsyncDisposable
 
         private BufferPool Pool => _blockchain._pool;
 
+        public void DestroyAccount(in Keccak address)
+        {
+            var searched = NibblePath.FromKey(address);
+
+            Destroy(searched, _state);
+            Destroy(searched, _storage);
+
+            _destroyed.Add(address);
+            return;
+
+            static void Destroy(NibblePath searched, PooledSpanDictionary dict)
+            {
+                foreach (var kvp in dict)
+                {
+                    Key.ReadFrom(kvp.Key, out var key);
+                    if (key.Path.Equals(searched))
+                    {
+                        dict.Destroy(kvp.Key, GetHash(key));
+                    }
+                }
+            }
+        }
+
         public Span<byte> GetStorage(in Keccak address, in Keccak storage, Span<byte> destination)
         {
             var key = Key.StorageCell(NibblePath.FromKey(address), storage);
@@ -451,7 +480,7 @@ public class Blockchain : IAsyncDisposable
 
             // check the span emptiness
             if (owner.Span.IsEmpty)
-                return default;
+                return new Account(0, 0);
 
             Account.ReadFrom(owner.Span, out var result);
             return result;
@@ -592,6 +621,16 @@ public class Blockchain : IAsyncDisposable
             if (succeeded)
                 return owner;
 
+            if (key.Type is DataType.Account or DataType.StorageCell)
+            {
+                if (_destroyed.Contains(key.Path.UnsafeAsKeccak))
+                {
+                    // The key is account or the storage cell that belongs to a history of a destroyed account. Default
+                    succeeded = true;
+                    return default;
+                }
+            }
+
             var expected = BlockNumber - 1;
 
             // walk all the blocks locally
@@ -687,6 +726,14 @@ public class Blockchain : IAsyncDisposable
 
         public void Apply(IBatch batch)
         {
+            if (_destroyed.Count > 0)
+            {
+                foreach (var account in _destroyed)
+                {
+                    batch.Destroy(NibblePath.FromKey(account));
+                }
+            }
+
             Apply(batch, _state);
             Apply(batch, _storage);
             Apply(batch, _preCommit);

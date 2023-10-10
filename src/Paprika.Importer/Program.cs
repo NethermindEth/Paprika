@@ -52,7 +52,7 @@ var dataPath = Path.Combine(dir, "db");
 var dbExists = Directory.Exists(dataPath);
 
 const long GB = 1024 * 1024 * 1024;
-var size = (path.Contains("mainnet") ? 256 : 32) * GB;
+var size = (path.Contains("mainnet") ? 256ul : 32ul) * GB;
 
 if (dbExists)
 {

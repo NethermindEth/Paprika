@@ -18,6 +18,11 @@ public interface IBatch : IReadOnlyBatch
     void SetRaw(in Key key, ReadOnlySpan<byte> rawData);
 
     /// <summary>
+    /// Marks the given account as destroyed.
+    /// </summary>
+    void Destroy(in NibblePath account);
+
+    /// <summary>
     /// Commits the block returning its root hash.
     /// </summary>
     /// <param name="options">How to commit.</param>
