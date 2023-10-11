@@ -1,11 +1,11 @@
 ﻿using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
 using System.Text;
 using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
-using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Store;
 using static Paprika.Tests.Values;
@@ -16,13 +16,6 @@ public class BlockchainTests
 {
     private const int Mb = 1024 * 1024;
 
-    private static readonly Keccak Block1A = Build(nameof(Block1A));
-    private static readonly Keccak Block1B = Build(nameof(Block1B));
-
-    private static readonly Keccak Block2A = Build(nameof(Block2A));
-
-    private static readonly Keccak Block3A = Build(nameof(Block3A));
-
     [Test]
     public async Task Simple()
     {
@@ -31,10 +24,12 @@ public class BlockchainTests
 
         using var db = PagedDb.NativeMemoryDb(16 * Mb, 2);
 
-        await using var blockchain = new Blockchain(db);
+        await using var blockchain = new Blockchain(db, new PreCommit());
 
-        using (var block1A = blockchain.StartNew(Keccak.Zero, Block1A, 1))
-        using (var block1B = blockchain.StartNew(Keccak.Zero, Block1B, 1))
+        Keccak keccak2A;
+
+        using (var block1A = blockchain.StartNew(Keccak.Zero))
+        using (var block1B = blockchain.StartNew(Keccak.Zero))
         {
             block1A.SetAccount(Key0, account1A);
             block1B.SetAccount(Key0, account1B);
@@ -43,25 +38,25 @@ public class BlockchainTests
             block1B.GetAccount(Key0).Should().Be(account1B);
 
             // commit both blocks as they were seen in the network
-            block1A.Commit();
-            block1B.Commit();
+            var keccak1A = block1A.Commit(1);
+            block1B.Commit(1);
 
             // start a next block
-            using var block2A = blockchain.StartNew(Block1A, Block2A, 2);
+            using var block2A = blockchain.StartNew(keccak1A);
 
             // assert whether the history is preserved
             block2A.GetAccount(Key0).Should().Be(account1A);
-            block2A.Commit();
+            keccak2A = block2A.Commit(2);
         }
 
         // finalize second block
-        blockchain.Finalize(Block2A);
+        blockchain.Finalize(keccak2A);
 
         // for now, to monitor the block chain, requires better handling of ref-counting on finalized
         await Task.Delay(1000);
 
         // start the third block
-        using var block3A = blockchain.StartNew(Block2A, Block3A, 3);
+        using var block3A = blockchain.StartNew(keccak2A);
 
         block3A.GetAccount(Key0).Should().Be(account1A);
     }
@@ -77,10 +72,10 @@ public class BlockchainTests
 
         var random = new Random(13);
 
-        await using var blockchain = new Blockchain(db);
+        await using var blockchain = new Blockchain(db, new PreCommit());
 
-        var block = blockchain.StartNew(Keccak.Zero, random.NextKeccak(), 1);
-        block.Commit();
+        var block = blockchain.StartNew(Keccak.Zero);
+        var hash = block.Commit(1);
         block.Dispose();
 
         for (uint no = 2; no < count; no++)
@@ -89,13 +84,14 @@ public class BlockchainTests
             var prev = block;
 
             // create new, set, commit and dispose
-            block = blockchain.StartNew(prev.Hash, random.NextKeccak(), no);
+            block = blockchain.StartNew(hash);
             block.SetAccount(Key0, new Account(no, no));
-            block.Commit();
-            block.Dispose();
 
             // finalize but only previous so that the dependency is there and should be managed properly
-            blockchain.Finalize(prev.Hash);
+            blockchain.Finalize(hash);
+
+            hash = block.Commit(no);
+            block.Dispose();
         }
 
         // DO NOT FINALIZE the last block! it will clean the dependencies and destroy the purpose of the test
@@ -104,7 +100,7 @@ public class BlockchainTests
         // for now, to monitor the block chain, requires better handling of ref-counting on finalized
         await Task.Delay(1000);
 
-        using var last = blockchain.StartNew(block.Hash, random.NextKeccak(), block.BlockNumber + 1);
+        using var last = blockchain.StartNew(hash);
         last.GetAccount(Key0).Should().Be(new Account(lastValue, lastValue));
     }
 
@@ -112,9 +108,9 @@ public class BlockchainTests
     public async Task Account_destruction_same_block()
     {
         using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
-        await using var blockchain = new Blockchain(db);
+        await using var blockchain = new Blockchain(db, new PreCommit());
 
-        using var block = blockchain.StartNew(Keccak.Zero, Keccak.EmptyTreeHash, 1);
+        using var block = blockchain.StartNew(Keccak.Zero);
 
         block.SetAccount(Key0, new Account(1, 1));
         block.SetStorage(Key0, Key1, stackalloc byte[1] { 1 });
@@ -128,16 +124,16 @@ public class BlockchainTests
     public async Task Account_destruction_multi_block()
     {
         using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
-        await using var blockchain = new Blockchain(db);
+        await using var blockchain = new Blockchain(db, new PreCommit());
 
-        using var block1 = blockchain.StartNew(Keccak.Zero, Keccak.EmptyTreeHash, 1);
+        using var block1 = blockchain.StartNew(Keccak.Zero);
 
         block1.SetAccount(Key0, new Account(1, 1));
         block1.SetStorage(Key0, Key1, stackalloc byte[1] { 1 });
 
-        block1.Commit();
+        var hash = block1.Commit(1);
 
-        using var block2 = blockchain.StartNew(block1.Hash, Key0, 2);
+        using var block2 = blockchain.StartNew(hash);
 
         block2.DestroyAccount(Key0);
 
@@ -148,27 +144,29 @@ public class BlockchainTests
     [Test]
     public async Task Account_destruction_database_flushed()
     {
-        using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
-        await using var blockchain = new Blockchain(db);
+        uint blockNo = 1;
 
-        using var block1 = blockchain.StartNew(Keccak.Zero, Keccak.EmptyTreeHash, 1);
+        using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
+        await using var blockchain = new Blockchain(db, new PreCommit());
+
+        using var block1 = blockchain.StartNew(Keccak.Zero);
 
         block1.SetAccount(Key0, new Account(1, 1));
         block1.SetStorage(Key0, Key1, stackalloc byte[1] { 1 });
 
-        block1.Commit();
+        var hash = block1.Commit(blockNo++);
 
-        blockchain.Finalize(block1.Hash);
+        blockchain.Finalize(hash);
 
         // Poor man's await on finalization flushed
         await Task.Delay(500);
 
-        using var block2 = blockchain.StartNew(block1.Hash, Key0, 2);
+        using var block2 = blockchain.StartNew(hash);
 
         block2.DestroyAccount(Key0);
-        block2.Commit();
+        var hash2 = block2.Commit(blockNo);
 
-        blockchain.Finalize(block2.Hash);
+        blockchain.Finalize(hash2);
 
         // Poor man's await on finalization flushed
         await Task.Delay(500);
@@ -194,13 +192,11 @@ public class BlockchainTests
 
         await using (var blockchain = new Blockchain(db, behavior))
         {
-            var previousBlock = Keccak.Zero;
+            var hash = Keccak.Zero;
 
-            for (var i = 1; i < blockCount + 1; i++)
+            for (uint i = 1; i < blockCount + 1; i++)
             {
-                var hash = BuildKey(i);
-
-                using var block = blockchain.StartNew(previousBlock, hash, (uint)i);
+                using var block = blockchain.StartNew(hash);
 
                 for (var j = 0; j < perBlock; j++)
                 {
@@ -213,21 +209,19 @@ public class BlockchainTests
                 }
 
                 // commit first
-                block.Commit();
+                hash = block.Commit(i);
 
                 if (i > 1)
                 {
-                    blockchain.Finalize(previousBlock);
+                    blockchain.Finalize(hash);
                 }
-
-                previousBlock = hash;
             }
 
             // make next visible
-            using var next = blockchain.StartNew(previousBlock, BuildKey(blockCount + 1), (uint)blockCount + 1);
-            next.Commit();
+            using var next = blockchain.StartNew(hash);
+            hash = next.Commit((uint)blockCount + 1);
 
-            blockchain.Finalize(previousBlock);
+            blockchain.Finalize(hash);
         }
 
         using var read = db.BeginReadOnlyBatch();
@@ -257,6 +251,17 @@ public class BlockchainTests
         Span<byte> span = stackalloc byte[4];
         BinaryPrimitives.WriteInt32LittleEndian(span, i);
         return Keccak.Compute(span);
+    }
+
+    private class PreCommit : IPreCommitBehavior
+    {
+        public Keccak BeforeCommit(ICommit commit)
+        {
+            var hashCode = RuntimeHelpers.GetHashCode(commit);
+            Keccak hash = default;
+            BinaryPrimitives.WriteInt32LittleEndian(hash.BytesAsSpan, hashCode);
+            return hash;
+        }
     }
 
     private static Keccak Build(string name) => Keccak.Compute(Encoding.UTF8.GetBytes(name));

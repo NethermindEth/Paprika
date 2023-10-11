@@ -58,12 +58,9 @@ public class RootHashFuzzyTests
         AssertRootHash(rootHash, generator);
     }
 
-    private static void AssertRootHash(string? rootHash, CaseGenerator generator)
+    private static void AssertRootHash(Keccak rootHash, CaseGenerator generator)
     {
-        rootHash = rootHash.Replace("0x", "");
-        var actual = NibblePath.Parse(rootHash).UnsafeAsKeccak;
-
-        actual.Should().Be(generator.RootHashAsKeccak, "Root hashes should match");
+        rootHash.Should().Be(generator.RootHashAsKeccak, "Root hashes should match");
     }
 
     private static CaseGenerator Build(string name) => (CaseGenerator)typeof(RootHashFuzzyTests)
@@ -137,11 +134,12 @@ public class RootHashFuzzyTests
             }
         }
 
-        public string Run(Blockchain blockchain, int newBlockEvery = Int32.MaxValue)
+        public Keccak Run(Blockchain blockchain, int newBlockEvery = Int32.MaxValue)
         {
             var counter = 0;
+            uint blocks = 1;
 
-            var block = blockchain.StartNew(Keccak.Zero, Keccak.EmptyTreeHash, 1);
+            var block = blockchain.StartNew(Keccak.Zero);
 
             var random = GetRandom();
 
@@ -154,7 +152,7 @@ public class RootHashFuzzyTests
                 var a = new Account(value, value);
                 block.SetAccount(keccak, a);
 
-                Next(ref counter, newBlockEvery, ref block, blockchain);
+                Next(ref counter, newBlockEvery, ref block, ref blocks, blockchain);
 
                 // storage data second
                 for (var j = 0; j < _storageCount; j++)
@@ -163,29 +161,26 @@ public class RootHashFuzzyTests
                     var storageValue = random.Next();
                     block.SetStorage(keccak, storageKey, storageValue.ToByteArray());
 
-                    Next(ref counter, newBlockEvery, ref block, blockchain);
+                    Next(ref counter, newBlockEvery, ref block, ref blocks, blockchain);
                 }
             }
 
-            var rootHash = block.Commit().ToString();
+            var rootHash = block.Commit(blocks);
             block.Dispose();
 
             return rootHash;
 
-            static void Next(ref int counter, int newBlockEvery, ref IWorldState block, Blockchain blockchain)
+            static void Next(ref int counter, int newBlockEvery, ref IWorldState block, ref uint blocks, Blockchain blockchain)
             {
                 counter++;
 
                 if (counter % newBlockEvery == 0)
                 {
                     counter = 0;
-                    block.Commit();
-                    block.Dispose();
+                    var hash = block.Commit(blocks++);
 
-                    var nextNumber = block.BlockNumber + 1;
-                    Keccak hash = default;
-                    BinaryPrimitives.WriteUInt32LittleEndian(hash.BytesAsSpan, nextNumber);
-                    block = blockchain.StartNew(block.Hash, hash, nextNumber);
+                    block.Dispose();
+                    block = blockchain.StartNew(hash);
                 }
             }
         }
