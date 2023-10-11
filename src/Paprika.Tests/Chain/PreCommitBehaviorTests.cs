@@ -59,7 +59,7 @@ public class PreCommitBehaviorTests
 
         public static ReadOnlySpan<byte> Value => new byte[29];
 
-        public object BeforeCommit(ICommit commit)
+        public Keccak BeforeCommit(ICommit commit)
         {
             commit.Set(AssignedKey, Value);
 
@@ -70,7 +70,7 @@ public class PreCommitBehaviorTests
             owner.IsEmpty.Should().BeFalse();
             owner.Span.SequenceEqual(Value).Should().BeTrue();
 
-            return "none";
+            return Keccak.Zero;
         }
 
         private static void OnKey(in Key key, ReadOnlySpan<byte> value) => throw new Exception("Should not be called at all!");
@@ -90,7 +90,7 @@ public class PreCommitBehaviorTests
             _found = new HashSet<Keccak>();
         }
 
-        public object BeforeCommit(ICommit commit)
+        public Keccak BeforeCommit(ICommit commit)
         {
             _found.Clear();
 
@@ -98,7 +98,7 @@ public class PreCommitBehaviorTests
 
             _keccaks.SetEquals(_found).Should().BeTrue();
 
-            return "none";
+            return Keccak.Zero;
         }
 
         private void OnKey(in Key key, ReadOnlySpan<byte> value)
