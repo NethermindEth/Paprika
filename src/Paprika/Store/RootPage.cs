@@ -108,11 +108,11 @@ public struct Metadata
     [FieldOffset(0)]
     public readonly uint BlockNumber;
     [FieldOffset(4)]
-    public readonly Keccak BlockHash;
+    public readonly Keccak StateHash;
 
-    public Metadata(uint blockNumber, Keccak blockHash)
+    public Metadata(uint blockNumber, Keccak stateHash)
     {
         BlockNumber = blockNumber;
-        BlockHash = blockHash;
+        StateHash = stateHash;
     }
 }

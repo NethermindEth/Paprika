@@ -168,11 +168,39 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     {
         lock (_batchLock)
         {
-            var batchId = Root.Header.BatchId;
-            var batch = new ReadOnlyBatch(this, batchId, Root.Data.DataRoot, Root.Data.IdRoot, Root.Data.Metadata,
-                Root.Data.NextFreePage, name);
-            _batchesReadOnly.Add(batch);
-            return batch;
+            var root = Root;
+            return BeginReadOnlyBatch(name, root);
+        }
+    }
+
+    private IReadOnlyBatch BeginReadOnlyBatch(string name, in RootPage root)
+    {
+        var batch = new ReadOnlyBatch(this,
+            root.Header.BatchId,
+            root.Data.DataRoot,
+            root.Data.IdRoot,
+            root.Data.Metadata,
+            root.Data.NextFreePage, name);
+        _batchesReadOnly.Add(batch);
+        return batch;
+    }
+
+    public IReadOnlyBatch BeginReadOnlyBatch(Keccak stateHash, string name = "")
+    {
+        lock (_batchLock)
+        {
+            for (var back = 0; back < _historyDepth; back++)
+            {
+                var at = (_lastRoot - back) % _historyDepth;
+                ref readonly var root = ref _roots[at];
+
+                if (root.Data.Metadata.StateHash == stateHash)
+                {
+                    return BeginReadOnlyBatch(name, root);
+                }
+            }
+
+            throw new Exception("Parent root hash not found!");
         }
     }
 

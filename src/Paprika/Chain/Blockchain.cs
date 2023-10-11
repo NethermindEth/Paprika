@@ -234,30 +234,42 @@ public class Blockchain : IAsyncDisposable
 
     private (IReadOnlyBatch batch, BlockState[] ancestors) BuildBlockDataDependencies(Keccak parentKeccak)
     {
-        var batch = _db.BeginReadOnlyBatch($"{nameof(Blockchain)}.{nameof(StartNew)} with parent @ {parentKeccak}");
-
-        var batchBlockNumber = batch.Metadata.BlockNumber;
-        var blocksToRead = blockNumber - batchBlockNumber - 1;
-
-        var ancestors = new BlockState[blocksToRead];
-
-        var parent = parentKeccak;
-
-        for (var i = 0; i < blocksToRead; i++)
+        if (_blocksByHash.TryGetValue(parentKeccak, out var p))
         {
-            if (_blocksByHash.TryGetValue(parent, out var parentBlock) == false)
+            // the easy path, the parent block is in the non-finalized set yet
+
+            var batch = _db.BeginReadOnlyBatch($"{nameof(Blockchain)}.{nameof(StartNew)} with parent @ {parentKeccak}");
+            var blockNumber = p.BlockNumber + 1;
+
+            var batchBlockNumber = batch.Metadata.BlockNumber;
+            var blocksToRead = blockNumber - batchBlockNumber - 1;
+
+            var ancestors = new BlockState[blocksToRead];
+
+            var parent = parentKeccak;
+
+            for (var i = 0; i < blocksToRead; i++)
             {
-                throw new Exception($"Missing block: @{blockNumber - 1}");
+                if (_blocksByHash.TryGetValue(parent, out var parentBlock) == false)
+                {
+                    throw new Exception($"Missing block: @{blockNumber - 1}");
+                }
+
+                // lease parent
+                parentBlock.AcquireLease();
+
+                ancestors[i] = parentBlock;
+                parent = parentBlock.ParentHash;
             }
 
-            // lease parent
-            parentBlock.AcquireLease();
-
-            ancestors[i] = parentBlock;
-            parent = parentBlock.ParentHash;
+            return (batch, ancestors);
         }
-
-        return (batch, ancestors);
+        else
+        {
+            // the block is in the finalized part, search for it
+            var batch = _db.BeginReadOnlyBatch(parentKeccak, $"{nameof(Blockchain)}.{nameof(StartNew)} with parent @ {parentKeccak}");
+            return (batch, Array.Empty<BlockState>());
+        }
     }
 
     public void Finalize(Keccak keccak)
