@@ -70,8 +70,6 @@ public class BlockchainTests
 
         using var db = PagedDb.NativeMemoryDb(16 * Mb, 2);
 
-        var random = new Random(13);
-
         await using var blockchain = new Blockchain(db, new PreCommit());
 
         var block = blockchain.StartNew(Keccak.EmptyTreeHash);
@@ -234,6 +232,40 @@ public class BlockchainTests
                 read.AssertStorageValue(key, key, ((UInt256)counter).ToBigEndian());
 
                 counter++;
+            }
+        }
+    }
+
+    [Test]
+    public async Task Start_in_the_past()
+    {
+        var account1 = new Account(1, 1);
+        var account2 = new Account(2, 2);
+
+        using var db = PagedDb.NativeMemoryDb(1 * Mb, 4);
+
+        await using var blockchain = new Blockchain(db, new PreCommit());
+
+        using (var block1A = blockchain.StartNew(Keccak.EmptyTreeHash))
+        {
+            block1A.SetAccount(Key0, account1);
+            block1A.GetAccount(Key0).Should().Be(account1);
+            var keccak1A = block1A.Commit(1);
+
+            using (var block2A = blockchain.StartNew(keccak1A))
+            {
+                block2A.SetAccount(Key0, account2);
+                var keccak2A = block2A.Commit(2);
+
+                blockchain.Finalize(keccak2A);
+
+                await Task.Delay(500);
+
+                // start in the past
+                using (var block2B = blockchain.StartNew(keccak1A))
+                {
+                    block2B.GetAccount(Key0).Should().Be(account1);
+                }
             }
         }
     }

@@ -191,6 +191,11 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         {
             for (var back = 0; back < _historyDepth; back++)
             {
+                if (_lastRoot - back < 0)
+                {
+                    break;
+                }
+
                 var at = (_lastRoot - back) % _historyDepth;
                 ref readonly var root = ref _roots[at];
 

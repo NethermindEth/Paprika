@@ -64,12 +64,13 @@ public class Blockchain : IAsyncDisposable
         }
         else
         {
-            _finalizedChannel = Channel.CreateBounded<BlockState>(new BoundedChannelOptions(finalizationQueueLimit.Value)
-            {
-                SingleReader = true,
-                SingleWriter = true,
-                FullMode = BoundedChannelFullMode.Wait,
-            });
+            _finalizedChannel = Channel.CreateBounded<BlockState>(
+                new BoundedChannelOptions(finalizationQueueLimit.Value)
+                {
+                    SingleReader = true,
+                    SingleWriter = true,
+                    FullMode = BoundedChannelFullMode.Wait,
+                });
         }
 
         _flusher = FlusherTask();
@@ -234,47 +235,38 @@ public class Blockchain : IAsyncDisposable
 
     private (IReadOnlyBatch batch, BlockState[] ancestors) BuildBlockDataDependencies(Keccak parentKeccak)
     {
-        if (parentKeccak == Keccak.EmptyTreeHash)
+        if (_blocksByHash.TryGetValue(parentKeccak, out var ancestor))
         {
-            // pages are zeroed before
-            parentKeccak = Keccak.Zero;
-        }
+            var ancestors = new List<BlockState>();
 
-        if (_blocksByHash.TryGetValue(parentKeccak, out var p))
-        {
-            // the easy path, the parent block is in the non-finalized set yet
-
-            var batch = _db.BeginReadOnlyBatch($"{nameof(Blockchain)}.{nameof(StartNew)} with parent @ {parentKeccak}");
-            var blockNumber = p.BlockNumber + 1;
-
-            var batchBlockNumber = batch.Metadata.BlockNumber;
-            var blocksToRead = blockNumber - batchBlockNumber - 1;
-
-            var ancestors = new BlockState[blocksToRead];
-
-            var parent = parentKeccak;
-
-            for (var i = 0; i < blocksToRead; i++)
+            do
             {
-                if (_blocksByHash.TryGetValue(parent, out var parentBlock) == false)
-                {
-                    throw new Exception($"Missing block: @{blockNumber - 1}");
-                }
+                ancestor.AcquireLease(); // lease it!
+                ancestors.Add(ancestor);
+            } while (_blocksByHash.TryGetValue(ancestor.ParentHash, out ancestor));
 
-                // lease parent
-                parentBlock.AcquireLease();
+            // no more ancestors, sort them from the youngest
+            var fromYoungest = ancestors.ToArray();
+            var oldest = fromYoungest[^1];
 
-                ancestors[i] = parentBlock;
-                parent = parentBlock.ParentHash;
-            }
+            // the easy path, the parent block is in the non-finalized set yet
+            var batch = _db.BeginReadOnlyBatch(Normalize(oldest.ParentHash),
+                $"Blockchain dependency with parent @ {parentKeccak}");
 
-            return (batch, ancestors);
+            return (batch, fromYoungest);
         }
         else
         {
             // the block is in the finalized part, search for it
-            var batch = _db.BeginReadOnlyBatch(parentKeccak, $"{nameof(Blockchain)}.{nameof(StartNew)} with parent @ {parentKeccak}");
+            var batch = _db.BeginReadOnlyBatch(Normalize(parentKeccak),
+                $"Blockchain dependency with parent @ {parentKeccak}");
             return (batch, Array.Empty<BlockState>());
+        }
+
+        static Keccak Normalize(in Keccak keccak)
+        {
+            // pages are zeroed before, return zero on empty tree
+            return keccak == Keccak.EmptyTreeHash ? Keccak.Zero : keccak;
         }
     }
 
@@ -534,7 +526,8 @@ public class Blockchain : IAsyncDisposable
             dict.Set(key.WriteTo(stackalloc byte[key.MaxByteLength]), hash, payload);
         }
 
-        private void SetImpl(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1, PooledSpanDictionary dict)
+        private void SetImpl(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1,
+            PooledSpanDictionary dict)
         {
             var hash = GetHash(key);
             _bloom.Add(hash);
@@ -546,7 +539,8 @@ public class Blockchain : IAsyncDisposable
 
         void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload) => SetImpl(key, payload, _preCommit);
 
-        void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1) => SetImpl(key, payload0, payload1, _preCommit);
+        void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1) =>
+            SetImpl(key, payload0, payload1, _preCommit);
 
         void ICommit.Visit(CommitAction action, TrieType type)
         {
