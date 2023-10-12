@@ -23,10 +23,10 @@ public class Blockchain : IAsyncDisposable
     private readonly BufferPool _pool = new(1024);
 
     private readonly object _blockLock = new();
-    private readonly Dictionary<uint, List<Block>> _blocksByNumber = new();
-    private readonly Dictionary<Keccak, Block> _blocksByHash = new();
+    private readonly Dictionary<uint, List<BlockState>> _blocksByNumber = new();
+    private readonly Dictionary<Keccak, BlockState> _blocksByHash = new();
 
-    private readonly Channel<Block> _finalizedChannel;
+    private readonly Channel<BlockState> _finalizedChannel;
 
     // metrics
     private readonly Meter _meter;
@@ -37,7 +37,7 @@ public class Blockchain : IAsyncDisposable
     private readonly MetricsExtensions.IAtomicIntGauge _flusherQueueCount;
 
     private readonly PagedDb _db;
-    private readonly IPreCommitBehavior? _preCommit;
+    private readonly IPreCommitBehavior _preCommit;
     private readonly TimeSpan _minFlushDelay;
     private readonly Action? _beforeMetricsDisposed;
     private readonly Task _flusher;
@@ -46,7 +46,7 @@ public class Blockchain : IAsyncDisposable
 
     private static readonly TimeSpan DefaultFlushDelay = TimeSpan.FromSeconds(1);
 
-    public Blockchain(PagedDb db, IPreCommitBehavior? preCommit = null, TimeSpan? minFlushDelay = null,
+    public Blockchain(PagedDb db, IPreCommitBehavior preCommit, TimeSpan? minFlushDelay = null,
         int? finalizationQueueLimit = null, Action? beforeMetricsDisposed = null)
     {
         _db = db;
@@ -56,7 +56,7 @@ public class Blockchain : IAsyncDisposable
 
         if (finalizationQueueLimit == null)
         {
-            _finalizedChannel = Channel.CreateUnbounded<Block>(new UnboundedChannelOptions
+            _finalizedChannel = Channel.CreateUnbounded<BlockState>(new UnboundedChannelOptions
             {
                 SingleReader = true,
                 SingleWriter = true,
@@ -64,12 +64,13 @@ public class Blockchain : IAsyncDisposable
         }
         else
         {
-            _finalizedChannel = Channel.CreateBounded<Block>(new BoundedChannelOptions(finalizationQueueLimit.Value)
-            {
-                SingleReader = true,
-                SingleWriter = true,
-                FullMode = BoundedChannelFullMode.Wait,
-            });
+            _finalizedChannel = Channel.CreateBounded<BlockState>(
+                new BoundedChannelOptions(finalizationQueueLimit.Value)
+                {
+                    SingleReader = true,
+                    SingleWriter = true,
+                    FullMode = BoundedChannelFullMode.Wait,
+                });
         }
 
         _flusher = FlusherTask();
@@ -126,9 +127,7 @@ public class Blockchain : IAsyncDisposable
                     // commit but no flush here, it's too heavy, the flush will come later
                     await batch.Commit(CommitOptions.DangerNoFlush);
 
-                    // inform the blocks about flushing
-                    Block[] blocks;
-
+                    // inform blocks about flushing
                     lock (_blockLock)
                     {
                         if (!_blocksByNumber.TryGetValue(flushedTo, out var removedBlocks))
@@ -136,13 +135,12 @@ public class Blockchain : IAsyncDisposable
                             throw new Exception($"Missing blocks at block number {flushedTo}");
                         }
 
-                        blocks = removedBlocks.ToArray();
-                    }
-
-                    foreach (var removedBlock in blocks)
-                    {
-                        // dispose one to allow leases to do the count
-                        removedBlock.Dispose();
+                        var cloned = removedBlocks.ToArray();
+                        foreach (var removedBlock in cloned)
+                        {
+                            // dispose one to allow leases to do the count
+                            removedBlock.Dispose();
+                        }
                     }
 
                     _flusherQueueCount.Subtract(1);
@@ -176,17 +174,16 @@ public class Blockchain : IAsyncDisposable
         }
     }
 
-    private void Add(Block block)
+    private void Add(BlockState state)
     {
         // allocate before lock
-        var list = new List<Block> { block };
+        var list = new List<BlockState> { state };
 
         lock (_blockLock)
         {
             // blocks by number first
             ref var blocks =
-                ref CollectionsMarshal.GetValueRefOrAddDefault(_blocksByNumber, block.BlockNumber,
-                    out var exists);
+                ref CollectionsMarshal.GetValueRefOrAddDefault(_blocksByNumber, state.BlockNumber, out var exists);
 
             if (exists == false)
             {
@@ -194,75 +191,85 @@ public class Blockchain : IAsyncDisposable
             }
             else
             {
-                blocks.Add(block);
+                blocks!.Add(state);
             }
 
             // blocks by hash
-            _blocksByHash.Add(block.Hash, block);
+            _blocksByHash.Add(state.Hash, state);
         }
     }
 
-    private void Remove(Block block)
+    private void Remove(BlockState blockState)
     {
         lock (_blockLock)
         {
             // blocks by number, use remove first as usually it should be the case
-            if (!_blocksByNumber.Remove(block.BlockNumber, out var blocks))
+            if (!_blocksByNumber.Remove(blockState.BlockNumber, out var blocks))
             {
-                throw new Exception($"Blocks @ {block.BlockNumber} should not be empty");
+                throw new Exception($"Blocks @ {blockState.BlockNumber} should not be empty");
             }
 
-            blocks.Remove(block);
+            blocks.Remove(blockState);
             if (blocks.Count > 0)
             {
                 // re-add only if not empty
-                _blocksByNumber.Add(block.BlockNumber, blocks);
+                _blocksByNumber.Add(blockState.BlockNumber, blocks);
             }
 
             // blocks by hash
-            _blocksByHash.Remove(block.Hash);
+            _blocksByHash.Remove(blockState.Hash);
         }
     }
 
-    public IWorldState StartNew(Keccak parentKeccak, Keccak blockKeccak, uint blockNumber)
+    public IWorldState StartNew(Keccak parentKeccak)
     {
         lock (_blockLock)
         {
-            var (batch, ancestors) = BuildBlockDataDependencies(parentKeccak, blockNumber);
-            return new Block(parentKeccak, blockKeccak, blockNumber, batch, ancestors, this);
+            var (batch, ancestors) = BuildBlockDataDependencies(parentKeccak);
+            return new BlockState(parentKeccak, batch, ancestors, this);
         }
     }
 
-    private (IReadOnlyBatch batch, Block[] ancestors) BuildBlockDataDependencies(Keccak parentKeccak, uint blockNumber)
+    private (IReadOnlyBatch batch, BlockState[] ancestors) BuildBlockDataDependencies(Keccak parentKeccak)
     {
-        var batch = _db.BeginReadOnlyBatch($"{nameof(Blockchain)}.{nameof(StartNew)} @ {blockNumber}");
-        var batchBlockNumber = batch.Metadata.BlockNumber;
-        var blocksToRead = blockNumber - batchBlockNumber - 1;
-
-        var ancestors = new Block[blocksToRead];
-
-        var parent = parentKeccak;
-
-        for (var i = 0; i < blocksToRead; i++)
+        if (_blocksByHash.TryGetValue(parentKeccak, out var ancestor))
         {
-            if (_blocksByHash.TryGetValue(parent, out var parentBlock) == false)
+            var ancestors = new List<BlockState>();
+
+            do
             {
-                throw new Exception($"Missing block: @{blockNumber - 1}");
-            }
+                ancestor.AcquireLease(); // lease it!
+                ancestors.Add(ancestor);
+            } while (_blocksByHash.TryGetValue(ancestor.ParentHash, out ancestor));
 
-            // lease parent
-            parentBlock.AcquireLease();
+            // no more ancestors, sort them from the youngest
+            var fromYoungest = ancestors.ToArray();
+            var oldest = fromYoungest[^1];
 
-            ancestors[i] = parentBlock;
-            parent = parentBlock.ParentHash;
+            // the easy path, the parent block is in the non-finalized set yet
+            var batch = _db.BeginReadOnlyBatch(Normalize(oldest.ParentHash),
+                $"Blockchain dependency with parent @ {parentKeccak}");
+
+            return (batch, fromYoungest);
+        }
+        else
+        {
+            // the block is in the finalized part, search for it
+            var batch = _db.BeginReadOnlyBatch(Normalize(parentKeccak),
+                $"Blockchain dependency with parent @ {parentKeccak}");
+            return (batch, Array.Empty<BlockState>());
         }
 
-        return (batch, ancestors);
+        static Keccak Normalize(in Keccak keccak)
+        {
+            // pages are zeroed before, return zero on empty tree
+            return keccak == Keccak.EmptyTreeHash ? Keccak.Zero : keccak;
+        }
     }
 
     public void Finalize(Keccak keccak)
     {
-        Stack<Block> finalized;
+        Stack<BlockState> finalized;
         uint count;
 
         // gather all the blocks to finalize 
@@ -339,12 +346,8 @@ public class Blockchain : IAsyncDisposable
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload.
     /// </summary>
-    private class Block : RefCountingDisposable, IWorldState, ICommit
+    private class BlockState : RefCountingDisposable, IWorldState, ICommit
     {
-        public Keccak Hash { get; }
-        public Keccak ParentHash { get; }
-        public uint BlockNumber { get; }
-
         /// <summary>
         /// A simple bloom filter to assert whether the given key was set in a given block, used to speed up getting the keys.
         /// </summary>
@@ -356,7 +359,7 @@ public class Blockchain : IAsyncDisposable
         private readonly HashSet<Keccak> _destroyed;
 
         private readonly ReadOnlyBatchCountingRefs _batch;
-        private Block[] _ancestors;
+        private BlockState[] _ancestors;
 
         private readonly Blockchain _blockchain;
 
@@ -378,8 +381,7 @@ public class Blockchain : IAsyncDisposable
 
         private bool _committed;
 
-        public Block(Keccak parentHash, Keccak hash, uint blockNumber, IReadOnlyBatch batch, Block[] ancestors,
-            Blockchain blockchain)
+        public BlockState(Keccak parentStateRoot, IReadOnlyBatch batch, BlockState[] ancestors, Blockchain blockchain)
         {
             _batch = new ReadOnlyBatchCountingRefs(batch);
 
@@ -387,9 +389,7 @@ public class Blockchain : IAsyncDisposable
 
             _blockchain = blockchain;
 
-            Hash = hash;
-            BlockNumber = blockNumber;
-            ParentHash = parentHash;
+            ParentHash = parentStateRoot;
 
             // rent pages for the bloom
             _bloom = new HashSet<int>();
@@ -405,13 +405,15 @@ public class Blockchain : IAsyncDisposable
             _preCommit = new PooledSpanDictionary(Pool, true, true);
         }
 
+        public Keccak ParentHash { get; }
+
         /// <summary>
         /// Commits the block to the block chain.
         /// </summary>
-        public object Commit()
+        public Keccak Commit(uint blockNumber)
         {
             // run pre-commit
-            var result = _blockchain._preCommit?.BeforeCommit(this);
+            var result = _blockchain._preCommit.BeforeCommit(this);
 
             // After this step, this block requires no batch or ancestors.
             // It just provides data on its own as it was committed.
@@ -423,14 +425,21 @@ public class Blockchain : IAsyncDisposable
                 ancestor.Dispose();
             }
 
-            _ancestors = Array.Empty<Block>();
+            _ancestors = Array.Empty<BlockState>();
 
             AcquireLease();
+
+            BlockNumber = blockNumber;
+            Hash = result;
+
             _blockchain.Add(this);
             _committed = true;
 
-            return result ?? "null";
+            return result;
         }
+
+        public uint BlockNumber { get; private set; }
+        public Keccak Hash { get; private set; }
 
         private BufferPool Pool => _blockchain._pool;
 
@@ -514,7 +523,8 @@ public class Blockchain : IAsyncDisposable
             dict.Set(key.WriteTo(stackalloc byte[key.MaxByteLength]), hash, payload);
         }
 
-        private void SetImpl(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1, PooledSpanDictionary dict)
+        private void SetImpl(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1,
+            PooledSpanDictionary dict)
         {
             var hash = GetHash(key);
             _bloom.Add(hash);
@@ -526,7 +536,8 @@ public class Blockchain : IAsyncDisposable
 
         void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload) => SetImpl(key, payload, _preCommit);
 
-        void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1) => SetImpl(key, payload0, payload1, _preCommit);
+        void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1) =>
+            SetImpl(key, payload0, payload1, _preCommit);
 
         void ICommit.Visit(CommitAction action, TrieType type)
         {
@@ -631,20 +642,13 @@ public class Blockchain : IAsyncDisposable
                 }
             }
 
-            var expected = BlockNumber - 1;
-
             // walk all the blocks locally
             foreach (var ancestor in _ancestors)
             {
-                Debug.Assert(ancestor.BlockNumber == expected);
-                expected--;
-
                 owner = ancestor.TryGetLocal(key, keyWritten, bloom, out succeeded);
                 if (succeeded)
                     return owner;
             }
-
-            Debug.Assert(_batch.BatchId == expected);
 
             if (_batch.TryGet(key, out var span))
             {

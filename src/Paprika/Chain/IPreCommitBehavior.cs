@@ -1,4 +1,5 @@
 ﻿using System.Buffers;
+using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Utils;
@@ -15,7 +16,8 @@ public interface IPreCommitBehavior
     /// Executed just before commit.
     /// </summary>
     /// <param name="commit">The object representing the commit.</param>
-    object BeforeCommit(ICommit commit);
+    /// <returns>The result of the before commit.</returns>
+    Keccak BeforeCommit(ICommit commit);
 
     /// <summary>
     /// Inspects the data allowing it to overwrite them if needed, before the commit is applied to the database.

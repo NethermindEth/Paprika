@@ -61,7 +61,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             "How long it takes to calculate storage roots");
     }
 
-    public object BeforeCommit(ICommit commit)
+    public Keccak BeforeCommit(ICommit commit)
     {
         // 1. Visit all Storage operations (SSTORE). For each key:
         //  a. remember Account that Storage belongs to
@@ -112,10 +112,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             var value = new Keccak(rootKeccak.Span);
             RootHash = value;
 
-            return value.ToString();
+            return value;
         }
 
-        return "not full merkle";
+        return Keccak.Zero;
     }
 
     public ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data)
@@ -176,7 +176,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     }
 
     public Keccak RootHash { get; private set; }
-
 
     private KeccakOrRlp Compute(in Key key, ICommit commit, TrieType trieType)
     {

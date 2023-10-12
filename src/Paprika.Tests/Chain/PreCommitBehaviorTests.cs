@@ -27,13 +27,13 @@ public class PreCommitBehaviorTests
 
         await using var blockchain = new Blockchain(db, preCommit: preCommit);
 
-        using var block = blockchain.StartNew(Keccak.Zero, BlockKeccak, 1);
+        using var block = blockchain.StartNew(Keccak.EmptyTreeHash);
 
         block.SetAccount(Key0, Account0);
         block.SetAccount(Key1A, Account1);
         block.SetAccount(Key2, Account2);
 
-        block.Commit();
+        block.Commit(1);
     }
 
     [Test]
@@ -43,11 +43,10 @@ public class PreCommitBehaviorTests
 
         await using var blockchain = new Blockchain(db, new SetGetPreCommitBehavior());
 
-        using var block = blockchain.StartNew(Keccak.Zero, BlockKeccak, 1);
+        using var block = blockchain.StartNew(Keccak.EmptyTreeHash);
 
         // no values as they are added in the hook only
-
-        block.Commit();
+        block.Commit(1);
     }
 
     /// <summary>
@@ -59,7 +58,7 @@ public class PreCommitBehaviorTests
 
         public static ReadOnlySpan<byte> Value => new byte[29];
 
-        public object BeforeCommit(ICommit commit)
+        public Keccak BeforeCommit(ICommit commit)
         {
             commit.Set(AssignedKey, Value);
 
@@ -70,7 +69,7 @@ public class PreCommitBehaviorTests
             owner.IsEmpty.Should().BeFalse();
             owner.Span.SequenceEqual(Value).Should().BeTrue();
 
-            return "none";
+            return Keccak.Zero;
         }
 
         private static void OnKey(in Key key, ReadOnlySpan<byte> value) => throw new Exception("Should not be called at all!");
@@ -90,7 +89,7 @@ public class PreCommitBehaviorTests
             _found = new HashSet<Keccak>();
         }
 
-        public object BeforeCommit(ICommit commit)
+        public Keccak BeforeCommit(ICommit commit)
         {
             _found.Clear();
 
@@ -98,7 +97,7 @@ public class PreCommitBehaviorTests
 
             _keccaks.SetEquals(_found).Should().BeTrue();
 
-            return "none";
+            return Keccak.Zero;
         }
 
         private void OnKey(in Key key, ReadOnlySpan<byte> value)

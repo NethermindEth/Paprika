@@ -7,10 +7,6 @@ namespace Paprika.Chain;
 /// </summary>
 public interface IWorldState : IDisposable
 {
-    Keccak Hash { get; }
-
-    uint BlockNumber { get; }
-
     void SetAccount(in Keccak address, in Account account);
 
     Account GetAccount(in Keccak address);
@@ -29,5 +25,5 @@ public interface IWorldState : IDisposable
     /// Also runs the <see cref="IPreCommitBehavior"/> that the blockchain was configured with.
     /// </summary>
     /// <returns>The result of the commit that is actually <see cref="IPreCommitBehavior.BeforeCommit"/> result. </returns>
-    object Commit();
+    Keccak Commit(uint blockNumber);
 }

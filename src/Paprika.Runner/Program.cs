@@ -266,16 +266,13 @@ public static class Program
 
         // writing
         var writing = Stopwatch.StartNew();
-        var parentBlockHash = Keccak.Zero;
+        var hash = Keccak.Zero;
 
         var toFinalize = new List<Keccak>();
 
         for (uint block = 1; block < config.BlockCount; block++)
         {
-            var blockHash = Keccak.Compute(parentBlockHash.Span);
-            using var worldState = blockchain.StartNew(parentBlockHash, blockHash, block);
-
-            parentBlockHash = blockHash;
+            using var worldState = blockchain.StartNew(hash);
 
             for (var account = 0; account < config.AccountsPerBlock; account++)
             {
@@ -307,8 +304,8 @@ public static class Program
                 counter++;
             }
 
-            var obj = worldState.Commit();
-            result = $"{obj.ToString()?[..8]}...";
+            hash = worldState.Commit(block);
+            result = $"{hash.ToString()?[..8]}...";
 
             //finalize
             if (toFinalize.Count >= FinalizeEvery)
@@ -318,7 +315,7 @@ public static class Program
                 toFinalize.Clear();
             }
 
-            toFinalize.Add(blockHash);
+            toFinalize.Add(hash);
 
             if (block > 0 & block % config.LogEvery == 0)
             {
@@ -332,8 +329,8 @@ public static class Program
 
         // flush leftovers by adding one more block for now
         var lastBlock = toFinalize.Last();
-        using var placeholder = blockchain.StartNew(lastBlock, Keccak.Compute(lastBlock.Span), config.BlockCount);
-        placeholder.Commit();
+        using var placeholder = blockchain.StartNew(lastBlock);
+        placeholder.Commit(config.BlockCount);
         blockchain.Finalize(lastBlock);
 
         report.AppendLine($@"At block {config.BlockCount - 1}. This batch of {config.LogEvery} blocks took {writing.Elapsed:h\:mm\:ss\.FF}. RootHash: {result}");
