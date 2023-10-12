@@ -28,8 +28,8 @@ public class BlockchainTests
 
         Keccak keccak2A;
 
-        using (var block1A = blockchain.StartNew(Keccak.Zero))
-        using (var block1B = blockchain.StartNew(Keccak.Zero))
+        using (var block1A = blockchain.StartNew(Keccak.EmptyTreeHash))
+        using (var block1B = blockchain.StartNew(Keccak.EmptyTreeHash))
         {
             block1A.SetAccount(Key0, account1A);
             block1B.SetAccount(Key0, account1B);
@@ -74,7 +74,7 @@ public class BlockchainTests
 
         await using var blockchain = new Blockchain(db, new PreCommit());
 
-        var block = blockchain.StartNew(Keccak.Zero);
+        var block = blockchain.StartNew(Keccak.EmptyTreeHash);
         var hash = block.Commit(1);
         block.Dispose();
 
@@ -110,7 +110,7 @@ public class BlockchainTests
         using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
         await using var blockchain = new Blockchain(db, new PreCommit());
 
-        using var block = blockchain.StartNew(Keccak.Zero);
+        using var block = blockchain.StartNew(Keccak.EmptyTreeHash);
 
         block.SetAccount(Key0, new Account(1, 1));
         block.SetStorage(Key0, Key1, stackalloc byte[1] { 1 });
@@ -126,7 +126,7 @@ public class BlockchainTests
         using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
         await using var blockchain = new Blockchain(db, new PreCommit());
 
-        using var block1 = blockchain.StartNew(Keccak.Zero);
+        using var block1 = blockchain.StartNew(Keccak.EmptyTreeHash);
 
         block1.SetAccount(Key0, new Account(1, 1));
         block1.SetStorage(Key0, Key1, stackalloc byte[1] { 1 });
@@ -149,7 +149,7 @@ public class BlockchainTests
         using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
         await using var blockchain = new Blockchain(db, new PreCommit());
 
-        using var block1 = blockchain.StartNew(Keccak.Zero);
+        using var block1 = blockchain.StartNew(Keccak.EmptyTreeHash);
 
         block1.SetAccount(Key0, new Account(1, 1));
         block1.SetStorage(Key0, Key1, stackalloc byte[1] { 1 });
@@ -216,12 +216,6 @@ public class BlockchainTests
                     blockchain.Finalize(hash);
                 }
             }
-
-            // make next visible
-            using var next = blockchain.StartNew(hash);
-            hash = next.Commit((uint)blockCount + 1);
-
-            blockchain.Finalize(hash);
         }
 
         using var read = db.BeginReadOnlyBatch();

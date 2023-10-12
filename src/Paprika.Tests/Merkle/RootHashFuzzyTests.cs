@@ -139,7 +139,7 @@ public class RootHashFuzzyTests
             var counter = 0;
             uint blocks = 1;
 
-            var block = blockchain.StartNew(Keccak.Zero);
+            var block = blockchain.StartNew(Keccak.EmptyTreeHash);
 
             var random = GetRandom();
 

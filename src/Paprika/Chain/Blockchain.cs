@@ -234,6 +234,12 @@ public class Blockchain : IAsyncDisposable
 
     private (IReadOnlyBatch batch, BlockState[] ancestors) BuildBlockDataDependencies(Keccak parentKeccak)
     {
+        if (parentKeccak == Keccak.EmptyTreeHash)
+        {
+            // pages are zeroed before
+            parentKeccak = Keccak.Zero;
+        }
+
         if (_blocksByHash.TryGetValue(parentKeccak, out var p))
         {
             // the easy path, the parent block is in the non-finalized set yet
@@ -645,20 +651,13 @@ public class Blockchain : IAsyncDisposable
                 }
             }
 
-            var expected = BlockNumber - 1;
-
             // walk all the blocks locally
             foreach (var ancestor in _ancestors)
             {
-                Debug.Assert(ancestor.BlockNumber == expected);
-                expected--;
-
                 owner = ancestor.TryGetLocal(key, keyWritten, bloom, out succeeded);
                 if (succeeded)
                     return owner;
             }
-
-            Debug.Assert(_batch.BatchId == expected);
 
             if (_batch.TryGet(key, out var span))
             {

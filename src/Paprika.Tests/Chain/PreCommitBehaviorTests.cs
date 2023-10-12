@@ -27,7 +27,7 @@ public class PreCommitBehaviorTests
 
         await using var blockchain = new Blockchain(db, preCommit: preCommit);
 
-        using var block = blockchain.StartNew(Keccak.Zero);
+        using var block = blockchain.StartNew(Keccak.EmptyTreeHash);
 
         block.SetAccount(Key0, Account0);
         block.SetAccount(Key1A, Account1);
@@ -43,7 +43,7 @@ public class PreCommitBehaviorTests
 
         await using var blockchain = new Blockchain(db, new SetGetPreCommitBehavior());
 
-        using var block = blockchain.StartNew(Keccak.Zero);
+        using var block = blockchain.StartNew(Keccak.EmptyTreeHash);
 
         // no values as they are added in the hook only
         block.Commit(1);
