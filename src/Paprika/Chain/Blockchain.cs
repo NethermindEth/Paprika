@@ -127,9 +127,7 @@ public class Blockchain : IAsyncDisposable
                     // commit but no flush here, it's too heavy, the flush will come later
                     await batch.Commit(CommitOptions.DangerNoFlush);
 
-                    // inform the blocks about flushing
-                    BlockState[] blocks;
-
+                    // inform blocks about flushing
                     lock (_blockLock)
                     {
                         if (!_blocksByNumber.TryGetValue(flushedTo, out var removedBlocks))
@@ -137,13 +135,12 @@ public class Blockchain : IAsyncDisposable
                             throw new Exception($"Missing blocks at block number {flushedTo}");
                         }
 
-                        blocks = removedBlocks.ToArray();
-                    }
-
-                    foreach (var removedBlock in blocks)
-                    {
-                        // dispose one to allow leases to do the count
-                        removedBlock.Dispose();
+                        var cloned = removedBlocks.ToArray();
+                        foreach (var removedBlock in cloned)
+                        {
+                            // dispose one to allow leases to do the count
+                            removedBlock.Dispose();
+                        }
                     }
 
                     _flusherQueueCount.Subtract(1);

@@ -78,9 +78,6 @@ public class BlockchainTests
 
         for (uint no = 2; no < count; no++)
         {
-            // remember block as prev
-            var prev = block;
-
             // create new, set, commit and dispose
             block = blockchain.StartNew(hash);
             block.SetAccount(Key0, new Account(no, no));
