@@ -366,18 +366,18 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// The maps mapping accounts information, written in this block.
         /// </summary>
-        private readonly PooledSpanDictionary _state;
+        private PooledSpanDictionary _state;
 
         /// <summary>
         /// The maps mapping storage information, written in this block.
         /// </summary>
-        private readonly PooledSpanDictionary _storage;
+        private PooledSpanDictionary _storage;
 
         /// <summary>
         /// The values set the <see cref="IPreCommitBehavior"/> during the <see cref="ICommit.Visit"/> invocation.
         /// It's both storage & state as it's metadata for the pre-commit behavior.
         /// </summary>
-        private readonly PooledSpanDictionary _preCommit;
+        private PooledSpanDictionary _preCommit;
 
         private bool _committed;
 
@@ -393,16 +393,33 @@ public class Blockchain : IAsyncDisposable
 
             // rent pages for the bloom
             _bloom = new HashSet<int>();
-
             _destroyed = new HashSet<Keccak>();
+
+            CreateDictionaries();
+        }
+
+        private void CreateDictionaries()
+        {
+            CreateDict(ref _state, Pool);
+            CreateDict(ref _storage, Pool);
+            CreateDict(ref _preCommit, Pool);
+            return;
 
             // as pre-commit can use parallelism, make the pooled dictionaries concurrent friendly:
             // 1. make the dictionary preserve once written values, which means that it can repeatedly read and set without worrying of ordering operations
             // 2. set dictionary so that it allows concurrent readers
+            static void CreateDict(ref PooledSpanDictionary dict, BufferPool pool)
+            {
+                // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
+                // ReSharper disable once UseNullPropagation
+                if (dict != null)
+                {
+                    // dispose previous
+                    dict.Dispose();    
+                }
 
-            _state = new PooledSpanDictionary(Pool, true, true);
-            _storage = new PooledSpanDictionary(Pool, true, true);
-            _preCommit = new PooledSpanDictionary(Pool, true, true);
+                dict = new PooledSpanDictionary(pool, true, true);
+            }
         }
 
         public Keccak ParentHash { get; }
@@ -436,6 +453,14 @@ public class Blockchain : IAsyncDisposable
             _committed = true;
 
             return result;
+        }
+
+        public void Reset()
+        {
+            CreateDictionaries();
+            
+            _bloom.Clear();
+            _destroyed.Clear();
         }
 
         public uint BlockNumber { get; private set; }
