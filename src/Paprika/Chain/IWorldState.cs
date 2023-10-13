@@ -31,4 +31,9 @@ public interface IWorldState : IDisposable
     /// Cleans up all the changes in the world state.
     /// </summary>
     void Reset();
+
+    /// <summary>
+    /// Gets the current hash of the world state.
+    /// </summary>
+    Keccak Hash { get; }
 }

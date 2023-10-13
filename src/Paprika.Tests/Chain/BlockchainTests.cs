@@ -44,6 +44,9 @@ public class BlockchainTests
             // start a next block
             using var block2A = blockchain.StartNew(keccak1A);
 
+            // set some dummy value
+            block2A.SetAccount(Key1, account1B);
+
             // assert whether the history is preserved
             block2A.GetAccount(Key0).Should().Be(account1A);
             keccak2A = block2A.Commit(2);
@@ -70,10 +73,12 @@ public class BlockchainTests
 
         using var db = PagedDb.NativeMemoryDb(16 * Mb, 2);
 
-        await using var blockchain = new Blockchain(db, new PreCommit());
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(true, 2, 2));
 
         var block = blockchain.StartNew(Keccak.EmptyTreeHash);
+        block.SetAccount(Key0, new Account(1, 1));
         var hash = block.Commit(1);
+
         block.Dispose();
 
         for (uint no = 2; no < count; no++)
