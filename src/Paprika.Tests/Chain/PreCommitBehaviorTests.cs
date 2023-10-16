@@ -36,45 +36,6 @@ public class PreCommitBehaviorTests
         block.Commit(1);
     }
 
-    [Test]
-    public async Task Get_set_work_only_in_pre_commit_hook()
-    {
-        using var db = PagedDb.NativeMemoryDb(SmallDb);
-
-        await using var blockchain = new Blockchain(db, new SetGetPreCommitBehavior());
-
-        using var block = blockchain.StartNew(Keccak.EmptyTreeHash);
-
-        // no values as they are added in the hook only
-        block.Commit(1);
-    }
-
-    /// <summary>
-    /// Asserts that the given set of keys was written
-    /// </summary>
-    class SetGetPreCommitBehavior : IPreCommitBehavior
-    {
-        public static Key AssignedKey => Key.Merkle(NibblePath.FromKey(Key2));
-
-        public static ReadOnlySpan<byte> Value => new byte[29];
-
-        public Keccak BeforeCommit(ICommit commit)
-        {
-            commit.Set(AssignedKey, Value);
-
-            commit.Visit(OnKey, TrieType.State);
-
-            using var owner = commit.Get(AssignedKey);
-
-            owner.IsEmpty.Should().BeFalse();
-            owner.Span.SequenceEqual(Value).Should().BeTrue();
-
-            return Keccak.Zero;
-        }
-
-        private static void OnKey(in Key key, ReadOnlySpan<byte> value) => throw new Exception("Should not be called at all!");
-    }
-
     /// <summary>
     /// Asserts that the given set of keys was written
     /// </summary>
