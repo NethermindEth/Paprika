@@ -205,8 +205,32 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 }
             }
 
-            throw new Exception("Parent root hash not found!");
+            throw new Exception($"There is no root page with the given stateHash '{stateHash}'!");
         }
+    }
+
+    public bool HasState(Keccak stateHash)
+    {
+        lock (_batchLock)
+        {
+            for (var back = 0; back < _historyDepth; back++)
+            {
+                if (_lastRoot - back < 0)
+                {
+                    break;
+                }
+
+                var at = (_lastRoot - back) % _historyDepth;
+                ref readonly var root = ref _roots[at];
+
+                if (root.Data.Metadata.StateHash == stateHash)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     public void Accept(IPageVisitor visitor)

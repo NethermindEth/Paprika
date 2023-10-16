@@ -26,4 +26,14 @@ public interface IWorldState : IDisposable
     /// </summary>
     /// <returns>The result of the commit that is actually <see cref="IPreCommitBehavior.BeforeCommit"/> result. </returns>
     Keccak Commit(uint blockNumber);
+
+    /// <summary>
+    /// Cleans up all the changes in the world state.
+    /// </summary>
+    void Reset();
+
+    /// <summary>
+    /// Gets the current hash of the world state.
+    /// </summary>
+    Keccak Hash { get; }
 }

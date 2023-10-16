@@ -44,6 +44,9 @@ public class BlockchainTests
             // start a next block
             using var block2A = blockchain.StartNew(keccak1A);
 
+            // set some dummy value
+            block2A.SetAccount(Key1, account1B);
+
             // assert whether the history is preserved
             block2A.GetAccount(Key0).Should().Be(account1A);
             keccak2A = block2A.Commit(2);
@@ -70,10 +73,12 @@ public class BlockchainTests
 
         using var db = PagedDb.NativeMemoryDb(16 * Mb, 2);
 
-        await using var blockchain = new Blockchain(db, new PreCommit());
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(true, 2, 2));
 
         var block = blockchain.StartNew(Keccak.EmptyTreeHash);
+        block.SetAccount(Key0, new Account(1, 1));
         var hash = block.Commit(1);
+
         block.Dispose();
 
         for (uint no = 2; no < count; no++)
@@ -161,10 +166,11 @@ public class BlockchainTests
         block2.DestroyAccount(Key0);
         var hash2 = block2.Commit(blockNo);
 
+        var wait = WaitTillFlush(blockchain, blockNo);
+
         blockchain.Finalize(hash2);
 
-        // Poor man's await on finalization flushed
-        await Task.Delay(500);
+        await wait;
 
         using var read = db.BeginReadOnlyBatch();
 
@@ -252,11 +258,14 @@ public class BlockchainTests
             using (var block2A = blockchain.StartNew(keccak1A))
             {
                 block2A.SetAccount(Key0, account2);
-                var keccak2A = block2A.Commit(2);
+                const int block2 = 2;
+
+                var keccak2A = block2A.Commit(block2);
+                var task = WaitTillFlush(blockchain, block2);
 
                 blockchain.Finalize(keccak2A);
 
-                await Task.Delay(500);
+                await task;
 
                 // start in the past
                 using (var block2B = blockchain.StartNew(keccak1A))
@@ -288,6 +297,19 @@ public class BlockchainTests
     }
 
     private static Keccak Build(string name) => Keccak.Compute(Encoding.UTF8.GetBytes(name));
+
+    private Task WaitTillFlush(Blockchain chain, uint blockNumber)
+    {
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        chain.Flushed += (_, block) =>
+        {
+            if (block == blockNumber)
+                tcs.SetResult();
+        };
+
+        return tcs.Task;
+    }
 }
 
 file static class BlockExtensions

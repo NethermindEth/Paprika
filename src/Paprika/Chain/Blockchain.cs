@@ -104,6 +104,8 @@ public class Blockchain : IAsyncDisposable
                 var flushed = new List<uint>();
                 var timer = Stopwatch.StartNew();
 
+                uint flushedTo = 0;
+
                 while (timer.Elapsed < _minFlushDelay && reader.TryRead(out var block))
                 {
                     using var batch = _db.BeginNextBatch();
@@ -112,7 +114,8 @@ public class Blockchain : IAsyncDisposable
                     var application = Stopwatch.StartNew();
 
                     flushed.Add(block.BlockNumber);
-                    var flushedTo = block.BlockNumber;
+
+                    flushedTo = block.BlockNumber;
 
                     batch.SetMetadata(block.BlockNumber, block.Hash);
 
@@ -161,6 +164,8 @@ public class Blockchain : IAsyncDisposable
                 _db.Flush();
                 _flusherFlushInMs.Record((int)flushWatch.ElapsedMilliseconds);
 
+                Flushed?.Invoke(this, flushedTo);
+
                 if (timer.ElapsedMilliseconds > 0)
                 {
                     _flusherBlockPerS.Record((int)(count * 1000 / timer.ElapsedMilliseconds));
@@ -173,6 +178,11 @@ public class Blockchain : IAsyncDisposable
             throw;
         }
     }
+
+    /// <summary>
+    /// Announces the last block number that was flushed to disk.
+    /// </summary>
+    public event EventHandler<uint> Flushed;
 
     private void Add(BlockState state)
     {
@@ -317,6 +327,20 @@ public class Blockchain : IAsyncDisposable
         }
     }
 
+    public bool HasState(in Keccak keccak)
+    {
+        lock (_blockLock)
+        {
+            if (_blocksByHash.ContainsKey(keccak))
+                return true;
+
+            if (_db.HasState(keccak))
+                return true;
+
+            return false;
+        }
+    }
+
     private class ReadOnlyBatchCountingRefs : RefCountingDisposable, IReadOnlyBatch
     {
         private readonly IReadOnlyBatch _batch;
@@ -366,20 +390,21 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// The maps mapping accounts information, written in this block.
         /// </summary>
-        private readonly PooledSpanDictionary _state;
+        private PooledSpanDictionary _state;
 
         /// <summary>
         /// The maps mapping storage information, written in this block.
         /// </summary>
-        private readonly PooledSpanDictionary _storage;
+        private PooledSpanDictionary _storage;
 
         /// <summary>
         /// The values set the <see cref="IPreCommitBehavior"/> during the <see cref="ICommit.Visit"/> invocation.
         /// It's both storage & state as it's metadata for the pre-commit behavior.
         /// </summary>
-        private readonly PooledSpanDictionary _preCommit;
+        private PooledSpanDictionary _preCommit;
 
         private bool _committed;
+        private Keccak? _hash;
 
         public BlockState(Keccak parentStateRoot, IReadOnlyBatch batch, BlockState[] ancestors, Blockchain blockchain)
         {
@@ -393,16 +418,35 @@ public class Blockchain : IAsyncDisposable
 
             // rent pages for the bloom
             _bloom = new HashSet<int>();
-
             _destroyed = new HashSet<Keccak>();
+
+            _hash = ParentHash;
+
+            CreateDictionaries();
+        }
+
+        private void CreateDictionaries()
+        {
+            CreateDict(ref _state, Pool);
+            CreateDict(ref _storage, Pool);
+            CreateDict(ref _preCommit, Pool);
+            return;
 
             // as pre-commit can use parallelism, make the pooled dictionaries concurrent friendly:
             // 1. make the dictionary preserve once written values, which means that it can repeatedly read and set without worrying of ordering operations
             // 2. set dictionary so that it allows concurrent readers
+            static void CreateDict(ref PooledSpanDictionary dict, BufferPool pool)
+            {
+                // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
+                // ReSharper disable once UseNullPropagation
+                if (dict != null)
+                {
+                    // dispose previous
+                    dict.Dispose();
+                }
 
-            _state = new PooledSpanDictionary(Pool, true, true);
-            _storage = new PooledSpanDictionary(Pool, true, true);
-            _preCommit = new PooledSpanDictionary(Pool, true, true);
+                dict = new PooledSpanDictionary(pool, true, true);
+            }
         }
 
         public Keccak ParentHash { get; }
@@ -412,8 +456,14 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         public Keccak Commit(uint blockNumber)
         {
-            // run pre-commit
-            var result = _blockchain._preCommit.BeforeCommit(this);
+            EnsureHash();
+
+            var hash = _hash!.Value;
+
+            if (hash == ParentHash)
+            {
+                throw new Exception("The same state as the parent is not handled now");
+            }
 
             // After this step, this block requires no batch or ancestors.
             // It just provides data on its own as it was committed.
@@ -430,21 +480,47 @@ public class Blockchain : IAsyncDisposable
             AcquireLease();
 
             BlockNumber = blockNumber;
-            Hash = result;
 
             _blockchain.Add(this);
             _committed = true;
 
-            return result;
+            return hash;
+        }
+
+        public void Reset()
+        {
+            _hash = ParentHash;
+            _bloom.Clear();
+            _destroyed.Clear();
+
+            CreateDictionaries();
         }
 
         public uint BlockNumber { get; private set; }
-        public Keccak Hash { get; private set; }
+
+        public Keccak Hash
+        {
+            get
+            {
+                EnsureHash();
+                return _hash!.Value;
+            }
+        }
+
+        private void EnsureHash()
+        {
+            if (_hash == null)
+            {
+                _hash = _blockchain._preCommit.BeforeCommit(this);
+            }
+        }
 
         private BufferPool Pool => _blockchain._pool;
 
         public void DestroyAccount(in Keccak address)
         {
+            _hash = null;
+
             var searched = NibblePath.FromKey(address);
 
             Destroy(searched, _state);
@@ -517,6 +593,9 @@ public class Blockchain : IAsyncDisposable
 
         private void SetImpl(in Key key, in ReadOnlySpan<byte> payload, PooledSpanDictionary dict)
         {
+            // clean precalculated hash
+            _hash = null;
+
             var hash = GetHash(key);
             _bloom.Add(hash);
 
