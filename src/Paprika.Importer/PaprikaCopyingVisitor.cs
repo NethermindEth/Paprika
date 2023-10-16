@@ -126,7 +126,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
             var i = 0;
             // dummy, for import only
             var child = Keccak.Compute(parent.BytesAsSpan);
-            using var block = _blockchain.StartNew(parent, child, number);
+            using var block = _blockchain.StartNew(parent);
 
             while (i < _batchSize && reader.TryRead(out var item))
             {
@@ -135,7 +135,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
             }
 
             // commit & finalize
-            block.Commit();
+            block.Commit(number);
 
             finalization.Enqueue(child);
             if (finalization.Count == finalizationDepth)
