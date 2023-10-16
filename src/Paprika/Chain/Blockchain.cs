@@ -104,6 +104,8 @@ public class Blockchain : IAsyncDisposable
                 var flushed = new List<uint>();
                 var timer = Stopwatch.StartNew();
 
+                uint flushedTo = 0;
+
                 while (timer.Elapsed < _minFlushDelay && reader.TryRead(out var block))
                 {
                     using var batch = _db.BeginNextBatch();
@@ -112,7 +114,8 @@ public class Blockchain : IAsyncDisposable
                     var application = Stopwatch.StartNew();
 
                     flushed.Add(block.BlockNumber);
-                    var flushedTo = block.BlockNumber;
+
+                    flushedTo = block.BlockNumber;
 
                     batch.SetMetadata(block.BlockNumber, block.Hash);
 
@@ -161,6 +164,8 @@ public class Blockchain : IAsyncDisposable
                 _db.Flush();
                 _flusherFlushInMs.Record((int)flushWatch.ElapsedMilliseconds);
 
+                Flushed?.Invoke(this, flushedTo);
+
                 if (timer.ElapsedMilliseconds > 0)
                 {
                     _flusherBlockPerS.Record((int)(count * 1000 / timer.ElapsedMilliseconds));
@@ -173,6 +178,11 @@ public class Blockchain : IAsyncDisposable
             throw;
         }
     }
+
+    /// <summary>
+    /// Announces the last block number that was flushed to disk.
+    /// </summary>
+    public event EventHandler<uint> Flushed;
 
     private void Add(BlockState state)
     {
@@ -314,6 +324,20 @@ public class Blockchain : IAsyncDisposable
                 // hard spin wait on breaching the size
                 SpinWait.SpinUntil(() => writer.TryWrite(block));
             }
+        }
+    }
+
+    public bool HasState(in Keccak keccak)
+    {
+        lock (_blockLock)
+        {
+            if (_blocksByHash.ContainsKey(keccak))
+                return true;
+
+            if (_db.HasState(keccak))
+                return true;
+
+            return false;
         }
     }
 
