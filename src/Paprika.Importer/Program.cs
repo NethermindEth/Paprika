@@ -16,7 +16,8 @@ using Paprika.Runner;
 using Paprika.Store;
 using Spectre.Console;
 
-const string path = @"C:\Users\Szymon\ethereum\mainnet";
+//const string path = @"C:\Users\Szymon\ethereum\mainnet";
+const string path = @"C:\Users\Szymon\ethereum\execution\nethermind_db\sepolia";
 
 var logs = LimboLogs.Instance;
 var cfg = DbConfig.Default;
@@ -24,6 +25,7 @@ var cfg = DbConfig.Default;
 using var state = new DbOnTheRocks(path, GetSettings(DbNames.State), cfg, logs).WithEOACompressed();
 using var blockInfos = new DbOnTheRocks(path, GetSettings(DbNames.BlockInfos), cfg, logs);
 using var headers = new DbOnTheRocks(path, GetSettings(DbNames.Headers), cfg, logs);
+using var blocks = new DbOnTheRocks(path, GetSettings(DbNames.Blocks), cfg, logs);
 using var store = new TrieStore(state, logs);
 
 // from BlockTree.cs
@@ -37,6 +39,7 @@ var bestPersisted = blockInfos.Get(bestPersistedState.Value);
 var chainLevel = Rlp.GetStreamDecoder<ChainLevelInfo>()!.Decode(new RlpStream(bestPersisted!));
 
 var main = chainLevel.BlockInfos[0];
+
 var header = headers.Get(main.BlockHash);
 var headerDecoded = Rlp.GetStreamDecoder<BlockHeader>()!.Decode(new RlpStream(header!));
 
@@ -110,8 +113,6 @@ if (dbExists == false)
         Console.WriteLine("Starting...");
 
         var copyingTask = visitor.Copy();
-
-
         trie.Accept(visitor, rootHash, true);
         visitor.Finish();
 

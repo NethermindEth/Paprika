@@ -43,11 +43,10 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
             if (_accountValue != null)
             {
                 var v = _accountValue;
-
                 var codeHash = AsPaprika(v.CodeHash);
-                var storageRoot = AsPaprika(v.StorageRoot);
 
-                block.SetAccount(addr, new Account(v.Balance, v.Nonce, codeHash, storageRoot));
+                // storage root will be recalculated by Paprika, drop it
+                block.SetAccount(addr, new Account(v.Balance, v.Nonce, codeHash, Keccak.EmptyTreeHash));
             }
             else
             {
@@ -124,8 +123,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
         while (await reader.WaitToReadAsync())
         {
             var i = 0;
-            // dummy, for import only
-            var child = Keccak.Compute(parent.BytesAsSpan);
+
             using var block = _blockchain.StartNew(parent);
 
             while (i < _batchSize && reader.TryRead(out var item))
@@ -135,9 +133,10 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
             }
 
             // commit & finalize
-            block.Commit(number);
+            var hash = block.Commit(number);
 
-            finalization.Enqueue(child);
+            finalization.Enqueue(hash);
+
             if (finalization.Count == finalizationDepth)
             {
                 _blockchain.Finalize(finalization.Dequeue());
@@ -145,7 +144,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 
             // update
             number++;
-            parent = child;
+            parent = hash;
         }
 
         while (finalization.TryDequeue(out var keccak))
