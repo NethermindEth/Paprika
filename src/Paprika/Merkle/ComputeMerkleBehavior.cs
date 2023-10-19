@@ -42,17 +42,30 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private readonly bool _fullMerkle;
     private readonly int _minimumTreeLevelToMemoizeKeccak;
     private readonly int _memoizeKeccakEvery;
+    private readonly bool _memoizeRlp;
     private readonly Meter _meter;
     private readonly Histogram<long> _stateRootHashCompute;
     private readonly Histogram<long> _storageRootsHashCompute;
 
-    public ComputeMerkleBehavior(bool fullMerkle = false,
+    /// <summary>
+    /// Initializes the Merkle.
+    /// </summary>
+    /// <param name="fullMerkle">Whether run a full Merkle protocol
+    /// or only track the dirty nodes so that one more call to calculate is required.</param>
+    /// <param name="minimumTreeLevelToMemoizeKeccak">Minimum lvl of the tree to memoize the Keccak of a branch node.</param>
+    /// <param name="memoizeKeccakEvery">How often (which lvl mod) should Keccaks be memoized.</param>
+    /// <param name="memoizeRlp">Whether the RLP of branches should be memoized in memory (but not stored)
+    /// to limit the number of lookups for the children and their Keccak recalculation.
+    /// This includes invalidating the memoized RLP whenever a path that it caches is marked as dirty.</param>
+    public ComputeMerkleBehavior(bool fullMerkle = true,
         int minimumTreeLevelToMemoizeKeccak = DefaultMinimumTreeLevelToMemoizeKeccak,
-        int memoizeKeccakEvery = MemoizeKeccakEveryNLevel)
+        int memoizeKeccakEvery = MemoizeKeccakEveryNLevel,
+        bool memoizeRlp = true)
     {
         _fullMerkle = fullMerkle;
         _minimumTreeLevelToMemoizeKeccak = minimumTreeLevelToMemoizeKeccak;
         _memoizeKeccakEvery = memoizeKeccakEvery;
+        _memoizeRlp = memoizeRlp;
 
         _meter = new Meter("Paprika.Merkle");
         _stateRootHashCompute = _meter.CreateHistogram<long>("State root compute", "ms",
@@ -405,8 +418,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private bool ShouldMemoizeBranchRlp(in NibblePath branchPath)
     {
-        // a simple condition to memoize only more nested RLPs
-        return branchPath.Length >= 1;
+        return _memoizeRlp && 
+               branchPath.Length >= 1; // a simple condition to memoize only more nested RLPs         
     }
 
     private bool ShouldMemoizeBranchKeccak(in NibblePath branchPath)

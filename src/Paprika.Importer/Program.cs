@@ -104,7 +104,7 @@ using var db = PagedDb.MemoryMappedDb(size, 64, dataPath, false);
 var rootHashActual = Keccak.Zero;
 if (dbExists == false)
 {
-    using var preCommit = new ComputeMerkleBehavior(true, 2, 2);
+    using var preCommit = new ComputeMerkleBehavior(true, 2, 2, true);
 
     await using (var blockchain =
                  new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 100, () => reporter.Observe()))
