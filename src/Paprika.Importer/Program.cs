@@ -26,7 +26,6 @@ var cfg = DbConfig.Default;
 using var state = new DbOnTheRocks(path, GetSettings(DbNames.State), cfg, logs).WithEOACompressed();
 using var blockInfos = new DbOnTheRocks(path, GetSettings(DbNames.BlockInfos), cfg, logs);
 using var headers = new DbOnTheRocks(path, GetSettings(DbNames.Headers), cfg, logs);
-using var blocks = new DbOnTheRocks(path, GetSettings(DbNames.Blocks), cfg, logs);
 using var store = new TrieStore(state, logs);
 
 // from BlockTree.cs
