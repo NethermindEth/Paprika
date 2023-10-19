@@ -55,7 +55,6 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
         }
     }
 
-
     private readonly Blockchain _blockchain;
     private readonly int _batchSize;
     private readonly int? _expectedAccountCount;

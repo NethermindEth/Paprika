@@ -80,6 +80,51 @@ public class RootHashTests
         AssertRoot("a624947d9693a5cba0701897b3a48cb9954c2f4fd54de36151800eb2c7f6bf50", commit);
     }
 
+    [Test(Description = "Skewed tree that build extensions of different lengths")]
+    public void Skewed_tree()
+    {
+        var commit = new Commit();
+        Random random = new(17);
+
+        // "0000"
+        // "1000"
+        // "1100";
+        // "1110";
+        // "1111";
+        // "2000"
+        // "2100"
+        // "2110"
+        // "2111"
+        // "2200"
+        // ...
+
+        Span<byte> destination = stackalloc byte[Account.MaxByteCount];
+        Span<byte> key = stackalloc byte[32];
+        for (var nibble0 = 0; nibble0 < 16; nibble0++)
+        {
+            for (var nibble1 = 0; nibble1 <= nibble0; nibble1++)
+            {
+                for (var nibble2 = 0; nibble2 <= nibble1; nibble2++)
+                {
+                    for (var nibble3 = 0; nibble3 <= nibble2; nibble3++)
+                    {
+                        random.NextBytes(key);
+                        var b0 = (byte)((nibble0 << 8) | nibble1);
+                        key[0] = b0;
+
+                        var b1 = (byte)((nibble2 << 8) | nibble3);
+                        key[1] = b1;
+
+                        var account = new Account(b1, b0, new Keccak(key), Keccak.EmptyTreeHash);
+                        commit.Set(Key.Account(NibblePath.FromKey(key)), account.WriteTo(destination));
+                    }
+                }
+            }
+        }
+
+        AssertRoot("336c4f5942630369aa8ebe35d26b9f596159f6c800e7a4cf538532782adf7caa", commit);
+    }
+
     private static void AssertRoot(string hex, ICommit commit)
     {
         var merkle = new ComputeMerkleBehavior(true);
