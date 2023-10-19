@@ -10,6 +10,7 @@ using Nethermind.Serialization.Rlp;
 using Nethermind.State;
 using Nethermind.Trie.Pruning;
 using Paprika.Chain;
+using Paprika.Crypto;
 using Paprika.Importer;
 using Paprika.Merkle;
 using Paprika.Runner;
@@ -98,17 +99,17 @@ var reportingTask = Task.Run(() => AnsiConsole.Live(dbExists ? layout.GetLayout(
 
 var sw = Stopwatch.StartNew();
 
-using var db = PagedDb.MemoryMappedDb(size, 2, dataPath, false);
+using var db = PagedDb.MemoryMappedDb(size, 64, dataPath, false);
 //using var db = PagedDb.NativeMemoryDb(size, 2);
 
+var rootHashActual = Keccak.Zero;
 if (dbExists == false)
 {
     using var preCommit = new ComputeMerkleBehavior(true, 2, 2);
+
     await using (var blockchain =
                  new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 100, () => reporter.Observe()))
     {
-        const int sepoliaAccountCount = 16146399;
-
         var visitor = new PaprikaCopyingVisitor(blockchain, 2_000, null);
         Console.WriteLine("Starting...");
 
@@ -117,7 +118,7 @@ if (dbExists == false)
         visitor.Finish();
 
         Console.WriteLine("Awaiting writes to finish...");
-        await copyingTask;
+        rootHashActual = await copyingTask;
     }
 
     db.ForceFlush();
@@ -129,7 +130,10 @@ StatisticsForPagedDb.Report(layout[stats], read);
 spectre.Cancel();
 await reportingTask;
 
-Console.WriteLine($"Root: {rootHash} imported to Paprika accounts in {sw.Elapsed:g}");
+if (dbExists == false)
+{
+    Console.WriteLine($"Root: {rootHash} was being imported to Paprika in {sw.Elapsed:g} and resulted in {rootHashActual}");
+}
 
 return;
 

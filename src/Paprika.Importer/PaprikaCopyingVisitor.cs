@@ -110,7 +110,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 
     public void Finish() => _channel.Writer.Complete();
 
-    public async Task Copy()
+    public async Task<Keccak> Copy()
     {
         var parent = Keccak.Zero;
         uint number = 1;
@@ -151,6 +151,8 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
         {
             _blockchain.Finalize(keccak);
         }
+
+        return parent;
     }
 
     private static Keccak AsPaprika(Nethermind.Core.Crypto.Keccak keccak)
