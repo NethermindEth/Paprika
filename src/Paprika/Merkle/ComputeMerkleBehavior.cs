@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
+using HdrHistogram;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -418,7 +419,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private bool ShouldMemoizeBranchRlp(in NibblePath branchPath)
     {
-        return _memoizeRlp && 
+        return _memoizeRlp &&
                branchPath.Length >= 1; // a simple condition to memoize only more nested RLPs         
     }
 
@@ -793,7 +794,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     {
         Span<byte> span = stackalloc byte[33];
 
-        for (int i = 0; i < path.Length; i++)
+        for (int i = 0; i <= path.Length; i++)
         {
             var slice = path.SliceTo(i);
             var key = Key.Merkle(slice);
@@ -986,4 +987,3 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     public void Dispose() => _meter.Dispose();
 }
-
