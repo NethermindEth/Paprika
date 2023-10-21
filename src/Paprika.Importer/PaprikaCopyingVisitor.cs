@@ -36,7 +36,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
             _data = data;
         }
 
-        public void Apply(IWorldState block)
+        public void Apply(IWorldState block, bool withStorage)
         {
             var addr = AsPaprika(_account);
 
@@ -45,8 +45,10 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
                 var v = _accountValue;
                 var codeHash = AsPaprika(v.CodeHash);
 
+                // if storage is imported as well,
                 // storage root will be recalculated by Paprika, drop it
-                block.SetAccount(addr, new Account(v.Balance, v.Nonce, codeHash, Keccak.EmptyTreeHash));
+                var storageRootHash = withStorage ? Keccak.EmptyTreeHash : AsPaprika(v.StorageRoot);
+                block.SetAccount(addr, new Account(v.Balance, v.Nonce, codeHash, storageRootHash));
             }
             else
             {
@@ -65,7 +67,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 
     private int _accounts;
 
-    public PaprikaCopyingVisitor(Blockchain blockchain, int batchSize, int? expectedAccountCount)
+    public PaprikaCopyingVisitor(Blockchain blockchain, int batchSize, int? expectedAccountCount, bool importStorage)
     {
         _meter = new Meter("Paprika.Importer");
 
@@ -80,6 +82,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 
         _batchSize = batchSize;
         _expectedAccountCount = expectedAccountCount;
+        VisitStorage = importStorage;
     }
 
     public void VisitLeafAccount(in ValueKeccak account, Nethermind.Core.Account value)
@@ -107,6 +110,8 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
         _channel.Writer.TryWrite(new(account, storage, value.ToArray()));
     }
 
+    public bool VisitStorage { get; private set; }
+
     public void Finish() => _channel.Writer.Complete();
 
     public async Task<Keccak> Copy()
@@ -128,7 +133,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
             while (i < _batchSize && reader.TryRead(out var item))
             {
                 i++;
-                item.Apply(block);
+                item.Apply(block, VisitStorage);
             }
 
             // commit & finalize

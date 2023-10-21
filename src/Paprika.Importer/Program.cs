@@ -109,7 +109,8 @@ if (dbExists == false)
     await using (var blockchain =
                  new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 100, () => reporter.Observe()))
     {
-        var visitor = new PaprikaCopyingVisitor(blockchain, 2_000, null);
+        const bool importStorage = false;
+        var visitor = new PaprikaCopyingVisitor(blockchain, 2_000, null, importStorage);
         Console.WriteLine("Starting...");
 
         var copyingTask = visitor.Copy();
