@@ -74,10 +74,10 @@ public class RootHashFuzzyTests
 
     private static CaseGenerator Accounts_10_000() =>
         new(10000, 0, "48864c880bd7610f9bad9aff765844db83c17cab764f5444b43c0076f6cf6c03");
-    
+
     private static CaseGenerator Accounts_1_000_000() =>
         new(1_000_000, 0, "e46e17a7ffa62ba32679893e6ccb4d9e48a9b044a88f22ff02004e6cc7f005b8");
-    
+
     private static CaseGenerator Accounts_10_000_000() =>
         new(10_000_000, 0, "a52d8ca37ed3310fa024563ad432df953fabb2130523f78adb1830bda9beccbe");
 

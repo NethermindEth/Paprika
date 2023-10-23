@@ -98,8 +98,8 @@ var reportingTask = Task.Run(() => AnsiConsole.Live(dbExists ? layout.GetLayout(
 
 var sw = Stopwatch.StartNew();
 
-using var db = PagedDb.MemoryMappedDb(size, 64, dataPath, false);
-//using var db = PagedDb.NativeMemoryDb(size, 2);
+//using var db = PagedDb.MemoryMappedDb(size, 64, dataPath, false);
+using var db = PagedDb.NativeMemoryDb(size, 2);
 
 var rootHashActual = Keccak.Zero;
 if (dbExists == false)
@@ -109,22 +109,26 @@ if (dbExists == false)
     await using (var blockchain =
                  new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 100, () => reporter.Observe()))
     {
-        const bool importStorage = false;
-        var visitor = new PaprikaCopyingVisitor(blockchain, 2_000, null, importStorage);
+        var visitor = new PaprikaRootValidatingVisitor(blockchain, 200);
         Console.WriteLine("Starting...");
 
-        var copyingTask = visitor.Copy();
-        trie.Accept(visitor, rootHash, true);
-        visitor.Finish();
+        var visit = Task.Run(() =>
+        {
+            trie.Accept(visitor, rootHash, true);
+            visitor.Finish();
+        });
 
-        Console.WriteLine("Awaiting writes to finish...");
-        rootHashActual = await copyingTask;
+        var copy = visitor.Copy();
+        await Task.WhenAll(visit, copy);
+
+        rootHashActual = await copy;
     }
 
     db.ForceFlush();
 }
 
 using var read = db.BeginReadOnlyBatch("Statistics");
+
 StatisticsForPagedDb.Report(layout[stats], read);
 
 spectre.Cancel();

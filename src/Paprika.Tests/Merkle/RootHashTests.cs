@@ -164,7 +164,7 @@ public class RootHashTests
 
         AssertRoot(rootHash, commit);
     }
-    
+
     [TestCase(16, "80ad0d5d5f4912fe515d70f62b0c5359ac8fb26dbaf52a78fafb7a820252438c")]
     [TestCase(128, "45f09d49b6b1ca5f2b0cb82bc7fb3b381ff2ce95bd69a5eda8ce13b48855c2e4")]
     [TestCase(512, "b71064764d77f2122778e3892b37470854efd4a4acd8a1955bbe7dcfa0bc161c")]
@@ -179,7 +179,7 @@ public class RootHashTests
         for (uint i = 0; i < size; i++)
         {
             key.Clear();
-            
+
             var at = random.Next(NibblePath.KeccakNibbleCount);
             var nibble = random.Next(16);
 
@@ -193,7 +193,7 @@ public class RootHashTests
             var account = new Account(i, i, new Keccak(key), Keccak.EmptyTreeHash);
             commit.Set(Key.Account(NibblePath.FromKey(key)), account.WriteTo(destination));
         }
-        
+
         AssertRoot(rootHash, commit);
     }
 
