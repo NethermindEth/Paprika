@@ -63,7 +63,7 @@ if (dbExists)
 }
 else
 {
-    Directory.CreateDirectory(dataPath);
+    //Directory.CreateDirectory(dataPath);
     Console.WriteLine($"Using persistent DB on disk, located: {dataPath}");
     Console.WriteLine("Initializing db of size {0}GB", size / GB);
 }
