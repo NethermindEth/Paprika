@@ -1,5 +1,4 @@
-﻿using System.Diagnostics;
-using System.Diagnostics.Metrics;
+﻿using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Nethermind.Core.Crypto;
@@ -36,7 +35,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
             _data = data;
         }
 
-        public void Apply(IWorldState block, bool withStorage)
+        public void Apply(IWorldState block)
         {
             var addr = AsPaprika(_account);
 
@@ -45,10 +44,8 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
                 var v = _accountValue;
                 var codeHash = AsPaprika(v.CodeHash);
 
-                // if storage is imported as well,
-                // storage root will be recalculated by Paprika, drop it
-                var storageRootHash = withStorage ? Keccak.EmptyTreeHash : AsPaprika(v.StorageRoot);
-                block.SetAccount(addr, new Account(v.Balance, v.Nonce, codeHash, storageRootHash));
+                // import account with empty tree hash so that it can be dirtied properly
+                block.SetAccount(addr, new Account(v.Balance, v.Nonce, codeHash, Keccak.EmptyTreeHash));
             }
             else
             {
@@ -59,7 +56,6 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 
     private readonly Blockchain _blockchain;
     private readonly int _batchSize;
-    private readonly int? _expectedAccountCount;
     private readonly Channel<Item> _channel;
 
     private readonly Meter _meter;
@@ -67,12 +63,11 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 
     private int _accounts;
 
-    public PaprikaCopyingVisitor(Blockchain blockchain, int batchSize, int? expectedAccountCount, bool importStorage)
+    public PaprikaCopyingVisitor(Blockchain blockchain, int batchSize)
     {
         _meter = new Meter("Paprika.Importer");
 
-        var accountsUnit = expectedAccountCount.HasValue ? "%" : "count";
-        _accountsGauge = _meter.CreateAtomicObservableGauge("Accounts imported", accountsUnit);
+        _accountsGauge = _meter.CreateAtomicObservableGauge("Accounts imported", "count");
 
         _blockchain = blockchain;
 
@@ -81,8 +76,6 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
         _channel = Channel.CreateUnbounded<Item>(options);
 
         _batchSize = batchSize;
-        _expectedAccountCount = expectedAccountCount;
-        VisitStorage = importStorage;
     }
 
     public void VisitLeafAccount(in ValueKeccak account, Nethermind.Core.Account value)
@@ -92,14 +85,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
         // update occasionally
         if (incremented % 100 == 0)
         {
-            if (_expectedAccountCount != null)
-            {
-                _accountsGauge.Set(incremented / (_expectedAccountCount.Value / 100));
-            }
-            else
-            {
-                _accountsGauge.Set(incremented);
-            }
+            _accountsGauge.Set(incremented);
         }
 
         _channel.Writer.TryWrite(new(account, value));
@@ -109,8 +95,6 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
     {
         _channel.Writer.TryWrite(new(account, storage, value.ToArray()));
     }
-
-    public bool VisitStorage { get; private set; }
 
     public void Finish() => _channel.Writer.Complete();
 
@@ -133,7 +117,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
             while (i < _batchSize && reader.TryRead(out var item))
             {
                 i++;
-                item.Apply(block, VisitStorage);
+                item.Apply(block);
             }
 
             // commit & finalize

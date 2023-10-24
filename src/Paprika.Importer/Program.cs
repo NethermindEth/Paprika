@@ -55,7 +55,7 @@ var dataPath = Path.Combine(dir, "db");
 var dbExists = Directory.Exists(dataPath);
 
 const long GB = 1024 * 1024 * 1024;
-var size = (path.Contains("mainnet") ? 256ul : 32ul) * GB;
+var size = (path.Contains("mainnet") ? 256ul : 24ul) * GB;
 
 if (dbExists)
 {
@@ -63,7 +63,7 @@ if (dbExists)
 }
 else
 {
-    //Directory.CreateDirectory(dataPath);
+    Directory.CreateDirectory(dataPath);
     Console.WriteLine($"Using persistent DB on disk, located: {dataPath}");
     Console.WriteLine("Initializing db of size {0}GB", size / GB);
 }
@@ -98,8 +98,8 @@ var reportingTask = Task.Run(() => AnsiConsole.Live(dbExists ? layout.GetLayout(
 
 var sw = Stopwatch.StartNew();
 
-//using var db = PagedDb.MemoryMappedDb(size, 64, dataPath, false);
-using var db = PagedDb.NativeMemoryDb(size, 2);
+using var db = PagedDb.MemoryMappedDb(size, 64, dataPath, false);
+//using var db = PagedDb.NativeMemoryDb(size, 2);
 
 var rootHashActual = Keccak.Zero;
 if (dbExists == false)
@@ -109,7 +109,7 @@ if (dbExists == false)
     await using (var blockchain =
                  new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 100, () => reporter.Observe()))
     {
-        var visitor = new PaprikaRootValidatingVisitor(blockchain, 200);
+        var visitor = new PaprikaCopyingVisitor(blockchain, 5000);
         Console.WriteLine("Starting...");
 
         var visit = Task.Run(() =>

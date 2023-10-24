@@ -25,23 +25,23 @@ public class PaprikaRootValidatingVisitor : ITreeLeafVisitor, IDisposable
     private readonly Queue<Keccak> _finalized = new();
 
     // Nethermind
-    private readonly StateTree _state;
+    private readonly StateTree? _state;
 
     private int _accounts;
 
-    public PaprikaRootValidatingVisitor(Blockchain blockchain, int batchSize = 1)
+    public PaprikaRootValidatingVisitor(Blockchain blockchain, int batchSize = 1, bool constructNethermindStateTree = true)
     {
         _meter = new Meter("Paprika.Importer");
 
         _accountsGauge = _meter.CreateAtomicObservableGauge("Accounts imported", "count");
         _blockchain = blockchain;
         _batchSize = batchSize;
-        _state = new StateTree();
+        _state = constructNethermindStateTree ? new StateTree() : null;
 
         var options = new UnboundedChannelOptions
         {
             SingleReader = true,
-            SingleWriter = true
+            SingleWriter = false
         };
         _channel = Channel.CreateUnbounded<(ValueKeccak keccak, Nethermind.Core.Account)>(options);
     }
@@ -109,18 +109,21 @@ public class PaprikaRootValidatingVisitor : ITreeLeafVisitor, IDisposable
             paprikaState.SetAccount(AsPaprika(account), paprikaAccount);
 
             // Nethermind
-            _state.Set(account, value);
+            _state?.Set(account, value);
         }
 
         // Paprika
         _blockHash = paprikaState.Commit(_blockNumber++);
         Finalize(_blockHash);
 
-        _state.UpdateRootHash();
-
-        if (_blockHash != AsPaprika(_state.RootHash))
+        if (_state != null)
         {
-            throw new Exception($"Hashes different at {_blockNumber}");
+            _state.UpdateRootHash();
+
+            if (_blockHash != AsPaprika(_state.RootHash))
+            {
+                throw new Exception($"Hashes different at {_blockNumber}");
+            }
         }
     }
 
