@@ -1,11 +1,8 @@
-#define USE_PARALLEL
-
 using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
-using HdrHistogram;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -146,13 +143,16 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private void CalculateStorageRoots(ICommit commit, StorageHandler storage)
     {
-        Span<byte> accountSpan = stackalloc byte[Account.MaxByteCount];
-
-        var prefixed = new PrefixingCommit(commit);
-
+        if (storage.AccountsWithModifiedStorage.Count == 0)
+            return;
+        
         // a. start with the accounts that had their storage altered
-        foreach (var accountAddress in storage.AccountsWithModifiedStorage)
+        Parallel.ForEach(storage.AccountsWithModifiedStorage, () => commit.GetChild(), (accountAddress, _, child) =>
         {
+            Span<byte> accountSpan = stackalloc byte[Account.MaxByteCount];
+
+            var prefixed = new PrefixingCommit(child);
+
             prefixed.SetPrefix(accountAddress);
 
             // compute new storage root hash
@@ -160,7 +160,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
             // read the existing account
             var key = Key.Account(accountAddress);
-            using var accountOwner = commit.Get(key);
+            using var accountOwner = child.Get(key);
 
             Debug.Assert(accountOwner.IsEmpty == false, "The account should exist");
 
@@ -170,8 +170,17 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             account = account.WithChangedStorageRoot(new Keccak(keccakOrRlp.Span));
 
             // set it
-            commit.Set(key, account.WriteTo(accountSpan));
-        }
+            child.Set(key, account.WriteTo(accountSpan));
+
+            return child;
+        }, childCommit =>
+        {
+            lock (commit)
+            {
+                childCommit.Commit();
+            }
+            childCommit.Dispose();
+        });
     }
 
     private static HashSet<Keccak> VisitState(ICommit commit, StorageHandler storage)
@@ -332,20 +341,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             var commits = new IChildCommit[NibbleSet.NibbleCount];
 
             // parallel calculation
-#if USE_PARALLEL
             Parallel.For((long)0, NibbleSet.NibbleCount, nibble =>
-#else
-            var synchronized = commit;
-            for (var nibble = 0; nibble < NibbleSet.NibbleCount; nibble++)
-#endif
             {
                 var childPath = NibblePath.FromKey(stackalloc byte[1] { (byte)(nibble << NibblePath.NibbleShift) }, 0)
                     .SliceTo(1);
                 var child = commits[nibble] = commit.GetChild();
                 results[nibble] = Compute(Key.Merkle(childPath), child, trieType).Span.ToArray();
-#if !USE_PARALLEL
-            }
-#else
             });
 
             foreach (var childCommit in commits)
@@ -353,7 +354,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 childCommit.Commit();
                 childCommit.Dispose();
             }
-#endif
+
             // write all results in the stream
             for (byte i = 0; i < NibbleSet.NibbleCount; i++)
             {
@@ -542,6 +543,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             public void Dispose() => _commit.Dispose();
 
             public void Commit() => _commit.Commit();
+
+            public IChildCommit GetChild() => new ChildCommit(_parent, _commit.GetChild());
         }
     }
 
@@ -569,7 +572,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             }
         }
 
-        public IEnumerable<Keccak> AccountsWithModifiedStorage => _accountsWithModifiedStorage;
+        public IReadOnlyCollection<Keccak> AccountsWithModifiedStorage => _accountsWithModifiedStorage;
     }
 
     private enum DeleteStatus
@@ -617,142 +620,142 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         switch (type)
         {
             case Node.Type.Leaf:
+            {
+                var diffAt = leaf.Path.FindFirstDifferentNibble(leftoverPath);
+
+                if (diffAt == leaf.Path.Length)
                 {
-                    var diffAt = leaf.Path.FindFirstDifferentNibble(leftoverPath);
+                    commit.DeleteKey(key);
+                    return DeleteStatus.LeafDeleted;
+                }
 
-                    if (diffAt == leaf.Path.Length)
-                    {
-                        commit.DeleteKey(key);
-                        return DeleteStatus.LeafDeleted;
-                    }
-
+                return DeleteStatus.KeyDoesNotExist;
+            }
+            case Node.Type.Extension:
+            {
+                var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
+                if (diffAt != ext.Path.Length)
+                {
+                    // the path does not follow the extension path. It does not exist
                     return DeleteStatus.KeyDoesNotExist;
                 }
-            case Node.Type.Extension:
+
+                var newAt = at + ext.Path.Length;
+                var status = Delete(path, newAt, commit);
+
+                if (status == DeleteStatus.KeyDoesNotExist)
                 {
-                    var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
-                    if (diffAt != ext.Path.Length)
-                    {
-                        // the path does not follow the extension path. It does not exist
-                        return DeleteStatus.KeyDoesNotExist;
-                    }
-
-                    var newAt = at + ext.Path.Length;
-                    var status = Delete(path, newAt, commit);
-
-                    if (status == DeleteStatus.KeyDoesNotExist)
-                    {
-                        // the child reported not existence
-                        return DeleteStatus.KeyDoesNotExist;
-                    }
-
-                    if (status == DeleteStatus.NodeTypePreserved)
-                    {
-                        // The node has not change its type
-                        return DeleteStatus.NodeTypePreserved;
-                    }
-
-                    Debug.Assert(status == DeleteStatus.BranchToLeafOrExtension, $"Unexpected status of {status}");
-
-                    var childPath = path.SliceTo(newAt);
-                    var childKey = Key.Merkle(childPath);
-
-                    return TransformExtension(childKey, commit, key, ext);
+                    // the child reported not existence
+                    return DeleteStatus.KeyDoesNotExist;
                 }
-            case Node.Type.Branch:
+
+                if (status == DeleteStatus.NodeTypePreserved)
                 {
-                    var nibble = path[at];
-                    if (!branch.Children[nibble])
+                    // The node has not change its type
+                    return DeleteStatus.NodeTypePreserved;
+                }
+
+                Debug.Assert(status == DeleteStatus.BranchToLeafOrExtension, $"Unexpected status of {status}");
+
+                var childPath = path.SliceTo(newAt);
+                var childKey = Key.Merkle(childPath);
+
+                return TransformExtension(childKey, commit, key, ext);
+            }
+            case Node.Type.Branch:
+            {
+                var nibble = path[at];
+                if (!branch.Children[nibble])
+                {
+                    // no such child
+                    return DeleteStatus.KeyDoesNotExist;
+                }
+
+                var newAt = at + 1;
+
+                var status = Delete(path, newAt, commit);
+                if (status == DeleteStatus.KeyDoesNotExist)
+                {
+                    // child reports non-existence
+                    return DeleteStatus.KeyDoesNotExist;
+                }
+
+                if (status
+                    is DeleteStatus.NodeTypePreserved
+                    or DeleteStatus.ExtensionToLeaf
+                    or DeleteStatus.BranchToLeafOrExtension)
+                {
+                    // if either has the keccak or has the leftover rlp, clean
+                    if (branch.HasKeccak || leftover.IsEmpty == false)
                     {
-                        // no such child
-                        return DeleteStatus.KeyDoesNotExist;
+                        // reset
+                        commit.SetBranch(key, branch.Children);
                     }
 
-                    var newAt = at + 1;
+                    return DeleteStatus.NodeTypePreserved;
+                }
 
-                    var status = Delete(path, newAt, commit);
-                    if (status == DeleteStatus.KeyDoesNotExist)
-                    {
-                        // child reports non-existence
-                        return DeleteStatus.KeyDoesNotExist;
-                    }
+                Debug.Assert(status == DeleteStatus.LeafDeleted, "leaf deleted");
 
-                    if (status
-                        is DeleteStatus.NodeTypePreserved
-                        or DeleteStatus.ExtensionToLeaf
-                        or DeleteStatus.BranchToLeafOrExtension)
-                    {
-                        // if either has the keccak or has the leftover rlp, clean
-                        if (branch.HasKeccak || leftover.IsEmpty == false)
-                        {
-                            // reset
-                            commit.SetBranch(key, branch.Children);
-                        }
+                var children = branch.Children.Remove(nibble);
 
-                        return DeleteStatus.NodeTypePreserved;
-                    }
+                // if branch has still more than one child, just update the set
+                if (children.SetCount > 1)
+                {
+                    commit.SetBranch(key, children);
+                    return DeleteStatus.NodeTypePreserved;
+                }
 
-                    Debug.Assert(status == DeleteStatus.LeafDeleted, "leaf deleted");
+                // there's an only child now. The branch should be collapsed
+                var onlyNibble = children.SmallestNibbleSet;
+                var onlyChildPath = slice.AppendNibble(onlyNibble,
+                    stackalloc byte[slice.MaxByteLength + 1]);
 
-                    var children = branch.Children.Remove(nibble);
+                var onlyChildKey = Key.Merkle(onlyChildPath);
+                using var onlyChildSpanOwner = commit.Get(onlyChildKey);
 
-                    // if branch has still more than one child, just update the set
-                    if (children.SetCount > 1)
-                    {
-                        commit.SetBranch(key, children);
-                        return DeleteStatus.NodeTypePreserved;
-                    }
+                // need to collapse the branch
+                Node.ReadFrom(onlyChildSpanOwner.Span, out var childType, out var childLeaf, out var childExt,
+                    out _);
 
-                    // there's an only child now. The branch should be collapsed
-                    var onlyNibble = children.SmallestNibbleSet;
-                    var onlyChildPath = slice.AppendNibble(onlyNibble,
-                        stackalloc byte[slice.MaxByteLength + 1]);
+                var firstNibblePath =
+                    NibblePath
+                        .FromKey(stackalloc byte[1] { (byte)(onlyNibble << NibblePath.NibbleShift) })
+                        .SliceTo(1);
 
-                    var onlyChildKey = Key.Merkle(onlyChildPath);
-                    using var onlyChildSpanOwner = commit.Get(onlyChildKey);
-
-                    // need to collapse the branch
-                    Node.ReadFrom(onlyChildSpanOwner.Span, out var childType, out var childLeaf, out var childExt,
-                        out _);
-
-                    var firstNibblePath =
-                        NibblePath
-                            .FromKey(stackalloc byte[1] { (byte)(onlyNibble << NibblePath.NibbleShift) })
-                            .SliceTo(1);
-
-                    if (childType == Node.Type.Extension)
-                    {
-                        var extensionPath = firstNibblePath.Append(childExt.Path,
-                            stackalloc byte[NibblePath.FullKeccakByteLength]);
-
-                        // delete the only child
-                        commit.DeleteKey(onlyChildKey);
-
-                        // the single child is an extension, make it an extension
-                        commit.SetExtension(key, extensionPath);
-
-                        return DeleteStatus.BranchToLeafOrExtension;
-                    }
-
-                    if (childType == Node.Type.Branch)
-                    {
-                        // the single child is an extension, make it an extension with length of 1
-                        commit.SetExtension(key, firstNibblePath);
-                        return DeleteStatus.BranchToLeafOrExtension;
-                    }
-
-                    // prepare the new leaf path
-                    var leafPath =
-                        firstNibblePath.Append(childLeaf.Path, stackalloc byte[NibblePath.FullKeccakByteLength]);
-
-                    // replace branch with the leaf
-                    commit.SetLeaf(key, leafPath);
+                if (childType == Node.Type.Extension)
+                {
+                    var extensionPath = firstNibblePath.Append(childExt.Path,
+                        stackalloc byte[NibblePath.FullKeccakByteLength]);
 
                     // delete the only child
                     commit.DeleteKey(onlyChildKey);
 
+                    // the single child is an extension, make it an extension
+                    commit.SetExtension(key, extensionPath);
+
                     return DeleteStatus.BranchToLeafOrExtension;
                 }
+
+                if (childType == Node.Type.Branch)
+                {
+                    // the single child is an extension, make it an extension with length of 1
+                    commit.SetExtension(key, firstNibblePath);
+                    return DeleteStatus.BranchToLeafOrExtension;
+                }
+
+                // prepare the new leaf path
+                var leafPath =
+                    firstNibblePath.Append(childLeaf.Path, stackalloc byte[NibblePath.FullKeccakByteLength]);
+
+                // replace branch with the leaf
+                commit.SetLeaf(key, leafPath);
+
+                // delete the only child
+                commit.DeleteKey(onlyChildKey);
+
+                return DeleteStatus.BranchToLeafOrExtension;
+            }
             default:
                 throw new ArgumentOutOfRangeException();
         }
@@ -815,169 +818,169 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             switch (type)
             {
                 case Node.Type.Leaf:
-                    {
-                        var diffAt = leaf.Path.FindFirstDifferentNibble(leftoverPath);
+                {
+                    var diffAt = leaf.Path.FindFirstDifferentNibble(leftoverPath);
 
-                        if (diffAt == leaf.Path.Length)
+                    if (diffAt == leaf.Path.Length)
+                    {
+                        // update in place, mark in parent as dirty, beside that, do from from the Merkle pov
+                        return;
+                    }
+
+                    var nibbleA = leaf.Path[diffAt];
+                    var nibbleB = leftoverPath[diffAt];
+
+                    // nibbleA, deep copy to write in an unsafe manner
+                    var pathA = path.SliceTo(i + diffAt).AppendNibble(nibbleA, span);
+                    commit.SetLeaf(Key.Merkle(pathA), leaf.Path.SliceFrom(diffAt + 1));
+
+                    // nibbleB, set the newly set leaf, slice to the next nibble
+                    var pathB = path.SliceTo(i + 1 + diffAt);
+                    commit.SetLeaf(Key.Merkle(pathB), leftoverPath.SliceFrom(diffAt + 1));
+
+                    // Important! Make it the last in set of changes as it may be updating the key that was read (leaf)
+                    if (diffAt > 0)
+                    {
+                        // diff is not on the 0th position, so it will be a branch but preceded with an extension
+                        commit.SetExtension(key, leftoverPath.SliceTo(diffAt));
+                    }
+
+                    // Important! Make it the last in set of changes
+                    var branchKey = Key.Merkle(path.SliceTo(i + diffAt));
+                    commit.SetBranch(branchKey, new NibbleSet(nibbleA, nibbleB));
+
+                    return;
+                }
+                case Node.Type.Extension:
+                {
+                    var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
+                    if (diffAt == ext.Path.Length)
+                    {
+                        // the path overlaps with what is there, move forward
+                        i += ext.Path.Length - 1;
+                        continue;
+                    }
+
+                    if (diffAt == 0)
+                    {
+                        if (ext.Path.Length == 1)
                         {
-                            // update in place, mark in parent as dirty, beside that, do from from the Merkle pov
+                            // special case of an extension being only 1 nibble long
+                            // 1. replace an extension with a branch
+                            // 2. leave the next branch as is
+                            // 3. add a new leaf
+                            var set = new NibbleSet(ext.Path[0], leftoverPath[0]);
+                            commit.SetBranch(key, set);
+                            commit.SetLeaf(Key.Merkle(path.SliceTo(i + 1)), path.SliceFrom(i + 1));
                             return;
                         }
 
-                        var nibbleA = leaf.Path[diffAt];
-                        var nibbleB = leftoverPath[diffAt];
-
-                        // nibbleA, deep copy to write in an unsafe manner
-                        var pathA = path.SliceTo(i + diffAt).AppendNibble(nibbleA, span);
-                        commit.SetLeaf(Key.Merkle(pathA), leaf.Path.SliceFrom(diffAt + 1));
-
-                        // nibbleB, set the newly set leaf, slice to the next nibble
-                        var pathB = path.SliceTo(i + 1 + diffAt);
-                        commit.SetLeaf(Key.Merkle(pathB), leftoverPath.SliceFrom(diffAt + 1));
-
-                        // Important! Make it the last in set of changes as it may be updating the key that was read (leaf)
-                        if (diffAt > 0)
                         {
-                            // diff is not on the 0th position, so it will be a branch but preceded with an extension
-                            commit.SetExtension(key, leftoverPath.SliceTo(diffAt));
-                        }
+                            // the extension is at least 2 nibbles long
+                            // 1. replace it with a branch
+                            // 2. create a new, shorter extension that the branch points to
+                            // 3. create a new leaf
 
-                        // Important! Make it the last in set of changes
-                        var branchKey = Key.Merkle(path.SliceTo(i + diffAt));
-                        commit.SetBranch(branchKey, new NibbleSet(nibbleA, nibbleB));
+                            var ext0Th = ext.Path[0];
 
-                        return;
-                    }
-                case Node.Type.Extension:
-                    {
-                        var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
-                        if (diffAt == ext.Path.Length)
-                        {
-                            // the path overlaps with what is there, move forward
-                            i += ext.Path.Length - 1;
-                            continue;
-                        }
+                            commit.SetExtension(Key.Merkle(key.Path.AppendNibble(ext0Th, span)),
+                                ext.Path.SliceFrom(1));
 
-                        if (diffAt == 0)
-                        {
-                            if (ext.Path.Length == 1)
-                            {
-                                // special case of an extension being only 1 nibble long
-                                // 1. replace an extension with a branch
-                                // 2. leave the next branch as is
-                                // 3. add a new leaf
-                                var set = new NibbleSet(ext.Path[0], leftoverPath[0]);
-                                commit.SetBranch(key, set);
-                                commit.SetLeaf(Key.Merkle(path.SliceTo(i + 1)), path.SliceFrom(i + 1));
-                                return;
-                            }
-
-                            {
-                                // the extension is at least 2 nibbles long
-                                // 1. replace it with a branch
-                                // 2. create a new, shorter extension that the branch points to
-                                // 3. create a new leaf
-
-                                var ext0Th = ext.Path[0];
-
-                                commit.SetExtension(Key.Merkle(key.Path.AppendNibble(ext0Th, span)),
-                                    ext.Path.SliceFrom(1));
-
-                                commit.SetLeaf(Key.Merkle(path.SliceTo(i + 1)), path.SliceFrom(i + 1));
-
-                                // Important! Make it the last as it's updating the existing key and it might affect the read value
-                                commit.SetBranch(key, new NibbleSet(ext0Th, leftoverPath[0]));
-                                return;
-                            }
-                        }
-
-                        var lastNibblePos = ext.Path.Length - 1;
-                        if (diffAt == lastNibblePos)
-                        {
-                            // the last nibble is different
-                            // 1. trim the end of the extension.path by 1
-                            // 2. add a branch at the end with nibbles set to the last and the leaf
-                            // 3. add a new leaf
-
-                            var splitAt = i + ext.Path.Length - 1;
-                            var set = new NibbleSet(path[splitAt], ext.Path[lastNibblePos]);
-
-                            commit.SetBranch(Key.Merkle(path.SliceTo(splitAt)), set);
-                            commit.SetLeaf(Key.Merkle(path.SliceTo(splitAt + 1)), path.SliceFrom(splitAt + 1));
+                            commit.SetLeaf(Key.Merkle(path.SliceTo(i + 1)), path.SliceFrom(i + 1));
 
                             // Important! Make it the last as it's updating the existing key and it might affect the read value
-                            commit.SetExtension(key, ext.Path.SliceTo(lastNibblePos));
+                            commit.SetBranch(key, new NibbleSet(ext0Th, leftoverPath[0]));
                             return;
                         }
+                    }
 
-                        // the diff is not at the 0th nibble, it's not a full match as well
-                        // this means that E0->B0 will turn into E1->B1->E2->B0
-                        //                                             ->L0
-                        var extPath = ext.Path.SliceTo(diffAt);
+                    var lastNibblePos = ext.Path.Length - 1;
+                    if (diffAt == lastNibblePos)
+                    {
+                        // the last nibble is different
+                        // 1. trim the end of the extension.path by 1
+                        // 2. add a branch at the end with nibbles set to the last and the leaf
+                        // 3. add a new leaf
 
-                        // B1
-                        var branch1 = key.Path.Append(extPath, span);
-                        var existingNibble = ext.Path[diffAt];
-                        var addedNibble = path[i + diffAt];
-                        var children = new NibbleSet(existingNibble, addedNibble);
-                        commit.SetBranch(Key.Merkle(branch1), children);
+                        var splitAt = i + ext.Path.Length - 1;
+                        var set = new NibbleSet(path[splitAt], ext.Path[lastNibblePos]);
 
-                        // E2
-                        var extension2 = branch1.AppendNibble(existingNibble, span);
-                        if (extension2.Length < key.Path.Length + ext.Path.Length)
-                        {
-                            // there are some bytes to be set in the extension path, create one
-                            var e2Path = ext.Path.SliceFrom(diffAt + 1);
-                            commit.SetExtension(Key.Merkle(extension2), e2Path);
-                        }
+                        commit.SetBranch(Key.Merkle(path.SliceTo(splitAt)), set);
+                        commit.SetLeaf(Key.Merkle(path.SliceTo(splitAt + 1)), path.SliceFrom(splitAt + 1));
 
-                        // L0
-                        var leafPath = branch1.AppendNibble(addedNibble, span);
-                        commit.SetLeaf(Key.Merkle(leafPath), path.SliceFrom(leafPath.Length));
-
-                        // Important! Make it the last as it's updating the existing key
-                        commit.SetExtension(key, extPath);
-
+                        // Important! Make it the last as it's updating the existing key and it might affect the read value
+                        commit.SetExtension(key, ext.Path.SliceTo(lastNibblePos));
                         return;
                     }
-                case Node.Type.Branch:
+
+                    // the diff is not at the 0th nibble, it's not a full match as well
+                    // this means that E0->B0 will turn into E1->B1->E2->B0
+                    //                                             ->L0
+                    var extPath = ext.Path.SliceTo(diffAt);
+
+                    // B1
+                    var branch1 = key.Path.Append(extPath, span);
+                    var existingNibble = ext.Path[diffAt];
+                    var addedNibble = path[i + diffAt];
+                    var children = new NibbleSet(existingNibble, addedNibble);
+                    commit.SetBranch(Key.Merkle(branch1), children);
+
+                    // E2
+                    var extension2 = branch1.AppendNibble(existingNibble, span);
+                    if (extension2.Length < key.Path.Length + ext.Path.Length)
                     {
-                        var nibble = path[i];
-                        Span<byte> rlp = default;
-                        byte[]? array = default;
+                        // there are some bytes to be set in the extension path, create one
+                        var e2Path = ext.Path.SliceFrom(diffAt + 1);
+                        commit.SetExtension(Key.Merkle(extension2), e2Path);
+                    }
 
-                        if (leftover.Length == RlpMemo.Size)
+                    // L0
+                    var leafPath = branch1.AppendNibble(addedNibble, span);
+                    commit.SetLeaf(Key.Merkle(leafPath), path.SliceFrom(leafPath.Length));
+
+                    // Important! Make it the last as it's updating the existing key
+                    commit.SetExtension(key, extPath);
+
+                    return;
+                }
+                case Node.Type.Branch:
+                {
+                    var nibble = path[i];
+                    Span<byte> rlp = default;
+                    byte[]? array = default;
+
+                    if (leftover.Length == RlpMemo.Size)
+                    {
+                        if (owner.IsOwnedBy(commit))
                         {
-                            if (owner.IsOwnedBy(commit))
-                            {
-                                rlp = MakeRlpWritable(leftover);
-                            }
-                            else
-                            {
-                                array = ArrayPool<byte>.Shared.Rent(RlpMemo.Size);
-                                rlp = array.AsSpan(0, RlpMemo.Size);
-                                leftover.CopyTo(rlp);
-                            }
-
-                            var memo = new RlpMemo(rlp);
-                            memo.Clear(nibble);
-                        }
-
-                        if (rlp.IsEmpty)
-                        {
-                            // update branch as is, as there's no rlp
-                            commit.SetBranch(key, branch.Children.Set(nibble));
+                            rlp = MakeRlpWritable(leftover);
                         }
                         else
                         {
-                            commit.SetBranch(key, branch.Children.Set(nibble), rlp);
+                            array = ArrayPool<byte>.Shared.Rent(RlpMemo.Size);
+                            rlp = array.AsSpan(0, RlpMemo.Size);
+                            leftover.CopyTo(rlp);
                         }
 
-                        if (array != null)
-                        {
-                            ArrayPool<byte>.Shared.Return(array);
-                        }
+                        var memo = new RlpMemo(rlp);
+                        memo.Clear(nibble);
                     }
+
+                    if (rlp.IsEmpty)
+                    {
+                        // update branch as is, as there's no rlp
+                        commit.SetBranch(key, branch.Children.Set(nibble));
+                    }
+                    else
+                    {
+                        commit.SetBranch(key, branch.Children.Set(nibble), rlp);
+                    }
+
+                    if (array != null)
+                    {
+                        ArrayPool<byte>.Shared.Return(array);
+                    }
+                }
                     break;
                 default:
                     throw new ArgumentOutOfRangeException();

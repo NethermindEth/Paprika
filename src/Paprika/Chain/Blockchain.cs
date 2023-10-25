@@ -629,21 +629,20 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-        IChildCommit ICommit.GetChild() => new ChildCommit(new PooledSpanDictionary(Pool, true, false), this);
-
+        IChildCommit ICommit.GetChild() => new ChildCommit(Pool, this);
 
         class ChildCommit : IChildCommit
         {
             private readonly PooledSpanDictionary _dict;
+            private readonly BufferPool _pool;
             private readonly ICommit _parent;
 
-            public ChildCommit(PooledSpanDictionary dictionary, ICommit parent)
+            public ChildCommit(BufferPool pool, ICommit parent)
             {
-                _dict = dictionary;
+                _dict = new PooledSpanDictionary(pool, true, false);
+                _pool = pool;
                 _parent = parent;
             }
-
-            public void Dispose() => _dict.Dispose();
 
             public ReadOnlySpanOwner<byte> Get(scoped in Key key)
             {
@@ -683,6 +682,9 @@ public class Blockchain : IAsyncDisposable
                 }
             }
 
+            public IChildCommit GetChild() => new ChildCommit(_pool, this);
+
+            public void Dispose() => _dict.Dispose();
             public override string ToString() => _dict.ToString();
         }
 

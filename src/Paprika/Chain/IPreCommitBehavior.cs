@@ -64,7 +64,7 @@ public interface ICommit
     /// Gets the child commit that is a thread-safe write-through commit.
     /// </summary>
     /// <returns>A child commit.</returns>
-    IChildCommit GetChild() => throw new Exception($"No {nameof(GetChild)} available for this commit");
+    IChildCommit GetChild();
 }
 
 public interface IChildCommit : ICommit, IDisposable

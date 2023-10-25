@@ -1,5 +1,4 @@
 using Paprika.Crypto;
-using Paprika.Utils;
 using SpanExtensions = Paprika.Crypto.SpanExtensions;
 
 namespace Paprika.RLP;

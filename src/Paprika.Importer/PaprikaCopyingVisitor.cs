@@ -35,7 +35,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
             _data = data;
         }
 
-        public void Apply(IWorldState block)
+        public bool Apply(IWorldState block, bool skipStorage)
         {
             var addr = AsPaprika(_account);
 
@@ -44,18 +44,27 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
                 var v = _accountValue;
                 var codeHash = AsPaprika(v.CodeHash);
 
+                var storageRoot = skipStorage ? AsPaprika(v.StorageRoot) : Keccak.EmptyTreeHash;
+
+
                 // import account with empty tree hash so that it can be dirtied properly
-                block.SetAccount(addr, new Account(v.Balance, v.Nonce, codeHash, Keccak.EmptyTreeHash));
+                block.SetAccount(addr, new Account(v.Balance, v.Nonce, codeHash, storageRoot));
+                return true;
             }
-            else
+
+            if (skipStorage == false)
             {
                 block.SetStorage(addr, AsPaprika(_storage), _data);
+                return true;
             }
+
+            return false;
         }
     }
 
     private readonly Blockchain _blockchain;
     private readonly int _batchSize;
+    private readonly bool _skipStorage;
     private readonly Channel<Item> _channel;
 
     private readonly Meter _meter;
@@ -63,7 +72,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 
     private int _accounts;
 
-    public PaprikaCopyingVisitor(Blockchain blockchain, int batchSize)
+    public PaprikaCopyingVisitor(Blockchain blockchain, int batchSize, bool skipStorage)
     {
         _meter = new Meter("Paprika.Importer");
 
@@ -71,11 +80,17 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 
         _blockchain = blockchain;
 
-        var options = new UnboundedChannelOptions
-        { SingleReader = true, SingleWriter = false, AllowSynchronousContinuations = false };
-        _channel = Channel.CreateUnbounded<Item>(options);
+        var options = new BoundedChannelOptions(batchSize * 1000)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            AllowSynchronousContinuations = false
+        };
+
+        _channel = Channel.CreateBounded<Item>(options);
 
         _batchSize = batchSize;
+        _skipStorage = skipStorage;
     }
 
     public void VisitLeafAccount(in ValueKeccak account, Nethermind.Core.Account value)
@@ -88,12 +103,20 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
             _accountsGauge.Set(incremented);
         }
 
-        _channel.Writer.TryWrite(new(account, value));
+        Add(new Item(account, value));
     }
 
     public void VisitLeafStorage(in ValueKeccak account, in ValueKeccak storage, ReadOnlySpan<byte> value)
     {
-        _channel.Writer.TryWrite(new(account, storage, value.ToArray()));
+        Add(new(account, storage, value.ToArray()));
+    }
+
+    private void Add(Item item)
+    {
+        while (_channel.Writer.TryWrite(item) == false)
+        {
+            Thread.Sleep(TimeSpan.FromSeconds(1));
+        }
     }
 
     public void Finish() => _channel.Writer.Complete();
@@ -116,8 +139,16 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 
             while (i < _batchSize && reader.TryRead(out var item))
             {
-                i++;
-                item.Apply(block);
+                if (item.Apply(block, _skipStorage))
+                {
+                    i++;
+                }
+            }
+
+            if (i == 0)
+            {
+                // spin again on missing changes
+                continue;
             }
 
             // commit & finalize
