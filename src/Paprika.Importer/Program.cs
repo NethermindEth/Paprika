@@ -1,6 +1,7 @@
 ﻿// See https://aka.ms/new-console-template for more information
 
 using System.Diagnostics;
+using Nethermind.Blockchain.Headers;
 using Nethermind.Core;
 using Nethermind.Db;
 using Nethermind.Db.Rocks;
@@ -26,6 +27,9 @@ var cfg = DbConfig.Default;
 using var state = new DbOnTheRocks(path, GetSettings(DbNames.State), cfg, logs).WithEOACompressed();
 using var blockInfos = new DbOnTheRocks(path, GetSettings(DbNames.BlockInfos), cfg, logs);
 using var headers = new DbOnTheRocks(path, GetSettings(DbNames.Headers), cfg, logs);
+using var blockNumbers = new DbOnTheRocks(path, GetSettings(DbNames.BlockNumbers), cfg, logs);
+var headerStore = new HeaderStore(headers,blockNumbers);
+
 using var store = new TrieStore(state, logs);
 
 // from BlockTree.cs
@@ -37,13 +41,11 @@ ArgumentNullException.ThrowIfNull(bestPersistedState, "Best persisted state not 
 
 var bestPersisted = blockInfos.Get(bestPersistedState.Value);
 var chainLevel = Rlp.GetStreamDecoder<ChainLevelInfo>()!.Decode(new RlpStream(bestPersisted!));
-
 var main = chainLevel.BlockInfos[0];
 
-var header = headers.Get(main.BlockHash);
-var headerDecoded = Rlp.GetStreamDecoder<BlockHeader>()!.Decode(new RlpStream(header!));
+var header = headerStore.Get(main.BlockHash);
 
-var rootHash = headerDecoded.StateRoot!;
+var rootHash = header.StateRoot!;
 
 var trie = new StateTree(store, logs)
 {
@@ -109,7 +111,7 @@ if (dbExists == false)
     await using (var blockchain =
                  new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 100, () => reporter.Observe()))
     {
-        var visitor = new PaprikaCopyingVisitor(blockchain, 1000, false);
+        var visitor = new PaprikaCopyingVisitor(blockchain, 1000, true);
         Console.WriteLine("Starting...");
 
         var visit = Task.Run(() =>
