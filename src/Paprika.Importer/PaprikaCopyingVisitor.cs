@@ -35,6 +35,8 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
             _data = data;
         }
 
+        public bool IsAccount => _accountValue != null;
+
         public bool Apply(IWorldState block, bool skipStorage)
         {
             var addr = AsPaprika(_account);
@@ -45,7 +47,6 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
                 var codeHash = AsPaprika(v.CodeHash);
 
                 var storageRoot = skipStorage ? AsPaprika(v.StorageRoot) : Keccak.EmptyTreeHash;
-
 
                 // import account with empty tree hash so that it can be dirtied properly
                 block.SetAccount(addr, new Account(v.Balance, v.Nonce, codeHash, storageRoot));
@@ -68,15 +69,16 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
     private readonly Channel<Item> _channel;
 
     private readonly Meter _meter;
-    private readonly MetricsExtensions.IAtomicIntGauge _accountsGauge;
 
-    private int _accounts;
+    private readonly MetricsExtensions.IAtomicIntGauge _accountsVisitedGauge;
+    private readonly MetricsExtensions.IAtomicIntGauge _accountsAddedGauge;
 
     public PaprikaCopyingVisitor(Blockchain blockchain, int batchSize, bool skipStorage)
     {
         _meter = new Meter("Paprika.Importer");
 
-        _accountsGauge = _meter.CreateAtomicObservableGauge("Accounts imported", "count");
+        _accountsVisitedGauge = _meter.CreateAtomicObservableGauge("Accounts visited", "count");
+        _accountsAddedGauge = _meter.CreateAtomicObservableGauge("Accounts added", "count");
 
         _blockchain = blockchain;
 
@@ -95,14 +97,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 
     public void VisitLeafAccount(in ValueKeccak account, Nethermind.Core.Account value)
     {
-        var incremented = Interlocked.Increment(ref _accounts);
-
-        // update occasionally
-        if (incremented % 100 == 0)
-        {
-            _accountsGauge.Set(incremented);
-        }
-
+        _accountsVisitedGauge.Add(1);
         Add(new Item(account, value));
     }
 
@@ -137,13 +132,22 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 
             using var block = _blockchain.StartNew(parent);
 
+            var added = 0;
+
             while (i < _batchSize && reader.TryRead(out var item))
             {
                 if (item.Apply(block, _skipStorage))
                 {
+                    if (item.IsAccount)
+                    {
+                        added += 1;
+                    }
+
                     i++;
                 }
             }
+
+            _accountsAddedGauge.Add(added);
 
             if (i == 0)
             {
