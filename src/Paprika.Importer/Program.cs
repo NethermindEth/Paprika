@@ -28,7 +28,7 @@ using var state = new DbOnTheRocks(path, GetSettings(DbNames.State), cfg, logs).
 using var blockInfos = new DbOnTheRocks(path, GetSettings(DbNames.BlockInfos), cfg, logs);
 using var headers = new DbOnTheRocks(path, GetSettings(DbNames.Headers), cfg, logs);
 using var blockNumbers = new DbOnTheRocks(path, GetSettings(DbNames.BlockNumbers), cfg, logs);
-var headerStore = new HeaderStore(headers,blockNumbers);
+var headerStore = new HeaderStore(headers, blockNumbers);
 
 using var store = new TrieStore(state, logs);
 
@@ -103,6 +103,8 @@ var sw = Stopwatch.StartNew();
 using var db = PagedDb.MemoryMappedDb(size, 64, dataPath, false);
 //using var db = PagedDb.NativeMemoryDb(size, 2);
 
+const bool skipStorage = false;
+
 var rootHashActual = Keccak.Zero;
 if (dbExists == false)
 {
@@ -111,12 +113,14 @@ if (dbExists == false)
     await using (var blockchain =
                  new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 100, () => reporter.Observe()))
     {
-        var visitor = new PaprikaCopyingVisitor(blockchain, 1000, false);
+        var visitor = new PaprikaCopyingVisitor(blockchain, 1000, skipStorage);
         Console.WriteLine("Starting...");
 
         var visit = Task.Run(() =>
         {
-            trie.Accept(visitor, rootHash, true);
+            trie.RootRef.Accept(visitor, store, skipStorage);
+            //trie.Accept(visitor, rootHash, true);
+
             visitor.Finish();
         });
 
