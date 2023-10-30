@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using Nethermind.Core.Crypto;
 using Nethermind.Trie;
 using Paprika.Chain;
+using Paprika.Merkle;
 using Keccak = Paprika.Crypto.Keccak;
 
 namespace Paprika.Importer;
@@ -26,7 +27,7 @@ public class PaprikaAccountValidatingVisitor : ITreeLeafVisitor, IDisposable
 
         public ValidationStatus Validate(IReadOnlyWorldState read)
         {
-            var addr = AsPaprika(_account);
+            var addr = AccountKeccak;
             var v = _accountValue;
 
             var codeHash = AsPaprika(v.CodeHash);
@@ -54,6 +55,8 @@ public class PaprikaAccountValidatingVisitor : ITreeLeafVisitor, IDisposable
 
             return ValidationStatus.Valid;
         }
+
+        public Keccak AccountKeccak => AsPaprika(_account);
     }
 
     public enum ValidationStatus
@@ -66,11 +69,14 @@ public class PaprikaAccountValidatingVisitor : ITreeLeafVisitor, IDisposable
     }
 
     private readonly Blockchain _blockchain;
+    private readonly ComputeMerkleBehavior _merkle;
     private readonly Channel<AccountItem> _channel;
 
-    public PaprikaAccountValidatingVisitor(Blockchain blockchain, int batchSize)
+    public PaprikaAccountValidatingVisitor(Blockchain blockchain, ComputeMerkleBehavior merkle,
+        int batchSize)
     {
         _blockchain = blockchain;
+        _merkle = merkle;
 
         var options = new BoundedChannelOptions(batchSize * 1000)
         {
@@ -117,6 +123,12 @@ public class PaprikaAccountValidatingVisitor : ITreeLeafVisitor, IDisposable
             {
                 i++;
                 var status = item.Validate(read);
+
+                if (status == ValidationStatus.InvalidStorageRootHash)
+                {
+                    var calculated = _merkle.CalculateStorageRootHash(read, item.AccountKeccak);
+                }
+                
                 statuses[(int)status]++;
 
                 if (item.HasStorage)

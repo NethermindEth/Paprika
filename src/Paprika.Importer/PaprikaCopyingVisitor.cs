@@ -1,7 +1,9 @@
 ﻿using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Nethermind.Core.Crypto;
+using Nethermind.Serialization.Rlp;
 using Nethermind.Trie;
 using Paprika.Chain;
 using Paprika.Utils;
@@ -103,7 +105,9 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 
     public void VisitLeafStorage(in ValueKeccak account, in ValueKeccak storage, ReadOnlySpan<byte> value)
     {
-        Add(new(account, storage, value.ToArray()));
+        var span = MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(value), value.Length);
+        Rlp.ValueDecoderContext rlp = new Rlp.ValueDecoderContext(span);
+        Add(new(account, storage, rlp.DecodeByteArray()));
     }
 
     private void Add(Item item)

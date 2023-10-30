@@ -3,6 +3,7 @@
 using System.Diagnostics;
 using Nethermind.Blockchain.Headers;
 using Nethermind.Core;
+using Nethermind.Core.Crypto;
 using Nethermind.Db;
 using Nethermind.Db.Rocks;
 using Nethermind.Db.Rocks.Config;
@@ -11,12 +12,12 @@ using Nethermind.Serialization.Rlp;
 using Nethermind.State;
 using Nethermind.Trie.Pruning;
 using Paprika.Chain;
-using Paprika.Crypto;
 using Paprika.Importer;
 using Paprika.Merkle;
 using Paprika.Runner;
 using Paprika.Store;
 using Spectre.Console;
+using Keccak = Paprika.Crypto.Keccak;
 
 //const string path = @"C:\Users\Szymon\ethereum\mainnet";
 const string path = @"C:\Users\Szymon\ethereum\execution\nethermind_db\sepolia";
@@ -135,7 +136,7 @@ else
     await using (var blockchain =
                  new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 100, () => reporter.Observe()))
     {
-        var visitor = new PaprikaAccountValidatingVisitor(blockchain, 1000);
+        var visitor = new PaprikaAccountValidatingVisitor(blockchain, preCommit, 1000);
         
         var visit = Task.Run(() =>
         {
