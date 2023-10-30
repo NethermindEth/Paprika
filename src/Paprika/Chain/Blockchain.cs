@@ -245,8 +245,14 @@ public class Blockchain : IAsyncDisposable
         lock (_blockLock)
         {
             var (batch, ancestors) = BuildBlockDataDependencies(parentKeccak);
-            return new ReadOnlyState(parentKeccak, batch, ancestors, this);
+            return new ReadOnlyState(parentKeccak, batch, ancestors);
         }
+    }
+    
+    public IReadOnlyWorldState StartReadOnlyLatestFromDb()
+    {
+        var batch = _db.BeginReadOnlyBatch($"Blockchain dependency LATEST");
+        return new ReadOnlyState(batch.Metadata.StateHash, batch, Array.Empty<BlockState>());
     }
 
     private (IReadOnlyBatch batch, BlockState[] ancestors) BuildBlockDataDependencies(Keccak parentKeccak)
@@ -898,16 +904,13 @@ public class Blockchain : IAsyncDisposable
     private class ReadOnlyState : RefCountingDisposable, IReadOnlyWorldState
     {
         private readonly ReadOnlyBatchCountingRefs _batch;
-        private BlockState[] _ancestors;
-        private readonly Blockchain _blockchain;
-        private Keccak _hash;
+        private readonly BlockState[] _ancestors;
 
-        public ReadOnlyState(Keccak stateRoot, IReadOnlyBatch batch, BlockState[] ancestors, Blockchain blockchain)
+        public ReadOnlyState(Keccak stateRoot, IReadOnlyBatch batch, BlockState[] ancestors)
         {
             _batch = new ReadOnlyBatchCountingRefs(batch);
             _ancestors = ancestors;
-            _blockchain = blockchain;
-            _hash = stateRoot;
+            Hash = stateRoot;
         }
 
         public uint BlockNumber { get; private set; }
@@ -946,7 +949,7 @@ public class Blockchain : IAsyncDisposable
         private static int GetHash(in Key key) => key.GetHashCode();
 
 
-        private ReadOnlySpanOwner<byte> Get(scoped in Key key)
+        public ReadOnlySpanOwner<byte> Get(scoped in Key key)
         {
             var hash = GetHash(key);
             var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);

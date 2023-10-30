@@ -72,6 +72,41 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             "How long it takes to calculate storage roots");
     }
 
+    public Keccak CalculateStorageRootHash(IReadOnlyWorldState commit, in Keccak account)
+    {
+        const ComputeHint hint = ComputeHint.DontUseParallel | ComputeHint.SkipCachedInformation;
+        var prefixed = new PrefixingCommit(new CommitWrapper(commit));
+        prefixed.SetPrefix(account);
+
+        var root = Key.Merkle(NibblePath.Empty);
+        var value = Compute(in root, prefixed, TrieType.Storage, hint);
+        return new Keccak(value.Span);
+    }
+
+    class CommitWrapper : ICommit
+    {
+        private readonly IReadOnlyWorldState _readOnly;
+
+        public CommitWrapper(IReadOnlyWorldState readOnly)
+        {
+            _readOnly = readOnly;
+        }
+
+        public ReadOnlySpanOwner<byte> Get(scoped in Key key) => _readOnly.Get(key);
+
+        public void Set(in Key key, in ReadOnlySpan<byte> payload)
+        {
+            // NOP
+        }
+
+        public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
+        {
+            // NOP
+        }
+
+        public IChildCommit GetChild() => throw new NotImplementedException("Should not be called");
+    }
+
     public Keccak BeforeCommit(ICommit commit)
     {
         // 1. Visit all Storage operations (SSTORE). For each key:
@@ -210,7 +245,23 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     public Keccak RootHash { get; private set; }
 
-    private KeccakOrRlp Compute(in Key key, ICommit commit, TrieType trieType)
+    [Flags]
+    private enum ComputeHint
+    {
+        None = 0,
+        
+        /// <summary>
+        /// Skip cached Branch keccaks as well as memoized RLP.
+        /// </summary>
+        SkipCachedInformation = 1,
+        
+        /// <summary>
+        ///  Don't user parallel computation when calculating this computation.
+        /// </summary>
+        DontUseParallel = 2,
+    }
+
+    private KeccakOrRlp Compute(in Key key, ICommit commit, TrieType trieType, ComputeHint hint = ComputeHint.None)
     {
         using var owner = commit.Get(key);
         if (owner.IsEmpty)
@@ -225,15 +276,16 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             case Node.Type.Leaf:
                 return EncodeLeaf(key, commit, leaf, trieType);
             case Node.Type.Extension:
-                return EncodeExtension(key, commit, ext, trieType);
+                return EncodeExtension(key, commit, ext, trieType, hint);
             case Node.Type.Branch:
-                if (branch.HasKeccak)
+                var useMemoized = !hint.HasFlag(ComputeHint.SkipCachedInformation);
+                if (useMemoized && branch.HasKeccak)
                 {
                     // return memoized value
                     return branch.Keccak;
                 }
 
-                return EncodeBranch(key, commit, branch, trieType, leftover, owner.IsOwnedBy(commit));
+                return EncodeBranch(key, commit, branch, trieType, leftover, owner.IsOwnedBy(commit), hint);
             default:
                 throw new ArgumentOutOfRangeException();
         }
@@ -266,14 +318,14 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     }
 
     private KeccakOrRlp EncodeBranch(Key key, ICommit commit, scoped in Node.Branch branch, TrieType trieType,
-        ReadOnlySpan<byte> previousRlp, bool isOwnedByCommit)
+        ReadOnlySpan<byte> previousRlp, bool isOwnedByCommit, ComputeHint hint)
     {
         // Parallelize at the root level any trie, state or storage, that have all children set.
         // This heuristic is used to estimate that the tree should be big enough to gain from making this computation
         // parallel but without calculating and storing additional information how big is the tree.
-        var runInParallel = key.Path.IsEmpty && branch.Children.AllSet;
+        var runInParallel = !hint.HasFlag(ComputeHint.DontUseParallel) && key.Path.IsEmpty && branch.Children.AllSet;
 
-        var memoize = ShouldMemoizeBranchRlp(key.Path);
+        var memoize = !hint.HasFlag(ComputeHint.SkipCachedInformation) && ShouldMemoizeBranchRlp(key.Path);
         var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
 
         byte[]? rlpMemoization = null;
@@ -443,7 +495,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     }
 
     private KeccakOrRlp EncodeExtension(in Key key, ICommit commit, scoped in Node.Extension ext,
-        TrieType trieType)
+        TrieType trieType, ComputeHint computeHint)
     {
         Span<byte> span = stackalloc byte[Math.Max(ext.Path.HexEncodedLength, key.Path.MaxByteLength + 1)];
 

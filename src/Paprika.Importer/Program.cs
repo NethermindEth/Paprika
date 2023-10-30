@@ -105,11 +105,11 @@ using var db = PagedDb.MemoryMappedDb(size, 64, dataPath, false);
 
 const bool skipStorage = false;
 
+using var preCommit = new ComputeMerkleBehavior(true, 2, 2, true);
+
 var rootHashActual = Keccak.Zero;
 if (dbExists == false)
 {
-    using var preCommit = new ComputeMerkleBehavior(true, 2, 2, true);
-
     await using (var blockchain =
                  new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 100, () => reporter.Observe()))
     {
@@ -119,8 +119,6 @@ if (dbExists == false)
         var visit = Task.Run(() =>
         {
             trie.RootRef.Accept(visitor, store, skipStorage);
-            //trie.Accept(visitor, rootHash, true);
-
             visitor.Finish();
         });
 
@@ -131,6 +129,25 @@ if (dbExists == false)
     }
 
     db.ForceFlush();
+}
+else
+{
+    await using (var blockchain =
+                 new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 100, () => reporter.Observe()))
+    {
+        var visitor = new PaprikaAccountValidatingVisitor(blockchain, 1000);
+        
+        var visit = Task.Run(() =>
+        {
+            trie.RootRef.Accept(visitor, store, skipStorage);
+            visitor.Finish();
+        });
+
+        var copy = visitor.Validate();
+        await Task.WhenAll(visit, copy);
+        
+        var wrong = await copy;
+    }
 }
 
 using var read = db.BeginReadOnlyBatch("Statistics");
