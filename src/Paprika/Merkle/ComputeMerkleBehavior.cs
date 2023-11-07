@@ -249,12 +249,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private enum ComputeHint
     {
         None = 0,
-        
+
         /// <summary>
         /// Skip cached Branch keccaks as well as memoized RLP.
         /// </summary>
         SkipCachedInformation = 1,
-        
+
         /// <summary>
         ///  Don't user parallel computation when calculating this computation.
         /// </summary>

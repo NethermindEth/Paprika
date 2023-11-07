@@ -15,7 +15,7 @@ public interface IWorldState : IDisposable
     /// Gets the current hash of the world state.
     /// </summary>
     Keccak Hash { get; }
-    
+
     void SetAccount(in Keccak address, in Account account);
 
     /// <summary>

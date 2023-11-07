@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using Nethermind.Core.Crypto;
 using Nethermind.Trie;
 using Paprika.Chain;
+using Paprika.Data;
 using Paprika.Merkle;
 using Keccak = Paprika.Crypto.Keccak;
 
@@ -110,35 +111,29 @@ public class PaprikaAccountValidatingVisitor : ITreeLeafVisitor, IDisposable
     public async Task<List<Keccak>> Validate()
     {
         var statuses = new int[5];
-        var withStorage = 0;
-        
+
         using var read = _blockchain.StartReadOnlyLatestFromDb();
         var reader = _channel.Reader;
 
+        var different = new List<Keccak>();
         var i = 0;
 
         while (await reader.WaitToReadAsync())
         {
-            while (reader.TryRead(out var  item))
+            while (reader.TryRead(out var item))
             {
                 i++;
                 var status = item.Validate(read);
-
-                if (status == ValidationStatus.InvalidStorageRootHash)
+                if (status != ValidationStatus.Valid)
                 {
-                    var calculated = _merkle.CalculateStorageRootHash(read, item.AccountKeccak);
+                    different.Add(item.AccountKeccak);
                 }
-                
+
                 statuses[(int)status]++;
-
-                if (item.HasStorage)
-                {
-                    withStorage++;
-                }
             }
         }
 
-        return new List<Keccak>();
+        return different;
     }
 
     private static Keccak AsPaprika(Nethermind.Core.Crypto.Keccak keccak)

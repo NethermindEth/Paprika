@@ -43,7 +43,7 @@ public interface ICommit
     /// If successful, returns a result as an owner. Must be disposed properly.
     /// </remarks>
     public ReadOnlySpanOwner<byte> Get(scoped in Key key);
-    
+
     /// <summary>
     /// Sets the value under the given key.
     /// </summary>

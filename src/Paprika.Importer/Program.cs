@@ -10,6 +10,7 @@ using Nethermind.Db.Rocks.Config;
 using Nethermind.Logging;
 using Nethermind.Serialization.Rlp;
 using Nethermind.State;
+using Nethermind.Trie;
 using Nethermind.Trie.Pruning;
 using Paprika.Chain;
 using Paprika.Importer;
@@ -52,6 +53,16 @@ var trie = new StateTree(store, logs)
 {
     RootHash = rootHash
 };
+
+
+// var accountHash = new ValueKeccak("0x2ffff586aaf673cf990d6c99753a67dff02f5f3d8e061fbd8b1011b4091b8d43").ToKeccak();
+// var accountRlp = trie.Get(accountHash.Bytes);
+// var storageRoot = new AccountDecoder().DecodeStorageRootOnly(new RlpStream(accountRlp!));
+// var storageTree = new StorageTree(store, storageRoot!, LimboLogs.Instance);
+// var root = storageTree.RootRef!;
+// root.ResolveNode(store);
+// var trieStats = new TrieStatsCollector(new MemDb(), LimboLogs.Instance);
+// root.Accept(trieStats, store, new TrieVisitContext { IsStorage = true });
 
 var dir = Directory.GetCurrentDirectory();
 var dataPath = Path.Combine(dir, "db");
@@ -114,12 +125,12 @@ if (dbExists == false)
     await using (var blockchain =
                  new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 100, () => reporter.Observe()))
     {
-        var visitor = new PaprikaCopyingVisitor(blockchain, 1000, skipStorage);
+        var visitor = new PaprikaCopyingVisitor(blockchain, 5000, skipStorage);
         Console.WriteLine("Starting...");
 
         var visit = Task.Run(() =>
         {
-            trie.RootRef.Accept(visitor, store, skipStorage);
+            trie.RootRef.Accept(visitor, store, false);
             visitor.Finish();
         });
 
@@ -130,6 +141,9 @@ if (dbExists == false)
     }
 
     db.ForceFlush();
+
+    using var read = db.BeginReadOnlyBatch("Statistics");
+    StatisticsForPagedDb.Report(layout[stats], read);
 }
 else
 {
@@ -137,23 +151,22 @@ else
                  new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 100, () => reporter.Observe()))
     {
         var visitor = new PaprikaAccountValidatingVisitor(blockchain, preCommit, 1000);
-        
+
         var visit = Task.Run(() =>
         {
-            trie.RootRef.Accept(visitor, store, skipStorage);
+            trie.RootRef.Accept(visitor, store, true);
             visitor.Finish();
         });
 
         var copy = visitor.Validate();
         await Task.WhenAll(visit, copy);
-        
+
         var wrong = await copy;
+        var keccaks = string.Join(", ", wrong);
+
+        layout[stats].Update(new Panel(keccaks).Header("Paprika accounts different from the original").Expand());
     }
 }
-
-using var read = db.BeginReadOnlyBatch("Statistics");
-
-StatisticsForPagedDb.Report(layout[stats], read);
 
 spectre.Cancel();
 await reportingTask;
