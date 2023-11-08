@@ -128,7 +128,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         }
 
         _lastRoot = 0;
-        for (var i = 0; i < MinHistoryDepth; i++)
+        for (var i = 0; i < _historyDepth; i++)
         {
             if (_roots[i].Header.BatchId > _lastRoot)
             {
