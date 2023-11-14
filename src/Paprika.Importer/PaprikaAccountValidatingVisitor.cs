@@ -1,4 +1,5 @@
 ﻿using System.Runtime.CompilerServices;
+using System.Text;
 using System.Threading.Channels;
 using Nethermind.Core.Crypto;
 using Nethermind.Trie;
@@ -36,6 +37,9 @@ public class PaprikaAccountValidatingVisitor : ITreeLeafVisitor, IDisposable
 
             var paprika = read.GetAccount(addr);
 
+            if (paprika.IsEmpty)
+                return ValidationStatus.EmptyInPaprika;
+                
             if (paprika.Balance != v.Balance)
                 return ValidationStatus.InvalidBalance;
 
@@ -63,10 +67,12 @@ public class PaprikaAccountValidatingVisitor : ITreeLeafVisitor, IDisposable
     public enum ValidationStatus
     {
         Valid = 0,
-        InvalidBalance = 1,
-        InvalidNonce = 2,
-        InvalidCodeHash = 3,
-        InvalidStorageRootHash = 4
+        
+        EmptyInPaprika = 1,
+        InvalidBalance = 2,
+        InvalidNonce = 3,
+        InvalidCodeHash = 4,
+        InvalidStorageRootHash = 5
     }
 
     private readonly Blockchain _blockchain;
@@ -108,32 +114,46 @@ public class PaprikaAccountValidatingVisitor : ITreeLeafVisitor, IDisposable
 
     public void Finish() => _channel.Writer.Complete();
 
-    public async Task<List<Keccak>> Validate()
+    public async Task<string> Validate()
     {
-        var statuses = new int[5];
+        List<string>?[] statuses = new List<string>[6];
 
         using var read = _blockchain.StartReadOnlyLatestFromDb();
         var reader = _channel.Reader;
-
-        var different = new List<Keccak>();
-        var i = 0;
 
         while (await reader.WaitToReadAsync())
         {
             while (reader.TryRead(out var item))
             {
-                i++;
                 var status = item.Validate(read);
                 if (status != ValidationStatus.Valid)
                 {
-                    different.Add(item.AccountKeccak);
+                    var i = (int)status;
+                    statuses[i] ??= new();
+                    statuses[i]!.Add(item.AccountKeccak.ToString());
                 }
-
-                statuses[(int)status]++;
             }
         }
 
-        return different;
+        var sb = new StringBuilder();
+
+        foreach (var status in Enum.GetValues<ValidationStatus>())
+        {
+            if (status == ValidationStatus.Valid)
+                continue;
+
+            var list = statuses[(int)status];
+            if (list is { Count: > 0 })
+            {
+                list.Sort();
+                
+                sb.AppendLine($"{status}: ");
+                sb.AppendJoin(", ", list);
+                sb.AppendLine();
+            }
+        }
+
+        return sb.ToString();
     }
 
     private static Keccak AsPaprika(Nethermind.Core.Crypto.Keccak keccak)

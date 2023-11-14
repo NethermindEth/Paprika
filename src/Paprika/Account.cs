@@ -16,6 +16,11 @@ public readonly struct Account : IEquatable<Account>
     public readonly Keccak CodeHash;
     public readonly Keccak StorageRootHash;
 
+    public bool IsEmpty => Balance.IsZero
+                           && Nonce.IsZero
+                           && CodeHash == EmptyCodeHash
+                           && StorageRootHash == EmptyStorageRoot;
+
     public Account(UInt256 balance, UInt256 nonce)
     {
         Balance = balance;

@@ -127,18 +127,18 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 
         var reader = _channel.Reader;
 
+        var batch = new Queue<Item>();
         var finalization = new Queue<Keccak>();
         const int finalizationDepth = 32;
 
         while (await reader.WaitToReadAsync())
         {
-            var i = 0;
+            await BuildBatch(reader, batch);
 
             using var block = _blockchain.StartNew(parent);
 
             var added = 0;
-
-            while (i < _batchSize && reader.TryRead(out var item))
+            while (batch.TryDequeue(out var item))
             {
                 if (item.Apply(block, _skipStorage))
                 {
@@ -146,18 +146,10 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
                     {
                         added += 1;
                     }
-
-                    i++;
                 }
             }
 
             _accountsAddedGauge.Add(added);
-
-            if (i == 0)
-            {
-                // spin again on missing changes
-                continue;
-            }
 
             // commit & finalize
             var hash = block.Commit(number);
@@ -180,6 +172,22 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
         }
 
         return parent;
+    }
+
+    private async Task BuildBatch(ChannelReader<Item> reader, Queue<Item> batch)
+    {
+        while (await reader.WaitToReadAsync())
+        {
+            while (reader.TryRead(out var item))
+            {
+                batch.Enqueue(item);
+                
+                if (batch.Count == _batchSize)
+                {
+                    return;
+                }
+            }
+        }
     }
 
     private static Keccak AsPaprika(Nethermind.Core.Crypto.Keccak keccak)

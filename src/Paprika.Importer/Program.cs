@@ -3,7 +3,6 @@
 using System.Diagnostics;
 using Nethermind.Blockchain.Headers;
 using Nethermind.Core;
-using Nethermind.Core.Crypto;
 using Nethermind.Db;
 using Nethermind.Db.Rocks;
 using Nethermind.Db.Rocks.Config;
@@ -54,15 +53,14 @@ var trie = new StateTree(store, logs)
     RootHash = rootHash
 };
 
-
-// var accountHash = new ValueKeccak("0x2ffff586aaf673cf990d6c99753a67dff02f5f3d8e061fbd8b1011b4091b8d43").ToKeccak();
+// var accountHash = new ValueKeccak("0x2f31c20a56f5e9fc1a3873c84d5f80daf7d52e12c5ad5260dc6c32eb41e5fc4d").ToKeccak();
 // var accountRlp = trie.Get(accountHash.Bytes);
-// var storageRoot = new AccountDecoder().DecodeStorageRootOnly(new RlpStream(accountRlp!));
-// var storageTree = new StorageTree(store, storageRoot!, LimboLogs.Instance);
-// var root = storageTree.RootRef!;
-// root.ResolveNode(store);
-// var trieStats = new TrieStatsCollector(new MemDb(), LimboLogs.Instance);
-// root.Accept(trieStats, store, new TrieVisitContext { IsStorage = true });
+// var accountDecoded = new AccountDecoder().Decode(new RlpStream(accountRlp!));
+// var storageTree = new StorageTree(store, accountDecoded.StorageRoot!, LimboLogs.Instance);
+// var storageRootNode = storageTree.RootRef!;
+// storageRootNode.ResolveNode(store);
+// // var trieStats = new TrieStatsCollector(new MemDb(), LimboLogs.Instance);
+// // root.Accept(trieStats, store, new TrieVisitContext { IsStorage = true });
 
 var dir = Directory.GetCurrentDirectory();
 var dataPath = Path.Combine(dir, "db");
@@ -117,7 +115,14 @@ using var db = PagedDb.MemoryMappedDb(size, 64, dataPath, false);
 
 const bool skipStorage = false;
 
+// the prefix that should only be scanned
+byte[] nibbles = new byte[0];
+//byte[] nibbles = new byte[] { 0x2 };
+var root = MoveDownInTree(nibbles, trie, store);
+
 using var preCommit = new ComputeMerkleBehavior(true, 2, 2, true);
+
+
 
 var rootHashActual = Keccak.Zero;
 if (dbExists == false)
@@ -130,7 +135,7 @@ if (dbExists == false)
 
         var visit = Task.Run(() =>
         {
-            trie.RootRef.Accept(visitor, store, false);
+            root.Accept(visitor, store, false, nibbles);
             visitor.Finish();
         });
 
@@ -154,17 +159,19 @@ else
 
         var visit = Task.Run(() =>
         {
-            trie.RootRef.Accept(visitor, store, true);
+            root.Accept(visitor, store, true, nibbles);
             visitor.Finish();
         });
 
-        var copy = visitor.Validate();
-        await Task.WhenAll(visit, copy);
+        var validation = visitor.Validate();
+        await Task.WhenAll(visit, validation);
 
-        var wrong = await copy;
-        var keccaks = string.Join(", ", wrong);
+        var report = await validation;
+        
+        File.WriteAllText("validation-report.txt", report);
 
-        layout[stats].Update(new Panel(keccaks).Header("Paprika accounts different from the original").Expand());
+        layout[stats].Update(new Panel("validation-report.txt").Header("Paprika accounts different from the original")
+            .Expand());
     }
 }
 
@@ -190,4 +197,19 @@ RocksDbSettings GetSettings(string dbName)
     }
 
     return new RocksDbSettings(dbName, dbPath);
+}
+
+static TrieNode MoveDownInTree(byte[] nibbles, PatriciaTree trie, ITrieNodeResolver store)
+{
+    var root = trie.RootRef!;
+    
+    for (var i = 0; i < nibbles.Length; i++)
+    {
+        root.ResolveNode(store, ReadFlags.HintCacheMiss);
+        root = root.GetChild(store, nibbles[i])!;
+    }
+    
+    root.ResolveNode(store, ReadFlags.HintCacheMiss);
+
+    return root;
 }
