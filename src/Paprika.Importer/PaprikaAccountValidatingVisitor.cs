@@ -39,7 +39,7 @@ public class PaprikaAccountValidatingVisitor : ITreeLeafVisitor, IDisposable
 
             if (paprika.IsEmpty)
                 return ValidationStatus.EmptyInPaprika;
-                
+
             if (paprika.Balance != v.Balance)
                 return ValidationStatus.InvalidBalance;
 
@@ -67,7 +67,7 @@ public class PaprikaAccountValidatingVisitor : ITreeLeafVisitor, IDisposable
     public enum ValidationStatus
     {
         Valid = 0,
-        
+
         EmptyInPaprika = 1,
         InvalidBalance = 2,
         InvalidNonce = 3,
@@ -146,7 +146,7 @@ public class PaprikaAccountValidatingVisitor : ITreeLeafVisitor, IDisposable
             if (list is { Count: > 0 })
             {
                 list.Sort();
-                
+
                 sb.AppendLine($"{status}: ");
                 sb.AppendJoin(", ", list);
                 sb.AppendLine();

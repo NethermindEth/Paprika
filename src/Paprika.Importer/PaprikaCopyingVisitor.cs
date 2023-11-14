@@ -181,7 +181,7 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
             while (reader.TryRead(out var item))
             {
                 batch.Enqueue(item);
-                
+
                 if (batch.Count == _batchSize)
                 {
                     return;

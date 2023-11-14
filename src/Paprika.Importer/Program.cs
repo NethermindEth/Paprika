@@ -167,7 +167,7 @@ else
         await Task.WhenAll(visit, validation);
 
         var report = await validation;
-        
+
         File.WriteAllText("validation-report.txt", report);
 
         layout[stats].Update(new Panel("validation-report.txt").Header("Paprika accounts different from the original")
@@ -202,13 +202,13 @@ RocksDbSettings GetSettings(string dbName)
 static TrieNode MoveDownInTree(byte[] nibbles, PatriciaTree trie, ITrieNodeResolver store)
 {
     var root = trie.RootRef!;
-    
+
     for (var i = 0; i < nibbles.Length; i++)
     {
         root.ResolveNode(store, ReadFlags.HintCacheMiss);
         root = root.GetChild(store, nibbles[i])!;
     }
-    
+
     root.ResolveNode(store, ReadFlags.HintCacheMiss);
 
     return root;
