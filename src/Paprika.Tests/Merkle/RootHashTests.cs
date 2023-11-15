@@ -204,6 +204,7 @@ public class RootHashTests
     private static readonly Keccak SepoliaBigStorageTreeAccount =
         NibblePath.Parse("380c98b03a3f72ee8aa540033b219c0d397dbe2523162db9dd07e6bbb015d50b").UnsafeAsKeccak;
 
+    [TestCase("0xd5a06a7f5cd264aeb54f783809beab33aaf015983cbc425b1fb779878131279e", 100)]
     [TestCase("0x5d188ee84da7f19a8350c55edcde9315e2ca2cd4e8b2bb36f98babfcabf859e3", 21864)]
     public async Task Sepolia_big_storage_tree(string storageHash, int take)
     {
