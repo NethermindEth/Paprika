@@ -72,13 +72,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             "How long it takes to calculate storage roots");
     }
 
-    public Keccak CalculateStorageRootHash(IReadOnlyWorldState commit, in Keccak account)
+    public Keccak CalculateStorageHash(IReadOnlyWorldState commit, in Keccak account, NibblePath storagePath = default)
     {
         const ComputeHint hint = ComputeHint.DontUseParallel | ComputeHint.SkipCachedInformation;
         var prefixed = new PrefixingCommit(new CommitWrapper(commit));
         prefixed.SetPrefix(account);
 
-        var root = Key.Merkle(NibblePath.Empty);
+        var root = Key.Merkle(storagePath);
         var value = Compute(in root, prefixed, TrieType.Storage, hint);
         return new Keccak(value.Span);
     }
@@ -380,10 +380,17 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     }
 
                     var childPath = key.Path.AppendNibble(i, childSpan);
-                    var value = Compute(Key.Merkle(childPath), commit, trieType);
+                    var value = Compute(Key.Merkle(childPath), commit, trieType, hint);
 
                     // it's either Keccak or a span. Both are encoded the same ways
-                    stream.Encode(value.Span);
+                    if (value.DataType == KeccakOrRlp.Type.Keccak)
+                    {
+                        stream.Encode(value.Span);
+                    }
+                    else
+                    {
+                        stream.Write(value.Span);
+                    }
 
                     if (memoize) memo.Set(value, i);
                 }

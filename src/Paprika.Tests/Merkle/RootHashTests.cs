@@ -32,7 +32,7 @@ public class RootHashTests
         var key = Values.Key0;
         var account = new Account(Values.Balance0, Values.Nonce0);
 
-        commit.Set(Key.Account(key), account.WriteTo(stackalloc byte[Account.MaxByteCount]));
+        commit.Set(Key.Account(key), account.WriteTo(stackalloc byte[Paprika.Account.MaxByteCount]));
 
         AssertRoot("E2533A0A0C4F1DDB72FEB7BFAAD12A83853447DEAAB6F28FA5C443DD2D37C3FB", commit);
     }
@@ -55,11 +55,11 @@ public class RootHashTests
 
         span[0] = nibbleA;
         commit.Set(Key.Account(new Keccak(span)),
-            new Account(balanceA, nonceA).WriteTo(stackalloc byte[Account.MaxByteCount]));
+            new Account(balanceA, nonceA).WriteTo(stackalloc byte[Paprika.Account.MaxByteCount]));
 
         span[0] = nibbleB;
         commit.Set(Key.Account(new Keccak(span)),
-            new Account(balanceB, nonceB).WriteTo(stackalloc byte[Account.MaxByteCount]));
+            new Account(balanceB, nonceB).WriteTo(stackalloc byte[Paprika.Account.MaxByteCount]));
 
         AssertRoot("73130daa1ae507554a72811c06e28d4fee671bfe2e1d0cef828a7fade54384f9", commit);
     }
@@ -76,9 +76,9 @@ public class RootHashTests
         var nonceB = Values.Nonce1;
 
         commit.Set(Key.Account(Values.Key0),
-            new Account(balanceA, nonceA).WriteTo(stackalloc byte[Account.MaxByteCount]));
+            new Account(balanceA, nonceA).WriteTo(stackalloc byte[Paprika.Account.MaxByteCount]));
         commit.Set(Key.Account(Values.Key1),
-            new Account(balanceB, nonceB).WriteTo(stackalloc byte[Account.MaxByteCount]));
+            new Account(balanceB, nonceB).WriteTo(stackalloc byte[Paprika.Account.MaxByteCount]));
 
         AssertRoot("a624947d9693a5cba0701897b3a48cb9954c2f4fd54de36151800eb2c7f6bf50", commit);
     }
@@ -105,7 +105,7 @@ public class RootHashTests
         // "2200"
         // ...
 
-        Span<byte> destination = stackalloc byte[Account.MaxByteCount];
+        Span<byte> destination = stackalloc byte[Paprika.Account.MaxByteCount];
         Span<byte> key = stackalloc byte[32];
         for (var nibble0 = 0; nibble0 < 16; nibble0++)
         {
@@ -148,7 +148,7 @@ public class RootHashTests
         // "21"
         // "22"
 
-        Span<byte> destination = stackalloc byte[Account.MaxByteCount];
+        Span<byte> destination = stackalloc byte[Paprika.Account.MaxByteCount];
         Span<byte> key = stackalloc byte[32];
         for (var nibble0 = 0; nibble0 < maxNibble; nibble0++)
         {
@@ -176,7 +176,7 @@ public class RootHashTests
     {
         Random random = new(17);
         Span<byte> key = stackalloc byte[32];
-        Span<byte> destination = stackalloc byte[Account.MaxByteCount];
+        Span<byte> destination = stackalloc byte[Paprika.Account.MaxByteCount];
 
         var commit = new Commit();
 
@@ -201,37 +201,47 @@ public class RootHashTests
         AssertRoot(rootHash, commit);
     }
 
-    private static readonly Keccak SepoliaBigStorageTreeAccount =
+    private static readonly Keccak Account =
         NibblePath.Parse("380c98b03a3f72ee8aa540033b219c0d397dbe2523162db9dd07e6bbb015d50b").UnsafeAsKeccak;
 
-    [TestCase("0xd5a06a7f5cd264aeb54f783809beab33aaf015983cbc425b1fb779878131279e", 100)]
-    [TestCase("0x5d188ee84da7f19a8350c55edcde9315e2ca2cd4e8b2bb36f98babfcabf859e3", 21864)]
-    public async Task Sepolia_big_storage_tree(string storageHash, int take)
+    [TestCase(1, "0x622ab7418fc24b6befa9b46b58e4a7481526d6193af1dadac6918c47e75273ad")]
+    [TestCase(100, "0xd5a06a7f5cd264aeb54f783809beab33aaf015983cbc425b1fb779878131279e")]
+    [TestCase(1000, "0x2096c9367baf7a329f231b03824a980d9f897de39a7c20c05bd79dbc6e351121")]
+    [TestCase(10000, "0x1db15bc352135f4395c1b98251d17dd698d0507001e63dd8543786e446c6e7d1")]
+    [TestCase(19225, "0x75a76f63025d1a44a2c175170360a120a6abb156456c067646292ac25a1c5fe3")]
+    [TestCase(19226, "0x1038152ba60bb21d331b99dde453d73dd42c3b2dddca1e4d22885f7658b56272")]
+    [TestCase(21864, "0xf98d55b3dbfe56766df86feb59737de4b029c1a775f822ee47cf7efcf2765a9c")]
+    public async Task Sepolia_big_storage_tree(int take, string storageHash)
     {
         using var db = PagedDb.NativeMemoryDb(8 * 1024 * 1024, 2);
-        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
+        var merkle = new ComputeMerkleBehavior();
+        
+        await using var blockchain = new Blockchain(db, merkle);
 
         using var commit = blockchain.StartNew(Keccak.EmptyTreeHash);
-
+        
+        commit.SetAccount(Account, new Account(1, 1));
+        
         Run(commit, take);
-        commit.SetAccount(SepoliaBigStorageTreeAccount, new Account(1, 1));
         var keccak = commit.Commit(1);
 
         using var read = blockchain.StartReadOnly(keccak);
 
-        var actual = read.GetAccount(SepoliaBigStorageTreeAccount).StorageRootHash;
+        var account = read.GetAccount(Account);
+        
+        var actual = account.StorageRootHash;
 
         actual.ToString().Should().Be(storageHash);
         
         return;
 
-        static void Run(IWorldState commit, int take)
+        static void Run(IWorldState commit, int take, int skip = 0)
         {
-            foreach (var line in GetData("storage-big-tree.txt").Take(take))
+            foreach (var line in GetData("storage-big-tree.txt").Skip(skip).Take(take))
             {
                 var strings = line.Split(":");
                 var storage = NibblePath.Parse(strings[0]);
-                commit.SetStorage(SepoliaBigStorageTreeAccount, storage.UnsafeAsKeccak,
+                commit.SetStorage(Account, storage.UnsafeAsKeccak,
                     Convert.FromHexString(strings[1]));
             }
         }

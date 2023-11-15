@@ -1,4 +1,5 @@
-﻿using FluentAssertions;
+﻿using System.IO.Abstractions;
+using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
@@ -40,7 +41,7 @@ public class AdditionalTests
 
         using var read = blockchain.StartReadOnly(hash);
         var account = read.GetAccount(Key0);
-        var recalculatedStorage = merkle.CalculateStorageRootHash(read, Key0);
+        var recalculatedStorage = merkle.CalculateStorageHash(read, Key0);
 
         recalculatedStorage.Should().Be(account.StorageRootHash);
     }

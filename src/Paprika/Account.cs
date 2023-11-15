@@ -55,7 +55,7 @@ public readonly struct Account : IEquatable<Account>
     public override string ToString() =>
         $"{nameof(Nonce)}: {Nonce}, " +
         $"{nameof(Balance)}: {Balance}, " +
-        $"{nameof(CodeHash)}: {CodeHash}" +
+        $"{nameof(CodeHash)}: {CodeHash}, " +
         $"{nameof(StorageRootHash)}: {StorageRootHash}";
 
     public const int MaxByteCount = BigPreambleLength + // preamble 
