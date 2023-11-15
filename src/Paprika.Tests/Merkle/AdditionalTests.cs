@@ -1,5 +1,4 @@
-﻿using System.IO.Abstractions;
-using FluentAssertions;
+﻿using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
