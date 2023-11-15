@@ -1,10 +1,12 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
+using Paprika.Store;
 
 namespace Paprika.Tests.Merkle;
 
@@ -82,8 +84,10 @@ public class RootHashTests
     }
 
     [TestCase(0, "7f7fd47a28dc4dbfd1b1b33d254da8be74deab55bef81a02c232ca9957e05689", TestName = "From the Root")]
-    [TestCase(Keccak.Size - 2, "d8fc42b5f9491f526d0935445e9b83d8ddde46978cc450a6d1f83351da1bfae2", TestName = "At the bottom")]
-    [TestCase(Keccak.Size - 16, "6cb4831677e5dc9f8b6aaa9554c8be152ead051c35bdadbc19ae7a0242904836", TestName = "Split in the middle")]
+    [TestCase(Keccak.Size - 2, "d8fc42b5f9491f526d0935445e9b83d8ddde46978cc450a6d1f83351da1bfae2",
+        TestName = "At the bottom")]
+    [TestCase(Keccak.Size - 16, "6cb4831677e5dc9f8b6aaa9554c8be152ead051c35bdadbc19ae7a0242904836",
+        TestName = "Split in the middle")]
     public void Skewed_tree(int startFromByte, string rootHash)
     {
         var commit = new Commit();
@@ -195,6 +199,46 @@ public class RootHashTests
         }
 
         AssertRoot(rootHash, commit);
+    }
+
+    private static readonly Keccak SepoliaBigStorageTreeAccount =
+        NibblePath.Parse("380c98b03a3f72ee8aa540033b219c0d397dbe2523162db9dd07e6bbb015d50b").UnsafeAsKeccak;
+
+    [TestCase("0x5d188ee84da7f19a8350c55edcde9315e2ca2cd4e8b2bb36f98babfcabf859e3", 21864)]
+    public async Task Sepolia_big_storage_tree(string storageHash, int take)
+    {
+        using var db = PagedDb.NativeMemoryDb(8 * 1024 * 1024, 2);
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
+
+        using var commit = blockchain.StartNew(Keccak.EmptyTreeHash);
+
+        Run(commit, take);
+        commit.SetAccount(SepoliaBigStorageTreeAccount, new Account(1, 1));
+        var keccak = commit.Commit(1);
+
+        using var read = blockchain.StartReadOnly(keccak);
+
+        var actual = read.GetAccount(SepoliaBigStorageTreeAccount).StorageRootHash;
+
+        actual.ToString().Should().Be(storageHash);
+        
+        return;
+
+        static void Run(IWorldState commit, int take)
+        {
+            foreach (var line in GetData("storage-big-tree.txt").Take(take))
+            {
+                var strings = line.Split(":");
+                var storage = NibblePath.Parse(strings[0]);
+                commit.SetStorage(SepoliaBigStorageTreeAccount, storage.UnsafeAsKeccak,
+                    Convert.FromHexString(strings[1]));
+            }
+        }
+    }
+
+    private static IEnumerable<string> GetData(string file, [CallerFilePath] string path = "")
+    {
+        return File.ReadLines(Path.Combine(Path.GetDirectoryName(path)!, file));
     }
 
     private static void AssertRoot(string hex, ICommit commit)
