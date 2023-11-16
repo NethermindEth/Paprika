@@ -215,24 +215,24 @@ public class RootHashTests
     {
         using var db = PagedDb.NativeMemoryDb(8 * 1024 * 1024, 2);
         var merkle = new ComputeMerkleBehavior();
-        
+
         await using var blockchain = new Blockchain(db, merkle);
 
         using var commit = blockchain.StartNew(Keccak.EmptyTreeHash);
-        
+
         commit.SetAccount(Account, new Account(1, 1));
-        
+
         Run(commit, take);
         var keccak = commit.Commit(1);
 
         using var read = blockchain.StartReadOnly(keccak);
 
         var account = read.GetAccount(Account);
-        
+
         var actual = account.StorageRootHash;
 
         actual.ToString().Should().Be(storageHash);
-        
+
         return;
 
         static void Run(IWorldState commit, int take, int skip = 0)
