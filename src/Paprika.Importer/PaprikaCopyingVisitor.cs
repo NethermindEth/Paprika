@@ -1,8 +1,9 @@
-﻿using System.Diagnostics;
-using System.Diagnostics.Metrics;
+﻿using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Nethermind.Core.Crypto;
+using Nethermind.Serialization.Rlp;
 using Nethermind.Trie;
 using Paprika.Chain;
 using Paprika.Utils;
@@ -36,108 +37,125 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
             _data = data;
         }
 
-        public void Apply(IWorldState block)
+        public bool IsAccount => _accountValue != null;
+
+        public bool Apply(IWorldState block, bool skipStorage)
         {
             var addr = AsPaprika(_account);
 
             if (_accountValue != null)
             {
                 var v = _accountValue;
-
                 var codeHash = AsPaprika(v.CodeHash);
-                var storageRoot = AsPaprika(v.StorageRoot);
 
+                var storageRoot = skipStorage ? AsPaprika(v.StorageRoot) : Keccak.EmptyTreeHash;
+
+                // import account with empty tree hash so that it can be dirtied properly
                 block.SetAccount(addr, new Account(v.Balance, v.Nonce, codeHash, storageRoot));
+                return true;
             }
-            else
+
+            if (skipStorage == false)
             {
                 block.SetStorage(addr, AsPaprika(_storage), _data);
+                return true;
             }
+
+            return false;
         }
     }
 
-
     private readonly Blockchain _blockchain;
     private readonly int _batchSize;
-    private readonly int? _expectedAccountCount;
+    private readonly bool _skipStorage;
     private readonly Channel<Item> _channel;
 
     private readonly Meter _meter;
-    private readonly MetricsExtensions.IAtomicIntGauge _accountsGauge;
 
-    private int _accounts;
+    private readonly MetricsExtensions.IAtomicIntGauge _accountsVisitedGauge;
+    private readonly MetricsExtensions.IAtomicIntGauge _accountsAddedGauge;
 
-    public PaprikaCopyingVisitor(Blockchain blockchain, int batchSize, int? expectedAccountCount)
+    public PaprikaCopyingVisitor(Blockchain blockchain, int batchSize, bool skipStorage)
     {
         _meter = new Meter("Paprika.Importer");
 
-        var accountsUnit = expectedAccountCount.HasValue ? "%" : "count";
-        _accountsGauge = _meter.CreateAtomicObservableGauge("Accounts imported", accountsUnit);
+        _accountsVisitedGauge = _meter.CreateAtomicObservableGauge("Accounts visited", "count");
+        _accountsAddedGauge = _meter.CreateAtomicObservableGauge("Accounts added", "count");
 
         _blockchain = blockchain;
 
-        var options = new UnboundedChannelOptions
-        { SingleReader = true, SingleWriter = false, AllowSynchronousContinuations = false };
-        _channel = Channel.CreateUnbounded<Item>(options);
+        var options = new BoundedChannelOptions(batchSize * 1000)
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            AllowSynchronousContinuations = false
+        };
+
+        _channel = Channel.CreateBounded<Item>(options);
 
         _batchSize = batchSize;
-        _expectedAccountCount = expectedAccountCount;
+        _skipStorage = skipStorage;
     }
 
     public void VisitLeafAccount(in ValueKeccak account, Nethermind.Core.Account value)
     {
-        var incremented = Interlocked.Increment(ref _accounts);
-
-        // update occasionally
-        if (incremented % 100 == 0)
-        {
-            if (_expectedAccountCount != null)
-            {
-                _accountsGauge.Set(incremented / (_expectedAccountCount.Value / 100));
-            }
-            else
-            {
-                _accountsGauge.Set(incremented);
-            }
-        }
-
-        _channel.Writer.TryWrite(new(account, value));
+        _accountsVisitedGauge.Add(1);
+        Add(new Item(account, value));
     }
 
     public void VisitLeafStorage(in ValueKeccak account, in ValueKeccak storage, ReadOnlySpan<byte> value)
     {
-        _channel.Writer.TryWrite(new(account, storage, value.ToArray()));
+        var span = MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(value), value.Length);
+        Rlp.ValueDecoderContext rlp = new Rlp.ValueDecoderContext(span);
+        Add(new(account, storage, rlp.DecodeByteArray()));
+    }
+
+    private void Add(Item item)
+    {
+        while (_channel.Writer.TryWrite(item) == false)
+        {
+            Thread.Sleep(TimeSpan.FromSeconds(1));
+        }
     }
 
     public void Finish() => _channel.Writer.Complete();
 
-    public async Task Copy()
+    public async Task<Keccak> Copy()
     {
         var parent = Keccak.Zero;
         uint number = 1;
 
         var reader = _channel.Reader;
 
+        var batch = new Queue<Item>();
         var finalization = new Queue<Keccak>();
         const int finalizationDepth = 32;
 
         while (await reader.WaitToReadAsync())
         {
-            var i = 0;
-            // dummy, for import only
-            var child = Keccak.Compute(parent.BytesAsSpan);
-            using var block = _blockchain.StartNew(parent, child, number);
+            await BuildBatch(reader, batch);
 
-            while (i < _batchSize && reader.TryRead(out var item))
+            using var block = _blockchain.StartNew(parent);
+
+            var added = 0;
+            while (batch.TryDequeue(out var item))
             {
-                i++;
-                item.Apply(block);
+                if (item.Apply(block, _skipStorage))
+                {
+                    if (item.IsAccount)
+                    {
+                        added += 1;
+                    }
+                }
             }
 
-            // commit & finalize
-            block.Commit();
+            _accountsAddedGauge.Add(added);
 
-            finalization.Enqueue(child);
+            // commit & finalize
+            var hash = block.Commit(number);
+
+            finalization.Enqueue(hash);
+
             if (finalization.Count == finalizationDepth)
             {
                 _blockchain.Finalize(finalization.Dequeue());
@@ -145,12 +163,30 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
 
             // update
             number++;
-            parent = child;
+            parent = hash;
         }
 
         while (finalization.TryDequeue(out var keccak))
         {
             _blockchain.Finalize(keccak);
+        }
+
+        return parent;
+    }
+
+    private async Task BuildBatch(ChannelReader<Item> reader, Queue<Item> batch)
+    {
+        while (await reader.WaitToReadAsync())
+        {
+            while (reader.TryRead(out var item))
+            {
+                batch.Enqueue(item);
+
+                if (batch.Count == _batchSize)
+                {
+                    return;
+                }
+            }
         }
     }
 

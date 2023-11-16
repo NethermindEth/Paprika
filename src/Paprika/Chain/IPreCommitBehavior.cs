@@ -1,5 +1,4 @@
-﻿using System.Buffers;
-using Paprika.Crypto;
+﻿using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Utils;
@@ -64,7 +63,18 @@ public interface ICommit
     /// Gets the child commit that is a thread-safe write-through commit.
     /// </summary>
     /// <returns>A child commit.</returns>
-    IChildCommit GetChild() => throw new Exception($"No {nameof(GetChild)} available for this commit");
+    IChildCommit GetChild();
+}
+
+public interface IReadOnlyCommit
+{
+    /// <summary>
+    /// Tries to retrieve the result stored under the given key only from this commit.
+    /// </summary>
+    /// <remarks>
+    /// If successful, returns a result as an owner. Must be disposed properly.
+    /// </remarks>
+    public ReadOnlySpanOwner<byte> Get(scoped in Key key);
 }
 
 public interface IChildCommit : ICommit, IDisposable

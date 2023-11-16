@@ -298,7 +298,7 @@ public class DirtyTests
 
     private void Assert(Commit commit, Action<ICommit> assert)
     {
-        var merkle = new ComputeMerkleBehavior();
+        var merkle = new ComputeMerkleBehavior(false);
 
         // run merkle before
         merkle.BeforeCommit(commit);

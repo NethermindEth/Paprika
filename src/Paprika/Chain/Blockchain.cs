@@ -240,6 +240,21 @@ public class Blockchain : IAsyncDisposable
         }
     }
 
+    public IReadOnlyWorldState StartReadOnly(Keccak parentKeccak)
+    {
+        lock (_blockLock)
+        {
+            var (batch, ancestors) = BuildBlockDataDependencies(parentKeccak);
+            return new ReadOnlyState(parentKeccak, batch, ancestors);
+        }
+    }
+
+    public IReadOnlyWorldState StartReadOnlyLatestFromDb()
+    {
+        var batch = _db.BeginReadOnlyBatch($"Blockchain dependency LATEST");
+        return new ReadOnlyState(batch.Metadata.StateHash, batch, Array.Empty<BlockState>());
+    }
+
     private (IReadOnlyBatch batch, BlockState[] ancestors) BuildBlockDataDependencies(Keccak parentKeccak)
     {
         if (_blocksByHash.TryGetValue(parentKeccak, out var ancestor))
@@ -629,21 +644,20 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-        IChildCommit ICommit.GetChild() => new ChildCommit(new PooledSpanDictionary(Pool, true, false), this);
-
+        IChildCommit ICommit.GetChild() => new ChildCommit(Pool, this);
 
         class ChildCommit : IChildCommit
         {
             private readonly PooledSpanDictionary _dict;
+            private readonly BufferPool _pool;
             private readonly ICommit _parent;
 
-            public ChildCommit(PooledSpanDictionary dictionary, ICommit parent)
+            public ChildCommit(BufferPool pool, ICommit parent)
             {
-                _dict = dictionary;
+                _dict = new PooledSpanDictionary(pool, true, false);
+                _pool = pool;
                 _parent = parent;
             }
-
-            public void Dispose() => _dict.Dispose();
 
             public ReadOnlySpanOwner<byte> Get(scoped in Key key)
             {
@@ -683,6 +697,9 @@ public class Blockchain : IAsyncDisposable
                 }
             }
 
+            public IChildCommit GetChild() => new ChildCommit(_pool, this);
+
+            public void Dispose() => _dict.Dispose();
             public override string ToString() => _dict.ToString();
         }
 
@@ -745,7 +762,7 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// Tries to get the key only from this block, acquiring no lease as it assumes that the lease is taken.
         /// </summary>
-        private ReadOnlySpanOwner<byte> TryGetLocal(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
+        public ReadOnlySpanOwner<byte> TryGetLocal(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
             int bloom, out bool succeeded)
         {
             if (!_bloom.Contains(bloom))
@@ -880,6 +897,113 @@ public class Blockchain : IAsyncDisposable
             $"Storage: {_storage}, " +
             $"PreCommit: {_preCommit}";
     }
+
+    /// <summary>
+    /// Represents a block that is a result of ExecutionPayload.
+    /// </summary>
+    private class ReadOnlyState : RefCountingDisposable, IReadOnlyWorldState
+    {
+        private readonly ReadOnlyBatchCountingRefs _batch;
+        private readonly BlockState[] _ancestors;
+
+        public ReadOnlyState(Keccak stateRoot, IReadOnlyBatch batch, BlockState[] ancestors)
+        {
+            _batch = new ReadOnlyBatchCountingRefs(batch);
+            _ancestors = ancestors;
+            Hash = stateRoot;
+        }
+
+        public uint BlockNumber { get; private set; }
+
+        public Keccak Hash { get; }
+
+        public Span<byte> GetStorage(in Keccak address, in Keccak storage, Span<byte> destination)
+        {
+            var key = Key.StorageCell(NibblePath.FromKey(address), storage);
+
+            using var owner = Get(key);
+
+            // check the span emptiness
+            var data = owner.Span;
+            if (data.IsEmpty)
+                return Span<byte>.Empty;
+
+            data.CopyTo(destination);
+            return destination.Slice(0, data.Length);
+        }
+
+        public Account GetAccount(in Keccak address)
+        {
+            var key = Key.Account(NibblePath.FromKey(address));
+
+            using var owner = Get(key);
+
+            // check the span emptiness
+            if (owner.Span.IsEmpty)
+                return new Account(0, 0);
+
+            Account.ReadFrom(owner.Span, out var result);
+            return result;
+        }
+
+        private static int GetHash(in Key key) => key.GetHashCode();
+
+
+        public ReadOnlySpanOwner<byte> Get(scoped in Key key)
+        {
+            var hash = GetHash(key);
+            var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+
+            var result = TryGet(key, keyWritten, hash, out var succeeded);
+
+            Debug.Assert(succeeded);
+            return result;
+        }
+
+        /// <summary>
+        /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
+        /// chain.
+        /// </summary>
+        private ReadOnlySpanOwner<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom,
+            out bool succeeded)
+        {
+            // walk all the blocks locally
+            foreach (var ancestor in _ancestors)
+            {
+                var owner = ancestor.TryGetLocal(key, keyWritten, bloom, out succeeded);
+                if (succeeded)
+                    return owner;
+            }
+
+            if (_batch.TryGet(key, out var span))
+            {
+                // return leased batch
+                succeeded = true;
+                _batch.AcquireLease();
+                return new ReadOnlySpanOwner<byte>(span, _batch);
+            }
+
+            // report as succeeded operation. The value is not there but it was walked through.
+            succeeded = true;
+            return default;
+        }
+
+        protected override void CleanUp()
+        {
+            _batch.Dispose();
+
+            // release all the ancestors
+            foreach (var ancestor in _ancestors)
+            {
+                ancestor.Dispose();
+            }
+        }
+
+        public override string ToString() =>
+            base.ToString() + ", " +
+            $"{nameof(BlockNumber)}: {BlockNumber}";
+    }
+
 
     public async ValueTask DisposeAsync()
     {

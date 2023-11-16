@@ -1,4 +1,5 @@
 using Paprika.Crypto;
+using SpanExtensions = Paprika.Crypto.SpanExtensions;
 
 namespace Paprika.RLP;
 
@@ -46,6 +47,10 @@ public readonly ref struct KeccakOrRlp
         KeccakHash.ComputeHash(data, output);
         return new KeccakOrRlp(Type.Keccak, output);
     }
+
+    public override string ToString() => DataType == Type.Keccak
+        ? $"Keccak: {_keccak.ToString()}"
+        : $"RLP: {SpanExtensions.ToHexString(Span, true)}";
 }
 
 public static class RlpStreamExtensions

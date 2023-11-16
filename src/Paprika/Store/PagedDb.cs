@@ -128,11 +128,12 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         }
 
         _lastRoot = 0;
-        for (var i = 0; i < MinHistoryDepth; i++)
+        for (var i = 0; i < _historyDepth; i++)
         {
-            if (_roots[i].Header.BatchId > _lastRoot)
+            var batchId = _roots[i].Header.BatchId;
+            if (batchId > _lastRoot)
             {
-                _lastRoot = i;
+                _lastRoot = batchId;
             }
         }
     }
@@ -667,7 +668,6 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             }
 
             var page = _db.GetAtForWriting(addr, reused);
-
             if (clear)
             {
                 page.Clear();

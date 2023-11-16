@@ -177,6 +177,8 @@ public class Commit : ICommit
                 _commit.Set(key, kvp.Value);
             }
         }
+
+        public IChildCommit GetChild() => new ChildCommit(this);
     }
 
     public KeyEnumerator GetSnapshotOfBefore() => new(_before.Keys.ToArray());

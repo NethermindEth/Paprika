@@ -195,7 +195,7 @@ public readonly ref struct NibblePath
     /// <returns>The newly copied nibble path.</returns>
     public NibblePath AppendNibble(byte nibble, Span<byte> workingSet)
     {
-        if (workingSet.Length <= MaxByteLength)
+        if (workingSet.Length < MaxByteLength)
         {
             throw new ArgumentException("Not enough memory to append");
         }

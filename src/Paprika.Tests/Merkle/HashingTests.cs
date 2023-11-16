@@ -1,3 +1,4 @@
+using System.Text;
 using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
@@ -65,5 +66,32 @@ public class HashingTests
 
         result.DataType.Should().Be(KeccakOrRlp.Type.Rlp);
         result.Span.ToArray().Should().BeEquivalentTo(new byte[] { 0xC4, 0x82, 0x20, 0x01, 0x03 });
+    }
+
+    // [Test]
+    // public void Storage_leaf_big()
+    // {
+    //     const string key = "0209000d0e0c0d090504080b06020a080d06000304050a0908080308060f0c08040b0a060b0c09050408040000080f060306020f09030106000e0f030e050603";
+    //     var path = NibblePath.FromKey(ParseNethermindKeyToHex(key));
+    //     var value = Convert.FromHexString("945027d6cc532f94976ba255a3c8bc01ad7c0cd03c");
+    //     
+    //     Node.Leaf.KeccakOrRlp(path, value, out var result);
+    //     
+    //     result.DataType.Should().Be(KeccakOrRlp.Type.Keccak);
+    //     
+    //     var expectedHash = new Keccak(Convert.FromHexString("374b893364427e3d960d8e8d2e9048e789f19657245d4003a6b84212b27cd5ce"));
+    //     new Keccak(result.Span).Should().Be(expectedHash);
+    // }
+
+    private static Keccak ParseNethermindKeyToHex(string key)
+    {
+        var sb = new StringBuilder();
+
+        for (var i = 1; i < key.Length; i += 2)
+        {
+            sb.Append(key[i]);
+        }
+
+        return new Keccak(Convert.FromHexString(sb.ToString()));
     }
 }

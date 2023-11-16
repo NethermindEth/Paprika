@@ -166,7 +166,7 @@ public class BlockchainTests
         block2.DestroyAccount(Key0);
         var hash2 = block2.Commit(blockNo);
 
-        var wait = WaitTillFlush(blockchain, blockNo);
+        var wait = blockchain.WaitTillFlush(blockNo);
 
         blockchain.Finalize(hash2);
 
@@ -261,7 +261,7 @@ public class BlockchainTests
                 const int block2 = 2;
 
                 var keccak2A = block2A.Commit(block2);
-                var task = WaitTillFlush(blockchain, block2);
+                var task = blockchain.WaitTillFlush(block2);
 
                 blockchain.Finalize(keccak2A);
 
@@ -294,21 +294,6 @@ public class BlockchainTests
             BinaryPrimitives.WriteInt32LittleEndian(hash.BytesAsSpan, hashCode);
             return hash;
         }
-    }
-
-    private static Keccak Build(string name) => Keccak.Compute(Encoding.UTF8.GetBytes(name));
-
-    private Task WaitTillFlush(Blockchain chain, uint blockNumber)
-    {
-        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        chain.Flushed += (_, block) =>
-        {
-            if (block == blockNumber)
-                tcs.SetResult();
-        };
-
-        return tcs.Task;
     }
 }
 
