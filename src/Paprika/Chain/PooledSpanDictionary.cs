@@ -1,6 +1,8 @@
-﻿using System.Diagnostics;
+﻿using System.CodeDom.Compiler;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store;
@@ -151,6 +153,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
             {
                 moved = _enumerator.MoveNext();
             } while (moved && _enumerator.Current.Value.IsDestroyed);
+
             return moved;
         }
 
@@ -315,4 +318,39 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
     }
 
     public override string ToString() => $"Count: {_dict.Count}, Memory: {_pages.Count * BufferSize / 1024}kb";
+
+    public void Describe(TextWriter text)
+    {
+        foreach (var kvp in this)
+        {
+            Key.ReadFrom(kvp.Key, out var key);
+            switch (key.Type)
+            {
+                case DataType.Account:
+                    Account.ReadFrom(kvp.Value, out var account);
+                    text.WriteLine($"Account [{S(key.Path)}] -> {account.ToString()}");
+                    break;
+                case DataType.StorageCell:
+                    text.WriteLine(
+                        $"Storage [{S(key.Path)}, {S(key.StoragePath)}] -> {kvp.Value.ToHexString(true)}");
+                    break;
+                case DataType.Merkle:
+                    if (key.StoragePath.Length <= 0)
+                    {
+                        text.WriteLine($"Merkle, State [{S(key.Path)}] (updated)");
+                    }
+                    else
+                        text.WriteLine($"Merkle, Storage [{S(key.Path)}, {S(key.StoragePath)}] (updated)");
+                    break;
+                case DataType.CompressedAccount:
+                    throw new Exception("Should not use compressed accounts");
+                default:
+                    throw new ArgumentOutOfRangeException($"The type {key.Type} is not handled");
+            }
+        }
+
+        return;
+
+        static string S(in NibblePath full) => full.UnsafeAsKeccak.ToString();
+    }
 }

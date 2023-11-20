@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.CodeDom.Compiler;
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
@@ -385,7 +386,7 @@ public class Blockchain : IAsyncDisposable
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload.
     /// </summary>
-    private class BlockState : RefCountingDisposable, IWorldState, ICommit
+    private class BlockState : RefCountingDisposable, IWorldState, ICommit, IProvideDescription
     {
         /// <summary>
         /// A simple bloom filter to assert whether the given key was set in a given block, used to speed up getting the keys.
@@ -405,18 +406,18 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// The maps mapping accounts information, written in this block.
         /// </summary>
-        private PooledSpanDictionary _state;
+        private PooledSpanDictionary _state = null!;
 
         /// <summary>
         /// The maps mapping storage information, written in this block.
         /// </summary>
-        private PooledSpanDictionary _storage;
+        private PooledSpanDictionary _storage = null!;
 
         /// <summary>
         /// The values set the <see cref="IPreCommitBehavior"/> during the <see cref="ICommit.Visit"/> invocation.
         /// It's both storage & state as it's metadata for the pre-commit behavior.
         /// </summary>
-        private PooledSpanDictionary _preCommit;
+        private PooledSpanDictionary _preCommit = null!;
 
         private bool _committed;
         private Keccak? _hash;
@@ -632,6 +633,24 @@ public class Blockchain : IAsyncDisposable
 
         void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1) =>
             SetImpl(key, payload0, payload1, _preCommit);
+
+        public string Describe()
+        {
+            var writer = new StringWriter();
+            var indented = new IndentedTextWriter(writer);
+            indented.Indent = 1;
+
+            writer.WriteLine("State:");
+            _state.Describe(indented);
+
+            writer.WriteLine("Storage:");
+            _storage.Describe(indented);
+
+            writer.WriteLine("PreCommit:");
+            _preCommit.Describe(indented);
+
+            return writer.ToString();
+        }
 
         void ICommit.Visit(CommitAction action, TrieType type)
         {
