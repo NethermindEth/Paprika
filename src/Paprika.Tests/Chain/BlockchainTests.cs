@@ -171,7 +171,7 @@ public class BlockchainTests
         using var block1 = blockchain.StartNew(Keccak.EmptyTreeHash);
 
         var before = block1.Hash;
-        
+
         block1.SetAccount(Key0, new Account(1, 1));
         block1.SetStorage(Key0, Key1, stackalloc byte[1] { 1 });
 

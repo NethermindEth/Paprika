@@ -168,7 +168,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     {
         if (data.IsEmpty)
             return data;
-        
+
         if (key.Type != DataType.Merkle)
             return data;
 
