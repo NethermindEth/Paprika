@@ -327,7 +327,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
             switch (key.Type)
             {
                 case DataType.Account:
-                    Account.ReadFrom(kvp.Value, out var account);
+                    Account.ReadFrom(kvp.Value, out Account account);
                     text.WriteLine($"Account [{S(key.Path)}] -> {account.ToString()}");
                     break;
                 case DataType.StorageCell:
@@ -337,10 +337,10 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
                 case DataType.Merkle:
                     if (key.StoragePath.Length <= 0)
                     {
-                        text.WriteLine($"Merkle, State [{S(key.Path)}] (updated)");
+                        text.WriteLine($"Merkle, State [{(key.Path.ToString())}] (updated)");
                     }
                     else
-                        text.WriteLine($"Merkle, Storage [{S(key.Path)}, {S(key.StoragePath)}] (updated)");
+                        text.WriteLine($"Merkle, Storage [{S(key.Path)}, {key.StoragePath.ToString()}] (updated)");
                     break;
                 case DataType.CompressedAccount:
                     throw new Exception("Should not use compressed accounts");
