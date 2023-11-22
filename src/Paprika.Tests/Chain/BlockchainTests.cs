@@ -108,30 +108,44 @@ public class BlockchainTests
     public async Task Account_destruction_same_block()
     {
         using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
-        await using var blockchain = new Blockchain(db, new PreCommit());
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
 
         using var block = blockchain.StartNew(Keccak.EmptyTreeHash);
+
+        var before = block.Hash;
 
         block.SetAccount(Key0, new Account(1, 1));
         block.SetStorage(Key0, Key1, stackalloc byte[1] { 1 });
 
+        // force hash calculation
+        var mid = block.Hash;
+
         block.DestroyAccount(Key0);
         block.GetAccount(Key0).Should().Be(new Account(0, 0));
         block.AssertNoStorageAt(Key0, Key1);
+
+        var after = block.Hash;
+
+        before.Should().Be(after);
+        before.Should().NotBe(mid);
     }
 
     [Test]
     public async Task Account_destruction_multi_block()
     {
         using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
-        await using var blockchain = new Blockchain(db, new PreCommit());
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
 
         using var block1 = blockchain.StartNew(Keccak.EmptyTreeHash);
+
+        var before = block1.Hash;
 
         block1.SetAccount(Key0, new Account(1, 1));
         block1.SetStorage(Key0, Key1, stackalloc byte[1] { 1 });
 
         var hash = block1.Commit(1);
+
+        var mid = hash;
 
         using var block2 = blockchain.StartNew(hash);
 
@@ -139,6 +153,11 @@ public class BlockchainTests
 
         block2.GetAccount(Key0).Should().Be(new Account(0, 0));
         block2.AssertNoStorageAt(Key0, Key1);
+
+        var after = block2.Hash;
+
+        before.Should().Be(after);
+        before.Should().NotBe(mid);
     }
 
     [Test]
@@ -178,6 +197,8 @@ public class BlockchainTests
 
         read.AssertNoAccount(Key0);
         read.AssertNoStorageAt(Key0, Key1);
+
+        hash.Should().Be(hash2);
     }
 
     [Test]
