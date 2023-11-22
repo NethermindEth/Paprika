@@ -541,6 +541,7 @@ public class Blockchain : IAsyncDisposable
 
             Destroy(searched, _state);
             Destroy(searched, _storage);
+            Destroy(searched, _preCommit);
 
             _destroyed.Add(address);
             return;
@@ -661,6 +662,15 @@ public class Blockchain : IAsyncDisposable
                 Key.ReadFrom(kvp.Key, out var key);
                 action(key, kvp.Value);
             }
+
+            if (type == TrieType.State)
+            {
+                foreach (var destroyed in _destroyed)
+                {
+                    // clean the deletes
+                    action(Key.Account(destroyed), ReadOnlySpan<byte>.Empty);
+                }
+            }
         }
 
         IChildCommit ICommit.GetChild() => new ChildCommit(Pool, this);
@@ -747,8 +757,9 @@ public class Blockchain : IAsyncDisposable
             if (succeeded)
                 return owner;
 
-            if (key.Type is DataType.Account or DataType.StorageCell)
+            if (key.Path.Length == NibblePath.KeccakNibbleCount)
             {
+                // it's either Account, Storage, or Merkle that is a storage
                 if (_destroyed.Contains(key.Path.UnsafeAsKeccak))
                 {
                     // The key is account or the storage cell that belongs to a history of a destroyed account. Default
