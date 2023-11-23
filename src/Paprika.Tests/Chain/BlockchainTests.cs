@@ -161,6 +161,44 @@ public class BlockchainTests
     }
 
     [Test]
+    public async Task Account_destruction_multi_block_2()
+    {
+        using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
+
+        using var block1 = blockchain.StartNew(Keccak.EmptyTreeHash);
+
+        var before = block1.Hash;
+
+        block1.SetAccount(Key0, new Account(1, 1));
+        block1.SetStorage(Key0, Key1, stackalloc byte[1] { 1 });
+
+        var hash1 = block1.Commit(1);
+
+        var mid = hash1;
+
+        using var block2 = blockchain.StartNew(hash1);
+
+        // destroy previous
+        block2.DestroyAccount(Key0);
+        block2.SetAccount(Key1, new Account(2, 2));
+
+        var hash2 = block2.Commit(2);
+
+        using var block3 = blockchain.StartNew(hash2);
+
+        const string reason = "Destroying an account should be true across blocks";
+        block3.GetStorage(Key0, Key1, stackalloc byte[32])
+            .IsEmpty
+            .Should()
+            .BeTrue(reason);
+
+        block3.GetAccount(Key0)
+            .Should()
+            .Be(new Account(0, 0), reason);
+    }
+
+    [Test]
     public async Task Account_destruction_database_flushed()
     {
         uint blockNo = 1;
