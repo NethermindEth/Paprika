@@ -784,25 +784,19 @@ public class Blockchain : IAsyncDisposable
         public ReadOnlySpanOwner<byte> TryGetLocal(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
             int bloom, out bool succeeded)
         {
-            // filter out destroyed accounts
-            if (key.Path.Length == NibblePath.KeccakNibbleCount)
-            {
-                // it's either Account, Storage, or Merkle that is a storage
-                if (_destroyed.Contains(key.Path.UnsafeAsKeccak))
-                {
-                    // The key is account or the storage cell that belongs to a history of a destroyed account. Default
-                    succeeded = true;
-                    return default;
-                }
-            }
-
             // check if the change is in the block
             if (!_bloom.Contains(bloom))
             {
+                // if destroyed, return false as no previous one will contain it
+                if (IsAccountDestroyed(key))
+                {
+                    succeeded = true;
+                    return default;
+                }
+
                 succeeded = false;
                 return default;
             }
-
 
             // select the map to search for 
             var dict = key.Type switch
@@ -825,16 +819,35 @@ public class Blockchain : IAsyncDisposable
             {
                 // return with owned lease
                 succeeded = true;
-
                 AcquireLease();
-
                 return new ReadOnlySpanOwner<byte>(span, this);
             }
 
             _blockchain._bloomMissedReads.Add(1);
 
+            // if destroyed, return false as no previous one will contain it
+            if (IsAccountDestroyed(key))
+            {
+                succeeded = true;
+                return default;
+            }
+
             succeeded = false;
             return default;
+        }
+
+        private bool IsAccountDestroyed(scoped in Key key)
+        {
+            if (key.Path.Length == NibblePath.KeccakNibbleCount)
+            {
+                // it's either Account, Storage, or Merkle that is a storage
+                if (_destroyed.Contains(key.Path.UnsafeAsKeccak))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         protected override void CleanUp()
