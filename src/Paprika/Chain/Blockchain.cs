@@ -757,17 +757,6 @@ public class Blockchain : IAsyncDisposable
             if (succeeded)
                 return owner;
 
-            if (key.Path.Length == NibblePath.KeccakNibbleCount)
-            {
-                // it's either Account, Storage, or Merkle that is a storage
-                if (_destroyed.Contains(key.Path.UnsafeAsKeccak))
-                {
-                    // The key is account or the storage cell that belongs to a history of a destroyed account. Default
-                    succeeded = true;
-                    return default;
-                }
-            }
-
             // walk all the blocks locally
             foreach (var ancestor in _ancestors)
             {
@@ -795,11 +784,25 @@ public class Blockchain : IAsyncDisposable
         public ReadOnlySpanOwner<byte> TryGetLocal(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
             int bloom, out bool succeeded)
         {
+            // filter out destroyed accounts
+            if (key.Path.Length == NibblePath.KeccakNibbleCount)
+            {
+                // it's either Account, Storage, or Merkle that is a storage
+                if (_destroyed.Contains(key.Path.UnsafeAsKeccak))
+                {
+                    // The key is account or the storage cell that belongs to a history of a destroyed account. Default
+                    succeeded = true;
+                    return default;
+                }
+            }
+
+            // check if the change is in the block
             if (!_bloom.Contains(bloom))
             {
                 succeeded = false;
                 return default;
             }
+
 
             // select the map to search for 
             var dict = key.Type switch
