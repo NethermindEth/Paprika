@@ -396,7 +396,7 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// Stores information about contracts that should have their previous incarnations destroyed.
         /// </summary>
-        private readonly HashSet<Keccak> _destroyed;
+        private HashSet<Keccak>? _destroyed;
 
         private readonly ReadOnlyBatchCountingRefs _batch;
         private BlockState[] _ancestors;
@@ -434,7 +434,7 @@ public class Blockchain : IAsyncDisposable
 
             // rent pages for the bloom
             _bloom = new HashSet<int>();
-            _destroyed = new HashSet<Keccak>();
+            _destroyed = null;
 
             _hash = ParentHash;
 
@@ -507,7 +507,7 @@ public class Blockchain : IAsyncDisposable
         {
             _hash = ParentHash;
             _bloom.Clear();
-            _destroyed.Clear();
+            _destroyed = null;
 
             CreateDictionaries();
         }
@@ -543,6 +543,7 @@ public class Blockchain : IAsyncDisposable
             Destroy(searched, _storage);
             Destroy(searched, _preCommit);
 
+            _destroyed ??= new HashSet<Keccak>();
             _destroyed.Add(address);
             return;
 
@@ -663,7 +664,7 @@ public class Blockchain : IAsyncDisposable
                 action(key, kvp.Value);
             }
 
-            if (type == TrieType.State)
+            if (type == TrieType.State && _destroyed != null)
             {
                 foreach (var destroyed in _destroyed)
                 {
@@ -838,16 +839,14 @@ public class Blockchain : IAsyncDisposable
 
         private bool IsAccountDestroyed(scoped in Key key)
         {
-            if (key.Path.Length == NibblePath.KeccakNibbleCount)
-            {
-                // it's either Account, Storage, or Merkle that is a storage
-                if (_destroyed.Contains(key.Path.UnsafeAsKeccak))
-                {
-                    return true;
-                }
-            }
+            if (_destroyed == null)
+                return false;
 
-            return false;
+            if (key.Path.Length != NibblePath.KeccakNibbleCount)
+                return false;
+
+            // it's either Account, Storage, or Merkle that is a storage
+            return _destroyed.Contains(key.Path.UnsafeAsKeccak);
         }
 
         protected override void CleanUp()
@@ -872,7 +871,7 @@ public class Blockchain : IAsyncDisposable
 
         public void Apply(IBatch batch)
         {
-            if (_destroyed.Count > 0)
+            if (_destroyed is { Count: > 0 })
             {
                 foreach (var account in _destroyed)
                 {
