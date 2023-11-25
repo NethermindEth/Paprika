@@ -392,7 +392,7 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// A simple bloom filter to assert whether the given key was set in a given block, used to speed up getting the keys.
         /// </summary>
-        private HashSet<ulong>? _bloom;
+        private HashSet<int>? _bloom;
 
         /// <summary>
         /// A faster filter constructed on block commit.
@@ -439,7 +439,7 @@ public class Blockchain : IAsyncDisposable
             ParentHash = parentStateRoot;
 
             // rent pages for the bloom
-            _bloom = new HashSet<ulong>();
+            _bloom = new HashSet<int>();
             _destroyed = null;
 
             _hash = ParentHash;
@@ -768,7 +768,7 @@ public class Blockchain : IAsyncDisposable
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        private ReadOnlySpanOwner<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, ulong bloom,
+        private ReadOnlySpanOwner<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom,
             out bool succeeded)
         {
             var owner = TryGetLocal(key, keyWritten, bloom, out succeeded);
@@ -800,9 +800,9 @@ public class Blockchain : IAsyncDisposable
         /// Tries to get the key only from this block, acquiring no lease as it assumes that the lease is taken.
         /// </summary>
         public ReadOnlySpanOwner<byte> TryGetLocal(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
-            ulong bloom, out bool succeeded)
+            int bloom, out bool succeeded)
         {
-            var mayHave = _committed ? _xor!.MayContain(bloom) : _bloom!.Contains(bloom);
+            var mayHave = _committed ? _xor!.MayContain(unchecked((ulong)bloom)) : _bloom!.Contains(bloom);
 
             // check if the change is in the block
             if (!mayHave)
@@ -1026,7 +1026,7 @@ public class Blockchain : IAsyncDisposable
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        private ReadOnlySpanOwner<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, ulong bloom,
+        private ReadOnlySpanOwner<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom,
             out bool succeeded)
         {
             // walk all the blocks locally
@@ -1066,10 +1066,7 @@ public class Blockchain : IAsyncDisposable
             $"{nameof(BlockNumber)}: {BlockNumber}";
     }
 
-    private static ulong GetHash(in Key key)
-    {
-        return unchecked((uint)key.GetHashCode());
-    }
+    private static int GetHash(in Key key) => key.GetHashCode();
 
     public async ValueTask DisposeAsync()
     {

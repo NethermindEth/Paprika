@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.IO.Hashing;
 using System.Runtime.CompilerServices;
 using Paprika.Crypto;
 using Paprika.Store;
@@ -96,14 +97,7 @@ public readonly ref partial struct Key
     [SkipLocalsInit]
     public override int GetHashCode()
     {
-        Span<byte> span = stackalloc byte[NibblePath.FullKeccakByteLength];
-
-        var hash = new HashCode();
-        hash.AddBytes(Path.WriteTo(span));
-        hash.AddBytes(StoragePath.WriteTo(span));
-        hash.Add((int)Type);
-
-        return hash.ToHashCode();
+        return unchecked((int)XxHash32.HashToUInt32(WriteTo(stackalloc byte[MaxByteLength])));
     }
 
     public override string ToString()
