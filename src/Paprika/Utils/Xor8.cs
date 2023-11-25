@@ -183,32 +183,33 @@ public class Xor8
     }
 
     private static int Fingerprint(ulong hash) => (int)(hash & ((1 << BitsPerFingerprint) - 1));
+
+    private static class Hash
+    {
+        public static ulong Hash64(ulong x, ulong seed)
+        {
+            x += seed;
+            x = (x ^ (x >>> 33)) * 0xff51afd7ed558ccdL;
+            x = (x ^ (x >>> 33)) * 0xc4ceb9fe1a85ec53L;
+            x = x ^ (x >>> 33);
+            return x;
+        }
+
+        public static ulong RandomSeed() => unchecked((ulong)Random.Shared.NextInt64());
+
+        /**
+         * Shrink the hash to a value 0..n. Kind of like modulo, but using
+         * multiplication and shift, which are faster to compute.
+         *
+         * @param hash the hash
+         * @param n the maximum of the result
+         * @return the reduced value
+         */
+        public static uint Reduce(uint hash, int n)
+        {
+            // http://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
+            return (uint)(((hash & 0xffffffffL) * (n & 0xffffffffL)) >>> 32);
+        }
+    }
 }
 
-public class Hash
-{
-    public static ulong Hash64(ulong x, ulong seed)
-    {
-        x += seed;
-        x = (x ^ (x >>> 33)) * 0xff51afd7ed558ccdL;
-        x = (x ^ (x >>> 33)) * 0xc4ceb9fe1a85ec53L;
-        x = x ^ (x >>> 33);
-        return x;
-    }
-
-    public static ulong RandomSeed() => unchecked((ulong)Random.Shared.NextInt64());
-
-    /**
-     * Shrink the hash to a value 0..n. Kind of like modulo, but using
-     * multiplication and shift, which are faster to compute.
-     *
-     * @param hash the hash
-     * @param n the maximum of the result
-     * @return the reduced value
-     */
-    public static uint Reduce(uint hash, int n)
-    {
-        // http://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
-        return (uint)(((hash & 0xffffffffL) * (n & 0xffffffffL)) >>> 32);
-    }
-}
