@@ -1,4 +1,5 @@
-﻿using System.Numerics;
+﻿using System.Buffers;
+using System.Numerics;
 
 namespace Paprika.Utils;
 
@@ -11,6 +12,7 @@ namespace Paprika.Utils;
  * [1] paper: Simple and Space-Efficient Minimal Perfect Hash Functions -
  * http://cmph.sourceforge.net/papers/wads07.pdf
  */
+// TODO: remove all the array allocs
 public class Xor8
 {
     private const int BitsPerFingerprint = 8;
@@ -30,18 +32,20 @@ public class Xor8
         var arrayLength = GetArrayLength(size);
 
         _blockLength = arrayLength / Hashes;
-        var m = arrayLength;
-        var reverseOrder = new ulong[size];
-        var reverseH = new byte[size];
+
+        var reverseOrder = ArrayPool<ulong>.Shared.Rent(size);
+        var reverseH = ArrayPool<byte>.Shared.Rent(size);
+
         int reverseOrderPos;
         ulong seed;
+
     MainLoop:
         do
         {
             seed = Hash.RandomSeed();
             reverseOrderPos = 0;
-            var t2Count = new byte[m];
-            var t2 = new ulong[m];
+            var t2Count = new byte[arrayLength];
+            var t2 = new ulong[arrayLength];
             foreach (var k in keys)
             {
                 for (var hi = 0; hi < Hashes; hi++)
@@ -64,7 +68,10 @@ public class Xor8
                 alone[i] = new int[_blockLength];
             }
 
-            var alonePos = new int[Hashes];
+            // ReSharper disable once StackAllocInsideLoop
+#pragma warning disable CA2014
+            Span<int> alonePos = stackalloc int[Hashes];
+#pragma warning restore CA2014
 
             for (var nextAlone = 0; nextAlone < Hashes; nextAlone++)
             {
@@ -132,7 +139,7 @@ public class Xor8
 
         _seed = seed;
 
-        var fp = new byte[m];
+        var fp = new byte[arrayLength];
         for (var i = reverseOrderPos - 1; i >= 0; i--)
         {
             var k = reverseOrder[i];
@@ -156,8 +163,11 @@ public class Xor8
             fp[change] = (byte)xor;
         }
 
-        _fingerprints = new byte[m];
+        _fingerprints = new byte[arrayLength];
         fp.CopyTo(_fingerprints, 0);
+
+        ArrayPool<ulong>.Shared.Return(reverseOrder);
+        ArrayPool<byte>.Shared.Return(reverseH);
     }
 
     public bool MayContain(ulong key)
@@ -212,4 +222,3 @@ public class Xor8
         }
     }
 }
-
