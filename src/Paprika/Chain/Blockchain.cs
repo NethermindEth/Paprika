@@ -1,6 +1,7 @@
 ﻿using System.CodeDom.Compiler;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Paprika.Crypto;
@@ -391,7 +392,7 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// A simple bloom filter to assert whether the given key was set in a given block, used to speed up getting the keys.
         /// </summary>
-        private readonly HashSet<int> _bloom;
+        private readonly HashSet<ulong> _bloom;
 
         /// <summary>
         /// Stores information about contracts that should have their previous incarnations destroyed.
@@ -433,7 +434,7 @@ public class Blockchain : IAsyncDisposable
             ParentHash = parentStateRoot;
 
             // rent pages for the bloom
-            _bloom = new HashSet<int>();
+            _bloom = new HashSet<ulong>();
             _destroyed = null;
 
             _hash = ParentHash;
@@ -590,8 +591,6 @@ public class Blockchain : IAsyncDisposable
             Account.ReadFrom(owner.Span, out var result);
             return result;
         }
-
-        private static int GetHash(in Key key) => key.GetHashCode();
 
         public void SetAccount(in Keccak address, in Account account)
         {
@@ -761,7 +760,7 @@ public class Blockchain : IAsyncDisposable
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        private ReadOnlySpanOwner<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom,
+        private ReadOnlySpanOwner<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, ulong bloom,
             out bool succeeded)
         {
             var owner = TryGetLocal(key, keyWritten, bloom, out succeeded);
@@ -793,7 +792,7 @@ public class Blockchain : IAsyncDisposable
         /// Tries to get the key only from this block, acquiring no lease as it assumes that the lease is taken.
         /// </summary>
         public ReadOnlySpanOwner<byte> TryGetLocal(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
-            int bloom, out bool succeeded)
+            ulong bloom, out bool succeeded)
         {
             // check if the change is in the block
             if (!_bloom.Contains(bloom))
@@ -1001,8 +1000,6 @@ public class Blockchain : IAsyncDisposable
             return result;
         }
 
-        private static int GetHash(in Key key) => key.GetHashCode();
-
 
         public ReadOnlySpanOwner<byte> Get(scoped in Key key)
         {
@@ -1019,7 +1016,7 @@ public class Blockchain : IAsyncDisposable
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        private ReadOnlySpanOwner<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom,
+        private ReadOnlySpanOwner<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, ulong bloom,
             out bool succeeded)
         {
             // walk all the blocks locally
@@ -1059,6 +1056,38 @@ public class Blockchain : IAsyncDisposable
             $"{nameof(BlockNumber)}: {BlockNumber}";
     }
 
+    private static ulong GetHash(in Key key)
+    {
+        var hash = (ulong)key.Type;
+
+        if (key.Path.Length == NibblePath.KeccakNibbleCount)
+        {
+            // either account, storage, or Merkle for storage
+            hash ^= key.Path.UnsafeAsKeccak.GetHashCodeUlong();
+
+            return hash ^ ProbeHash(key.StoragePath);
+        }
+
+        return hash ^ ProbeHash(key.Path);
+
+        static ulong ProbeHash(in NibblePath path)
+        {
+            if (path.Length == 0)
+                return 0;
+
+            var max = path.Length - 1;
+
+            // use only 32 bit here to not over-flood with GetAt
+            return (ulong)path.GetAt(0) ^
+                   ((ulong)path.GetAt(max / 8) << 4) ^
+                   ((ulong)path.GetAt(max * 2 / 8) << 8) ^
+                   ((ulong)path.GetAt(max * 3 / 8) << 12) ^
+                   ((ulong)path.GetAt(max * 4 / 8) << 16) ^
+                   ((ulong)path.GetAt(max * 5 / 8) << 20) ^
+                   ((ulong)path.GetAt(max * 6 / 8) << 24) ^
+                   ((ulong)path.GetAt(max * 7 / 8) << 28);
+        }
+    }
 
     public async ValueTask DisposeAsync()
     {
