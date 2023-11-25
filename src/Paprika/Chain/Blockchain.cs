@@ -505,6 +505,8 @@ public class Blockchain : IAsyncDisposable
 
         public void Reset()
         {
+            EnsureNotCommitted();
+
             _hash = ParentHash;
             _bloom.Clear();
             _destroyed = null;
@@ -614,10 +616,18 @@ public class Blockchain : IAsyncDisposable
             // clean precalculated hash
             _hash = null;
 
+            EnsureNotCommitted();
+
             var hash = GetHash(key);
             _bloom.Add(hash);
 
             dict.Set(key.WriteTo(stackalloc byte[key.MaxByteLength]), hash, payload);
+        }
+
+        private void EnsureNotCommitted()
+        {
+            if (_committed)
+                throw new Exception("This blocks has already been committed");
         }
 
         private void SetImpl(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1,
