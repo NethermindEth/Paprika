@@ -1068,35 +1068,7 @@ public class Blockchain : IAsyncDisposable
 
     private static ulong GetHash(in Key key)
     {
-        var hash = (ulong)key.Type;
-
-        if (key.Path.Length == NibblePath.KeccakNibbleCount)
-        {
-            // either account, storage, or Merkle for storage
-            hash ^= key.Path.UnsafeAsKeccak.GetHashCodeUlong();
-
-            return hash ^ ProbeHash(key.StoragePath);
-        }
-
-        return hash ^ ProbeHash(key.Path);
-
-        static ulong ProbeHash(in NibblePath path)
-        {
-            if (path.Length == 0)
-                return 0;
-
-            var max = path.Length - 1;
-
-            // use only 32 bit here to not over-flood with GetAt
-            return (ulong)path.GetAt(0) ^
-                   ((ulong)path.GetAt(max / 8) << 4) ^
-                   ((ulong)path.GetAt(max * 2 / 8) << 8) ^
-                   ((ulong)path.GetAt(max * 3 / 8) << 12) ^
-                   ((ulong)path.GetAt(max * 4 / 8) << 16) ^
-                   ((ulong)path.GetAt(max * 5 / 8) << 20) ^
-                   ((ulong)path.GetAt(max * 6 / 8) << 24) ^
-                   ((ulong)path.GetAt(max * 7 / 8) << 28);
-        }
+        return unchecked((uint)key.GetHashCode());
     }
 
     public async ValueTask DisposeAsync()
