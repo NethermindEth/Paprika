@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
+using System.Reflection.Metadata;
 using System.Text;
 using Nethermind.Int256;
 using Paprika.Chain;
@@ -33,7 +34,7 @@ public static class Program
         new(100, 1000, 1 * Gb, false, TimeSpan.FromSeconds(5), false, true);
 
     private static readonly Case InMemorySmall =
-        new(10_000, 1000, 11 * Gb, false, TimeSpan.FromSeconds(5), false, true);
+        new(10_000, 1000, 10 * Gb, false, TimeSpan.FromSeconds(5), false, true);
     private static readonly Case InMemoryMedium =
         new(50_000, 1000, 32 * Gb, false, TimeSpan.FromSeconds(5), false, false);
     private static readonly Case
@@ -44,7 +45,7 @@ public static class Program
         new(50_000, 1000, 11 * Gb, true, TimeSpan.FromSeconds(5), true, false);
 
     private const int MaxReorgDepth = 64;
-    private const int FinalizeEvery = 32;
+    private const int FinalizeEvery = 64;
 
     private const int RandomSeed = 17;
     private const long Gb = 1024 * 1024 * 1024L;
@@ -261,6 +262,7 @@ public static class Program
         var report = new StringBuilder();
         string result = "";
         var counter = 0;
+        var sameHashOccured = false;
 
         bool bigStorageAccountCreated = false;
 
@@ -268,7 +270,7 @@ public static class Program
         var writing = Stopwatch.StartNew();
         var hash = Keccak.Zero;
 
-        var toFinalize = new List<Keccak>();
+        var toFinalize = new Queue<Keccak>();
 
         for (uint block = 1; block < config.BlockCount; block++)
         {
@@ -305,17 +307,17 @@ public static class Program
             }
 
             hash = worldState.Commit(block);
+
             result = $"{hash.ToString()?[..8]}...";
 
             //finalize
-            if (toFinalize.Count >= FinalizeEvery)
+            while (toFinalize.Count >= FinalizeEvery)
             {
                 // finalize first
-                blockchain.Finalize(toFinalize[0]);
-                toFinalize.Clear();
+                blockchain.Finalize(toFinalize.Dequeue());
             }
 
-            toFinalize.Add(hash);
+            toFinalize.Enqueue(hash);
 
             if (block > 0 & block % config.LogEvery == 0)
             {
@@ -329,8 +331,6 @@ public static class Program
 
         // flush leftovers by adding one more block for now
         var lastBlock = toFinalize.Last();
-        using var placeholder = blockchain.StartNew(lastBlock);
-        placeholder.Commit(config.BlockCount);
         blockchain.Finalize(lastBlock);
 
         report.AppendLine($@"At block {config.BlockCount - 1}. This batch of {config.LogEvery} blocks took {writing.Elapsed:h\:mm\:ss\.FF}. RootHash: {result}");
