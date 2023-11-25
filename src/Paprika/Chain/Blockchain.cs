@@ -392,7 +392,12 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// A simple bloom filter to assert whether the given key was set in a given block, used to speed up getting the keys.
         /// </summary>
-        private readonly HashSet<ulong> _bloom;
+        private HashSet<ulong>? _bloom;
+
+        /// <summary>
+        /// A faster filter constructed on block commit.
+        /// </summary>
+        private Xor8? _xor;
 
         /// <summary>
         /// Stores information about contracts that should have their previous incarnations destroyed.
@@ -495,8 +500,11 @@ public class Blockchain : IAsyncDisposable
             _ancestors = Array.Empty<BlockState>();
 
             AcquireLease();
-
             BlockNumber = blockNumber;
+
+            // create xor bloom
+            _xor = new Xor8(_bloom!);
+            _bloom = null;
 
             _blockchain.Add(this);
             _committed = true;
@@ -794,8 +802,10 @@ public class Blockchain : IAsyncDisposable
         public ReadOnlySpanOwner<byte> TryGetLocal(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
             ulong bloom, out bool succeeded)
         {
+            var mayHave = _committed ? _xor!.MayContain(bloom) : _bloom!.Contains(bloom);
+
             // check if the change is in the block
-            if (!_bloom.Contains(bloom))
+            if (!mayHave)
             {
                 // if destroyed, return false as no previous one will contain it
                 if (IsAccountDestroyed(key))

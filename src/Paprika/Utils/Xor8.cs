@@ -26,9 +26,9 @@ public class Xor8
 
     private static int GetArrayLength(int size) => (int)(Offset + (long)FactorTimes100 * size / 100);
 
-    public Xor8(ulong[] keys)
+    public Xor8(IReadOnlyCollection<ulong> keys)
     {
-        var size = keys.Length;
+        var size = keys.Count;
         var arrayLength = GetArrayLength(size);
 
         _blockLength = arrayLength / Hashes;
