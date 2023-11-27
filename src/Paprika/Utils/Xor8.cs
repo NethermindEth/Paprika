@@ -1,6 +1,7 @@
 ﻿using System.Buffers;
 using System.Collections;
 using System.Numerics;
+using System.Runtime.InteropServices.ComTypes;
 
 namespace Paprika.Utils;
 
@@ -13,7 +14,6 @@ namespace Paprika.Utils;
  * [1] paper: Simple and Space-Efficient Minimal Perfect Hash Functions -
  * http://cmph.sourceforge.net/papers/wads07.pdf
  */
-// TODO: remove all the array allocs
 public class Xor8
 {
     private const int BitsPerFingerprint = 8;
@@ -33,6 +33,9 @@ public class Xor8
 
     public Xor8(IReadOnlyCollection<ulong> keys)
     {
+        // TODO: remove all array allocations, use ArrayPool<ulong> more and/or buffer pool, potentially combine chunks of memory together
+
+        
         var size = keys.Count;
         var arrayLength = GetArrayLength(size);
 
@@ -40,6 +43,8 @@ public class Xor8
 
         var reverseOrder = ArrayPool<ulong>.Shared.Rent(size);
         var reverseH = ArrayPool<byte>.Shared.Rent(size);
+        var t2Count = ArrayPool<byte>.Shared.Rent(arrayLength);
+        var t2 = ArrayPool<ulong>.Shared.Rent(arrayLength);
 
         int reverseOrderPos;
         ulong seed;
@@ -49,8 +54,10 @@ public class Xor8
         {
             seed = Hash.RandomSeed();
             reverseOrderPos = 0;
-            var t2Count = new byte[arrayLength];
-            var t2 = new ulong[arrayLength];
+            
+            Array.Clear(t2Count);
+            Array.Clear(t2);
+            
             foreach (var k in keys)
             {
                 for (var hi = 0; hi < Hashes; hi++)
@@ -173,6 +180,8 @@ public class Xor8
 
         ArrayPool<ulong>.Shared.Return(reverseOrder);
         ArrayPool<byte>.Shared.Return(reverseH);
+        ArrayPool<byte>.Shared.Return(t2Count);
+        ArrayPool<ulong>.Shared.Return(t2);
     }
 
     public bool MayContain(ulong key)
