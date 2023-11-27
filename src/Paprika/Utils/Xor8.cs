@@ -35,7 +35,7 @@ public class Xor8
     {
         // TODO: remove all array allocations, use ArrayPool<ulong> more and/or buffer pool, potentially combine chunks of memory together
 
-        
+
         var size = keys.Count;
         var arrayLength = GetArrayLength(size);
 
@@ -54,10 +54,10 @@ public class Xor8
         {
             seed = Hash.RandomSeed();
             reverseOrderPos = 0;
-            
+
             Array.Clear(t2Count);
             Array.Clear(t2);
-            
+
             foreach (var k in keys)
             {
                 for (var hi = 0; hi < Hashes; hi++)
