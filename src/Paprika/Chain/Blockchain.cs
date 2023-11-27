@@ -1,6 +1,7 @@
 ﻿using System.CodeDom.Compiler;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Paprika.Crypto;
@@ -391,7 +392,12 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// A simple bloom filter to assert whether the given key was set in a given block, used to speed up getting the keys.
         /// </summary>
-        private readonly HashSet<int> _bloom;
+        private HashSet<int>? _bloom;
+
+        /// <summary>
+        /// A faster filter constructed on block commit.
+        /// </summary>
+        private Xor8? _xor;
 
         /// <summary>
         /// Stores information about contracts that should have their previous incarnations destroyed.
@@ -494,8 +500,11 @@ public class Blockchain : IAsyncDisposable
             _ancestors = Array.Empty<BlockState>();
 
             AcquireLease();
-
             BlockNumber = blockNumber;
+
+            // create xor bloom
+            _xor = new Xor8(_bloom!);
+            _bloom = null;
 
             _blockchain.Add(this);
             _committed = true;
@@ -505,6 +514,8 @@ public class Blockchain : IAsyncDisposable
 
         public void Reset()
         {
+            EnsureNotCommitted();
+
             _hash = ParentHash;
             _bloom.Clear();
             _destroyed = null;
@@ -589,8 +600,6 @@ public class Blockchain : IAsyncDisposable
             return result;
         }
 
-        private static int GetHash(in Key key) => key.GetHashCode();
-
         public void SetAccount(in Keccak address, in Account account)
         {
             var path = NibblePath.FromKey(address);
@@ -614,10 +623,18 @@ public class Blockchain : IAsyncDisposable
             // clean precalculated hash
             _hash = null;
 
+            EnsureNotCommitted();
+
             var hash = GetHash(key);
             _bloom.Add(hash);
 
             dict.Set(key.WriteTo(stackalloc byte[key.MaxByteLength]), hash, payload);
+        }
+
+        private void EnsureNotCommitted()
+        {
+            if (_committed)
+                throw new Exception("This blocks has already been committed");
         }
 
         private void SetImpl(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1,
@@ -785,8 +802,10 @@ public class Blockchain : IAsyncDisposable
         public ReadOnlySpanOwner<byte> TryGetLocal(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
             int bloom, out bool succeeded)
         {
+            var mayHave = _committed ? _xor!.MayContain(unchecked((ulong)bloom)) : _bloom!.Contains(bloom);
+
             // check if the change is in the block
-            if (!_bloom.Contains(bloom))
+            if (!mayHave)
             {
                 // if destroyed, return false as no previous one will contain it
                 if (IsAccountDestroyed(key))
@@ -991,8 +1010,6 @@ public class Blockchain : IAsyncDisposable
             return result;
         }
 
-        private static int GetHash(in Key key) => key.GetHashCode();
-
 
         public ReadOnlySpanOwner<byte> Get(scoped in Key key)
         {
@@ -1049,6 +1066,7 @@ public class Blockchain : IAsyncDisposable
             $"{nameof(BlockNumber)}: {BlockNumber}";
     }
 
+    private static int GetHash(in Key key) => key.GetHashCode();
 
     public async ValueTask DisposeAsync()
     {
