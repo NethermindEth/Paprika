@@ -60,6 +60,30 @@ public class RootHashFuzzyTests
         AssertRootHash(rootHash, generator);
     }
 
+    [TestCase(nameof(Accounts_1000_Storage_1), int.MaxValue)]
+    [TestCase(nameof(Accounts_1_Storage_100), int.MaxValue)]
+    [TestCase(nameof(Accounts_100_Storage_1), int.MaxValue)]
+    public async Task CalculateStateRootHash(string test, int commitEvery)
+    {
+        var generator = Build(test);
+
+        using var db = PagedDb.NativeMemoryDb(16 * 1024 * 1024, 2);
+        var merkle = new ComputeMerkleBehavior(true, 2, 2);
+        await using var blockchain = new Blockchain(db, merkle);
+
+        var rootHash = generator.Run(blockchain, commitEvery);
+
+        var flush = blockchain.WaitTillFlush(rootHash);
+        blockchain.Finalize(rootHash);
+        await flush;
+
+        var state = blockchain.StartReadOnly(rootHash);
+        var recalculated = merkle.CalculateStateRootHash(state);
+
+        rootHash.Should().Be(generator.RootHashAsKeccak);
+        recalculated.Should().Be(rootHash);
+    }
+
     private static void AssertRootHash(Keccak rootHash, CaseGenerator generator)
     {
         rootHash.Should().Be(generator.RootHashAsKeccak, "Root hashes should match");
@@ -142,7 +166,7 @@ public class RootHashFuzzyTests
             }
         }
 
-        public Keccak Run(Blockchain blockchain, int newBlockEvery = Int32.MaxValue)
+        public Keccak Run(Blockchain blockchain, int newBlockEvery = int.MaxValue)
         {
             var counter = 0;
             uint blocks = 1;

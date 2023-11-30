@@ -116,6 +116,19 @@ public readonly struct Keccak : IEquatable<Keccak>
         return (int)v0 ^ (int)(v0 >> 32);
     }
 
+    public ulong GetHashCodeUlong()
+    {
+        var v0 = As<Vector256<byte>, ulong>(ref AsRef(in Bytes));
+        var v1 = Add(ref As<Vector256<byte>, ulong>(ref AsRef(in Bytes)), 1);
+        var v2 = Add(ref As<Vector256<byte>, ulong>(ref AsRef(in Bytes)), 2);
+        var v3 = Add(ref As<Vector256<byte>, ulong>(ref AsRef(in Bytes)), 3);
+        v0 ^= v1;
+        v2 ^= v3;
+        v0 ^= v2;
+
+        return v0;
+    }
+
     public override string ToString() => ToString(true);
 
     public string ToString(bool withZeroX) => Span.ToHexString(withZeroX);

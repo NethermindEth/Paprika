@@ -1,5 +1,7 @@
-﻿using System.Diagnostics;
+﻿using System.CodeDom.Compiler;
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Paprika.Crypto;
@@ -104,10 +106,12 @@ public class Blockchain : IAsyncDisposable
                 var flushed = new List<uint>();
                 var timer = Stopwatch.StartNew();
 
-                uint flushedTo = 0;
+                (uint _blocksByNumber, Keccak blockHash) last = default;
 
                 while (timer.Elapsed < _minFlushDelay && reader.TryRead(out var block))
                 {
+                    last = (block.BlockNumber, block.Hash);
+
                     using var batch = _db.BeginNextBatch();
 
                     // apply
@@ -115,7 +119,7 @@ public class Blockchain : IAsyncDisposable
 
                     flushed.Add(block.BlockNumber);
 
-                    flushedTo = block.BlockNumber;
+                    var flushedTo = block.BlockNumber;
 
                     batch.SetMetadata(block.BlockNumber, block.Hash);
 
@@ -164,7 +168,7 @@ public class Blockchain : IAsyncDisposable
                 _db.Flush();
                 _flusherFlushInMs.Record((int)flushWatch.ElapsedMilliseconds);
 
-                Flushed?.Invoke(this, flushedTo);
+                Flushed?.Invoke(this, last);
 
                 if (timer.ElapsedMilliseconds > 0)
                 {
@@ -182,7 +186,7 @@ public class Blockchain : IAsyncDisposable
     /// <summary>
     /// Announces the last block number that was flushed to disk.
     /// </summary>
-    public event EventHandler<uint> Flushed;
+    public event EventHandler<(uint blockNumber, Keccak blockHash)> Flushed;
 
     private void Add(BlockState state)
     {
@@ -240,12 +244,12 @@ public class Blockchain : IAsyncDisposable
         }
     }
 
-    public IReadOnlyWorldState StartReadOnly(Keccak parentKeccak)
+    public IReadOnlyWorldState StartReadOnly(Keccak keccak)
     {
         lock (_blockLock)
         {
-            var (batch, ancestors) = BuildBlockDataDependencies(parentKeccak);
-            return new ReadOnlyState(parentKeccak, batch, ancestors);
+            var (batch, ancestors) = BuildBlockDataDependencies(keccak);
+            return new ReadOnlyState(keccak, batch, ancestors);
         }
     }
 
@@ -385,17 +389,22 @@ public class Blockchain : IAsyncDisposable
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload.
     /// </summary>
-    private class BlockState : RefCountingDisposable, IWorldState, ICommit
+    private class BlockState : RefCountingDisposable, IWorldState, ICommit, IProvideDescription
     {
         /// <summary>
         /// A simple bloom filter to assert whether the given key was set in a given block, used to speed up getting the keys.
         /// </summary>
-        private readonly HashSet<int> _bloom;
+        private HashSet<int>? _bloom;
+
+        /// <summary>
+        /// A faster filter constructed on block commit.
+        /// </summary>
+        private Xor8? _xor;
 
         /// <summary>
         /// Stores information about contracts that should have their previous incarnations destroyed.
         /// </summary>
-        private readonly HashSet<Keccak> _destroyed;
+        private HashSet<Keccak>? _destroyed;
 
         private readonly ReadOnlyBatchCountingRefs _batch;
         private BlockState[] _ancestors;
@@ -405,18 +414,18 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// The maps mapping accounts information, written in this block.
         /// </summary>
-        private PooledSpanDictionary _state;
+        private PooledSpanDictionary _state = null!;
 
         /// <summary>
         /// The maps mapping storage information, written in this block.
         /// </summary>
-        private PooledSpanDictionary _storage;
+        private PooledSpanDictionary _storage = null!;
 
         /// <summary>
         /// The values set the <see cref="IPreCommitBehavior"/> during the <see cref="ICommit.Visit"/> invocation.
         /// It's both storage & state as it's metadata for the pre-commit behavior.
         /// </summary>
-        private PooledSpanDictionary _preCommit;
+        private PooledSpanDictionary _preCommit = null!;
 
         private bool _committed;
         private Keccak? _hash;
@@ -433,7 +442,7 @@ public class Blockchain : IAsyncDisposable
 
             // rent pages for the bloom
             _bloom = new HashSet<int>();
-            _destroyed = new HashSet<Keccak>();
+            _destroyed = null;
 
             _hash = ParentHash;
 
@@ -493,8 +502,11 @@ public class Blockchain : IAsyncDisposable
             _ancestors = Array.Empty<BlockState>();
 
             AcquireLease();
-
             BlockNumber = blockNumber;
+
+            // create xor bloom
+            _xor = new Xor8(_bloom!);
+            _bloom = null;
 
             _blockchain.Add(this);
             _committed = true;
@@ -504,9 +516,11 @@ public class Blockchain : IAsyncDisposable
 
         public void Reset()
         {
+            EnsureNotCommitted();
+
             _hash = ParentHash;
             _bloom.Clear();
-            _destroyed.Clear();
+            _destroyed = null;
 
             CreateDictionaries();
         }
@@ -540,7 +554,9 @@ public class Blockchain : IAsyncDisposable
 
             Destroy(searched, _state);
             Destroy(searched, _storage);
+            Destroy(searched, _preCommit);
 
+            _destroyed ??= new HashSet<Keccak>();
             _destroyed.Add(address);
             return;
 
@@ -586,8 +602,6 @@ public class Blockchain : IAsyncDisposable
             return result;
         }
 
-        private static int GetHash(in Key key) => key.GetHashCode();
-
         public void SetAccount(in Keccak address, in Account account)
         {
             var path = NibblePath.FromKey(address);
@@ -611,10 +625,18 @@ public class Blockchain : IAsyncDisposable
             // clean precalculated hash
             _hash = null;
 
+            EnsureNotCommitted();
+
             var hash = GetHash(key);
             _bloom.Add(hash);
 
             dict.Set(key.WriteTo(stackalloc byte[key.MaxByteLength]), hash, payload);
+        }
+
+        private void EnsureNotCommitted()
+        {
+            if (_committed)
+                throw new Exception("This blocks has already been committed");
         }
 
         private void SetImpl(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1,
@@ -633,6 +655,24 @@ public class Blockchain : IAsyncDisposable
         void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1) =>
             SetImpl(key, payload0, payload1, _preCommit);
 
+        public string Describe()
+        {
+            var writer = new StringWriter();
+            var indented = new IndentedTextWriter(writer);
+            indented.Indent = 1;
+
+            writer.WriteLine("State:");
+            _state.Describe(indented);
+
+            writer.WriteLine("Storage:");
+            _storage.Describe(indented);
+
+            writer.WriteLine("PreCommit:");
+            _preCommit.Describe(indented);
+
+            return writer.ToString();
+        }
+
         void ICommit.Visit(CommitAction action, TrieType type)
         {
             var dict = type == TrieType.State ? _state : _storage;
@@ -641,6 +681,15 @@ public class Blockchain : IAsyncDisposable
             {
                 Key.ReadFrom(kvp.Key, out var key);
                 action(key, kvp.Value);
+            }
+
+            if (type == TrieType.State && _destroyed != null)
+            {
+                foreach (var destroyed in _destroyed)
+                {
+                    // clean the deletes
+                    action(Key.Account(destroyed), ReadOnlySpan<byte>.Empty);
+                }
             }
         }
 
@@ -728,16 +777,6 @@ public class Blockchain : IAsyncDisposable
             if (succeeded)
                 return owner;
 
-            if (key.Type is DataType.Account or DataType.StorageCell)
-            {
-                if (_destroyed.Contains(key.Path.UnsafeAsKeccak))
-                {
-                    // The key is account or the storage cell that belongs to a history of a destroyed account. Default
-                    succeeded = true;
-                    return default;
-                }
-            }
-
             // walk all the blocks locally
             foreach (var ancestor in _ancestors)
             {
@@ -765,8 +804,18 @@ public class Blockchain : IAsyncDisposable
         public ReadOnlySpanOwner<byte> TryGetLocal(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
             int bloom, out bool succeeded)
         {
-            if (!_bloom.Contains(bloom))
+            var mayHave = _committed ? _xor!.MayContain(unchecked((ulong)bloom)) : _bloom!.Contains(bloom);
+
+            // check if the change is in the block
+            if (!mayHave)
             {
+                // if destroyed, return false as no previous one will contain it
+                if (IsAccountDestroyed(key))
+                {
+                    succeeded = true;
+                    return default;
+                }
+
                 succeeded = false;
                 return default;
             }
@@ -792,16 +841,33 @@ public class Blockchain : IAsyncDisposable
             {
                 // return with owned lease
                 succeeded = true;
-
                 AcquireLease();
-
                 return new ReadOnlySpanOwner<byte>(span, this);
             }
 
             _blockchain._bloomMissedReads.Add(1);
 
+            // if destroyed, return false as no previous one will contain it
+            if (IsAccountDestroyed(key))
+            {
+                succeeded = true;
+                return default;
+            }
+
             succeeded = false;
             return default;
+        }
+
+        private bool IsAccountDestroyed(scoped in Key key)
+        {
+            if (_destroyed == null)
+                return false;
+
+            if (key.Path.Length != NibblePath.KeccakNibbleCount)
+                return false;
+
+            // it's either Account, Storage, or Merkle that is a storage
+            return _destroyed.Contains(key.Path.UnsafeAsKeccak);
         }
 
         protected override void CleanUp()
@@ -826,7 +892,7 @@ public class Blockchain : IAsyncDisposable
 
         public void Apply(IBatch batch)
         {
-            if (_destroyed.Count > 0)
+            if (_destroyed is { Count: > 0 })
             {
                 foreach (var account in _destroyed)
                 {
@@ -946,8 +1012,6 @@ public class Blockchain : IAsyncDisposable
             return result;
         }
 
-        private static int GetHash(in Key key) => key.GetHashCode();
-
 
         public ReadOnlySpanOwner<byte> Get(scoped in Key key)
         {
@@ -1004,6 +1068,7 @@ public class Blockchain : IAsyncDisposable
             $"{nameof(BlockNumber)}: {BlockNumber}";
     }
 
+    private static int GetHash(in Key key) => key.GetHashCode();
 
     public async ValueTask DisposeAsync()
     {
