@@ -106,10 +106,12 @@ public class Blockchain : IAsyncDisposable
                 var flushed = new List<uint>();
                 var timer = Stopwatch.StartNew();
 
-                uint flushedTo = 0;
+                (uint _blocksByNumber, Keccak blockHash) last = default;
 
                 while (timer.Elapsed < _minFlushDelay && reader.TryRead(out var block))
                 {
+                    last = (block.BlockNumber, block.Hash);
+
                     using var batch = _db.BeginNextBatch();
 
                     // apply
@@ -117,7 +119,7 @@ public class Blockchain : IAsyncDisposable
 
                     flushed.Add(block.BlockNumber);
 
-                    flushedTo = block.BlockNumber;
+                    var flushedTo = block.BlockNumber;
 
                     batch.SetMetadata(block.BlockNumber, block.Hash);
 
@@ -166,7 +168,7 @@ public class Blockchain : IAsyncDisposable
                 _db.Flush();
                 _flusherFlushInMs.Record((int)flushWatch.ElapsedMilliseconds);
 
-                Flushed?.Invoke(this, flushedTo);
+                Flushed?.Invoke(this, last);
 
                 if (timer.ElapsedMilliseconds > 0)
                 {
@@ -184,7 +186,7 @@ public class Blockchain : IAsyncDisposable
     /// <summary>
     /// Announces the last block number that was flushed to disk.
     /// </summary>
-    public event EventHandler<uint> Flushed;
+    public event EventHandler<(uint blockNumber, Keccak blockHash)> Flushed;
 
     private void Add(BlockState state)
     {
@@ -242,12 +244,12 @@ public class Blockchain : IAsyncDisposable
         }
     }
 
-    public IReadOnlyWorldState StartReadOnly(Keccak parentKeccak)
+    public IReadOnlyWorldState StartReadOnly(Keccak keccak)
     {
         lock (_blockLock)
         {
-            var (batch, ancestors) = BuildBlockDataDependencies(parentKeccak);
-            return new ReadOnlyState(parentKeccak, batch, ancestors);
+            var (batch, ancestors) = BuildBlockDataDependencies(keccak);
+            return new ReadOnlyState(keccak, batch, ancestors);
         }
     }
 

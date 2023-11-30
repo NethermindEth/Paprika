@@ -180,7 +180,20 @@ public static class TestExtensions
 
         chain.Flushed += (_, block) =>
         {
-            if (block == blockNumber)
+            if (block.blockNumber == blockNumber)
+                tcs.SetResult();
+        };
+
+        return tcs.Task;
+    }
+
+    public static Task WaitTillFlush(this Blockchain chain, Keccak hash)
+    {
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        chain.Flushed += (_, block) =>
+        {
+            if (block.blockHash == hash)
                 tcs.SetResult();
         };
 
