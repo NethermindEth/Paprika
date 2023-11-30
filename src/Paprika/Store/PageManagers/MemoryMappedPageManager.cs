@@ -30,7 +30,7 @@ public class MemoryMappedPageManager : PointerPageManager
     public unsafe MemoryMappedPageManager(ulong size, byte historyDepth, string dir,
         PersistenceOptions options = PersistenceOptions.FlushFile) : base(size)
     {
-        Path = System.IO.Path.Combine(dir, PaprikaFileName);
+        Path = GetPaprikaFilePath(dir);
 
         if (!File.Exists(Path))
         {
@@ -62,6 +62,8 @@ public class MemoryMappedPageManager : PointerPageManager
         _whole.SafeMemoryMappedViewHandle.AcquirePointer(ref _ptr);
         _options = options;
     }
+
+    public static string GetPaprikaFilePath(string dir) => System.IO.Path.Combine(dir, PaprikaFileName);
 
     public string Path { get; }
 
