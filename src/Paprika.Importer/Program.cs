@@ -54,8 +54,8 @@ var trie = new StateTree(store, logs)
     RootHash = rootHash
 };
 
-var keccak = new ValueKeccak("0x380c98b03a3f72ee8aa540033b219c0d397dbe2523162db9dd07e6bbb015d50b").ToKeccak();
-var nibs = Nibbles.FromBytes(keccak.Bytes);
+//var keccak = new ValueKeccak("0x380c98b03a3f72ee8aa540033b219c0d397dbe2523162db9dd07e6bbb015d50b").ToKeccak();
+var nibs = new byte[0];//Nibbles.FromBytes(keccak.Bytes);
 
 var current = trie.RootRef!;
 
@@ -73,7 +73,7 @@ var dataPath = Path.Combine(dir, "db");
 var dbExists = Directory.Exists(dataPath);
 
 const long GB = 1024 * 1024 * 1024;
-var size = (path.Contains("mainnet") ? 256ul : 24ul) * GB;
+var size = (path.Contains("mainnet") ? 256ul : 32ul) * GB;
 
 if (dbExists)
 {
