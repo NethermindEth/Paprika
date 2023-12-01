@@ -60,8 +60,7 @@ public class Blockchain : IAsyncDisposable
         {
             _finalizedChannel = Channel.CreateUnbounded<BlockState>(new UnboundedChannelOptions
             {
-                SingleReader = true,
-                SingleWriter = true,
+                SingleReader = true, SingleWriter = true,
             });
         }
         else
@@ -69,9 +68,7 @@ public class Blockchain : IAsyncDisposable
             _finalizedChannel = Channel.CreateBounded<BlockState>(
                 new BoundedChannelOptions(finalizationQueueLimit.Value)
                 {
-                    SingleReader = true,
-                    SingleWriter = true,
-                    FullMode = BoundedChannelFullMode.Wait,
+                    SingleReader = true, SingleWriter = true, FullMode = BoundedChannelFullMode.Wait,
                 });
         }
 
@@ -261,33 +258,31 @@ public class Blockchain : IAsyncDisposable
 
     private (IReadOnlyBatch batch, BlockState[] ancestors) BuildBlockDataDependencies(Keccak parentKeccak)
     {
-        if (_blocksByHash.TryGetValue(parentKeccak, out var ancestor))
-        {
-            var ancestors = new List<BlockState>();
+        parentKeccak = Normalize(parentKeccak);
 
-            do
-            {
-                ancestor.AcquireLease(); // lease it!
-                ancestors.Add(ancestor);
-            } while (_blocksByHash.TryGetValue(ancestor.ParentHash, out ancestor));
+        // the most recent finalized batch
+        var batch = _db.BeginReadOnlyBatchOrLatest(parentKeccak, $"Blockchain dependency");
 
-            // no more ancestors, sort them from the youngest
-            var fromYoungest = ancestors.ToArray();
-            var oldest = fromYoungest[^1];
-
-            // the easy path, the parent block is in the non-finalized set yet
-            var batch = _db.BeginReadOnlyBatch(Normalize(oldest.ParentHash),
-                $"Blockchain dependency with parent @ {parentKeccak}");
-
-            return (batch, fromYoungest);
-        }
-        else
-        {
-            // the block is in the finalized part, search for it
-            var batch = _db.BeginReadOnlyBatch(Normalize(parentKeccak),
-                $"Blockchain dependency with parent @ {parentKeccak}");
+        // batch matches the parent, return
+        if (batch.Metadata.StateHash == parentKeccak)
             return (batch, Array.Empty<BlockState>());
+
+        // no match, find chain
+        var ancestors = new List<BlockState>();
+        while (batch.Metadata.StateHash != parentKeccak)
+        {
+            if (_blocksByHash.TryGetValue(parentKeccak, out var ancestor) == false)
+            {
+                throw new Exception(
+                    $"Failed to build dependencies. Parent state with hash {parentKeccak} was not found");
+            }
+
+            ancestor.AcquireLease(); // lease it!
+            ancestors.Add(ancestor);
+            parentKeccak = ancestor.ParentHash;
         }
+
+        return (batch, ancestors.ToArray());
 
         static Keccak Normalize(in Keccak keccak)
         {
@@ -301,7 +296,7 @@ public class Blockchain : IAsyncDisposable
         Stack<BlockState> finalized;
         uint count;
 
-        // gather all the blocks to finalize 
+        // gather all the blocks to finalize
         lock (_blockLock)
         {
             if (_blocksByHash.TryGetValue(keccak, out var block) == false)
@@ -820,7 +815,7 @@ public class Blockchain : IAsyncDisposable
                 return default;
             }
 
-            // select the map to search for 
+            // select the map to search for
             var dict = key.Type switch
             {
                 DataType.Account => _state,
