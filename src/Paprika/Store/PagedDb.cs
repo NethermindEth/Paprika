@@ -210,6 +210,30 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
+    public IReadOnlyBatch BeginReadOnlyBatchOrLatest(Keccak stateHash, string name = "")
+    {
+        lock (_batchLock)
+        {
+            for (var back = 0; back < _historyDepth; back++)
+            {
+                if (_lastRoot - back < 0)
+                {
+                    break;
+                }
+
+                var at = (_lastRoot - back) % _historyDepth;
+                ref readonly var root = ref _roots[at];
+
+                if (root.Data.Metadata.StateHash == stateHash)
+                {
+                    return BeginReadOnlyBatch(name, root);
+                }
+            }
+
+            return BeginReadOnlyBatch(name, Root);
+        }
+    }
+
     public bool HasState(Keccak stateHash)
     {
         lock (_batchLock)
@@ -614,7 +638,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             CheckDisposed();
 
-            // memoize the abandoned so that it's preserved for future uses 
+            // memoize the abandoned so that it's preserved for future uses
             MemoizeAbandoned();
 
             _db.ReportPageCountPerCommit(_written.Count, _metrics.PagesReused, _metrics.PagesAllocated);
