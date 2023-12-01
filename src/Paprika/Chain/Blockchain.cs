@@ -60,7 +60,8 @@ public class Blockchain : IAsyncDisposable
         {
             _finalizedChannel = Channel.CreateUnbounded<BlockState>(new UnboundedChannelOptions
             {
-                SingleReader = true, SingleWriter = true,
+                SingleReader = true,
+                SingleWriter = true,
             });
         }
         else
@@ -68,7 +69,9 @@ public class Blockchain : IAsyncDisposable
             _finalizedChannel = Channel.CreateBounded<BlockState>(
                 new BoundedChannelOptions(finalizationQueueLimit.Value)
                 {
-                    SingleReader = true, SingleWriter = true, FullMode = BoundedChannelFullMode.Wait,
+                    SingleReader = true,
+                    SingleWriter = true,
+                    FullMode = BoundedChannelFullMode.Wait,
                 });
         }
 
