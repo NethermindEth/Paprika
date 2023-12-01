@@ -282,7 +282,7 @@ public class Blockchain : IAsyncDisposable
 
             ancestor.AcquireLease(); // lease it!
             ancestors.Add(ancestor);
-            parentKeccak = ancestor.ParentHash;
+            parentKeccak = Normalize(ancestor.ParentHash);
         }
 
         return (batch, ancestors.ToArray());
