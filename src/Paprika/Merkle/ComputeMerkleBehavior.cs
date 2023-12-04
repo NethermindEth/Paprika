@@ -134,21 +134,31 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     public Keccak BeforeCommit(ICommit commit)
     {
-        const int fanout = 16;
-
-        var items = new Item[fanout];
-
-        for (byte nibble = 0; nibble < fanout; nibble++)
+        if (CanRunInParallel(commit))
         {
-            items[nibble] = new Item(nibble, commit, this);
+            const int fanout = 16;
+
+            var items = new Item[fanout];
+
+            for (byte nibble = 0; nibble < fanout; nibble++)
+            {
+                items[nibble] = new Item(nibble, commit, this);
+            }
+
+            Parallel.ForEach(items, item => item.DoWork());
+
+            foreach (var item in items)
+            {
+                item.Commit();
+                item.Dispose();
+            }
         }
-
-        Parallel.ForEach(items, item => item.DoWork());
-
-        foreach (var item in items)
+        else
         {
+            // TODO: this creates a child commit that is not needed. At the same time, this should happen only at the start. After all the root is always full
+            using var item = new Item(Item.All, commit, this);
+            item.DoWork();
             item.Commit();
-            item.Dispose();
         }
 
         // 4. recalculate root hash
@@ -165,6 +175,17 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
 
         return Keccak.Zero;
+    }
+
+    private static bool CanRunInParallel(ICommit commit)
+    {
+        var root = Key.Merkle(NibblePath.Empty);
+
+        using var readRoot = commit.Get(root);
+        if (readRoot.IsEmpty) return false;
+
+        Node.ReadFrom(readRoot.Span, out var type, out _, out _, out var branch);
+        return type == Node.Type.Branch && branch.Children.AllSet;
     }
 
     public ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data)
@@ -564,6 +585,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private sealed class Item : IDisposable
     {
+        public const byte All = byte.MaxValue;
+
         private readonly byte _nibble;
         private readonly ICommit _parent;
         private readonly ComputeMerkleBehavior _behavior;
@@ -702,7 +725,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             }
         }
 
-        private bool ShouldVisit(in Key key) => key.Path.FirstNibble == _nibble;
+        private bool ShouldVisit(in Key key) => _nibble == All || key.Path.FirstNibble == _nibble;
     }
 
     /// <summary>
