@@ -41,9 +41,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private readonly int _minimumTreeLevelToMemoizeKeccak;
     private readonly int _memoizeKeccakEvery;
     private readonly bool _memoizeRlp;
-    private readonly Meter _meter;
-    private readonly Histogram<long> _stateRootHashCompute;
-    private readonly Histogram<long> _storageRootsHashCompute;
 
     /// <summary>
     /// Initializes the Merkle.
@@ -64,12 +61,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         _minimumTreeLevelToMemoizeKeccak = minimumTreeLevelToMemoizeKeccak;
         _memoizeKeccakEvery = memoizeKeccakEvery;
         _memoizeRlp = memoizeRlp;
-
-        _meter = new Meter("Paprika.Merkle");
-        _stateRootHashCompute = _meter.CreateHistogram<long>("State root compute", "ms",
-            "How long it takes to calculate the root hash");
-        _storageRootsHashCompute = _meter.CreateHistogram<long>("Storage roots compute", "ms",
-            "How long it takes to calculate storage roots");
     }
 
     /// <summary>
@@ -1119,5 +1110,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
     }
 
-    public void Dispose() => _meter.Dispose();
+    public void Dispose()
+    {
+    }
 }
