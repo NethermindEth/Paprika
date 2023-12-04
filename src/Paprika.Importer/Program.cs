@@ -130,7 +130,7 @@ var root = MoveDownInTree(nibbles, trie, store);
 // root.Accept(storageCapture, store, false, nibbles);
 // File.WriteAllText("storage-big-tree.txt",storageCapture.Payload);
 
-using var preCommit = new ComputeMerkleBehavior(true, 2, 2, true);
+using var preCommit = new ComputeMerkleBehavior(true, 1, 1, true);
 
 var rootHashActual = Keccak.Zero;
 if (dbExists == false)
