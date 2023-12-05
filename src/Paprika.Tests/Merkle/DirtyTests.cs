@@ -273,6 +273,29 @@ public class DirtyTests
         });
     }
 
+    [Test]
+    public void Big_random_set_and_delete()
+    {
+        const int size = 10000;
+        const int seed = 19;
+        var commit = new Commit();
+
+        var random = new Random(seed);
+
+        for (var i = 0; i < size; i++)
+        {
+            commit.Set(NibblePath.FromKey(random.NextKeccak()));
+        }
+
+        Assert(commit, c =>
+        {
+            if (_delete == false)
+            {
+                NUnit.Framework.Assert.Ignore("No asserting for non-delete scenario");
+            }
+        });
+    }
+
     private void Assert(Commit commit, Action<ICommit> assert)
     {
         var merkle = new ComputeMerkleBehavior(false);

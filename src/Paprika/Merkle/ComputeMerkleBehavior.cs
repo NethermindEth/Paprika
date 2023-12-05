@@ -41,6 +41,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private readonly int _minimumTreeLevelToMemoizeKeccak;
     private readonly int _memoizeKeccakEvery;
     private readonly bool _memoizeRlp;
+    private readonly Meter _meter;
+    private readonly Histogram<long> _stateRootHashCompute;
+    private readonly Histogram<long> _storageRootsHashCompute;
 
     /// <summary>
     /// Initializes the Merkle.
@@ -61,6 +64,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         _minimumTreeLevelToMemoizeKeccak = minimumTreeLevelToMemoizeKeccak;
         _memoizeKeccakEvery = memoizeKeccakEvery;
         _memoizeRlp = memoizeRlp;
+
+        _meter = new Meter("Paprika.Merkle");
+        _stateRootHashCompute = _meter.CreateHistogram<long>("State root compute", "ms",
+            "How long it takes to calculate the root hash");
+        _storageRootsHashCompute = _meter.CreateHistogram<long>("Storage roots compute", "ms",
+            "How long it takes to calculate storage roots");
     }
 
     /// <summary>
@@ -114,69 +123,66 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         public IChildCommit GetChild() =>
             _allowChildCommits ? this : throw new NotImplementedException("Should not be called");
 
-        void IDisposable.Dispose()
-        {
-        }
+        void IDisposable.Dispose() { }
 
-        void IChildCommit.Commit()
-        {
-        }
+        void IChildCommit.Commit() { }
     }
 
     public Keccak BeforeCommit(ICommit commit)
     {
-        if (CanRunInParallel(commit))
+        // 1. Visit all Storage operations (SSTORE). For each key:
+        //  a. remember Account that Storage belongs to
+        //  b. walk through the MPT of Account Storage to create/amend Trie nodes
+        // 2. Visit all State operations. For each key:
+        //  a. check if it was one of the Storage operations. If yes, remove it from the set above
+        //  b. walk through the MPT of Account State to create/amend Trie nodes
+        // 3. Visit all the accounts that were not accessed in 2., but were remembered in 1,
+        //    meaning Accounts that had their storage modified but no changes to codehash, balance, nonce.
+        //    For each key:
+        //  a. walk through the MPT of Account State to create/amend Trie nodes
+        // 4. Calculate the Root Hash 
+        //  a.  for each of accounts that had their storage modified (from 1.), 
+        //    i. calculate the storage root hash
+        //    ii. store it in the account (decode account, encode, set)
+        //  b.  calculate the root hash of the State
+
+        // 1. visit storage
+        var storage = VisitStorage(commit);
+
+        // 2. visit state
+        var accountsThatRequireManualTouch = VisitState(commit, storage);
+
+        // 3. visit keys that require manual touch as they were not modified in the state step, mark them dirty
+        foreach (var accountKey in accountsThatRequireManualTouch)
         {
-            const int fanout = 16;
-
-            var items = new Item[fanout];
-
-            for (byte nibble = 0; nibble < fanout; nibble++)
-            {
-                items[nibble] = new Item(nibble, commit, this);
-            }
-
-            Parallel.ForEach(items, item => item.DoWork());
-
-            foreach (var item in items)
-            {
-                item.Commit();
-                item.Dispose();
-            }
-        }
-        else
-        {
-            // TODO: this creates a child commit that is not needed. At the same time, this should happen only at the start. After all the root is always full
-            using var item = new Item(Item.All, commit, this);
-            item.DoWork();
-            item.Commit();
+            MarkPathDirty(NibblePath.FromKey(accountKey), commit);
         }
 
         // 4. recalculate root hash
         if (_fullMerkle)
         {
+            var sw = Stopwatch.StartNew();
+
+            CalculateStorageRoots(commit, storage);
+
+            _storageRootsHashCompute.Record(sw.ElapsedMilliseconds);
+
+            sw.Restart();
+
             var root = Key.Merkle(NibblePath.Empty);
-            var rootKeccak = Compute(root, commit, TrieType.State, ComputeHint.DontUseParallel); // should be pre-calculated already
+            var rootKeccak = Compute(root, commit, TrieType.State, ComputeHint.None);
+
+            _stateRootHashCompute.Record(sw.ElapsedMilliseconds);
 
             Debug.Assert(rootKeccak.DataType == KeccakOrRlp.Type.Keccak);
 
             var value = new Keccak(rootKeccak.Span);
             RootHash = value;
+
             return value;
         }
 
         return Keccak.Zero;
-    }
-
-    private static bool CanRunInParallel(ICommit commit)
-    {
-        var root = Key.Merkle(NibblePath.Empty);
-
-        using var readRoot = commit.Get(root);
-        if (readRoot.IsEmpty) return false;
-
-        Node.ReadFrom(readRoot.Span, out var type, out _, out _, out var branch);
-        return type == Node.Type.Branch && branch.Children.AllSet;
     }
 
     public ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data)
@@ -192,6 +198,73 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         // trim the cached rlp from branches
         return Node.Branch.GetOnlyBranchData(data);
+    }
+
+    private void CalculateStorageRoots(ICommit commit, StorageHandler storage)
+    {
+        if (storage.AccountsWithModifiedStorage.Count == 0)
+            return;
+
+        // Gather children into a list and only then commit.
+        // As child, when committed modifies the commit, it should be done in
+        // a non-parallel manner. Otherwise it can cause parallel access data error.
+        var children = new List<IChildCommit>();
+
+        // a. start with the accounts that had their storage altered
+        Parallel.ForEach(storage.AccountsWithModifiedStorage, () => commit.GetChild(), (accountAddress, _, child) =>
+        {
+            Span<byte> accountSpan = stackalloc byte[Account.MaxByteCount];
+
+            var prefixed = new PrefixingCommit(child);
+
+            prefixed.SetPrefix(accountAddress);
+
+            // compute new storage root hash
+            var keccakOrRlp = Compute(Key.Merkle(NibblePath.Empty), prefixed, TrieType.Storage, ComputeHint.None);
+
+            // read the existing account
+            var key = Key.Account(accountAddress);
+            using var accountOwner = child.Get(key);
+
+            Debug.Assert(accountOwner.IsEmpty == false, "The account should exist");
+
+            Account.ReadFrom(accountOwner.Span, out var account);
+
+            // update it
+            account = account.WithChangedStorageRoot(new Keccak(keccakOrRlp.Span));
+
+            // set it
+            child.Set(key, account.WriteTo(accountSpan));
+
+            return child;
+        }, childCommit =>
+        {
+            lock (children)
+            {
+                children.Add(childCommit);
+            }
+        });
+
+        foreach (var child in children)
+        {
+            child.Commit();
+            child.Dispose();
+        }
+    }
+
+    private static HashSet<Keccak> VisitState(ICommit commit, StorageHandler storage)
+    {
+        var accountsThatRequireManualTouch = new HashSet<Keccak>(storage.AccountsWithModifiedStorage);
+        var state = new StateHandler(commit, accountsThatRequireManualTouch);
+        commit.Visit(state.OnKey, TrieType.State);
+        return accountsThatRequireManualTouch;
+    }
+
+    private static StorageHandler VisitStorage(ICommit commit)
+    {
+        var storage = new StorageHandler(commit);
+        commit.Visit(storage.OnKey, TrieType.Storage);
+        return storage;
     }
 
     public Keccak RootHash { get; private set; }
@@ -493,6 +566,37 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     }
 
     /// <summary>
+    /// The handler for the state part.
+    /// </summary>
+    private class StateHandler
+    {
+        private readonly ICommit _commit;
+        private readonly HashSet<Keccak> _accountsToVisit;
+
+        public StateHandler(ICommit commit, HashSet<Keccak> accountsToVisit)
+        {
+            _commit = commit;
+            _accountsToVisit = accountsToVisit;
+        }
+
+        public void OnKey(in Key key, ReadOnlySpan<byte> value)
+        {
+            Debug.Assert(key.Type == DataType.Account);
+
+            _accountsToVisit.Remove(key.Path.UnsafeAsKeccak);
+
+            if (value.IsEmpty)
+            {
+                Delete(in key.Path, 0, _commit);
+            }
+            else
+            {
+                MarkPathDirty(in key.Path, _commit);
+            }
+        }
+    }
+
+    /// <summary>
     /// This component appends the prefix to all the commit operations.
     /// It's useful for storage operations, that have their key prefixed with the account.
     /// </summary>
@@ -552,6 +656,33 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
     }
 
+    private class StorageHandler
+    {
+        private readonly PrefixingCommit _commit;
+        private readonly HashSet<Keccak> _accountsWithModifiedStorage = new();
+
+        public StorageHandler(ICommit commit) => _commit = new PrefixingCommit(commit);
+
+        public void OnKey(in Key key, ReadOnlySpan<byte> value)
+        {
+            Debug.Assert(key.Type == DataType.StorageCell);
+
+            _commit.SetPrefix(key.Path);
+            _accountsWithModifiedStorage.Add(key.Path.UnsafeAsKeccak);
+
+            if (value.IsEmpty)
+            {
+                Delete(in key.StoragePath, 0, _commit);
+            }
+            else
+            {
+                MarkPathDirty(in key.StoragePath, _commit);
+            }
+        }
+
+        public IReadOnlyCollection<Keccak> AccountsWithModifiedStorage => _accountsWithModifiedStorage;
+    }
+
     private enum DeleteStatus
     {
         KeyDoesNotExist,
@@ -572,151 +703,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         ExtensionToLeaf,
 
         NodeTypePreserved
-    }
-
-    private sealed class Item : IDisposable
-    {
-        public const byte All = byte.MaxValue;
-
-        private readonly byte _nibble;
-        private readonly ICommit _parent;
-        private readonly ComputeMerkleBehavior _behavior;
-        private readonly IChildCommit _child;
-        private readonly PrefixingCommit _prefix;
-        private readonly HashSet<Keccak> _requireManualTouch;
-        private readonly HashSet<Keccak> _storageChanged;
-
-        public Item(byte nibble, ICommit parent, ComputeMerkleBehavior behavior)
-        {
-            _nibble = nibble;
-            _parent = parent;
-            _behavior = behavior;
-            _child = _parent.GetChild();
-            _prefix = new PrefixingCommit(_child);
-            _requireManualTouch = new HashSet<Keccak>();
-            _storageChanged = new HashSet<Keccak>();
-        }
-
-        public void Commit() => _child.Commit();
-        public void Dispose() => _child.Dispose();
-
-        public void DoWork()
-        {
-            // 1. Visit all Storage operations (SSTORE). For each key:
-            //  a. remember Account that Storage belongs to
-            //  b. walk through the MPT of Account Storage to create/amend Trie nodes
-            // 2. Visit all State operations. For each key:
-            //  a. check if it was one of the Storage operations. If yes, remove it from the set above
-            //  b. walk through the MPT of Account State to create/amend Trie nodes
-            // 3. Visit all the accounts that were not accessed in 2., but were remembered in 1,
-            //    meaning Accounts that had their storage modified but no changes to codehash, balance, nonce.
-            //    For each key:
-            //  a. walk through the MPT of Account State to create/amend Trie nodes
-            // 4. Calculate the Root Hash 
-            //  a.  for each of accounts that had their storage modified (from 1.), 
-            //    i. calculate the storage root hash
-            //    ii. store it in the account (decode account, encode, set)
-            //  b.  calculate the root hash of the State
-
-            // 1. visit storage
-            _parent.Visit(OnStorageKey, TrieType.Storage);
-
-            // 2. visit state
-            _parent.Visit(OnStateKey, TrieType.State);
-
-            // 3. visit keys that require manual touch as they were not modified in the state step, mark them dirty
-            foreach (var accountKey in _requireManualTouch)
-            {
-                MarkPathDirty(NibblePath.FromKey(accountKey), _child);
-            }
-
-            // 4. recalculate root hash
-            if (_behavior._fullMerkle)
-            {
-                CalculateStorageRoots();
-
-                var nibblePath = NibblePath
-                    .FromKey(stackalloc byte[1] { (byte)(_nibble << NibblePath.NibbleShift) }
-                        .Slice(0, 1));
-
-                var root = Key.Merkle(nibblePath);
-
-                // already parallel!
-                var hint = ComputeHint.DontUseParallel;
-                var result = _behavior.Compute(root, _child, TrieType.State, ComputeHint.DontUseParallel);
-
-                // TODO: for now do not return the result and let the root recalculate on top of pre-calculated
-            }
-        }
-
-        private void CalculateStorageRoots()
-        {
-            Span<byte> accountSpan = stackalloc byte[Account.MaxByteCount];
-
-            foreach (var accountAddress in _storageChanged)
-            {
-                _prefix.SetPrefix(accountAddress);
-
-                // compute new storage root hash
-                var keccakOrRlp = _behavior.Compute(Key.Merkle(NibblePath.Empty), _prefix, TrieType.Storage, ComputeHint.DontUseParallel);
-
-                // read the existing account
-                var key = Key.Account(accountAddress);
-                using var accountOwner = _child.Get(key);
-
-                Debug.Assert(accountOwner.IsEmpty == false, "The account should exist");
-
-                Account.ReadFrom(accountOwner.Span, out var account);
-
-                // update it
-                account = account.WithChangedStorageRoot(new Keccak(keccakOrRlp.Span));
-
-                // set it
-                _child.Set(key, account.WriteTo(accountSpan));
-            }
-        }
-
-        private void OnStorageKey(in Key key, ReadOnlySpan<byte> value)
-        {
-            Debug.Assert(key.Type == DataType.StorageCell);
-
-            if (!ShouldVisit(key))
-                return;
-
-            _prefix.SetPrefix(key.Path);
-            _requireManualTouch.Add(key.Path.UnsafeAsKeccak);
-            _storageChanged.Add(key.Path.UnsafeAsKeccak);
-
-            if (value.IsEmpty)
-            {
-                Delete(in key.StoragePath, 0, _prefix);
-            }
-            else
-            {
-                MarkPathDirty(in key.StoragePath, _prefix);
-            }
-        }
-
-        private void OnStateKey(in Key key, ReadOnlySpan<byte> value)
-        {
-            Debug.Assert(key.Type == DataType.Account);
-
-            if (!ShouldVisit(key))
-                return;
-
-            _requireManualTouch.Remove(key.Path.UnsafeAsKeccak);
-
-            if (value.IsEmpty)
-            {
-                Delete(in key.Path, 0, _child);
-            }
-            else
-            {
-                MarkPathDirty(in key.Path, _child);
-            }
-        }
-
-        private bool ShouldVisit(in Key key) => _nibble == All || key.Path.FirstNibble == _nibble;
     }
 
     /// <summary>
@@ -1110,7 +1096,5 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
     }
 
-    public void Dispose()
-    {
-    }
+    public void Dispose() => _meter.Dispose();
 }
