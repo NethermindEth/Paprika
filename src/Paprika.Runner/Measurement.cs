@@ -1,10 +1,17 @@
-﻿using System.Diagnostics.Metrics;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics.Metrics;
+using HdrHistogram;
 using Spectre.Console;
 using Spectre.Console.Rendering;
 
 namespace Paprika.Runner;
 
-abstract class Measurement : JustInTimeRenderable
+interface IMeasurement : IRenderable
+{
+    void Update(double measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags);
+}
+
+abstract class Measurement : JustInTimeRenderable, IMeasurement 
 {
     private readonly Instrument _instrument;
     private const long NoValue = Int64.MaxValue;
@@ -37,7 +44,7 @@ abstract class Measurement : JustInTimeRenderable
 
     public override string ToString() => $"{nameof(Instrument)}: {_instrument.Name}, Value: {Volatile.Read(ref _value)}";
 
-    public static Measurement Build(Instrument instrument)
+    public static IMeasurement Build(Instrument instrument)
     {
         var type = instrument.GetType();
         if (type.IsGenericType)
@@ -56,7 +63,7 @@ abstract class Measurement : JustInTimeRenderable
 
             if (definition == typeof(Histogram<>))
             {
-                return new HistogramMeasurement(instrument);
+                return new HistogramHdrMeasurement(instrument);
             }
         }
 
@@ -73,16 +80,63 @@ abstract class Measurement : JustInTimeRenderable
     }
 
     // for now use the last value
-    private class HistogramMeasurement : Measurement
+    private class HistogramLastMeasurement : Measurement
     {
         protected override long Update(double measurement)
         {
             return (long)measurement;
         }
 
-        public HistogramMeasurement(Instrument instrument) : base(instrument)
+        public HistogramLastMeasurement(Instrument instrument) : base(instrument)
         {
         }
+    }
+    
+    private class HistogramHdrMeasurement : JustInTimeRenderable, IMeasurement
+    {
+        private readonly Instrument _instrument;
+        private readonly ConcurrentQueue<long> _measurements;
+        private readonly LongHistogram _histogram;
+
+        public HistogramHdrMeasurement(Instrument instrument)
+        {
+            _instrument = instrument;
+            _measurements = new ConcurrentQueue<long>();
+            _histogram = new LongHistogram(1, 1, int.MaxValue, 4);
+        }
+
+        protected override IRenderable Build()
+        {
+            // dequeue all first
+            while (_measurements.TryDequeue(out var measurement))
+            {
+                if (measurement > 0)
+                {
+                    _histogram.RecordValue(measurement);
+                }
+            }
+
+            try
+            {
+                var p50 = _histogram.GetValueAtPercentile(50).ToString().PadLeft(5);
+                var p90 = _histogram.GetValueAtPercentile(90).ToString().PadLeft(5);
+                var p99 = _histogram.GetValueAtPercentile(99).ToString().PadLeft(5);
+
+                return new Markup($"[green]{p50}[/] |[yellow]{p90}[/] |[red]{p99}[/]");
+            }
+            catch
+            {
+                return new Text(" N/A yet");
+            }
+        }
+
+        public void Update(double measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags)
+        {
+            _measurements.Enqueue((long)measurement);
+            MarkAsDirty();
+        }
+        
+        public override string ToString() => $"{nameof(Instrument)}: {_instrument.Name}, Histogram";
     }
 
     private class CounterMeasurement : Measurement
