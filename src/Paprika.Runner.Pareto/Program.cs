@@ -21,9 +21,9 @@ public static class Program
     private const int BlockCount = 500_000;
     
     private const int AccountCount = 1_000_000;
-    private const int ContractCount = 25_000;
+    private const int ContractCount = 50_000;
     private const int MinAccountsPerBlock = 200;
-    private const int MaxAccountsPerBlock = 1000;
+    private const int MaxAccountsPerBlock = 500;
 
     private const int MaxStorageSlotsCount = 1_000_000;
     private const int MinStoragePerContract = 10;
