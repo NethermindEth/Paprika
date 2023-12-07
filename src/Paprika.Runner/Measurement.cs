@@ -11,7 +11,7 @@ interface IMeasurement : IRenderable
     void Update(double measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags);
 }
 
-abstract class Measurement : JustInTimeRenderable, IMeasurement 
+abstract class Measurement : JustInTimeRenderable, IMeasurement
 {
     private readonly Instrument _instrument;
     private const long NoValue = Int64.MaxValue;
@@ -91,7 +91,7 @@ abstract class Measurement : JustInTimeRenderable, IMeasurement
         {
         }
     }
-    
+
     private class HistogramHdrMeasurement : JustInTimeRenderable, IMeasurement
     {
         private readonly Instrument _instrument;
@@ -135,7 +135,7 @@ abstract class Measurement : JustInTimeRenderable, IMeasurement
             _measurements.Enqueue((long)measurement);
             MarkAsDirty();
         }
-        
+
         public override string ToString() => $"{nameof(Instrument)}: {_instrument.Name}, Histogram";
     }
 

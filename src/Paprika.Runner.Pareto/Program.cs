@@ -19,7 +19,7 @@ public static class Program
     private const int FinalizeEvery = 128;
 
     private const int BlockCount = 500_000;
-    
+
     private const int AccountCount = 1_000_000;
     private const int ContractCount = 50_000;
     private const int MinAccountsPerBlock = 200;
@@ -93,7 +93,7 @@ public static class Program
 
             var blockHash = Keccak.EmptyTreeHash;
             var finalization = new Queue<Keccak>();
-            
+
             await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds(1), 1000, reporter.Observe))
             {
                 uint at = 1;
@@ -104,11 +104,11 @@ public static class Program
                     var accountSetCount = 0;
                     var contractSetCount = 0;
                     var storageSlotCount = 0;
-                    
+
                     atBlock.Set((int)at);
-                    
+
                     using var block = blockchain.StartNew(blockHash);
-                    
+
                     var accounts = random.Next(MinAccountsPerBlock, MaxAccountsPerBlock);
 
                     for (var j = 0; j < accounts; j++)
@@ -119,23 +119,23 @@ public static class Program
                         if (isContract)
                         {
                             contractSetCount++;
-                            
+
                             // regenerate index, so that it's skewed and more probable to be close to zero
                             index = ContractCount - RandomPareto(random, ContractCount);
-                            
+
                             var accountKeccak = keccaks[index];
                             var account = block.GetAccount(accountKeccak);
-                            
+
                             // increment the account
                             block.SetAccount(accountKeccak, new Account(account.Balance + 1, account.Nonce + 1));
-                          
+
                             var maxSlotsForThisAccount = GetMaxSlotsForContractAt(index);
                             var count = random.Next(MinStoragePerContract, MaxStoragePerContract);
 
                             for (var k = 0; k < count; k++)
                             {
                                 storageSlotCount++;
-                                
+
                                 var slot = random.Next(maxSlotsForThisAccount);
                                 var storageKeccak = keccaks[slot];
                                 block.SetStorage(accountKeccak, storageKeccak, random.NextKeccak().BytesAsSpan);
@@ -144,7 +144,7 @@ public static class Program
                         else
                         {
                             accountSetCount++;
-                            
+
                             // increment the account
                             var accountKeccak = keccaks[index];
                             var account = block.GetAccount(accountKeccak);
@@ -155,7 +155,7 @@ public static class Program
                     gaugeAccountsPerBlock.Set(accountSetCount);
                     gaugeStorageSlotPerBlock.Set(storageSlotCount);
                     gaugeContractsPerBlock.Set(contractSetCount);
-                    
+
                     blockHash = block.Commit(at);
                     finalization.Enqueue(blockHash);
 
@@ -168,7 +168,7 @@ public static class Program
                 // finalize the last one
                 blockchain.Finalize(finalization.Last());
             }
-            
+
             spectre.Cancel();
             await reportingTask;
         }
@@ -176,7 +176,7 @@ public static class Program
         {
             spectre.Cancel();
             await reportingTask;
-            
+
             var paragraph = new Paragraph();
             var style = new Style().Foreground(Color.Red);
             paragraph.Append(e.Message, style);
@@ -196,7 +196,7 @@ public static class Program
     private static int RandomPareto(Random random, int maxValue)
     {
         // The result is skewed towards max
-        
+
         const double alpha = 1.5; // Shape parameter
 
         var u = random.NextDouble(); // Uniformly distributed number between 0 and 1
