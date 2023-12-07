@@ -44,6 +44,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private readonly Meter _meter;
     private readonly Histogram<long> _stateRootHashCompute;
     private readonly Histogram<long> _storageRootsHashCompute;
+    private readonly Histogram<long> _totalMerkle;
 
     /// <summary>
     /// Initializes the Merkle.
@@ -70,6 +71,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             "How long it takes to calculate the root hash");
         _storageRootsHashCompute = _meter.CreateHistogram<long>("Storage roots compute", "ms",
             "How long it takes to calculate storage roots");
+        _totalMerkle = _meter.CreateHistogram<long>("Total Merkle", "ms",
+            "How long it takes to run Merkle");
     }
 
     /// <summary>
@@ -123,66 +126,79 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         public IChildCommit GetChild() =>
             _allowChildCommits ? this : throw new NotImplementedException("Should not be called");
 
-        void IDisposable.Dispose() { }
+        void IDisposable.Dispose()
+        {
+        }
 
-        void IChildCommit.Commit() { }
+        void IChildCommit.Commit()
+        {
+        }
     }
 
     public Keccak BeforeCommit(ICommit commit)
     {
-        // 1. Visit all Storage operations (SSTORE). For each key:
-        //  a. remember Account that Storage belongs to
-        //  b. walk through the MPT of Account Storage to create/amend Trie nodes
-        // 2. Visit all State operations. For each key:
-        //  a. check if it was one of the Storage operations. If yes, remove it from the set above
-        //  b. walk through the MPT of Account State to create/amend Trie nodes
-        // 3. Visit all the accounts that were not accessed in 2., but were remembered in 1,
-        //    meaning Accounts that had their storage modified but no changes to codehash, balance, nonce.
-        //    For each key:
-        //  a. walk through the MPT of Account State to create/amend Trie nodes
-        // 4. Calculate the Root Hash 
-        //  a.  for each of accounts that had their storage modified (from 1.), 
-        //    i. calculate the storage root hash
-        //    ii. store it in the account (decode account, encode, set)
-        //  b.  calculate the root hash of the State
+        var total = Stopwatch.StartNew();
 
-        // 1. visit storage
-        var storage = VisitStorage(commit);
-
-        // 2. visit state
-        var accountsThatRequireManualTouch = VisitState(commit, storage);
-
-        // 3. visit keys that require manual touch as they were not modified in the state step, mark them dirty
-        foreach (var accountKey in accountsThatRequireManualTouch)
+        try
         {
-            MarkPathDirty(NibblePath.FromKey(accountKey), commit);
-        }
+            // 1. Visit all Storage operations (SSTORE). For each key:
+            //  a. remember Account that Storage belongs to
+            //  b. walk through the MPT of Account Storage to create/amend Trie nodes
+            // 2. Visit all State operations. For each key:
+            //  a. check if it was one of the Storage operations. If yes, remove it from the set above
+            //  b. walk through the MPT of Account State to create/amend Trie nodes
+            // 3. Visit all the accounts that were not accessed in 2., but were remembered in 1,
+            //    meaning Accounts that had their storage modified but no changes to codehash, balance, nonce.
+            //    For each key:
+            //  a. walk through the MPT of Account State to create/amend Trie nodes
+            // 4. Calculate the Root Hash 
+            //  a.  for each of accounts that had their storage modified (from 1.), 
+            //    i. calculate the storage root hash
+            //    ii. store it in the account (decode account, encode, set)
+            //  b.  calculate the root hash of the State
 
-        // 4. recalculate root hash
-        if (_fullMerkle)
+            // 1. visit storage
+            var storage = VisitStorage(commit);
+
+            // 2. visit state
+            var accountsThatRequireManualTouch = VisitState(commit, storage);
+
+            // 3. visit keys that require manual touch as they were not modified in the state step, mark them dirty
+            foreach (var accountKey in accountsThatRequireManualTouch)
+            {
+                MarkPathDirty(NibblePath.FromKey(accountKey), commit);
+            }
+
+            // 4. recalculate root hash
+            if (_fullMerkle)
+            {
+                var sw = Stopwatch.StartNew();
+
+                CalculateStorageRoots(commit, storage);
+
+                _storageRootsHashCompute.Record(sw.ElapsedMilliseconds);
+
+                sw.Restart();
+
+                var root = Key.Merkle(NibblePath.Empty);
+                var rootKeccak = Compute(root, commit, TrieType.State, ComputeHint.None);
+
+                _stateRootHashCompute.Record(sw.ElapsedMilliseconds);
+
+                Debug.Assert(rootKeccak.DataType == KeccakOrRlp.Type.Keccak);
+
+                var value = new Keccak(rootKeccak.Span);
+                RootHash = value;
+
+                return value;
+            }
+
+            return Keccak.Zero;
+        }
+        finally
         {
-            var sw = Stopwatch.StartNew();
-
-            CalculateStorageRoots(commit, storage);
-
-            _storageRootsHashCompute.Record(sw.ElapsedMilliseconds);
-
-            sw.Restart();
-
-            var root = Key.Merkle(NibblePath.Empty);
-            var rootKeccak = Compute(root, commit, TrieType.State, ComputeHint.None);
-
-            _stateRootHashCompute.Record(sw.ElapsedMilliseconds);
-
-            Debug.Assert(rootKeccak.DataType == KeccakOrRlp.Type.Keccak);
-
-            var value = new Keccak(rootKeccak.Span);
-            RootHash = value;
-
-            return value;
+            _totalMerkle.Record(total.ElapsedMilliseconds);
         }
-
-        return Keccak.Zero;
     }
 
     public ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data)
