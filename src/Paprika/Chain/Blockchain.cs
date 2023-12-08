@@ -394,6 +394,8 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private HashSet<int>? _bloom;
 
+        private Dictionary<Keccak, int>? _stats;
+
         /// <summary>
         /// A faster filter constructed on block commit.
         /// </summary>
@@ -428,25 +430,6 @@ public class Blockchain : IAsyncDisposable
         private bool _committed;
         private Keccak? _hash;
 
-        public BlockState(Keccak parentStateRoot, IReadOnlyBatch batch, BlockState[] ancestors, Blockchain blockchain)
-        {
-            _batch = new ReadOnlyBatchCountingRefs(batch);
-
-            _ancestors = ancestors;
-
-            _blockchain = blockchain;
-
-            ParentHash = parentStateRoot;
-
-            // rent pages for the bloom
-            _bloom = new HashSet<int>();
-            _destroyed = null;
-
-            _hash = ParentHash;
-
-            CreateDictionaries();
-        }
-
         private void CreateDictionaries()
         {
             CreateDict(ref _state, Pool);
@@ -469,6 +452,25 @@ public class Blockchain : IAsyncDisposable
 
                 dict = new PooledSpanDictionary(pool, true, true);
             }
+        }
+
+        public BlockState(Keccak parentStateRoot, IReadOnlyBatch batch, BlockState[] ancestors, Blockchain blockchain)
+        {
+            _batch = new ReadOnlyBatchCountingRefs(batch);
+
+            _ancestors = ancestors;
+
+            _blockchain = blockchain;
+
+            ParentHash = parentStateRoot;
+
+            _bloom = new HashSet<int>();
+            _destroyed = null;
+            _stats = new Dictionary<Keccak, int>();
+
+            _hash = ParentHash;
+
+            CreateDictionaries();
         }
 
         public Keccak ParentHash { get; }
@@ -502,9 +504,12 @@ public class Blockchain : IAsyncDisposable
             AcquireLease();
             BlockNumber = blockNumber;
 
-            // create xor bloom
+            // create xor filter
             _xor = new Xor8(_bloom!);
+
+            // clean no longer used fields
             _bloom = null;
+            _stats = null;
 
             _blockchain.Add(this);
             _committed = true;
@@ -608,6 +613,8 @@ public class Blockchain : IAsyncDisposable
             var payload = account.WriteTo(stackalloc byte[Account.MaxByteCount]);
 
             SetImpl(key, payload, _state);
+
+            _stats!.RegisterSetAccount(address);
         }
 
         public void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value)
@@ -616,6 +623,8 @@ public class Blockchain : IAsyncDisposable
             var key = Key.StorageCell(path, storage);
 
             SetImpl(key, value, _storage);
+
+            _stats!.RegisterSetStorageAccount(address);
         }
 
         private void SetImpl(in Key key, in ReadOnlySpan<byte> payload, PooledSpanDictionary dict)
@@ -693,6 +702,8 @@ public class Blockchain : IAsyncDisposable
 
         IChildCommit ICommit.GetChild() => new ChildCommit(Pool, this);
 
+        public IReadOnlyDictionary<Keccak, int> Stats => _stats!;
+
         class ChildCommit : IChildCommit
         {
             private readonly PooledSpanDictionary _dict;
@@ -745,6 +756,9 @@ public class Blockchain : IAsyncDisposable
             }
 
             public IChildCommit GetChild() => new ChildCommit(_pool, this);
+
+            public IReadOnlyDictionary<Keccak, int> Stats =>
+                throw new NotImplementedException("Child commits provide no stats");
 
             public void Dispose() => _dict.Dispose();
             public override string ToString() => _dict.ToString();

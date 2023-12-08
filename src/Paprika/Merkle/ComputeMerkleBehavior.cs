@@ -126,6 +126,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         public IChildCommit GetChild() =>
             _allowChildCommits ? this : throw new NotImplementedException("Should not be called");
 
+        public IReadOnlyDictionary<Keccak, int> Stats =>
+            throw new NotImplementedException("Child commit provides no stats");
+
         void IDisposable.Dispose()
         {
         }
@@ -646,6 +649,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         public void Visit(CommitAction action, TrieType type) => throw new Exception("Should not be called");
 
+        public IReadOnlyDictionary<Keccak, int> Stats =>
+            throw new NotImplementedException("No stats for the child commit");
+
         private class ChildCommit : IChildCommit
         {
             private readonly PrefixingCommit _parent;
@@ -669,6 +675,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             public void Commit() => _commit.Commit();
 
             public IChildCommit GetChild() => new ChildCommit(_parent, _commit.GetChild());
+
+            public IReadOnlyDictionary<Keccak, int> Stats =>
+                throw new NotImplementedException("No stats for the child commit");
         }
     }
 
