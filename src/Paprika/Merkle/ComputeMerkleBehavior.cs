@@ -8,6 +8,7 @@ using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.RLP;
+using Paprika.Store;
 using Paprika.Utils;
 
 namespace Paprika.Merkle;
@@ -272,7 +273,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             list.Add(current);
 
         return (list.Select(set => new BuildStorageTriesItem(commit, set)).ToArray(),
-            list.Select(set => new CalculateStorageTriesRootHashItem(this, commit, set)).ToArray());
+            list.Select(set => new CalculateStorageTriesRootHashItem(this, set)).ToArray());
     }
 
     public ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data)
@@ -681,7 +682,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     /// <returns>Whether the node has changed its type </returns>
     /// <exception cref="ArgumentOutOfRangeException"></exception>
-    private static DeleteStatus Delete(in NibblePath path, int at, ICommit commit)
+    private static DeleteStatus Delete(in NibblePath path, int at, ICommit commit, TrieStructureCache cache = default)
     {
         var slice = path.SliceTo(at);
         var key = Key.Merkle(slice);
@@ -720,7 +721,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     }
 
                     var newAt = at + ext.Path.Length;
-                    var status = Delete(path, newAt, commit);
+                    var status = Delete(path, newAt, commit, cache);
 
                     if (status == DeleteStatus.KeyDoesNotExist)
                     {
@@ -752,7 +753,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                     var newAt = at + 1;
 
-                    var status = Delete(path, newAt, commit);
+                    var status = Delete(path, newAt, commit, cache);
                     if (status == DeleteStatus.KeyDoesNotExist)
                     {
                         // child reports non-existence
@@ -775,6 +776,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     }
 
                     Debug.Assert(status == DeleteStatus.LeafDeleted, "leaf deleted");
+
+                    cache.InvalidateFrom(path, at);
 
                     var children = branch.Children.Remove(nibble);
 
@@ -872,19 +875,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         return DeleteStatus.ExtensionToLeaf;
     }
 
-    private static void MarkPathDirty(in NibblePath path, ICommit commit)
+    private static void MarkPathDirty(in NibblePath path, ICommit commit, TrieStructureCache cache = default)
     {
-        ref var cache = ref Unsafe.NullRef<TrieStructureCache>();
-        
         Span<byte> span = stackalloc byte[33];
 
-        var start = 0;
-        if (!Unsafe.IsNullRef(ref cache))
-        {
-            start = cache.GetCachedStart(path);
-        }
+        var start = cache.GetCachedStart(path);
 
-        for (int i = start; i <= path.Length; i++)
+        for (var i = start; i <= path.Length; i++)
         {
             var slice = path.SliceTo(i);
             var key = Key.Merkle(slice);
@@ -895,6 +892,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
             if (owner.IsEmpty)
             {
+                cache.InvalidateFrom(path, i);
+
                 // no value set now, create one
                 commit.SetLeaf(key, leftoverPath);
                 return;
@@ -1053,10 +1052,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             memo.Clear(nibble);
                         }
 
-                        if (!Unsafe.IsNullRef(ref cache))
-                        {
-                            cache.MarkAsDirtyBranchAt(path, i);
-                        }
+                        cache.MarkAsVisitedBranchAt(path, i);
 
                         if (rlp.IsEmpty)
                         {
@@ -1094,12 +1090,16 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         private readonly HashSet<Keccak> _toTouch;
 
         private IChildCommit? _commit;
+        private readonly byte[] _buffer;
 
         public BuildStateTreeItem(ICommit parent, IEnumerable<Keccak> toTouch)
         {
             _parent = parent;
             _toTouch = new HashSet<Keccak>(toTouch);
             _commit = null;
+
+            // should come from the pool
+            _buffer = new byte[Page.PageSize];
         }
 
         public void DoWork(IChildCommit commit)
@@ -1107,10 +1107,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             _commit = commit;
             _parent.Visit(OnState, TrieType.State);
 
+            var cache = new TrieStructureCache(_buffer);
+
             // dirty the leftovers
             foreach (var key in _toTouch)
             {
-                MarkPathDirty(NibblePath.FromKey(key), _commit!);
+                MarkPathDirty(NibblePath.FromKey(key), _commit!, cache);
             }
         }
 
@@ -1118,13 +1120,15 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         {
             Debug.Assert(key.Type == DataType.Account);
 
+            var cache = new TrieStructureCache(_buffer);
+
             if (value.IsEmpty)
             {
-                Delete(in key.Path, 0, _commit!);
+                Delete(in key.Path, 0, _commit!, cache);
             }
             else
             {
-                MarkPathDirty(in key.Path, _commit!);
+                MarkPathDirty(in key.Path, _commit!, cache);
             }
 
             // mark as touched already
@@ -1177,14 +1181,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private sealed class CalculateStorageTriesRootHashItem : IWorkItem
     {
         private readonly ComputeMerkleBehavior _behavior;
-        private readonly ICommit _parent;
         private readonly HashSet<Keccak> _accounts;
 
-        public CalculateStorageTriesRootHashItem(ComputeMerkleBehavior behavior, ICommit parent,
-            HashSet<Keccak> accounts)
+        public CalculateStorageTriesRootHashItem(ComputeMerkleBehavior behavior, HashSet<Keccak> accounts)
         {
             _behavior = behavior;
-            _parent = parent;
             _accounts = accounts;
         }
 

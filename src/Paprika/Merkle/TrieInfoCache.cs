@@ -1,7 +1,7 @@
-﻿using System.Collections.Specialized;
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
+using Paprika.Store;
 
 namespace Paprika.Merkle;
 
@@ -11,19 +11,26 @@ namespace Paprika.Merkle;
 ///
 /// It saves a lot of queries and checks.   
 /// </summary>
-[StructLayout(LayoutKind.Explicit, Size = L0Size + L1Size + L2Size)]
-struct TrieStructureCache
+readonly ref struct TrieStructureCache
 {
-    public const int MaxMemoizedLevel = 2;
-    private const byte NibbleCount = 16;
-    private const byte ByteSize = 8;
-    private const int L0Size = 1;
-    private const int L1Size = NibbleCount / ByteSize;
-    private const int L2Size = NibbleCount * NibbleCount / ByteSize;
+    private readonly Span<NibbleSet> _nibbles;
 
-    [FieldOffset(0)] private byte _l0;
-    [FieldOffset(L0Size)] private byte _l1;
-    [FieldOffset(L0Size + L1Size)] private byte _l2;
+    private const byte NibbleCount = 16;
+
+    public TrieStructureCache(in Page page)
+    {
+        unsafe
+        {
+            _nibbles = page.Raw == UIntPtr.Zero
+                ? Span<NibbleSet>.Empty
+                : new Span<NibbleSet>(page.Raw.ToPointer(), Page.PageSize / Unsafe.SizeOf<NibbleSet>());
+        }
+    }
+
+    public TrieStructureCache(byte[] buffer)
+    {
+        _nibbles = MemoryMarshal.Cast<byte, NibbleSet>(buffer.AsSpan());
+    }
 
     /// <summary>
     /// Gets the start nibble of the path that is not dirtied and memoized yet and requires visiting.
@@ -32,34 +39,86 @@ struct TrieStructureCache
     /// <returns></returns>
     public int GetCachedStart(in NibblePath path)
     {
-        return 0;
+        var at = 0;
+        var start = 0;
+        var count = 1;
+
+        while (start + count <= _nibbles.Length)
+        {
+            var current = _nibbles.Slice(start, count);
+            var value = BuildValue(path, at);
+
+            var (set, nibble) = Math.DivRem(value, NibbleCount);
+
+            if (current[set][(byte)nibble] == false)
+            {
+                return at;
+            }
+
+            at++;
+            start += count;
+            count *= NibbleCount;
+        }
+
+        return at;
     }
 
-    public void MarkAsDirtyBranchAt(in NibblePath path, int at)
+    public void MarkAsVisitedBranchAt(in NibblePath path, int at)
     {
-        switch (at)
+        var i = 0;
+        var start = 0;
+        var count = 1;
+
+        while (start + count <= _nibbles.Length)
         {
-            case 0:
-                _l0 = 1;
-                break;
-            case 1:
-                SetBit(path.GetAt(0), ref _l1);
-                break;
-            case 2:
-                SetBit(path.GetAt(0), ref _l2);
-                break;
+            if (at == i)
+            {
+                var current = _nibbles.Slice(start, count);
+                var value = BuildValue(path, at);
+                var (set, nibble) = Math.DivRem(value, NibbleCount);
+                current[set][(byte)nibble] = true;
+
+                return;
+            }
+
+            i++;
+            start += count;
+            count *= NibbleCount;
         }
+    }
 
-        return;
+    public void InvalidateFrom(in NibblePath path, int i)
+    {
+        var at = 0;
+        var start = 0;
+        var count = 1;
 
-        static void SetBit(int value, ref byte b)
+        while (start + count <= _nibbles.Length)
         {
-            var (@byte, bit) = Split(value);
-            ref var @ref = ref Unsafe.Add(ref b, @byte);
+            if (i >= at)
+            {
+                var current = _nibbles.Slice(start, count);
+                var value = BuildValue(path, at);
 
-            @ref = (byte)((1 << bit) | @ref);
+                var (set, nibble) = Math.DivRem(value, NibbleCount);
+
+                current[set][(byte)nibble] = false;
+            }
+
+            at++;
+            start += count;
+            count *= NibbleCount;
         }
+    }
 
-        static (int @byte, int bit) Split(int value) => (value >> 3, value & 7);
+    private static int BuildValue(in NibblePath path, int at)
+    {
+        return at switch
+        {
+            0 => path.GetAt(0),
+            1 => path.GetAt(0) | (path.GetAt(1) << NibblePath.NibbleShift),
+            2 => path.GetAt(0) | (path.GetAt(1) << NibblePath.NibbleShift) | (path.GetAt(2) << (NibblePath.NibbleShift * 2)),
+            _ => -1
+        };
     }
 }
