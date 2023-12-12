@@ -682,7 +682,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     /// <returns>Whether the node has changed its type </returns>
     /// <exception cref="ArgumentOutOfRangeException"></exception>
-    private static DeleteStatus Delete(in NibblePath path, int at, ICommit commit, TrieStructureCache cache = default)
+    private static DeleteStatus Delete(in NibblePath path, int at, ICommit commit)
     {
         var slice = path.SliceTo(at);
         var key = Key.Merkle(slice);
@@ -721,7 +721,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     }
 
                     var newAt = at + ext.Path.Length;
-                    var status = Delete(path, newAt, commit, cache);
+                    var status = Delete(path, newAt, commit);
 
                     if (status == DeleteStatus.KeyDoesNotExist)
                     {
@@ -753,7 +753,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                     var newAt = at + 1;
 
-                    var status = Delete(path, newAt, commit, cache);
+                    var status = Delete(path, newAt, commit);
                     if (status == DeleteStatus.KeyDoesNotExist)
                     {
                         // child reports non-existence
@@ -776,8 +776,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     }
 
                     Debug.Assert(status == DeleteStatus.LeafDeleted, "leaf deleted");
-
-                    cache.InvalidateFrom(path, at);
 
                     var children = branch.Children.Remove(nibble);
 
@@ -875,13 +873,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         return DeleteStatus.ExtensionToLeaf;
     }
 
-    private static void MarkPathDirty(in NibblePath path, ICommit commit, TrieStructureCache cache = default)
+    private static void MarkPathDirty(in NibblePath path, ICommit commit)
     {
         Span<byte> span = stackalloc byte[33];
 
-        var start = cache.GetCachedStart(path);
-
-        for (var i = start; i <= path.Length; i++)
+        for (var i = 0; i <= path.Length; i++)
         {
             var slice = path.SliceTo(i);
             var key = Key.Merkle(slice);
@@ -892,8 +888,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
             if (owner.IsEmpty)
             {
-                cache.InvalidateFrom(path, i);
-
                 // no value set now, create one
                 commit.SetLeaf(key, leftoverPath);
                 return;
@@ -1052,8 +1046,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             memo.Clear(nibble);
                         }
 
-                        cache.MarkAsVisitedBranchAt(path, i);
-
                         if (rlp.IsEmpty)
                         {
                             // update branch as is, as there's no rlp
@@ -1090,16 +1082,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         private readonly HashSet<Keccak> _toTouch;
 
         private IChildCommit? _commit;
-        private readonly byte[] _buffer;
 
         public BuildStateTreeItem(ICommit parent, IEnumerable<Keccak> toTouch)
         {
             _parent = parent;
             _toTouch = new HashSet<Keccak>(toTouch);
             _commit = null;
-
-            // should come from the pool
-            _buffer = new byte[Page.PageSize];
         }
 
         public void DoWork(IChildCommit commit)
@@ -1107,12 +1095,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             _commit = commit;
             _parent.Visit(OnState, TrieType.State);
 
-            var cache = new TrieStructureCache(_buffer);
-
             // dirty the leftovers
             foreach (var key in _toTouch)
             {
-                MarkPathDirty(NibblePath.FromKey(key), _commit!, cache);
+                MarkPathDirty(NibblePath.FromKey(key), _commit!);
             }
         }
 
@@ -1120,15 +1106,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         {
             Debug.Assert(key.Type == DataType.Account);
 
-            var cache = new TrieStructureCache(_buffer);
-
             if (value.IsEmpty)
             {
-                Delete(in key.Path, 0, _commit!, cache);
+                Delete(in key.Path, 0, _commit!);
             }
             else
             {
-                MarkPathDirty(in key.Path, _commit!, cache);
+                MarkPathDirty(in key.Path, _commit!);
             }
 
             // mark as touched already
