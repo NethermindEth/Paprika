@@ -161,34 +161,21 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             // 4. Can be parallelized at the root level
 
             // 1&2
-            var children = new ConcurrentQueue<IChildCommit>();
             var workItems = new List<IWorkItem>();
 
             workItems.AddRange(GetBuildStateTrieWorkItems(commit));
-            workItems.AddRange(GetBuildStorageTrieWorkItems(commit));
 
-            // scatter 1&2
-            Parallel.ForEach(workItems, commit.GetChild, (workItem, _, child) =>
-                {
-                    workItem.DoWork(child);
-                    return child;
-                },
-                child => children.Enqueue(child)
-            );
+            var (buildTrie, computeRoots) = GetStorageWorkItems(commit);
 
-            // gather 1&2
-            CommitToParent(children);
+            workItems.AddRange(buildTrie);
+
+            ScatterGather(commit, workItems);
 
             if (_fullMerkle)
             {
                 var sw = Stopwatch.StartNew();
-                var storage = commit.Stats
-                    .Where(kvp => kvp.Value > 0)
-                    .Select(kvp => kvp.Key)
-                    .ToArray();
 
-                CalculateStorageRoots(commit, storage, children);
-                CommitToParent(children);
+                ScatterGather(commit, computeRoots);
 
                 _storageRootsHashCompute.Record(sw.ElapsedMilliseconds);
 
@@ -213,14 +200,29 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         {
             _totalMerkle.Record(total.ElapsedMilliseconds);
         }
+    }
 
-        static void CommitToParent(ConcurrentQueue<IChildCommit> children)
-        {
-            while (children.TryDequeue(out var child))
+    /// <summary>
+    /// Runs the work items in parallel then gathers the data and commits to the parent.
+    /// </summary>
+    /// <param name="commit">The original commit.</param>
+    /// <param name="workItems">The work items.</param>
+    private static void ScatterGather(ICommit commit, IEnumerable<IWorkItem> workItems)
+    {
+        var children = new ConcurrentQueue<IChildCommit>();
+
+        Parallel.ForEach(workItems, commit.GetChild, (workItem, _, child) =>
             {
-                child.Commit();
-                child.Dispose();
-            }
+                workItem.DoWork(child);
+                return child;
+            },
+            children.Enqueue
+        );
+
+        while (children.TryDequeue(out var child))
+        {
+            child.Commit();
+            child.Dispose();
         }
     }
 
@@ -235,11 +237,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// <summary>
     /// Builds works items responsible for building up the storage tries.
     /// </summary>
-    private static IEnumerable<IWorkItem> GetBuildStorageTrieWorkItems(ICommit commit)
+    private (IEnumerable<IWorkItem> buildTrie, IEnumerable<IWorkItem> computeRoots) GetStorageWorkItems(
+        ICommit commit)
     {
-        // To make it more well distributed, we'll be gathering groups of storages that sums up to some reasonable value.
-        // The reasonable is assumed to be a 1/16 of the state trie change.
-        var batchSize = commit.Stats.Count / 16;
+        var sum = commit.Stats.Sum(pair => pair.Value);
+
+        // make 2 more batches than CPU count to allow some balancing
+        var batchBudget = sum / (Environment.ProcessorCount * 2);
 
         var list = new List<HashSet<Keccak>>();
         var current = new HashSet<Keccak>();
@@ -252,7 +256,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 current.Add(key);
                 currentSize += count;
 
-                if (currentSize > batchSize)
+                if (currentSize > batchBudget)
                 {
                     list.Add(current);
                     currentSize = 0;
@@ -264,10 +268,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         if (current.Count > 0)
             list.Add(current);
 
-        foreach (var set in list)
-        {
-            yield return new BuildStorageTriesItem(commit, set);
-        }
+        return (list.Select(set => new BuildStorageTriesItem(commit, set)).ToArray(),
+            list.Select(set => new CalculateStorageTriesRootHashItem(this, commit, set)).ToArray());
     }
 
     public ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data)
@@ -283,48 +285,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         // trim the cached rlp from branches
         return Node.Branch.GetOnlyBranchData(data);
-    }
-
-    private void CalculateStorageRoots(ICommit commit, IReadOnlyCollection<Keccak> storage,
-        ConcurrentQueue<IChildCommit> children)
-    {
-        if (storage.Count == 0)
-            return;
-
-        // Gather children into a list and only then commit.
-        // As child, when committed modifies the commit, it should be done in
-        // a non-parallel manner. Otherwise it can cause parallel access data error.
-
-        // a. start with the accounts that had their storage altered
-        Parallel.ForEach(storage, () => commit.GetChild(), (accountAddress, _, child) =>
-            {
-                Span<byte> accountSpan = stackalloc byte[Account.MaxByteCount];
-
-                var prefixed = new PrefixingCommit(child);
-
-                prefixed.SetPrefix(accountAddress);
-
-                // compute new storage root hash
-                var keccakOrRlp = Compute(Key.Merkle(NibblePath.Empty), prefixed, TrieType.Storage, ComputeHint.None);
-
-                // read the existing account
-                var key = Key.Account(accountAddress);
-                using var accountOwner = child.Get(key);
-
-                Debug.Assert(accountOwner.IsEmpty == false, "The account should exist");
-
-                Account.ReadFrom(accountOwner.Span, out var account);
-
-                // update it
-                account = account.WithChangedStorageRoot(new Keccak(keccakOrRlp.Span));
-
-                // set it
-                child.Set(key, account.WriteTo(accountSpan));
-
-                return child;
-            },
-            child => children.Enqueue(child)
-        );
     }
 
     public Keccak RootHash { get; private set; }
@@ -1194,6 +1154,54 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             else
             {
                 MarkPathDirty(in key.StoragePath, _commit);
+            }
+        }
+    }
+
+    private sealed class CalculateStorageTriesRootHashItem : IWorkItem
+    {
+        private readonly ComputeMerkleBehavior _behavior;
+        private readonly ICommit _parent;
+        private readonly HashSet<Keccak> _accounts;
+
+        public CalculateStorageTriesRootHashItem(ComputeMerkleBehavior behavior, ICommit parent,
+            HashSet<Keccak> accounts)
+        {
+            _behavior = behavior;
+            _parent = parent;
+            _accounts = accounts;
+        }
+
+        public void DoWork(IChildCommit commit)
+        {
+            // If there are more accounts to go through than 1, then it means that they are grouped to make the compute parallel.
+            // Don't parallelize this work as it would be counter-productive to have parallel over parallel.
+            // If there's a one account only, use the default.
+            var hint = _accounts.Count > 1 ? ComputeHint.DontUseParallel : ComputeHint.None;
+
+            Span<byte> accountSpan = stackalloc byte[Account.MaxByteCount];
+            var prefixed = new PrefixingCommit(commit);
+
+            foreach (var accountAddress in _accounts)
+            {
+                prefixed.SetPrefix(accountAddress);
+
+                // compute new storage root hash
+                var keccakOrRlp = _behavior.Compute(Key.Merkle(NibblePath.Empty), prefixed, TrieType.Storage, hint);
+
+                // read the existing account
+                var key = Key.Account(accountAddress);
+                using var accountOwner = commit.Get(key);
+
+                Debug.Assert(accountOwner.IsEmpty == false, "The account should exist");
+
+                Account.ReadFrom(accountOwner.Span, out var account);
+
+                // update it
+                account = account.WithChangedStorageRoot(new Keccak(keccakOrRlp.Span));
+
+                // set it
+                commit.Set(key, account.WriteTo(accountSpan));
             }
         }
     }
