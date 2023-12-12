@@ -167,6 +167,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             workItems.AddRange(GetBuildStateTrieWorkItems(commit));
             workItems.AddRange(GetBuildStorageTrieWorkItems(commit));
 
+            // scatter 1&2
             Parallel.ForEach(workItems, commit.GetChild, (workItem, _, child) =>
                 {
                     workItem.DoWork(child);
@@ -175,12 +176,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 child => children.Enqueue(child)
             );
 
+            // gather 1&2
             CommitToParent(children);
-
-            // make the root right
-            commit.Get(Keccak)
-
-
 
             if (_fullMerkle)
             {
@@ -232,24 +229,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     private static IEnumerable<IWorkItem> GetBuildStateTrieWorkItems(ICommit commit)
     {
-        const int nibbles = 16;
-
-        var accountsTouchedByStorageGroupedByFirstNibble = new HashSet<Keccak>?[nibbles];
-        foreach (var (key, count) in commit.Stats)
-        {
-            if (count > 0)
-            {
-                var nibble0 = key.BytesAsSpan[0] >> NibblePath.NibbleShift;
-                accountsTouchedByStorageGroupedByFirstNibble[nibble0] ??= new HashSet<Keccak>();
-                accountsTouchedByStorageGroupedByFirstNibble[nibble0]!.Add(key);
-            }
-        }
-
-        for (byte i = 0; i < nibbles; i++)
-        {
-            var storageTouched = accountsTouchedByStorageGroupedByFirstNibble[i] ?? new HashSet<Keccak>();
-            yield return new BuildStateTreeItem(i, commit, storageTouched);
-        }
+        yield return new BuildStateTreeItem(commit, commit.Stats.Keys);
     }
 
     /// <summary>
@@ -257,8 +237,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     private static IEnumerable<IWorkItem> GetBuildStorageTrieWorkItems(ICommit commit)
     {
-        // To make it more well distributed, we'll be gathering groups of storages that are similar in size to the
-        // accounts count divided by 16. The same distribution as GetBuildStateTrieWorkItems.
+        // To make it more well distributed, we'll be gathering groups of storages that sums up to some reasonable value.
+        // The reasonable is assumed to be a 1/16 of the state trie change.
         var batchSize = commit.Stats.Count / 16;
 
         var list = new List<HashSet<Keccak>>();
@@ -1134,17 +1114,15 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     private sealed class BuildStateTreeItem : IWorkItem
     {
-        private readonly byte _nibble;
         private readonly ICommit _parent;
-        private readonly HashSet<Keccak> _storageTouched;
+        private readonly HashSet<Keccak> _toTouch;
 
         private IChildCommit? _commit;
 
-        public BuildStateTreeItem(byte nibble, ICommit parent, HashSet<Keccak> storageTouched)
+        public BuildStateTreeItem(ICommit parent, IEnumerable<Keccak> toTouch)
         {
-            _nibble = nibble;
             _parent = parent;
-            _storageTouched = storageTouched;
+            _toTouch = new HashSet<Keccak>(toTouch);
             _commit = null;
         }
 
@@ -1154,7 +1132,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             _parent.Visit(OnState, TrieType.State);
 
             // dirty the leftovers
-            foreach (var key in _storageTouched)
+            foreach (var key in _toTouch)
             {
                 MarkPathDirty(NibblePath.FromKey(key), _commit!);
             }
@@ -1163,9 +1141,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         private void OnState(in Key key, ReadOnlySpan<byte> value)
         {
             Debug.Assert(key.Type == DataType.Account);
-
-            if (key.Path.FirstNibble != _nibble)
-                return;
 
             if (value.IsEmpty)
             {
@@ -1177,7 +1152,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             }
 
             // mark as touched already
-            _storageTouched.Remove(key.Path.UnsafeAsKeccak);
+            _toTouch.Remove(key.Path.UnsafeAsKeccak);
         }
     }
 
@@ -1214,11 +1189,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
             if (value.IsEmpty)
             {
-                Delete(in key.Path, 0, _commit);
+                Delete(in key.StoragePath, 0, _commit);
             }
             else
             {
-                MarkPathDirty(in key.Path, _commit);
+                MarkPathDirty(in key.StoragePath, _commit);
             }
         }
     }

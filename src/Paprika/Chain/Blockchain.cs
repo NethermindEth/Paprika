@@ -559,6 +559,8 @@ public class Blockchain : IAsyncDisposable
             Destroy(searched, _storage);
             Destroy(searched, _preCommit);
 
+            _stats![address] = 0;
+
             _destroyed ??= new HashSet<Keccak>();
             _destroyed.Add(address);
             return;

@@ -226,6 +226,17 @@ public static partial class Node
         public readonly NibbleSet.Readonly Children;
         public readonly Keccak Keccak;
 
+        private static readonly byte[] FullNodeNoKeccak;
+
+        static Branch()
+        {
+            var full = new Branch(NibbleSet.Readonly.All);
+            Span<byte> buffer = stackalloc byte[full.MaxByteLength];
+            FullNodeNoKeccak = full.WriteTo(buffer).ToArray();
+        }
+
+        public static ReadOnlySpan<byte> FullNode => FullNodeNoKeccak;
+
         private Branch(Header header, NibbleSet.Readonly children, Keccak keccak)
         {
             Header = ValidateHeaderKeccak(ValidateHeaderNodeType(header, Type.Branch), shouldHaveKeccak: true);
