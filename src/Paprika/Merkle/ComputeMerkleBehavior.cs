@@ -46,6 +46,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private readonly Histogram<long> _stateRootHashCompute;
     private readonly Histogram<long> _storageRootsHashCompute;
     private readonly Histogram<long> _totalMerkle;
+    private readonly Histogram<long> _trieBuilding;
 
     /// <summary>
     /// Initializes the Merkle.
@@ -68,6 +69,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         _memoizeRlp = memoizeRlp;
 
         _meter = new Meter("Paprika.Merkle");
+        _trieBuilding = _meter.CreateHistogram<long>("Trie building", "ms",
+            "How long it takes to build all the Tries of state");
         _stateRootHashCompute = _meter.CreateHistogram<long>("State root compute", "ms",
             "How long it takes to calculate the root hash");
         _storageRootsHashCompute = _meter.CreateHistogram<long>("Storage roots compute", "ms",
@@ -163,23 +166,18 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             // 1&2
             var workItems = new List<IWorkItem>();
 
-            workItems.AddRange(GetBuildStateTrieWorkItems(commit));
-
             var (buildTrie, computeRoots) = GetStorageWorkItems(commit);
 
+            workItems.AddRange(GetBuildStateTrieWorkItems(commit));
             workItems.AddRange(buildTrie);
 
-            ScatterGather(commit, workItems);
+            ScatterGather(commit, workItems, _trieBuilding);
 
             if (_fullMerkle)
             {
+                ScatterGather(commit, computeRoots, _storageRootsHashCompute);
+
                 var sw = Stopwatch.StartNew();
-
-                ScatterGather(commit, computeRoots);
-
-                _storageRootsHashCompute.Record(sw.ElapsedMilliseconds);
-
-                sw.Restart();
 
                 var root = Key.Merkle(NibblePath.Empty);
                 var rootKeccak = Compute(root, commit, TrieType.State, ComputeHint.None);
@@ -207,8 +205,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     /// <param name="commit">The original commit.</param>
     /// <param name="workItems">The work items.</param>
-    private static void ScatterGather(ICommit commit, IEnumerable<IWorkItem> workItems)
+    /// <param name="report"></param>
+    private static void ScatterGather(ICommit commit, IEnumerable<IWorkItem> workItems, Histogram<long> report)
     {
+        var sw = Stopwatch.StartNew();
+
         var children = new ConcurrentQueue<IChildCommit>();
 
         Parallel.ForEach(workItems, commit.GetChild, (workItem, _, child) =>
@@ -224,6 +225,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             child.Commit();
             child.Dispose();
         }
+
+        report.Record(sw.ElapsedMilliseconds);
     }
 
     /// <summary>
@@ -871,9 +874,17 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private static void MarkPathDirty(in NibblePath path, ICommit commit)
     {
+        ref var cache = ref Unsafe.NullRef<TrieStructureCache>();
+        
         Span<byte> span = stackalloc byte[33];
 
-        for (int i = 0; i <= path.Length; i++)
+        var start = 0;
+        if (!Unsafe.IsNullRef(ref cache))
+        {
+            start = cache.GetCachedStart(path);
+        }
+
+        for (int i = start; i <= path.Length; i++)
         {
             var slice = path.SliceTo(i);
             var key = Key.Merkle(slice);
@@ -1040,6 +1051,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                             var memo = new RlpMemo(rlp);
                             memo.Clear(nibble);
+                        }
+
+                        if (!Unsafe.IsNullRef(ref cache))
+                        {
+                            cache.MarkAsDirtyBranchAt(path, i);
                         }
 
                         if (rlp.IsEmpty)
