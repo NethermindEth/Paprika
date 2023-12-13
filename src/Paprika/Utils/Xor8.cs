@@ -1,6 +1,8 @@
 ﻿using System.Buffers;
 using System.Collections;
 using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 
 namespace Paprika.Utils;
@@ -186,15 +188,17 @@ public class Xor8
 
     public bool MayContain(ulong key)
     {
+        ref var fingerprints = ref MemoryMarshal.GetArrayDataReference(_fingerprints);
+
         var hash = Hash.Hash64(key, _seed);
         var f = Fingerprint(hash);
         var r0 = (uint)hash;
         var r1 = (uint)BitOperations.RotateLeft(hash, 21);
         var r2 = (uint)BitOperations.RotateLeft(hash, 42);
-        var h0 = Hash.Reduce(r0, _blockLength);
-        var h1 = Hash.Reduce(r1, _blockLength) + _blockLength;
-        var h2 = Hash.Reduce(r2, _blockLength) + 2 * _blockLength;
-        f ^= _fingerprints[h0] ^ _fingerprints[h1] ^ _fingerprints[h2];
+        var h0 = (int)Hash.Reduce(r0, _blockLength);
+        var h1 = (int)Hash.Reduce(r1, _blockLength) + _blockLength;
+        var h2 = (int)Hash.Reduce(r2, _blockLength) + 2 * _blockLength;
+        f ^= Unsafe.Add(ref fingerprints, h0) ^ Unsafe.Add(ref fingerprints, h1) ^ Unsafe.Add(ref fingerprints, h2);
         return (f & 0xff) == 0;
     }
 
@@ -210,6 +214,7 @@ public class Xor8
 
     private static class Hash
     {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static ulong Hash64(ulong x, ulong seed)
         {
             x += seed;
