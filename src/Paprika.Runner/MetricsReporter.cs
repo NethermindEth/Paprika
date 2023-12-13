@@ -9,7 +9,7 @@ public class MetricsReporter : IDisposable
 {
     private readonly object _sync = new();
     private readonly MeterListener _listener;
-    private readonly Dictionary<Meter, Dictionary<Instrument, Measurement>> _instrument2State = new();
+    private readonly Dictionary<Meter, Dictionary<Instrument, IMeasurement>> _instrument2State = new();
 
     public IRenderable Renderer { get; }
 
@@ -21,7 +21,7 @@ public class MetricsReporter : IDisposable
 
         table.AddColumn(new TableColumn("Meter").LeftAligned());
         table.AddColumn(new TableColumn("Instrument").LeftAligned());
-        table.AddColumn(new TableColumn("Value").Width(10).RightAligned());
+        table.AddColumn(new TableColumn("Value").RightAligned());
         table.AddColumn(new TableColumn("Unit").RightAligned());
 
         _listener = new MeterListener
@@ -36,7 +36,7 @@ public class MetricsReporter : IDisposable
 
                     if (!exists)
                     {
-                        dict = new Dictionary<Instrument, Measurement>();
+                        dict = new Dictionary<Instrument, IMeasurement>();
                     }
 
                     var state = Measurement.Build(instrument);
@@ -64,13 +64,13 @@ public class MetricsReporter : IDisposable
 
         _listener.Start();
 
-        _listener.SetMeasurementEventCallback<double>((i, m, l, c) => ((Measurement)c!).Update(m, l));
-        _listener.SetMeasurementEventCallback<float>((i, m, l, c) => ((Measurement)c!).Update(m, l));
-        _listener.SetMeasurementEventCallback<long>((i, m, l, c) => ((Measurement)c!).Update(m, l));
-        _listener.SetMeasurementEventCallback<int>((i, m, l, c) => ((Measurement)c!).Update(m, l));
-        _listener.SetMeasurementEventCallback<short>((i, m, l, c) => ((Measurement)c!).Update(m, l));
-        _listener.SetMeasurementEventCallback<byte>((i, m, l, c) => ((Measurement)c!).Update(m, l));
-        _listener.SetMeasurementEventCallback<decimal>((i, m, l, c) => ((Measurement)c!).Update((double)m, l));
+        _listener.SetMeasurementEventCallback<double>((i, m, l, c) => ((IMeasurement)c!).Update(m, l));
+        _listener.SetMeasurementEventCallback<float>((i, m, l, c) => ((IMeasurement)c!).Update(m, l));
+        _listener.SetMeasurementEventCallback<long>((i, m, l, c) => ((IMeasurement)c!).Update(m, l));
+        _listener.SetMeasurementEventCallback<int>((i, m, l, c) => ((IMeasurement)c!).Update(m, l));
+        _listener.SetMeasurementEventCallback<short>((i, m, l, c) => ((IMeasurement)c!).Update(m, l));
+        _listener.SetMeasurementEventCallback<byte>((i, m, l, c) => ((IMeasurement)c!).Update(m, l));
+        _listener.SetMeasurementEventCallback<decimal>((i, m, l, c) => ((IMeasurement)c!).Update((double)m, l));
     }
 
     public void Observe()

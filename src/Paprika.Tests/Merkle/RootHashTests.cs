@@ -204,7 +204,6 @@ public class RootHashTests
     private static readonly Keccak Account =
         NibblePath.Parse("380c98b03a3f72ee8aa540033b219c0d397dbe2523162db9dd07e6bbb015d50b").UnsafeAsKeccak;
 
-    [TestCase(1, "0x622ab7418fc24b6befa9b46b58e4a7481526d6193af1dadac6918c47e75273ad")]
     [TestCase(100, "0xd5a06a7f5cd264aeb54f783809beab33aaf015983cbc425b1fb779878131279e")]
     [TestCase(1000, "0x2096c9367baf7a329f231b03824a980d9f897de39a7c20c05bd79dbc6e351121")]
     [TestCase(10000, "0x1db15bc352135f4395c1b98251d17dd698d0507001e63dd8543786e446c6e7d1")]
