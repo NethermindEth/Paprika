@@ -2,6 +2,7 @@
 using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Chain;
+using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Utils;
@@ -17,6 +18,8 @@ public class Commit : ICommit
     private readonly Dictionary<byte[], byte[]> _history = new(Comparer);
     private readonly Dictionary<byte[], byte[]> _before = new(Comparer);
     private readonly Dictionary<byte[], byte[]> _after = new(Comparer);
+
+    private readonly Dictionary<Keccak, int> _stats = new();
 
     private bool _asserting;
 
@@ -131,6 +134,7 @@ public class Commit : ICommit
     }
 
     public IChildCommit GetChild() => new ChildCommit(this);
+    public IReadOnlyDictionary<Keccak, int> Stats => _stats;
 
     private static byte[] Concat(in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
     {
@@ -179,6 +183,7 @@ public class Commit : ICommit
         }
 
         public IChildCommit GetChild() => new ChildCommit(this);
+        public IReadOnlyDictionary<Keccak, int> Stats => throw new NotImplementedException("Child commit has no stats");
     }
 
     public KeyEnumerator GetSnapshotOfBefore() => new(_before.Keys.ToArray());
@@ -253,6 +258,8 @@ public class Commit : ICommit
                 dict.Remove(emptyKey);
             }
         }
+
+        _stats.Clear();
 
         return commit;
     }

@@ -64,6 +64,13 @@ public interface ICommit
     /// </summary>
     /// <returns>A child commit.</returns>
     IChildCommit GetChild();
+
+    /// <summary>
+    /// Gets the statistics of sets in the given commit.
+    /// Account writes make just key appear.
+    /// Storage writes increase it by 1.
+    /// </summary>
+    IReadOnlyDictionary<Keccak, int> Stats { get; }
 }
 
 public interface IReadOnlyCommit
