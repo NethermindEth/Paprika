@@ -21,7 +21,8 @@ using Spectre.Console;
 using Keccak = Paprika.Crypto.Keccak;
 
 //const string path = @"C:\Users\Szymon\ethereum\mainnet";
-const string path = @"C:\Users\Szymon\ethereum\execution\nethermind_db\sepolia";
+//const string path = @"C:\Users\Szymon\ethereum\execution\nethermind_db\sepolia";
+const string path = "~/execution-data/nethermind_db/mainnet/";
 
 var logs = LimboLogs.Instance;
 var cfg = DbConfig.Default;
