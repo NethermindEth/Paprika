@@ -17,7 +17,7 @@ on:
 
 env:
   BUILD_CONFIG: release
-  DOTNET_VERSION: 7
+  DOTNET_VERSION: 8
   DOTNET_INSTALL_DIR: '~/.dotnet'
 
 jobs:
