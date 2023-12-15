@@ -94,8 +94,13 @@ public static class Program
             var blockHash = Keccak.EmptyTreeHash;
             var finalization = new Queue<Keccak>();
 
-            await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds(1), 1000, reporter.Observe))
+            // add finality and 10 just to make it a bit slower
+            var gate = new SingleAsyncGate(FinalizeEvery + 10);
+
+            await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds(5), 1000, reporter.Observe))
             {
+                blockchain.Flushed += (_, e) => gate.Signal(e.blockNumber);
+
                 uint at = 1;
 
                 // 500_000 * 50 = 25_000_000 z 10_000_000
@@ -157,6 +162,9 @@ public static class Program
                     gaugeContractsPerBlock.Set(contractSetCount);
 
                     blockHash = block.Commit(at);
+
+                    await gate.WaitAsync(at);
+
                     finalization.Enqueue(blockHash);
 
                     if (finalization.Count == FinalizeEvery)
