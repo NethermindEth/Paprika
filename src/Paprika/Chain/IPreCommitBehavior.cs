@@ -113,6 +113,9 @@ public readonly ref struct ReadOnlySpanOwnerWithMetadata<T>
     /// <see cref="DatabaseQueryDepth"/> is for a query hitting the db transaction. 
     /// </summary>
     public ushort QueryDepth { get; }
+
+    public bool IsDbQuery => QueryDepth == DatabaseQueryDepth;
+
     private readonly ReadOnlySpanOwner<T> _owner;
 
     public ReadOnlySpanOwnerWithMetadata(ReadOnlySpanOwner<T> owner, ushort queryDepth)

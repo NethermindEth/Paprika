@@ -774,20 +774,16 @@ public class Blockchain : IAsyncDisposable
             var hash = GetHash(key);
             var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
-            var result = TryGet(key, keyWritten, hash, out var succeeded);
-
-            Debug.Assert(succeeded);
-            return result;
+            return TryGet(key, keyWritten, hash);
         }
 
         /// <summary>
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom,
-            out bool succeeded)
+        private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom)
         {
-            var owner = TryGetLocal(key, keyWritten, bloom, out succeeded);
+            var owner = TryGetLocal(key, keyWritten, bloom, out var succeeded);
             if (succeeded)
                 return owner.WithDepth(0);
 
@@ -806,13 +802,11 @@ public class Blockchain : IAsyncDisposable
             if (_batch.TryGet(key, out var span))
             {
                 // return leased batch
-                succeeded = true;
                 _batch.AcquireLease();
                 return new ReadOnlySpanOwner<byte>(span, _batch).FromDatabase();
             }
 
-            // report as succeeded operation. The value is not there but it was walked through.
-            succeeded = true;
+            // Return default as the value does not exist
             return default;
         }
 
