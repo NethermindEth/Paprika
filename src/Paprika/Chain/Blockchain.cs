@@ -657,7 +657,7 @@ public class Blockchain : IAsyncDisposable
             dict.Set(key.WriteTo(stackalloc byte[key.MaxByteLength]), hash, payload0, payload1);
         }
 
-        ReadOnlySpanOwner<byte> ICommit.Get(scoped in Key key) => Get(key);
+        ReadOnlySpanOwnerWithMetadata<byte> ICommit.Get(scoped in Key key) => Get(key);
 
         void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload) => SetImpl(key, payload, _preCommit);
 
@@ -719,14 +719,14 @@ public class Blockchain : IAsyncDisposable
                 _parent = parent;
             }
 
-            public ReadOnlySpanOwner<byte> Get(scoped in Key key)
+            public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
             {
                 var hash = GetHash(key);
                 var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
                 if (_dict.TryGet(keyWritten, hash, out var result))
                 {
-                    return new ReadOnlySpanOwner<byte>(result, null);
+                    return new ReadOnlySpanOwnerWithMetadata<byte>(new ReadOnlySpanOwner<byte>(result, null), 0);
                 }
 
                 return _parent.Get(key);
@@ -766,7 +766,7 @@ public class Blockchain : IAsyncDisposable
             public override string ToString() => _dict.ToString();
         }
 
-        private ReadOnlySpanOwner<byte> Get(scoped in Key key)
+        private ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
         {
             Debug.Assert(_committed == false,
                 "The block is committed and it cleaned up some of its dependencies. It cannot provide data for Get method");
@@ -784,19 +784,23 @@ public class Blockchain : IAsyncDisposable
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        private ReadOnlySpanOwner<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom,
+        private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom,
             out bool succeeded)
         {
             var owner = TryGetLocal(key, keyWritten, bloom, out succeeded);
             if (succeeded)
-                return owner;
+                return owner.WithDepth(0);
+
+            ushort depth = 1;
 
             // walk all the blocks locally
             foreach (var ancestor in _ancestors)
             {
                 owner = ancestor.TryGetLocal(key, keyWritten, bloom, out succeeded);
                 if (succeeded)
-                    return owner;
+                    return owner.WithDepth(depth);
+
+                depth++;
             }
 
             if (_batch.TryGet(key, out var span))
@@ -804,7 +808,7 @@ public class Blockchain : IAsyncDisposable
                 // return leased batch
                 succeeded = true;
                 _batch.AcquireLease();
-                return new ReadOnlySpanOwner<byte>(span, _batch);
+                return new ReadOnlySpanOwner<byte>(span, _batch).FromDatabase();
             }
 
             // report as succeeded operation. The value is not there but it was walked through.
@@ -1027,7 +1031,7 @@ public class Blockchain : IAsyncDisposable
         }
 
 
-        public ReadOnlySpanOwner<byte> Get(scoped in Key key)
+        public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
         {
             var hash = GetHash(key);
             var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
@@ -1042,15 +1046,17 @@ public class Blockchain : IAsyncDisposable
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        private ReadOnlySpanOwner<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom,
+        private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom,
             out bool succeeded)
         {
+            ushort depth = 1;
+
             // walk all the blocks locally
             foreach (var ancestor in _ancestors)
             {
                 var owner = ancestor.TryGetLocal(key, keyWritten, bloom, out succeeded);
                 if (succeeded)
-                    return owner;
+                    return owner.WithDepth(1);
             }
 
             if (_batch.TryGet(key, out var span))
@@ -1058,7 +1064,7 @@ public class Blockchain : IAsyncDisposable
                 // return leased batch
                 succeeded = true;
                 _batch.AcquireLease();
-                return new ReadOnlySpanOwner<byte>(span, _batch);
+                return new ReadOnlySpanOwner<byte>(span, _batch).FromDatabase();
             }
 
             // report as succeeded operation. The value is not there but it was walked through.

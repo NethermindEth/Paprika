@@ -72,23 +72,23 @@ public class Commit : ICommit
         Assert.Fail(sb.ToString());
     }
 
-    ReadOnlySpanOwner<byte> ICommit.Get(scoped in Key key)
+    ReadOnlySpanOwnerWithMetadata<byte> ICommit.Get(scoped in Key key)
     {
         var k = GetKey(key);
 
         if (_after.TryGetValue(k, out var value))
         {
-            return new ReadOnlySpanOwner<byte>(value, null);
+            return new ReadOnlySpanOwner<byte>(value, null).WithDepth(0);
         }
 
         if (_before.TryGetValue(k, out value))
         {
-            return new ReadOnlySpanOwner<byte>(value, null);
+            return new ReadOnlySpanOwner<byte>(value, null).WithDepth(0);
         }
 
         if (_history.TryGetValue(k, out value))
         {
-            return new ReadOnlySpanOwner<byte>(value, null);
+            return new ReadOnlySpanOwner<byte>(value, null).WithDepth(0);
         }
 
         return default;
@@ -156,10 +156,10 @@ public class Commit : ICommit
 
         public void Dispose() => _data.Clear();
 
-        public ReadOnlySpanOwner<byte> Get(scoped in Key key)
+        public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
         {
             return _data.TryGetValue(GetKey(key), out var value)
-                ? new ReadOnlySpanOwner<byte>(value, null)
+                ? new ReadOnlySpanOwner<byte>(value, null).WithDepth(0)
                 : _commit.Get(key);
         }
 
