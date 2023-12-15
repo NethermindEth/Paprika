@@ -18,7 +18,7 @@ public static class Program
     private const int MaxReorgDepth = 64;
     private const int FinalizeEvery = 128;
 
-    private const int BlockCount = 500_000;
+    private const int BlockCount = 50_000;
 
     private const int AccountCount = 1_000_000;
     private const int ContractCount = 50_000;
@@ -89,7 +89,7 @@ public static class Program
                     ctx.Refresh();
                 }));
 
-            using var preCommit = new ComputeMerkleBehavior(true, 1, 1);
+            using var preCommit = new ComputeMerkleBehavior(true, 1, 1, true, 100);
 
             var blockHash = Keccak.EmptyTreeHash;
             var finalization = new Queue<Keccak>();

@@ -116,6 +116,8 @@ public readonly ref struct ReadOnlySpanOwnerWithMetadata<T>
 
     public bool IsDbQuery => QueryDepth == DatabaseQueryDepth;
 
+    public bool SetAtThisBlock => QueryDepth == 0;
+
     private readonly ReadOnlySpanOwner<T> _owner;
 
     public ReadOnlySpanOwnerWithMetadata(ReadOnlySpanOwner<T> owner, ushort queryDepth)
