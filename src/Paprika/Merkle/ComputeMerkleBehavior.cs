@@ -59,7 +59,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// <param name="memoizeRlp">Whether the RLP of branches should be memoized in memory (but not stored)
     /// to limit the number of lookups for the children and their Keccak recalculation.
     /// This includes invalidating the memoized RLP whenever a path that it caches is marked as dirty.</param>
-    /// <param name="refreshBudget">How many time per block values that were retrieved from database can be put in front
+    /// <param name="refreshBudget">How many values per block, that were retrieved from database, can be put in front
     /// of it so that they are more fresh.</param>
     public ComputeMerkleBehavior(bool fullMerkle = true,
         int minimumTreeLevelToMemoizeKeccak = DefaultMinimumTreeLevelToMemoizeKeccak,
