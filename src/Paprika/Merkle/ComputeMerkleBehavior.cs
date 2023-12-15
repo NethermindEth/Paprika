@@ -116,7 +116,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             _allowChildCommits = allowChildCommits;
         }
 
-        public ReadOnlySpanOwner<byte> Get(scoped in Key key) => _readOnly.Get(key);
+        public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) => _readOnly.Get(key);
 
         public void Set(in Key key, in ReadOnlySpan<byte> payload)
         {
@@ -607,7 +607,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         public void SetPrefix(in Keccak keccak) => _keccak = keccak;
 
-        public ReadOnlySpanOwner<byte> Get(scoped in Key key) => _commit.Get(Build(key));
+        public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) => _commit.Get(Build(key));
 
         public void Set(in Key key, in ReadOnlySpan<byte> payload) => _commit.Set(Build(key), in payload);
 
@@ -637,7 +637,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 _commit = commit;
             }
 
-            public ReadOnlySpanOwner<byte> Get(scoped in Key key) => _commit.Get(_parent.Build(key));
+            public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) => _commit.Get(_parent.Build(key));
 
             public void Set(in Key key, in ReadOnlySpan<byte> payload) => _commit.Set(_parent.Build(key), payload);
 
