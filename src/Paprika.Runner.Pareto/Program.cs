@@ -18,7 +18,7 @@ public static class Program
     private const int MaxReorgDepth = 64;
     private const int FinalizeEvery = 128;
 
-    private const int BlockCount = 500_000;
+    private const int BlockCount = 50_000;
 
     private const int AccountCount = 1_000_000;
     private const int ContractCount = 50_000;
@@ -89,13 +89,18 @@ public static class Program
                     ctx.Refresh();
                 }));
 
-            using var preCommit = new ComputeMerkleBehavior(true, 1, 1);
+            using var preCommit = new ComputeMerkleBehavior(true, 1, 1, true, 100);
 
             var blockHash = Keccak.EmptyTreeHash;
             var finalization = new Queue<Keccak>();
 
-            await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds(1), 1000, reporter.Observe))
+            // add finality and 10 just to make it a bit slower
+            var gate = new SingleAsyncGate(FinalizeEvery + 10);
+
+            await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds(5), 1000, reporter.Observe))
             {
+                blockchain.Flushed += (_, e) => gate.Signal(e.blockNumber);
+
                 uint at = 1;
 
                 // 500_000 * 50 = 25_000_000 z 10_000_000
@@ -157,6 +162,9 @@ public static class Program
                     gaugeContractsPerBlock.Set(contractSetCount);
 
                     blockHash = block.Commit(at);
+
+                    await gate.WaitAsync(at);
+
                     finalization.Enqueue(blockHash);
 
                     if (finalization.Count == FinalizeEvery)

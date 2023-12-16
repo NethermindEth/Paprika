@@ -37,12 +37,12 @@ public interface IPreCommitBehavior
 public interface ICommit
 {
     /// <summary>
-    /// Tries to retrieve the result stored under the given key only from this commit.
+    /// Tries to retrieve the result stored under the given key.
     /// </summary>
     /// <remarks>
-    /// If successful, returns a result as an owner. Must be disposed properly.
+    /// Returns a result as an owner that must be disposed properly (using var owner = Get)
     /// </remarks>
-    public ReadOnlySpanOwner<byte> Get(scoped in Key key);
+    public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key);
 
     /// <summary>
     /// Sets the value under the given key.
@@ -81,7 +81,7 @@ public interface IReadOnlyCommit
     /// <remarks>
     /// If successful, returns a result as an owner. Must be disposed properly.
     /// </remarks>
-    public ReadOnlySpanOwner<byte> Get(scoped in Key key);
+    public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key);
 }
 
 public interface IChildCommit : ICommit, IDisposable
@@ -96,3 +96,56 @@ public interface IChildCommit : ICommit, IDisposable
 /// A delegate to be called on the each key that that the commit contains.
 /// </summary>
 public delegate void CommitAction(in Key key, ReadOnlySpan<byte> value);
+
+/// <summary>
+/// Provides the same capability as <see cref="ReadOnlySpanOwner{T}"/> but with the additional metadata.
+/// </summary>
+/// <typeparam name="T"></typeparam>
+public readonly ref struct ReadOnlySpanOwnerWithMetadata<T>
+{
+    public const ushort DatabaseQueryDepth = ushort.MaxValue;
+
+    /// <summary>
+    /// Provides the depths of the query to retrieve the value.
+    ///
+    /// 0 is for the current commit.
+    /// 1-N is for blocks
+    /// <see cref="DatabaseQueryDepth"/> is for a query hitting the db transaction. 
+    /// </summary>
+    public ushort QueryDepth { get; }
+
+    public bool IsDbQuery => QueryDepth == DatabaseQueryDepth;
+
+    public bool SetAtThisBlock => QueryDepth == 0;
+
+    private readonly ReadOnlySpanOwner<T> _owner;
+
+    public ReadOnlySpanOwnerWithMetadata(ReadOnlySpanOwner<T> owner, ushort queryDepth)
+    {
+        QueryDepth = queryDepth;
+        _owner = owner;
+    }
+
+    public ReadOnlySpan<T> Span => _owner.Span;
+
+    public bool IsEmpty => _owner.IsEmpty;
+
+    /// <summary>
+    /// Disposes the owner provided as <see cref="IDisposable"/> once.
+    /// </summary>
+    public void Dispose() => _owner.Dispose();
+
+    /// <summary>
+    /// Answers whether this span is owned and provided by <paramref name="owner"/>.
+    /// </summary>
+    public bool IsOwnedBy(object owner) => _owner.IsOwnedBy(owner);
+}
+
+public static class ReadOnlySpanOwnerExtensions
+{
+    public static ReadOnlySpanOwnerWithMetadata<T> WithDepth<T>(this ReadOnlySpanOwner<T> owner, ushort depth) =>
+        new(owner, depth);
+
+    public static ReadOnlySpanOwnerWithMetadata<T> FromDatabase<T>(this ReadOnlySpanOwner<T> owner) =>
+        new(owner, ReadOnlySpanOwnerWithMetadata<T>.DatabaseQueryDepth);
+}
