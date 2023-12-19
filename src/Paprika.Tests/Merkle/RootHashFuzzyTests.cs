@@ -85,8 +85,9 @@ public class RootHashFuzzyTests
         recalculated.Should().Be(rootHash);
     }
 
-    [TestCase(nameof(Accounts_1_000_000))]
-    public async Task CalculateThenDelete(string test)
+    [TestCase(nameof(Accounts_10_000), 64 * 1024 * 1024UL)]
+    [TestCase(nameof(Accounts_1_000_000), 1024 * 1024 * 1024UL, Category = Categories.LongRunning)]
+    public async Task CalculateThenDelete(string test, ulong size)
     {
         var generator = Build(test);
 
