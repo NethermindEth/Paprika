@@ -1074,23 +1074,24 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             memo.Clear(nibble);
                         }
 
+                        var children = branch.Children.Set(nibble);
+
                         if (rlp.IsEmpty)
                         {
-                            // Set if the nibble was not set before
-                            if (!branch.Children[nibble])
+                            // Set if the nibble was not set before, or branch has memoized Keccak
+                            if (!branch.Children[nibble] || branch.HasKeccak)
                             {
-                                commit.SetBranch(key, branch.Children.Set(nibble));
+                                commit.SetBranch(key, children);
                             }
-
-                            // If it was a db query, check budget and update
-                            if (owner.IsDbQuery && budget.IsAvailable())
+                            else if (owner.IsDbQuery && budget.IsAvailable())
                             {
-                                commit.SetBranch(key, branch.Children.Set(nibble));
+                                // If it was a db query, check budget and update
+                                commit.SetBranch(key, children);
                             }
                         }
                         else
                         {
-                            commit.SetBranch(key, branch.Children.Set(nibble), rlp);
+                            commit.SetBranch(key, children, rlp);
                         }
 
                         if (array != null)

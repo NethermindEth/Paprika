@@ -263,6 +263,11 @@ public class Blockchain : IAsyncDisposable
     {
         parentKeccak = Normalize(parentKeccak);
 
+        if (parentKeccak == Keccak.Zero)
+        {
+            return (EmptyReadOnlyBatch.Instance, Array.Empty<BlockState>());
+        }
+
         // the most recent finalized batch
         var batch = _db.BeginReadOnlyBatchOrLatest(parentKeccak, $"Blockchain dependency");
 
@@ -484,9 +489,18 @@ public class Blockchain : IAsyncDisposable
 
             var hash = _hash!.Value;
 
+            bool earlyReturn = false;
+
             if (hash == ParentHash)
             {
-                throw new Exception("The same state as the parent is not handled now");
+                if (hash == Keccak.EmptyTreeHash)
+                {
+                    earlyReturn = true;
+                }
+                else
+                {
+                    throw new Exception("The same state as the parent is not handled now");
+                }
             }
 
             // After this step, this block requires no batch or ancestors.
@@ -500,6 +514,9 @@ public class Blockchain : IAsyncDisposable
             }
 
             _ancestors = Array.Empty<BlockState>();
+
+            if (earlyReturn)
+                return hash;
 
             AcquireLease();
             BlockNumber = blockNumber;
