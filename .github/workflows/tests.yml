@@ -1,4 +1,4 @@
-name: 'Paprika Tests'
+name: "Paprika Tests"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -13,60 +13,60 @@ on:
 env:
   BUILD_CONFIG: release
   DOTNET_VERSION: 8
-  DOTNET_INSTALL_DIR: '~/.dotnet'
+  DOTNET_INSTALL_DIR: "~/.dotnet"
 
 jobs:
   tests:
-    timeout-minutes: 5
-    name: 'Run Paprika tests'
+    timeout-minutes: 10
+    name: "Run Paprika tests"
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write # for sticky-pull-request-comment
     steps:
-    - name: Cache dotnet
-      id: cache-dotnet
-      uses: actions/cache@v3
-      with:
+      - name: Cache dotnet
+        id: cache-dotnet
+        uses: actions/cache@v3
+        with:
           path: ${{ env.DOTNET_INSTALL_DIR }}
           key: ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}
           restore-keys: ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}
-    - name: Set up .NET
-      if: ${{ steps.cache-dotnet.outputs.cache-hit != 'true' }}
-      uses: actions/setup-dotnet@v3
-      with:
-        dotnet-version: ${{ env.DOTNET_VERSION }}
-    - uses: actions/checkout@v3
-      with:
-        submodules: true
-    - name: Cache nuget
-      uses: actions/cache@v3
-      with:
-        path: ~/.nuget/packages
-        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
-        restore-keys: |
-          ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+      - name: Set up .NET
+        if: ${{ steps.cache-dotnet.outputs.cache-hit != 'true' }}
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+      - name: Cache nuget
+        uses: actions/cache@v3
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
 
-    - name: Test
-      run: dotnet test src/Paprika.Tests -c ${{ env.BUILD_CONFIG }} --collect:"XPlat Code Coverage" --results-directory ./coverage
+      - name: Test
+        run: dotnet test src/Paprika.Tests -c ${{ env.BUILD_CONFIG }} --collect:"XPlat Code Coverage" --results-directory ./coverage
 
-    - name: Code Coverage Report
-      uses: irongut/CodeCoverageSummary@v1.3.0
-      with:
-        filename: coverage/**/coverage.cobertura.xml
-        badge: true
-        fail_below_min: true
-        format: markdown
-        hide_branch_rate: false
-        hide_complexity: true
-        indicators: true
-        output: both
-        thresholds: '75 85'
-    
-    - name: Coverage PR Comment
-      uses: marocchino/sticky-pull-request-comment@v2
-      if: github.event_name == 'pull_request'
-      with:
-        header: Code Coverage
-        recreate: true
-        path: code-coverage-results.md
+      - name: Code Coverage Report
+        uses: irongut/CodeCoverageSummary@v1.3.0
+        with:
+          filename: coverage/**/coverage.cobertura.xml
+          badge: true
+          fail_below_min: true
+          format: markdown
+          hide_branch_rate: false
+          hide_complexity: true
+          indicators: true
+          output: both
+          thresholds: "75 85"
+
+      - name: Coverage PR Comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        if: github.event_name == 'pull_request'
+        with:
+          header: Code Coverage
+          recreate: true
+          path: code-coverage-results.md
