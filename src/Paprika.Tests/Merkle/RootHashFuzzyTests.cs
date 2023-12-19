@@ -85,6 +85,24 @@ public class RootHashFuzzyTests
         recalculated.Should().Be(rootHash);
     }
 
+    [TestCase(nameof(Accounts_1_000_000))]
+    public async Task CalculateThenDelete(string test)
+    {
+        var generator = Build(test);
+
+        using var db = PagedDb.NativeMemoryDb(1024 * 1024 * 1024, 2);
+        var merkle = new ComputeMerkleBehavior(true, 2, 2, false);
+        await using var blockchain = new Blockchain(db, merkle);
+
+        // set
+        generator.Run(blockchain, 513, false, true);
+
+        // delete
+        var rootHash = generator.Run(blockchain, 1001, true, true);
+
+        rootHash.Should().Be(Keccak.EmptyTreeHash);
+    }
+
     private static void AssertRootHash(Keccak rootHash, CaseGenerator generator)
     {
         rootHash.Should().Be(generator.RootHashAsKeccak, "Root hashes should match");
@@ -127,6 +145,8 @@ public class RootHashFuzzyTests
         private readonly int _storageCount;
         public readonly string RootHash;
         public readonly Keccak RootHashAsKeccak;
+        private uint _blocks;
+        private Keccak _parent;
 
         public CaseGenerator(int count, int storageCount, string rootHash)
         {
@@ -135,6 +155,9 @@ public class RootHashFuzzyTests
             RootHash = rootHash;
 
             RootHashAsKeccak = new Keccak(Convert.FromHexString(RootHash));
+
+            _blocks = 1;
+            _parent = Keccak.EmptyTreeHash;
         }
 
         public void Run(Commit commit)
@@ -167,12 +190,11 @@ public class RootHashFuzzyTests
             }
         }
 
-        public Keccak Run(Blockchain blockchain, int newBlockEvery = int.MaxValue)
+        public Keccak Run(Blockchain blockchain, int newBlockEvery = int.MaxValue, bool delete = false,
+            bool autoFinalize = false)
         {
             var counter = 0;
-            uint blocks = 1;
-
-            var block = blockchain.StartNew(Keccak.EmptyTreeHash);
+            var block = blockchain.StartNew(_parent);
 
             var random = GetRandom();
 
@@ -183,40 +205,57 @@ public class RootHashFuzzyTests
                 var value = (uint)random.Next();
 
                 var a = new Account(value, value);
-                block.SetAccount(keccak, a);
 
-                Next(ref counter, newBlockEvery, ref block, ref blocks, blockchain);
+                if (delete)
+                {
+                    block.DestroyAccount(keccak);
+                }
+                else
+                {
+                    block.SetAccount(keccak, a);
+                }
+
+                Next(ref counter, newBlockEvery, ref block, blockchain, autoFinalize);
 
                 // storage data second
                 for (var j = 0; j < _storageCount; j++)
                 {
                     var storageKey = random.NextKeccak();
                     var storageValue = random.Next();
-                    block.SetStorage(keccak, storageKey, storageValue.ToByteArray());
 
-                    Next(ref counter, newBlockEvery, ref block, ref blocks, blockchain);
+                    var actual = delete ? ReadOnlySpan<byte>.Empty : storageValue.ToByteArray();
+                    block.SetStorage(keccak, storageKey, actual);
+
+                    Next(ref counter, newBlockEvery, ref block, blockchain, autoFinalize);
                 }
             }
 
-            var rootHash = block.Commit(blocks);
+            var rootHash = block.Commit(_blocks);
             block.Dispose();
 
             return rootHash;
+        }
 
-            static void Next(ref int counter, int newBlockEvery, ref IWorldState block, ref uint blocks, Blockchain blockchain)
+
+        private void Next(ref int counter, int newBlockEvery, ref IWorldState block, Blockchain blockchain, bool autoFinalize)
+        {
+            counter++;
+
+            if (counter % newBlockEvery == 0)
             {
-                counter++;
+                counter = 0;
+                _parent = block.Commit(_blocks++);
 
-                if (counter % newBlockEvery == 0)
+                block.Dispose();
+                block = blockchain.StartNew(_parent);
+
+                if (autoFinalize)
                 {
-                    counter = 0;
-                    var hash = block.Commit(blocks++);
-
-                    block.Dispose();
-                    block = blockchain.StartNew(hash);
+                    blockchain.Finalize(_parent);
                 }
             }
         }
+
 
         private static Random GetRandom() => new(13);
     }
