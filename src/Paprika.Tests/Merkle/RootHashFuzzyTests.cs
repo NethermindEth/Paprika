@@ -265,7 +265,7 @@ public class RootHashFuzzyTests
     {
         var merkle = new ComputeMerkleBehavior(true);
 
-        merkle.BeforeCommit(commit);
+        merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());
 
         var keccak = new Keccak(Convert.FromHexString(hex));
 

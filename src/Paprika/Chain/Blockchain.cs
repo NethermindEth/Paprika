@@ -1,7 +1,6 @@
 ﻿using System.CodeDom.Compiler;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Paprika.Crypto;
@@ -40,6 +39,7 @@ public class Blockchain : IAsyncDisposable
 
     private readonly PagedDb _db;
     private readonly IPreCommitBehavior _preCommit;
+    private readonly CacheBudget.Options _options;
     private readonly TimeSpan _minFlushDelay;
     private readonly Action? _beforeMetricsDisposed;
     private readonly Task _flusher;
@@ -49,10 +49,12 @@ public class Blockchain : IAsyncDisposable
     private static readonly TimeSpan DefaultFlushDelay = TimeSpan.FromSeconds(1);
 
     public Blockchain(PagedDb db, IPreCommitBehavior preCommit, TimeSpan? minFlushDelay = null,
+        CacheBudget.Options options = default,
         int? finalizationQueueLimit = null, Action? beforeMetricsDisposed = null)
     {
         _db = db;
         _preCommit = preCommit;
+        _options = options;
         _minFlushDelay = minFlushDelay ?? DefaultFlushDelay;
         _beforeMetricsDisposed = beforeMetricsDisposed;
 
@@ -432,14 +434,21 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private PooledSpanDictionary _preCommit = null!;
 
+        /// <summary>
+        /// Represents keys of that were written in a transient way, just for caching.
+        /// </summary>
+        private PooledSpanDictionary _transient = null!;
+
         private bool _committed;
         private Keccak? _hash;
+        private readonly CacheBudget _cacheBudget;
 
         private void CreateDictionaries()
         {
             CreateDict(ref _state, Pool);
             CreateDict(ref _storage, Pool);
             CreateDict(ref _preCommit, Pool);
+            CreateDict(ref _transient, Pool);
             return;
 
             // as pre-commit can use parallelism, make the pooled dictionaries concurrent friendly:
@@ -474,6 +483,8 @@ public class Blockchain : IAsyncDisposable
             _stats = new Dictionary<Keccak, int>();
 
             _hash = ParentHash;
+
+            _cacheBudget = blockchain._options.Build();
 
             CreateDictionaries();
         }
@@ -560,7 +571,7 @@ public class Blockchain : IAsyncDisposable
         {
             if (_hash == null)
             {
-                _hash = _blockchain._preCommit.BeforeCommit(this);
+                _hash = _blockchain._preCommit.BeforeCommit(this, _cacheBudget);
             }
         }
 
@@ -575,6 +586,7 @@ public class Blockchain : IAsyncDisposable
             Destroy(searched, _state);
             Destroy(searched, _storage);
             Destroy(searched, _preCommit);
+            Destroy(searched, _transient);
 
             _stats![address] = 0;
 
@@ -601,6 +613,8 @@ public class Blockchain : IAsyncDisposable
 
             using var owner = Get(key);
 
+            TryCache(key, owner, _storage);
+
             // check the span emptiness
             var data = owner.Span;
             if (data.IsEmpty)
@@ -610,11 +624,42 @@ public class Blockchain : IAsyncDisposable
             return destination.Slice(0, data.Length);
         }
 
+        /// <summary>
+        /// Decides to whether put the value in a transient cache or in a persistent cache to speed
+        /// up queries in next executions. 
+        /// </summary>
+        /// <param name="key"></param>
+        /// <param name="owner"></param>
+        /// <param name="dict"></param>
+        /// <exception cref="NotImplementedException"></exception>
+        private void TryCache(in Key key, in ReadOnlySpanOwnerWithMetadata<byte> owner, PooledSpanDictionary dict)
+        {
+            if (owner.IsDbQuery && _cacheBudget.ClaimTransient())
+            {
+                // this was the db query and there was the budget to store it
+                SetImpl(key, owner.Span, dict, true);
+            }
+            else if (_cacheBudget.IsTransientAvailable)
+            {
+                var ratio = (double)owner.QueryDepth / _ancestors.Length;
+                if (ratio > 0.8)
+                {
+                    // Cache only really distant entries
+                    if (_cacheBudget.ClaimTransient())
+                    {
+                        SetImpl(key, owner.Span, dict, true);
+                    }
+                }
+            }
+        }
+
         public Account GetAccount(in Keccak address)
         {
             var key = Key.Account(NibblePath.FromKey(address));
 
             using var owner = Get(key);
+
+            TryCache(key, owner, _state);
 
             // check the span emptiness
             if (owner.Span.IsEmpty)
@@ -646,7 +691,8 @@ public class Blockchain : IAsyncDisposable
             _stats!.RegisterSetStorageAccount(address);
         }
 
-        private void SetImpl(in Key key, in ReadOnlySpan<byte> payload, PooledSpanDictionary dict)
+        private void SetImpl(in Key key, in ReadOnlySpan<byte> payload, PooledSpanDictionary dict,
+            bool transient = false)
         {
             // clean precalculated hash
             _hash = null;
@@ -656,22 +702,49 @@ public class Blockchain : IAsyncDisposable
             var hash = GetHash(key);
             _bloom.Add(hash);
 
-            dict.Set(key.WriteTo(stackalloc byte[key.MaxByteLength]), hash, payload);
+            var k = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+
+            if (transient)
+            {
+                _transient.Set(k, hash, ReadOnlySpan<byte>.Empty);
+            }
+            else
+            {
+                _transient.Remove(k, hash);
+            }
+
+            dict.Set(k, hash, payload);
+        }
+
+        private void SetImpl(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1,
+            PooledSpanDictionary dict, bool transient = false)
+        {
+            // clean precalculated hash
+            _hash = null;
+
+            EnsureNotCommitted();
+
+            var hash = GetHash(key);
+            _bloom.Add(hash);
+
+            var k = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+
+            if (transient)
+            {
+                _transient.Set(k, hash, ReadOnlySpan<byte>.Empty);
+            }
+            else
+            {
+                _transient.Remove(k, hash);
+            }
+
+            dict.Set(k, hash, payload0, payload1);
         }
 
         private void EnsureNotCommitted()
         {
             if (_committed)
                 throw new Exception("This blocks has already been committed");
-        }
-
-        private void SetImpl(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1,
-            PooledSpanDictionary dict)
-        {
-            var hash = GetHash(key);
-            _bloom.Add(hash);
-
-            dict.Set(key.WriteTo(stackalloc byte[key.MaxByteLength]), hash, payload0, payload1);
         }
 
         ReadOnlySpanOwnerWithMetadata<byte> ICommit.Get(scoped in Key key) => Get(key);
@@ -705,8 +778,11 @@ public class Blockchain : IAsyncDisposable
 
             foreach (var kvp in dict)
             {
-                Key.ReadFrom(kvp.Key, out var key);
-                action(key, kvp.Value);
+                if (!_transient.Contains(kvp.Key, kvp.ShortHash))
+                {
+                    Key.ReadFrom(kvp.Key, out var key);
+                    action(key, kvp.Value);
+                }
             }
 
             if (type == TrieType.State && _destroyed != null)
@@ -798,7 +874,8 @@ public class Blockchain : IAsyncDisposable
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom)
+        private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
+            int bloom)
         {
             var owner = TryGetLocal(key, keyWritten, bloom, out var succeeded);
             if (succeeded)
@@ -904,6 +981,7 @@ public class Blockchain : IAsyncDisposable
             _state.Dispose();
             _storage.Dispose();
             _preCommit.Dispose();
+            _transient.Dispose();
 
             _batch.Dispose();
 
@@ -1057,7 +1135,8 @@ public class Blockchain : IAsyncDisposable
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, int bloom,
+        private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
+            int bloom,
             out bool succeeded)
         {
             ushort depth = 1;

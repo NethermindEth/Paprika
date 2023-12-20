@@ -385,7 +385,7 @@ public class BlockchainTests
 
     private class PreCommit : IPreCommitBehavior
     {
-        public Keccak BeforeCommit(ICommit commit)
+        public Keccak BeforeCommit(ICommit commit, CacheBudget budget)
         {
             var hashCode = RuntimeHelpers.GetHashCode(commit);
             Keccak hash = default;

@@ -301,7 +301,7 @@ public class DirtyTests
         var merkle = new ComputeMerkleBehavior(false);
 
         // run merkle before
-        merkle.BeforeCommit(commit);
+        merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());
 
         if (_delete)
         {
@@ -318,7 +318,7 @@ public class DirtyTests
             }
 
             // run Merkle it again to undo the structure
-            merkle.BeforeCommit(commit);
+            merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());
         }
 
         if (!_delete)

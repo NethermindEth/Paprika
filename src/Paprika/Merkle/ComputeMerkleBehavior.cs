@@ -42,7 +42,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private readonly int _minimumTreeLevelToMemoizeKeccak;
     private readonly int _memoizeKeccakEvery;
     private readonly bool _memoizeRlp;
-    private readonly int _refreshBudget;
     private readonly Meter _meter;
     private readonly Histogram<long> _stateRootHashCompute;
     private readonly Histogram<long> _storageRootsHashCompute;
@@ -64,14 +63,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     public ComputeMerkleBehavior(bool fullMerkle = true,
         int minimumTreeLevelToMemoizeKeccak = DefaultMinimumTreeLevelToMemoizeKeccak,
         int memoizeKeccakEvery = MemoizeKeccakEveryNLevel,
-        bool memoizeRlp = true,
-        int refreshBudget = 0)
+        bool memoizeRlp = true)
     {
         _fullMerkle = fullMerkle;
         _minimumTreeLevelToMemoizeKeccak = minimumTreeLevelToMemoizeKeccak;
         _memoizeKeccakEvery = memoizeKeccakEvery;
         _memoizeRlp = memoizeRlp;
-        _refreshBudget = refreshBudget;
 
         _meter = new Meter("Paprika.Merkle");
         _trieBuilding = _meter.CreateHistogram<long>("Trie building", "ms",
@@ -94,7 +91,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         var wrapper = new CommitWrapper(commit, true);
 
         var root = Key.Merkle(NibblePath.Empty);
-        var value = Compute(in root, new ComputeContext(wrapper, TrieType.State, hint, new RefreshValueBudget(0)));
+        var value = Compute(in root, new ComputeContext(wrapper, TrieType.State, hint, CacheBudget.Options.None.Build()));
         return new Keccak(value.Span);
     }
 
@@ -105,7 +102,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         prefixed.SetPrefix(account);
 
         var root = Key.Merkle(storagePath);
-        var value = Compute(in root, new ComputeContext(prefixed, TrieType.Storage, hint, new RefreshValueBudget(0)));
+        var value = Compute(in root, new ComputeContext(prefixed, TrieType.Storage, hint, CacheBudget.Options.None.Build()));
         return new Keccak(value.Span);
     }
 
@@ -147,10 +144,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
     }
 
-    public Keccak BeforeCommit(ICommit commit)
+    public Keccak BeforeCommit(ICommit commit, CacheBudget budget)
     {
         var total = Stopwatch.StartNew();
-        var budget = new RefreshValueBudget(_refreshBudget);
 
         try
         {
@@ -238,7 +234,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// <summary>
     /// Builds works items responsible for building up the state tree. Work items are split by the leading nibble key.
     /// </summary>
-    private static IEnumerable<IWorkItem> GetBuildStateTrieWorkItems(ICommit commit, RefreshValueBudget budget)
+    private static IEnumerable<IWorkItem> GetBuildStateTrieWorkItems(ICommit commit, CacheBudget budget)
     {
         yield return new BuildStateTreeItem(commit, commit.Stats.Keys, budget);
     }
@@ -247,7 +243,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// Builds works items responsible for building up the storage tries.
     /// </summary>
     private (IEnumerable<IWorkItem> buildTrie, IEnumerable<IWorkItem> computeRoots) GetStorageWorkItems(ICommit commit,
-        RefreshValueBudget budget)
+        CacheBudget budget)
     {
         var sum = commit.Stats.Sum(pair => pair.Value);
 
@@ -319,17 +315,23 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         ForceStorageRootHashRecalculation = 4
     }
 
-    private readonly struct ComputeContext(ICommit commit, TrieType trieType, ComputeHint hint, RefreshValueBudget budget)
+    private readonly struct ComputeContext(ICommit commit, TrieType trieType, ComputeHint hint, CacheBudget budget)
     {
         public readonly ICommit Commit = commit;
         public readonly TrieType TrieType = trieType;
         public readonly ComputeHint Hint = hint;
-        public readonly RefreshValueBudget Budget = budget;
+        public readonly CacheBudget Budget = budget;
     }
 
     private KeccakOrRlp Compute(in Key key, in ComputeContext ctx)
     {
         using var owner = ctx.Commit.Get(key);
+
+        if (owner.IsDbQuery && ctx.Budget.ClaimDbWrite())
+        {
+            ctx.Commit.Set(key, owner.Span);
+        }
+
         if (owner.IsEmpty)
         {
             // empty tree, return empty
@@ -357,7 +359,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
     }
 
-    private KeccakOrRlp EncodeLeaf(Key key, scoped in Node.Leaf leaf, in ComputeContext ctx)
+    private KeccakOrRlp EncodeLeaf(in Key key, scoped in Node.Leaf leaf, in ComputeContext ctx)
     {
         var leafPath =
             key.Path.Append(leaf.Path, stackalloc byte[key.Path.MaxByteLength + leaf.Path.MaxByteLength + 1]);
@@ -369,7 +371,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         using var leafData = ctx.Commit.Get(leafKey);
 
-        if (leafData.IsDbQuery && ctx.Budget.IsAvailable())
+        if (leafData.IsDbQuery && ctx.Budget.ClaimDbWrite())
         {
             ctx.Commit.Set(leafKey, leafData.Span);
         }
@@ -703,7 +705,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     /// <returns>Whether the node has changed its type </returns>
     /// <exception cref="ArgumentOutOfRangeException"></exception>
-    private static DeleteStatus Delete(in NibblePath path, int at, ICommit commit, RefreshValueBudget budget)
+    private static DeleteStatus Delete(in NibblePath path, int at, ICommit commit, CacheBudget budget)
     {
         var slice = path.SliceTo(at);
         var key = Key.Merkle(slice);
@@ -894,7 +896,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         return DeleteStatus.ExtensionToLeaf;
     }
 
-    private static void MarkPathDirty(in NibblePath path, ICommit commit, RefreshValueBudget budget)
+    private static void MarkPathDirty(in NibblePath path, ICommit commit, CacheBudget budget)
     {
         Span<byte> span = stackalloc byte[33];
 
@@ -927,7 +929,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             // This is update in place. The parent is marked as parent as dirty.
                             // The structure of Merkle does not change.
                             // Check if the read was from db and, if there's the budget for the update, schedule it.
-                            if (owner.IsDbQuery && budget.IsAvailable())
+                            if (owner.IsDbQuery && budget.ClaimDbWrite())
                             {
                                 commit.SetLeaf(key, leftoverPath);
                             }
@@ -1083,7 +1085,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             {
                                 commit.SetBranch(key, children);
                             }
-                            else if (owner.IsDbQuery && budget.IsAvailable())
+                            else if (owner.IsDbQuery && budget.ClaimDbWrite())
                             {
                                 // If it was a db query, check budget and update
                                 commit.SetBranch(key, children);
@@ -1117,12 +1119,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private sealed class BuildStateTreeItem : IWorkItem
     {
         private readonly ICommit _parent;
-        private readonly RefreshValueBudget _budget;
+        private readonly CacheBudget _budget;
         private readonly HashSet<Keccak> _toTouch;
 
         private IChildCommit? _commit;
 
-        public BuildStateTreeItem(ICommit parent, IEnumerable<Keccak> toTouch, RefreshValueBudget budget)
+        public BuildStateTreeItem(ICommit parent, IEnumerable<Keccak> toTouch, CacheBudget budget)
         {
             _parent = parent;
             _budget = budget;
@@ -1164,10 +1166,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     {
         private readonly ICommit _parent;
         private readonly HashSet<Keccak> _accountsToProcess;
-        private readonly RefreshValueBudget _budget;
+        private readonly CacheBudget _budget;
         private PrefixingCommit? _commit;
 
-        public BuildStorageTriesItem(ICommit parent, HashSet<Keccak> accountsToProcess, RefreshValueBudget budget)
+        public BuildStorageTriesItem(ICommit parent, HashSet<Keccak> accountsToProcess, CacheBudget budget)
         {
             _parent = parent;
             _accountsToProcess = accountsToProcess;
@@ -1208,10 +1210,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     {
         private readonly ComputeMerkleBehavior _behavior;
         private readonly HashSet<Keccak> _accounts;
-        private readonly RefreshValueBudget _budget;
+        private readonly CacheBudget _budget;
 
         public CalculateStorageTriesRootHashItem(ComputeMerkleBehavior behavior, HashSet<Keccak> accounts,
-            RefreshValueBudget budget)
+            CacheBudget budget)
         {
             _behavior = behavior;
             _accounts = accounts;
@@ -1250,14 +1252,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 commit.Set(key, account.WriteTo(accountSpan));
             }
         }
-    }
-
-    /// <summary>
-    /// Provides the budget for setting values that does exit, but were retrieved from the depth of the database.
-    /// </summary>
-    private class RefreshValueBudget(int count)
-    {
-        public bool IsAvailable() => Interlocked.Decrement(ref count) >= 0;
     }
 
     public void Dispose() => _meter.Dispose();
