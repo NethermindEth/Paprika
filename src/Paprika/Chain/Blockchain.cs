@@ -1018,9 +1018,12 @@ public class Blockchain : IAsyncDisposable
 
             foreach (var kvp in dict)
             {
-                Key.ReadFrom(kvp.Key, out var key);
-                var data = preCommit == null ? kvp.Value : preCommit.InspectBeforeApply(key, kvp.Value);
-                batch.SetRaw(key, data);
+                if (!_transient.Contains(kvp.Key, kvp.ShortHash))
+                {
+                    Key.ReadFrom(kvp.Key, out var key);
+                    var data = preCommit == null ? kvp.Value : preCommit.InspectBeforeApply(key, kvp.Value);
+                    batch.SetRaw(key, data);
+                }
             }
         }
 
