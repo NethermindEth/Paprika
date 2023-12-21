@@ -21,8 +21,8 @@ using Spectre.Console;
 using Keccak = Paprika.Crypto.Keccak;
 
 //const string path = @"C:\Users\Szymon\ethereum\mainnet";
-//const string path = @"C:\Users\Szymon\ethereum\execution\nethermind_db\sepolia";
-const string path = "~/execution-data/nethermind_db/mainnet/";
+const string path = @"C:\Users\Szymon\ethereum\execution\nethermind_db\sepolia";
+//const string path = "~/execution-data/nethermind_db/mainnet/";
 
 var logs = LimboLogs.Instance;
 var cfg = DbConfig.Default;
@@ -131,13 +131,13 @@ var root = MoveDownInTree(nibbles, trie, store);
 // root.Accept(storageCapture, store, false, nibbles);
 // File.WriteAllText("storage-big-tree.txt",storageCapture.Payload);
 
-using var preCommit = new ComputeMerkleBehavior(true, 1, 1, true);
+using var preCommit = new ComputeMerkleBehavior(1, 1, true);
 
 var rootHashActual = Keccak.Zero;
 if (dbExists == false)
 {
     await using (var blockchain =
-                 new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 100, () => reporter.Observe()))
+                 new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), CacheBudget.Options.None,100, () => reporter.Observe()))
     {
         var visitor = new PaprikaCopyingVisitor(blockchain, 5000, skipStorage);
         Console.WriteLine("Starting...");
@@ -162,7 +162,7 @@ if (dbExists == false)
 else
 {
     await using (var blockchain =
-                 new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), 100, () => reporter.Observe()))
+                 new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), CacheBudget.Options.None, 100, () => reporter.Observe()))
     {
         var visitor = new PaprikaAccountValidatingVisitor(blockchain, preCommit, 1000);
 
