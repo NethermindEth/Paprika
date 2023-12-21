@@ -766,6 +766,8 @@ public class Blockchain : IAsyncDisposable
             Debug.Assert(_committed == false,
                 "The block is committed and it cleaned up some of its dependencies. It cannot provide data for Get method");
 
+            return Get(key);
+
             // Precompute hash and preencode key
             var hash = GetHash(key);
             var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);

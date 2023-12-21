@@ -298,7 +298,8 @@ public class DirtyTests
 
     private void Assert(Commit commit, Action<ICommit> assert)
     {
-        var merkle = new ComputeMerkleBehavior(false);
+        const int dontMemoize = int.MaxValue;
+        var merkle = new ComputeMerkleBehavior(dontMemoize, dontMemoize, false);
 
         // run merkle before
         merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());
@@ -358,5 +359,14 @@ public static class CommitExtensions
 
     public static void Set(this Commit commit, string path) => commit.Set(NibblePath.Parse(path));
 
-    public static void Set(this Commit commit, in NibblePath path) => commit.Set(Key.Account(path), new byte[] { 0 });
+    public static void Set(this Commit commit, in NibblePath path) => commit.Set(Key.Account(path), SmallestAccount);
+
+    private static readonly byte[] SmallestAccount;
+
+    static CommitExtensions()
+    {
+        var account = new Account(1, 1);
+        var written = account.WriteTo(stackalloc byte[Account.MaxByteCount]);
+        SmallestAccount = written.ToArray();
+    }
 }

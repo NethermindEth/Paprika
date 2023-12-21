@@ -1,9 +1,26 @@
-﻿using System.Diagnostics.Metrics;
+﻿using System.Diagnostics;
+using System.Diagnostics.Metrics;
 
 namespace Paprika.Utils;
 
 public static class MetricsExtensions
 {
+    public readonly struct MeasurementScope : IDisposable
+    {
+        private readonly Stopwatch _sw;
+        private readonly Histogram<long> _timer;
+
+        public MeasurementScope(Stopwatch sw, Histogram<long> timer)
+        {
+            _sw = sw;
+            _timer = timer;
+        }
+
+        public void Dispose() => _timer.Record(_sw.ElapsedMilliseconds);
+    }
+
+    public static MeasurementScope Measure(this Histogram<long> timer) => new(Stopwatch.StartNew(), timer);
+
     private class AtomicIntGauge : IAtomicIntGauge
     {
         private int _value;

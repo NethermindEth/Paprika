@@ -38,47 +38,37 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     public const int DefaultMinimumTreeLevelToMemoizeKeccak = 2;
     public const int MemoizeKeccakEveryNLevel = 2;
 
-    private readonly bool _fullMerkle;
     private readonly int _minimumTreeLevelToMemoizeKeccak;
     private readonly int _memoizeKeccakEvery;
     private readonly bool _memoizeRlp;
     private readonly Meter _meter;
-    private readonly Histogram<long> _stateRootHashCompute;
-    private readonly Histogram<long> _storageRootsHashCompute;
+    private readonly Histogram<long> _storageProcessing;
+    private readonly Histogram<long> _stateProcessing;
     private readonly Histogram<long> _totalMerkle;
-    private readonly Histogram<long> _trieBuilding;
 
     /// <summary>
     /// Initializes the Merkle.
     /// </summary>
-    /// <param name="fullMerkle">Whether run a full Merkle protocol
-    /// or only track the dirty nodes so that one more call to calculate is required.</param>
     /// <param name="minimumTreeLevelToMemoizeKeccak">Minimum lvl of the tree to memoize the Keccak of a branch node.</param>
     /// <param name="memoizeKeccakEvery">How often (which lvl mod) should Keccaks be memoized.</param>
     /// <param name="memoizeRlp">Whether the RLP of branches should be memoized in memory (but not stored)
     /// to limit the number of lookups for the children and their Keccak recalculation.
     /// This includes invalidating the memoized RLP whenever a path that it caches is marked as dirty.</param>
-    /// <param name="refreshBudget">How many values per block, that were retrieved from database, can be put in front
-    /// of it so that they are more fresh.</param>
-    public ComputeMerkleBehavior(bool fullMerkle = true,
-        int minimumTreeLevelToMemoizeKeccak = DefaultMinimumTreeLevelToMemoizeKeccak,
+    public ComputeMerkleBehavior(int minimumTreeLevelToMemoizeKeccak = DefaultMinimumTreeLevelToMemoizeKeccak,
         int memoizeKeccakEvery = MemoizeKeccakEveryNLevel,
         bool memoizeRlp = true)
     {
-        _fullMerkle = fullMerkle;
         _minimumTreeLevelToMemoizeKeccak = minimumTreeLevelToMemoizeKeccak;
         _memoizeKeccakEvery = memoizeKeccakEvery;
         _memoizeRlp = memoizeRlp;
 
         _meter = new Meter("Paprika.Merkle");
-        _trieBuilding = _meter.CreateHistogram<long>("Trie building", "ms",
-            "How long it takes to build all the Tries of state");
-        _stateRootHashCompute = _meter.CreateHistogram<long>("State root compute", "ms",
-            "How long it takes to calculate the root hash");
-        _storageRootsHashCompute = _meter.CreateHistogram<long>("Storage roots compute", "ms",
-            "How long it takes to calculate storage roots");
+        _storageProcessing = _meter.CreateHistogram<long>("State processing", "ms",
+            "How long it takes to process state");
+        _stateProcessing = _meter.CreateHistogram<long>("Storage processing", "ms",
+            "How long it takes to process storage");
         _totalMerkle = _meter.CreateHistogram<long>("Total Merkle", "ms",
-            "How long it takes to run Merkle");
+            "How long it takes to process Merkle total");
     }
 
     /// <summary>
@@ -91,7 +81,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         var wrapper = new CommitWrapper(commit, true);
 
         var root = Key.Merkle(NibblePath.Empty);
-        var value = Compute(in root, new ComputeContext(wrapper, TrieType.State, hint, CacheBudget.Options.None.Build()));
+        var value = Compute(in root,
+            new ComputeContext(wrapper, TrieType.State, hint, CacheBudget.Options.None.Build()));
         return new Keccak(value.Span);
     }
 
@@ -102,7 +93,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         prefixed.SetPrefix(account);
 
         var root = Key.Merkle(storagePath);
-        var value = Compute(in root, new ComputeContext(prefixed, TrieType.Storage, hint, CacheBudget.Options.None.Build()));
+        var value = Compute(in root,
+            new ComputeContext(prefixed, TrieType.Storage, hint, CacheBudget.Options.None.Build()));
         return new Keccak(value.Span);
     }
 
@@ -146,59 +138,48 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     public Keccak BeforeCommit(ICommit commit, CacheBudget budget)
     {
-        var total = Stopwatch.StartNew();
+        using var total = _totalMerkle.Measure();
 
-        try
+        // There are following things to do:
+        // 1. Visit State Trie 
+        // 2. Visit Storage Tries
+        // 3. Calculate Storage Roots
+        // 4. Calculate State Root
+        //
+        // 1. and 2. do the same for the tries. They make the structure right (delete empty accounts, create/delete nodes etc)
+        // and they invalidate memoized keccaks.
+        // 2. is a prerequisite for 3.
+        // 1. and 3 are prerequisites for 4.
+        //
+        // This means that 1 can be run in parallel with 2.
+        // 3. Can be run in parallel for each tree
+        // 4. Can be parallelized at the root level
+
+        // 1&2
+        var workItems = new List<IWorkItem>();
+
+        var (buildTrie, computeRoots) = GetStorageWorkItems(commit, budget);
+
+        workItems.AddRange(buildTrie);
+
+        using (_storageProcessing.Measure())
         {
-            // There are following things to do:
-            // 1. Visit State Trie 
-            // 2. Visit Storage Tries
-            // 3. Calculate Storage Roots
-            // 4. Calculate State Root
-            //
-            // 1. and 2. do the same for the tries. They make the structure right (delete empty accounts, create/delete nodes etc)
-            // and they invalidate memoized keccaks.
-            // 2. is a prerequisite for 3.
-            // 1. and 3 are prerequisites for 4.
-            //
-            // This means that 1 can be run in parallel with 2.
-            // 3. Can be run in parallel for each tree
-            // 4. Can be parallelized at the root level
-
-            // 1&2
-            var workItems = new List<IWorkItem>();
-
-            var (buildTrie, computeRoots) = GetStorageWorkItems(commit, budget);
-
-            workItems.AddRange(GetBuildStateTrieWorkItems(commit, budget));
-            workItems.AddRange(buildTrie);
-
-            ScatterGather(commit, workItems, _trieBuilding);
-
-            if (_fullMerkle)
-            {
-                ScatterGather(commit, computeRoots, _storageRootsHashCompute);
-
-                var sw = Stopwatch.StartNew();
-
-                var root = Key.Merkle(NibblePath.Empty);
-                var rootKeccak = Compute(root, new ComputeContext(commit, TrieType.State, ComputeHint.None, budget));
-
-                _stateRootHashCompute.Record(sw.ElapsedMilliseconds);
-
-                Debug.Assert(rootKeccak.DataType == KeccakOrRlp.Type.Keccak);
-
-                var value = new Keccak(rootKeccak.Span);
-                RootHash = value;
-
-                return value;
-            }
-
-            return Keccak.Zero;
+            ScatterGather(commit, workItems);
+            ScatterGather(commit, computeRoots);
         }
-        finally
+
+        using (_stateProcessing.Measure())
         {
-            _totalMerkle.Record(total.ElapsedMilliseconds);
+            new BuildStateTreeItem(commit, commit.Stats.Keys, budget).DoWork();
+            var root = Key.Merkle(NibblePath.Empty);
+            var rootKeccak = Compute(root, new ComputeContext(commit, TrieType.State, ComputeHint.None, budget));
+
+            Debug.Assert(rootKeccak.DataType == KeccakOrRlp.Type.Keccak);
+
+            var value = new Keccak(rootKeccak.Span);
+            RootHash = value;
+
+            return value;
         }
     }
 
@@ -207,11 +188,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     /// <param name="commit">The original commit.</param>
     /// <param name="workItems">The work items.</param>
-    /// <param name="report"></param>
-    private static void ScatterGather(ICommit commit, IEnumerable<IWorkItem> workItems, Histogram<long> report)
+    private static void ScatterGather(ICommit commit, IEnumerable<IWorkItem> workItems)
     {
-        var sw = Stopwatch.StartNew();
-
         var children = new ConcurrentQueue<IChildCommit>();
 
         Parallel.ForEach(workItems, commit.GetChild, (workItem, _, child) =>
@@ -227,16 +205,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             child.Commit();
             child.Dispose();
         }
-
-        report.Record(sw.ElapsedMilliseconds);
-    }
-
-    /// <summary>
-    /// Builds works items responsible for building up the state tree. Work items are split by the leading nibble key.
-    /// </summary>
-    private static IEnumerable<IWorkItem> GetBuildStateTrieWorkItems(ICommit commit, CacheBudget budget)
-    {
-        yield return new BuildStateTreeItem(commit, commit.Stats.Keys, budget);
     }
 
     /// <summary>
@@ -323,7 +291,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         public readonly CacheBudget Budget = budget;
     }
 
-    private KeccakOrRlp Compute(in Key key, in ComputeContext ctx)
+    private KeccakOrRlp Compute(scoped in Key key, scoped in ComputeContext ctx)
     {
         using var owner = ctx.Commit.Get(key);
 
@@ -359,7 +327,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
     }
 
-    private KeccakOrRlp EncodeLeaf(in Key key, scoped in Node.Leaf leaf, in ComputeContext ctx)
+    private KeccakOrRlp EncodeLeaf(scoped in Key key, scoped in Node.Leaf leaf, scoped in ComputeContext ctx)
     {
         var leafPath =
             key.Path.Append(leaf.Path, stackalloc byte[key.Path.MaxByteLength + leaf.Path.MaxByteLength + 1]);
@@ -400,12 +368,14 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         return keccakOrRlp;
     }
 
-    private KeccakOrRlp EncodeBranch(Key key, scoped in Node.Branch branch, ReadOnlySpan<byte> previousRlp, bool isOwnedByCommit, in ComputeContext ctx)
+    private KeccakOrRlp EncodeBranch(scoped in Key key, scoped in Node.Branch branch, ReadOnlySpan<byte> previousRlp,
+        bool isOwnedByCommit, scoped in ComputeContext ctx)
     {
         // Parallelize at the root level any trie, state or storage, that have all children set.
         // This heuristic is used to estimate that the tree should be big enough to gain from making this computation
         // parallel but without calculating and storing additional information how big is the tree.
-        var runInParallel = !ctx.Hint.HasFlag(ComputeHint.DontUseParallel) && key.Path.IsEmpty && branch.Children.AllSet;
+        var runInParallel = !ctx.Hint.HasFlag(ComputeHint.DontUseParallel) && key.Path.IsEmpty &&
+                            branch.Children.AllSet;
 
         var memoize = !ctx.Hint.HasFlag(ComputeHint.SkipCachedInformation) && ShouldMemoizeBranchRlp(key.Path);
         var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
@@ -588,7 +558,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         return level >= 0 && level % _memoizeKeccakEvery == 0;
     }
 
-    private KeccakOrRlp EncodeExtension(in Key key, scoped in Node.Extension ext, in ComputeContext ctx)
+    private KeccakOrRlp EncodeExtension(scoped in Key key, scoped in Node.Extension ext, scoped in ComputeContext ctx)
     {
         Span<byte> span = stackalloc byte[Math.Max(ext.Path.HexEncodedLength, key.Path.MaxByteLength + 1)];
 
@@ -1110,37 +1080,46 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     interface IWorkItem
     {
-        void DoWork(IChildCommit commit);
+        void DoWork(ICommit commit);
     }
 
     /// <summary>
     /// Builds a part of State Trie, invalidating paths and marking them as dirty whenever needed.
     /// </summary>
-    private sealed class BuildStateTreeItem : IWorkItem
+    private sealed class BuildStateTreeItem
     {
-        private readonly ICommit _parent;
         private readonly CacheBudget _budget;
         private readonly HashSet<Keccak> _toTouch;
+        private readonly ICommit _commit;
 
-        private IChildCommit? _commit;
-
-        public BuildStateTreeItem(ICommit parent, IEnumerable<Keccak> toTouch, CacheBudget budget)
+        public BuildStateTreeItem(ICommit commit, IEnumerable<Keccak> toTouch, CacheBudget budget)
         {
-            _parent = parent;
             _budget = budget;
             _toTouch = new HashSet<Keccak>(toTouch);
-            _commit = null;
+            _commit = commit;
         }
 
-        public void DoWork(IChildCommit commit)
+        public void DoWork()
         {
-            _commit = commit;
-            _parent.Visit(OnState, TrieType.State);
+            _commit.Visit(OnState, TrieType.State);
 
             // dirty the leftovers
-            foreach (var key in _toTouch)
+            foreach (var keccak in _toTouch)
             {
-                MarkPathDirty(NibblePath.FromKey(key), _commit!, _budget);
+                // Requires checking whether exists or not. There are cases where Storage Tries are
+                // created and cleaned  during one transaction and require asserting that the value is not there.
+                // This also creates a dependency on storage roots computation.
+                var key = Key.Account(keccak);
+                using var value = _commit.Get(key);
+
+                if (value.IsEmpty)
+                {
+                    Delete(in key.Path, 0, _commit, _budget);
+                }
+                else
+                {
+                    MarkPathDirty(in key.Path, _commit, _budget);
+                }
             }
         }
 
@@ -1177,7 +1156,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             _commit = null;
         }
 
-        public void DoWork(IChildCommit commit)
+        public void DoWork(ICommit commit)
         {
             _commit = new PrefixingCommit(commit);
             _parent.Visit(OnStorage, TrieType.Storage);
@@ -1220,7 +1199,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             _budget = budget;
         }
 
-        public void DoWork(IChildCommit commit)
+        public void DoWork(ICommit commit)
         {
             // If there are more accounts to go through than 1, then it means that they are grouped to make the compute parallel.
             // Don't parallelize this work as it would be counter-productive to have parallel over parallel.
@@ -1235,21 +1214,32 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 prefixed.SetPrefix(accountAddress);
 
                 // compute new storage root hash
-                var keccakOrRlp = _behavior.Compute(Key.Merkle(NibblePath.Empty), new(prefixed, TrieType.Storage, hint, _budget));
+                var keccakOrRlp = _behavior.Compute(Key.Merkle(NibblePath.Empty),
+                    new(prefixed, TrieType.Storage, hint, _budget));
+                var storageRoot = new Keccak(keccakOrRlp.Span);
 
                 // read the existing account
                 var key = Key.Account(accountAddress);
                 using var accountOwner = commit.Get(key);
 
-                Debug.Assert(accountOwner.IsEmpty == false, "The account should exist");
+                if (accountOwner.IsEmpty == false)
+                {
+                    Account.ReadFrom(accountOwner.Span, out var account);
 
-                Account.ReadFrom(accountOwner.Span, out var account);
+                    // update it
+                    account = account.WithChangedStorageRoot(storageRoot);
 
-                // update it
-                account = account.WithChangedStorageRoot(new Keccak(keccakOrRlp.Span));
-
-                // set it
-                commit.Set(key, account.WriteTo(accountSpan));
+                    // set it
+                    commit.Set(key, account.WriteTo(accountSpan));
+                }
+                else
+                {
+                    //see: https://sepolia.etherscan.io/tx/0xb3790025b59b7e31d6d8249e8962234217e0b5b02e47ecb2942b8c4d0f4a3cfe
+                    // Contract is created and destroyed, then its values are destroyed
+                    // The storage root should be empty, otherwise, it's wrong
+                    Debug.Assert(storageRoot == Keccak.EmptyTreeHash,
+                        $"Non-existent account with hash of {accountAddress.ToString()} should have the storage root empty");
+                }
             }
         }
     }
