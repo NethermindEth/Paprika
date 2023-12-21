@@ -50,7 +50,7 @@ public class PreCommitBehaviorTests
             _found = new HashSet<Keccak>();
         }
 
-        public Keccak BeforeCommit(ICommit commit)
+        public Keccak BeforeCommit(ICommit commit, CacheBudget budget)
         {
             _found.Clear();
 
