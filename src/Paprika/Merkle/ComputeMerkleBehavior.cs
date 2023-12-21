@@ -141,9 +141,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         using var total = _totalMerkle.Measure();
 
         // There are following things to do:
-        // 1. Visit State Trie 
-        // 2. Visit Storage Tries
-        // 3. Calculate Storage Roots
+        // 1. Visit Storage Tries
+        // 2. Calculate Storage Roots
+        // 3. Visit State Root
         // 4. Calculate State Root
         //
         // 1. and 2. do the same for the tries. They make the structure right (delete empty accounts, create/delete nodes etc)
@@ -155,17 +155,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         // 3. Can be run in parallel for each tree
         // 4. Can be parallelized at the root level
 
-        // 1&2
-        var workItems = new List<IWorkItem>();
-
-        var (buildTrie, computeRoots) = GetStorageWorkItems(commit, budget);
-
-        workItems.AddRange(buildTrie);
-
         using (_storageProcessing.Measure())
         {
-            ScatterGather(commit, workItems);
-            ScatterGather(commit, computeRoots);
+            ScatterGather(commit, GetStorageWorkItems(commit, budget));
         }
 
         using (_stateProcessing.Measure())
@@ -210,8 +202,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// <summary>
     /// Builds works items responsible for building up the storage tries.
     /// </summary>
-    private (IEnumerable<IWorkItem> buildTrie, IEnumerable<IWorkItem> computeRoots) GetStorageWorkItems(ICommit commit,
-        CacheBudget budget)
+    private IEnumerable<IWorkItem> GetStorageWorkItems(ICommit commit, CacheBudget budget)
     {
         var sum = commit.Stats.Sum(pair => pair.Value);
 
@@ -241,8 +232,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         if (current.Count > 0)
             list.Add(current);
 
-        return (list.Select(set => new BuildStorageTriesItem(commit, set, budget)).ToArray(),
-            list.Select(set => new CalculateStorageTriesRootHashItem(this, set, budget)).ToArray());
+        return list.Select(set => new BuildStorageTriesItem(this, commit, set, budget)).ToArray();
     }
 
     public ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data)
@@ -283,12 +273,20 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         ForceStorageRootHashRecalculation = 4
     }
 
-    private readonly struct ComputeContext(ICommit commit, TrieType trieType, ComputeHint hint, CacheBudget budget)
+    private readonly struct ComputeContext
     {
-        public readonly ICommit Commit = commit;
-        public readonly TrieType TrieType = trieType;
-        public readonly ComputeHint Hint = hint;
-        public readonly CacheBudget Budget = budget;
+        public readonly ICommit Commit;
+        public readonly TrieType TrieType;
+        public readonly ComputeHint Hint;
+        public readonly CacheBudget Budget;
+
+        public ComputeContext(ICommit commit, TrieType trieType, ComputeHint hint, CacheBudget budget)
+        {
+            Commit = commit;
+            TrieType = trieType;
+            Hint = hint;
+            Budget = budget;
+        }
     }
 
     private KeccakOrRlp Compute(scoped in Key key, scoped in ComputeContext ctx)
@@ -547,7 +545,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private bool ShouldMemoizeBranchRlp(in NibblePath branchPath)
     {
         return _memoizeRlp &&
-               branchPath.Length >= 1; // a simple condition to memoize only more nested RLPs         
+               branchPath.Length >= 1; // a simple condition to memoize only more nested RLPs
     }
 
     private bool ShouldMemoizeBranchKeccak(in NibblePath branchPath)
@@ -835,7 +833,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     }
 
     /// <summary>
-    /// Transforms the extension either to a <see cref="Node.Type.Leaf"/> or to a longer <see cref="Node.Type.Extension"/>. 
+    /// Transforms the extension either to a <see cref="Node.Type.Leaf"/> or to a longer <see cref="Node.Type.Extension"/>.
     /// </summary>
     [SkipLocalsInit]
     private static DeleteStatus TransformExtension(in Key childKey, ICommit commit, in Key key, in Node.Extension ext)
@@ -1143,23 +1141,26 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private sealed class BuildStorageTriesItem : IWorkItem
     {
+        private readonly ComputeMerkleBehavior _behavior;
         private readonly ICommit _parent;
-        private readonly HashSet<Keccak> _accountsToProcess;
+        private readonly HashSet<Keccak> _accounts;
         private readonly CacheBudget _budget;
-        private PrefixingCommit? _commit;
+        private PrefixingCommit? _prefixed;
 
-        public BuildStorageTriesItem(ICommit parent, HashSet<Keccak> accountsToProcess, CacheBudget budget)
+        public BuildStorageTriesItem(ComputeMerkleBehavior behavior, ICommit parent, HashSet<Keccak> accounts, CacheBudget budget)
         {
+            _behavior = behavior;
             _parent = parent;
-            _accountsToProcess = accountsToProcess;
+            _accounts = accounts;
             _budget = budget;
-            _commit = null;
+            _prefixed = null;
         }
 
         public void DoWork(ICommit commit)
         {
-            _commit = new PrefixingCommit(commit);
+            _prefixed = new PrefixingCommit(commit);
             _parent.Visit(OnStorage, TrieType.Storage);
+            CalculateStorageRoots(commit);
         }
 
         private void OnStorage(in Key key, ReadOnlySpan<byte> value)
@@ -1167,55 +1168,37 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             Debug.Assert(key.Type == DataType.StorageCell);
 
             var keccak = key.Path.UnsafeAsKeccak;
-            if (_accountsToProcess.Contains(keccak) == false)
+            if (_accounts.Contains(keccak) == false)
             {
                 return;
             }
 
-            _commit!.SetPrefix(keccak);
+            _prefixed!.SetPrefix(keccak);
 
             if (value.IsEmpty)
             {
-                Delete(in key.StoragePath, 0, _commit, _budget);
+                Delete(in key.StoragePath, 0, _prefixed, _budget);
             }
             else
             {
-                MarkPathDirty(in key.StoragePath, _commit, _budget);
+                MarkPathDirty(in key.StoragePath, _prefixed, _budget);
             }
         }
-    }
 
-    private sealed class CalculateStorageTriesRootHashItem : IWorkItem
-    {
-        private readonly ComputeMerkleBehavior _behavior;
-        private readonly HashSet<Keccak> _accounts;
-        private readonly CacheBudget _budget;
-
-        public CalculateStorageTriesRootHashItem(ComputeMerkleBehavior behavior, HashSet<Keccak> accounts,
-            CacheBudget budget)
+        private void CalculateStorageRoots(ICommit commit)
         {
-            _behavior = behavior;
-            _accounts = accounts;
-            _budget = budget;
-        }
-
-        public void DoWork(ICommit commit)
-        {
-            // If there are more accounts to go through than 1, then it means that they are grouped to make the compute parallel.
             // Don't parallelize this work as it would be counter-productive to have parallel over parallel.
-            // If there's a one account only, use the default.
-            var hint = _accounts.Count > 1 ? ComputeHint.DontUseParallel : ComputeHint.None;
+            const ComputeHint hint = ComputeHint.DontUseParallel;
 
             Span<byte> accountSpan = stackalloc byte[Account.MaxByteCount];
-            var prefixed = new PrefixingCommit(commit);
 
             foreach (var accountAddress in _accounts)
             {
-                prefixed.SetPrefix(accountAddress);
+                _prefixed.SetPrefix(accountAddress);
 
                 // compute new storage root hash
                 var keccakOrRlp = _behavior.Compute(Key.Merkle(NibblePath.Empty),
-                    new(prefixed, TrieType.Storage, hint, _budget));
+                    new(_prefixed, TrieType.Storage, hint, _budget));
                 var storageRoot = new Keccak(keccakOrRlp.Span);
 
                 // read the existing account
