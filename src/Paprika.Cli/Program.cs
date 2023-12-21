@@ -42,7 +42,7 @@ public class ValidateRootHashesSettingsCommand : AsyncCommand<ValidateRootHashes
 
         // configure merkle to memoize none and recalculate all
         const int none = int.MaxValue;
-        var merkle = new ComputeMerkleBehavior(true, none, none, false);
+        var merkle = new ComputeMerkleBehavior(none, none, false);
 
         await using var blockchain = new Blockchain(db, merkle);
         using var batch = blockchain.StartReadOnlyLatestFromDb();

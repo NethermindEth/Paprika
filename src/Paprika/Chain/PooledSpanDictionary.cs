@@ -79,6 +79,11 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         return false;
     }
 
+    public bool Contains(scoped ReadOnlySpan<byte> key, ushort shortHash)
+    {
+        return _dict.ContainsKey(BuildKeyTemp(key, shortHash));
+    }
+
     public void Set(scoped ReadOnlySpan<byte> key, int hash, ReadOnlySpan<byte> data) =>
         Set(key, hash, data, ReadOnlySpan<byte>.Empty);
 
@@ -115,6 +120,17 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         }
 
         refValue = BuildValue(data0, data1);
+    }
+
+    public void Remove(Span<byte> key, int hash)
+    {
+        if (_dict.Count == 0)
+            return;
+
+        var mixed = Mix(hash);
+        var tempKey = BuildKeyTemp(key, mixed);
+
+        _dict.Remove(tempKey);
     }
 
     public void Destroy(scoped ReadOnlySpan<byte> key, int hash)
@@ -162,7 +178,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
             get
             {
                 var (key, value) = _enumerator.Current;
-                return new KeyValue(_dictionary.GetAt(key), _dictionary.GetAt(value));
+                return new KeyValue(_dictionary.GetAt(key), key.ShortHash, _dictionary.GetAt(value));
             }
         }
 
@@ -173,9 +189,12 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
             public ReadOnlySpan<byte> Key { get; }
             public ReadOnlySpan<byte> Value { get; }
 
-            public KeyValue(ReadOnlySpan<byte> key, ReadOnlySpan<byte> value)
+            public ushort ShortHash { get; }
+
+            public KeyValue(ReadOnlySpan<byte> key, ushort shortHash, ReadOnlySpan<byte> value)
             {
                 Key = key;
+                ShortHash = shortHash;
                 Value = value;
             }
         }

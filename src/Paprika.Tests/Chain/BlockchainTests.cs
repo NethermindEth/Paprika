@@ -73,7 +73,7 @@ public class BlockchainTests
 
         using var db = PagedDb.NativeMemoryDb(16 * Mb, 2);
 
-        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(true, 2, 2));
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(2, 2));
 
         var block = blockchain.StartNew(Keccak.EmptyTreeHash);
         block.SetAccount(Key0, new Account(1, 1));
@@ -287,7 +287,7 @@ public class BlockchainTests
         using var db = PagedDb.NativeMemoryDb(256 * Mb, 2);
         var counter = 0;
 
-        var behavior = new ComputeMerkleBehavior(true, 2, 2);
+        var behavior = new ComputeMerkleBehavior(2, 2);
 
         await using (var blockchain = new Blockchain(db, behavior))
         {
@@ -385,7 +385,7 @@ public class BlockchainTests
 
     private class PreCommit : IPreCommitBehavior
     {
-        public Keccak BeforeCommit(ICommit commit)
+        public Keccak BeforeCommit(ICommit commit, CacheBudget budget)
         {
             var hashCode = RuntimeHelpers.GetHashCode(commit);
             Keccak hash = default;

@@ -54,7 +54,7 @@ public class RootHashFuzzyTests
         var generator = Build(test);
 
         using var db = PagedDb.NativeMemoryDb(32 * 1024 * 1024, 2);
-        var merkle = new ComputeMerkleBehavior(true, 2, 2);
+        var merkle = new ComputeMerkleBehavior(2, 2);
         await using var blockchain = new Blockchain(db, merkle);
 
         var rootHash = generator.Run(blockchain, commitEvery);
@@ -69,7 +69,7 @@ public class RootHashFuzzyTests
         var generator = Build(test);
 
         using var db = PagedDb.NativeMemoryDb(16 * 1024 * 1024, 2);
-        var merkle = new ComputeMerkleBehavior(true, 2, 2);
+        var merkle = new ComputeMerkleBehavior(2, 2);
         await using var blockchain = new Blockchain(db, merkle);
 
         var rootHash = generator.Run(blockchain, commitEvery);
@@ -92,7 +92,7 @@ public class RootHashFuzzyTests
         var generator = Build(test);
 
         using var db = PagedDb.NativeMemoryDb(1024 * 1024 * 1024, 2);
-        var merkle = new ComputeMerkleBehavior(true, 2, 2, false);
+        var merkle = new ComputeMerkleBehavior(2, 2, false);
         await using var blockchain = new Blockchain(db, merkle);
 
         // set
@@ -263,9 +263,9 @@ public class RootHashFuzzyTests
 
     private static void AssertRoot(string hex, ICommit commit)
     {
-        var merkle = new ComputeMerkleBehavior(true);
+        var merkle = new ComputeMerkleBehavior();
 
-        merkle.BeforeCommit(commit);
+        merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());
 
         var keccak = new Keccak(Convert.FromHexString(hex));
 

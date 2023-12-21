@@ -255,7 +255,7 @@ public class RootHashTests
     {
         var merkle = new ComputeMerkleBehavior();
 
-        merkle.BeforeCommit(commit);
+        merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());
 
         var keccak = new Keccak(Convert.FromHexString(hex));
 

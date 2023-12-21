@@ -20,7 +20,12 @@ namespace Paprika.Runner;
 /// <summary>
 /// The case for running the runner.
 /// </summary>
-public record Case(uint BlockCount, int AccountsPerBlock, ulong DbFileSize, bool PersistentDb, TimeSpan FlushEvery,
+public record Case(
+    uint BlockCount,
+    int AccountsPerBlock,
+    ulong DbFileSize,
+    bool PersistentDb,
+    TimeSpan FlushEvery,
     bool Fsync,
     bool UseBigStorageAccount)
 {
@@ -35,12 +40,16 @@ public static class Program
 
     private static readonly Case InMemorySmall =
         new(10_000, 1000, 10 * Gb, false, TimeSpan.FromSeconds(5), false, true);
+
     private static readonly Case InMemoryMedium =
         new(50_000, 1000, 32 * Gb, false, TimeSpan.FromSeconds(5), false, false);
+
     private static readonly Case
         InMemoryBig = new(100_000, 1000, 56 * Gb, false, TimeSpan.FromSeconds(5), false, false);
+
     private static readonly Case DiskSmallNoFlush =
         new(50_000, 1000, 11 * Gb, true, TimeSpan.FromSeconds(5), false, false);
+
     private static readonly Case DiskSmallFlushFile =
         new(50_000, 1000, 11 * Gb, true, TimeSpan.FromSeconds(5), true, false);
 
@@ -149,10 +158,11 @@ public static class Program
                     ctx.Refresh();
                 }));
 
-            using var preCommit = new ComputeMerkleBehavior(true, 2, 1);
+            using var preCommit = new ComputeMerkleBehavior(2, 1);
             //IPreCommitBehavior preCommit = null;
 
-            await using (var blockchain = new Blockchain(db, preCommit, config.FlushEvery, 1000, reporter.Observe))
+            await using (var blockchain =
+                         new Blockchain(db, preCommit, config.FlushEvery, default, 1000, reporter.Observe))
             {
                 counter = Writer(config, blockchain, bigStorageAccount, random, layout[writing]);
             }
@@ -257,7 +267,8 @@ public static class Program
 
     private static Random BuildRandom() => new(RandomSeed);
 
-    private static int Writer(Case config, Blockchain blockchain, Keccak bigStorageAccount, Random random, Layout reporting)
+    private static int Writer(Case config, Blockchain blockchain, Keccak bigStorageAccount, Random random,
+        Layout reporting)
     {
         var report = new StringBuilder();
         string result = "";
@@ -333,7 +344,8 @@ public static class Program
         var lastBlock = toFinalize.Last();
         blockchain.Finalize(lastBlock);
 
-        report.AppendLine($@"At block {config.BlockCount - 1}. This batch of {config.LogEvery} blocks took {writing.Elapsed:h\:mm\:ss\.FF}. RootHash: {result}");
+        report.AppendLine(
+            $@"At block {config.BlockCount - 1}. This batch of {config.LogEvery} blocks took {writing.Elapsed:h\:mm\:ss\.FF}. RootHash: {result}");
 
         reporting.Update(new Panel(report.ToString()).Header("Writing").Expand());
 

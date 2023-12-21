@@ -15,8 +15,9 @@ public interface IPreCommitBehavior
     /// Executed just before commit.
     /// </summary>
     /// <param name="commit">The object representing the commit.</param>
+    /// <param name="budget">The budget for caching capabilities.</param>
     /// <returns>The result of the before commit.</returns>
-    Keccak BeforeCommit(ICommit commit);
+    Keccak BeforeCommit(ICommit commit, CacheBudget budget);
 
     /// <summary>
     /// Inspects the data allowing it to overwrite them if needed, before the commit is applied to the database.
