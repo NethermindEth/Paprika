@@ -65,9 +65,12 @@ public static class CommitExtensions
         [SkipLocalsInit]
         public void Set(in Key key, in ReadOnlySpan<byte> payload)
         {
-            // write locally
-            var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
-            _cache.Set(keyWritten, Hash(key), payload);
+            if (_shouldCacheKey(key))
+            {
+                // write locally
+                var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+                _cache.Set(keyWritten, Hash(key), payload);
+            }
 
             // write in the wrapped
             _commit.Set(key, payload);
@@ -76,9 +79,12 @@ public static class CommitExtensions
         [SkipLocalsInit]
         public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
         {
-            // write locally
-            var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
-            _cache.Set(keyWritten, Hash(key), payload0, payload1);
+            if (_shouldCacheKey(key))
+            {
+                // write locally
+                var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+                _cache.Set(keyWritten, Hash(key), payload0, payload1);
+            }
 
             // write in the wrapped
             _commit.Set(key, payload0, payload1);
