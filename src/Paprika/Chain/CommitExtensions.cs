@@ -1,6 +1,7 @@
 ﻿using System.Runtime.CompilerServices;
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Merkle;
 using Paprika.Utils;
 
 namespace Paprika.Chain;
@@ -14,20 +15,63 @@ public static class CommitExtensions
     /// Writes are write through, but they are stored locally for faster compute as well.
     /// </summary>
     /// <returns>The wrapped commit.</returns>
-    public static IChildCommit WriteThroughCache(this IChildCommit original, ShouldCacheKey shouldCacheKey,
+    public static IChildCommit WriteThroughCacheChild(this IChildCommit original, ShouldCacheKey shouldCacheKey,
         ShouldCacheResult<byte> shouldCacheResult, BufferPool pool)
     {
-        return new ReadCachingCommit(original, shouldCacheKey, shouldCacheResult, pool);
+        return new ReadCachingCommitChild(original, shouldCacheKey, shouldCacheResult, pool);
     }
 
-    private class ReadCachingCommit : IChildCommit
+    public static ISealableCommit WriteThroughCacheRoot(this ICommit original, ShouldCacheKey shouldCacheKey,
+        ShouldCacheResult<byte> shouldCacheResult, BufferPool pool)
+    {
+        return new ReadCachingCommitRoot(original, shouldCacheKey, shouldCacheResult, pool);
+    }
+
+    private class ReadCachingCommitChild : ReadCachingCommit, IChildCommit
     {
         private readonly IChildCommit _commit;
+
+        public ReadCachingCommitChild(IChildCommit commit, ShouldCacheKey shouldCacheKey, ShouldCacheResult<byte> shouldCacheResult, BufferPool pool)
+            : base(commit, shouldCacheKey, shouldCacheResult, pool)
+        {
+            _commit = commit;
+        }
+
+        public override IChildCommit GetChild() => throw new NotImplementedException("Caching commit has no children");
+        protected override void DisposeImpl() => _commit.Dispose();
+
+        public void Commit() => _commit.Commit();
+    }
+
+    private class ReadCachingCommitRoot : ReadCachingCommit, ISealableCommit
+    {
+        private readonly ICommit _commit;
+        private bool _canCache;
+
+        public ReadCachingCommitRoot(ICommit commit, ShouldCacheKey shouldCacheKey, ShouldCacheResult<byte> shouldCacheResult, BufferPool pool)
+            : base(commit, shouldCacheKey, shouldCacheResult, pool)
+        {
+            _commit = commit;
+        }
+
+        public override IChildCommit GetChild() => _commit.GetChild();
+        public void SealCaching() => _canCache = true;
+
+        public void Visit(CommitAction action, TrieType type) => _commit.Visit(action, type);
+
+        protected override void DisposeImpl() { }
+
+        protected override bool CanCache => _canCache;
+    }
+
+    private abstract class ReadCachingCommit : ICommit
+    {
+        private readonly ICommit _commit;
         private readonly ShouldCacheKey _shouldCacheKey;
         private readonly ShouldCacheResult<byte> _shouldCacheResult;
         private readonly PooledSpanDictionary _cache;
 
-        public ReadCachingCommit(IChildCommit commit, ShouldCacheKey shouldCacheKey,
+        protected ReadCachingCommit(ICommit commit, ShouldCacheKey shouldCacheKey,
             ShouldCacheResult<byte> shouldCacheResult, BufferPool pool)
         {
             _commit = commit;
@@ -38,7 +82,7 @@ public static class CommitExtensions
 
         public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
         {
-            if (_shouldCacheKey(key) == false)
+            if (ShouldCache(key) == false)
             {
                 return _commit.Get(key);
             }
@@ -62,10 +106,12 @@ public static class CommitExtensions
             return result;
         }
 
+        private bool ShouldCache(in Key key) => CanCache && _shouldCacheKey(key);
+
         [SkipLocalsInit]
         public void Set(in Key key, in ReadOnlySpan<byte> payload)
         {
-            if (_shouldCacheKey(key))
+            if (ShouldCache(key))
             {
                 // write locally
                 var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
@@ -79,7 +125,7 @@ public static class CommitExtensions
         [SkipLocalsInit]
         public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
         {
-            if (_shouldCacheKey(key))
+            if (ShouldCache(key))
             {
                 // write locally
                 var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
@@ -92,17 +138,19 @@ public static class CommitExtensions
 
         private static int Hash(in Key key) => Blockchain.GetHash(key);
 
-        public IChildCommit GetChild() => throw new NotImplementedException("Caching commit has no children");
+        public abstract IChildCommit GetChild();
 
         public IReadOnlyDictionary<Keccak, int> Stats => _commit.Stats;
 
         public void Dispose()
         {
             _cache.Dispose();
-            _commit.Dispose();
+            DisposeImpl();
         }
 
-        public void Commit() => _commit.Commit();
+        protected abstract void DisposeImpl();
+
+        protected virtual bool CanCache => false;
     }
 }
 
@@ -115,3 +163,8 @@ public delegate bool ShouldCacheKey(in Key key);
 /// The predicate whether the result should be cached.
 /// </summary>
 public delegate bool ShouldCacheResult<T>(in ReadOnlySpanOwnerWithMetadata<T> result);
+
+public interface ISealableCommit : ICommit, IDisposable
+{
+    void SealCaching();
+}
