@@ -217,8 +217,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     {
         var sum = commit.Stats.Sum(pair => pair.Value);
 
-        // rough estimate of work is to have a budget same budget per core
-        var batchBudget = sum / Environment.ProcessorCount;
+        // make 2 more batches than CPU count to allow some balancing
+        var batchBudget = sum / (Environment.ProcessorCount * 2);
 
         var list = new List<HashSet<Keccak>>();
         var current = new HashSet<Keccak>();
