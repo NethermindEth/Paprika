@@ -79,6 +79,18 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         return false;
     }
 
+    public bool TryGet(scoped ReadOnlySpan<byte> key, ushort shortHash, out ReadOnlySpan<byte> result)
+    {
+        if (_dict.TryGetValue(BuildKeyTemp(key, shortHash), out var value))
+        {
+            result = GetAt(value);
+            return true;
+        }
+
+        result = default;
+        return false;
+    }
+
     public bool Contains(scoped ReadOnlySpan<byte> key, ushort shortHash)
     {
         return _dict.ContainsKey(BuildKeyTemp(key, shortHash));
@@ -122,7 +134,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         refValue = BuildValue(data0, data1);
     }
 
-    public void Remove(Span<byte> key, int hash)
+    public void Remove(ReadOnlySpan<byte> key, int hash)
     {
         if (_dict.Count == 0)
             return;

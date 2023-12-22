@@ -46,6 +46,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private readonly Histogram<long> _stateProcessing;
     private readonly Histogram<long> _totalMerkle;
 
+    private readonly BufferPool _pool = new(1024, true, "Merkle");
+
     /// <summary>
     /// Initializes the Merkle.
     /// </summary>
@@ -180,11 +182,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     /// <param name="commit">The original commit.</param>
     /// <param name="workItems">The work items.</param>
-    private static void ScatterGather(ICommit commit, IEnumerable<IWorkItem> workItems)
+    private void ScatterGather(ICommit commit, IEnumerable<IWorkItem> workItems)
     {
         var children = new ConcurrentQueue<IChildCommit>();
 
-        Parallel.ForEach(workItems, commit.GetChild, (workItem, _, child) =>
+        Parallel.ForEach(workItems, () => commit.GetChild().WriteThroughCache(ShouldCacheKey, ShouldCacheResult, _pool),
+            (workItem, _, child) =>
             {
                 workItem.DoWork(child);
                 return child;
@@ -197,6 +200,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             child.Commit();
             child.Dispose();
         }
+
+        return;
+
+        static bool ShouldCacheKey(in Key key) => key.Type == DataType.Merkle;
+        static bool ShouldCacheResult(in ReadOnlySpanOwnerWithMetadata<byte> result) => true;
     }
 
     /// <summary>
@@ -206,8 +214,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     {
         var sum = commit.Stats.Sum(pair => pair.Value);
 
-        // make 2 more batches than CPU count to allow some balancing
-        var batchBudget = sum / (Environment.ProcessorCount * 2);
+        // rough estimate of work is to have a budget same budget per core
+        var batchBudget = sum / Environment.ProcessorCount;
 
         var list = new List<HashSet<Keccak>>();
         var current = new HashSet<Keccak>();
@@ -1227,5 +1235,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
     }
 
-    public void Dispose() => _meter.Dispose();
+    public void Dispose()
+    {
+        _pool.Dispose();
+        _meter.Dispose();
+    }
 }
