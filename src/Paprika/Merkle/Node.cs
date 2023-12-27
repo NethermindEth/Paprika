@@ -41,11 +41,9 @@ public static partial class Node
         }
     }
 
-    private static Header ValidateHeaderNodeType(Header header, Type expected)
+    private static void ValidateHeaderNodeType(Header header, Type expected)
     {
         Assert(header.NodeType == expected, $"Expected {nameof(Header)} with {nameof(Type)} {expected}, got {header.NodeType}");
-
-        return header;
     }
 
     [StructLayout(LayoutKind.Explicit, Pack = 1, Size = Size)]
@@ -221,23 +219,18 @@ public static partial class Node
 
         private const byte HeaderMetadataKeccakMask = 0b0000_0001;
         private const byte HeaderMetadataAllChildrenSetMask = 0b0000_0010;
+        private const byte HeaderMetadataEmbeddedLeafsMask = 0b0000_0100;
 
         public readonly Header Header;
         public readonly NibbleSet.Readonly Children;
         public readonly Keccak Keccak;
 
-        private Branch(Header header, NibbleSet.Readonly children, Keccak keccak)
+        private Branch(Header header, NibbleSet.Readonly children, scoped in Keccak keccak)
         {
-            Header = ValidateHeaderKeccak(ValidateHeaderNodeType(header, Type.Branch), shouldHaveKeccak: true);
+            ValidateHeaderNodeType(header, Type.Branch);
+            Header = header;
             Children = children;
             Keccak = keccak;
-        }
-
-        private Branch(Header header, NibbleSet.Readonly children)
-        {
-            Header = ValidateHeaderKeccak(header, shouldHaveKeccak: false);
-            Children = children;
-            Keccak = default;
         }
 
         public Branch(NibbleSet.Readonly children, Keccak keccak)
@@ -271,21 +264,13 @@ public static partial class Node
             Keccak = default;
         }
 
-        private static Header ValidateHeaderKeccak(Header header, bool shouldHaveKeccak)
-        {
-            var expected = shouldHaveKeccak ? HeaderMetadataKeccakMask : 0;
-            var actual = header.Metadata & HeaderMetadataKeccakMask;
-
-            Debug.Assert(actual == expected,
-                $"Expected {nameof(Header)} to have {nameof(Keccak)} = {shouldHaveKeccak}, got {!shouldHaveKeccak}");
-
-            return header;
-        }
-
         public bool HasKeccak => HeaderHasKeccak(Header);
 
         private static bool HeaderHasKeccak(Header header) =>
             (header.Metadata & HeaderMetadataKeccakMask) == HeaderMetadataKeccakMask;
+
+        private static bool HeaderHasEmbeddedLeafs(Header header) =>
+            (header.Metadata & HeaderMetadataEmbeddedLeafsMask) == HeaderMetadataEmbeddedLeafsMask;
 
         private static bool HeaderHasAllSet(Header header) =>
             (header.Metadata & HeaderMetadataAllChildrenSetMask) == HeaderMetadataAllChildrenSetMask;
@@ -328,15 +313,13 @@ public static partial class Node
                 leftover = NibbleSet.Readonly.ReadFrom(leftover, out children);
             }
 
+            Keccak keccak = default;
             if (HeaderHasKeccak(header))
             {
-                leftover = Keccak.ReadFrom(leftover, out var keccak);
-                branch = new Branch(header, children, keccak);
+                leftover = Keccak.ReadFrom(leftover, out keccak);
             }
-            else
-            {
-                branch = new Branch(header, children);
-            }
+
+            branch = new Branch(header, children, keccak);
 
             return leftover;
         }
