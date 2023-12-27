@@ -24,12 +24,14 @@ public class BufferPool : IDisposable
     // metrics
     private readonly Meter _meter;
 
-    public BufferPool(int buffersInOneSlab, bool assertCountOnDispose = true)
+    public BufferPool(int buffersInOneSlab, bool assertCountOnDispose = true, string name = "")
     {
         _buffersInOneSlab = buffersInOneSlab;
         _assertCountOnDispose = assertCountOnDispose;
 
-        _meter = new Meter("Paprika.Chain.BufferPool");
+        var baseName = "Paprika.Chain.BufferPool";
+
+        _meter = new Meter(string.IsNullOrEmpty(name) ? baseName : baseName + "-" + name);
         _allocatedMB = _meter.CreateAtomicObservableGauge("Total buffers' size", "MB",
             "The amount of MB allocated in the pool");
     }

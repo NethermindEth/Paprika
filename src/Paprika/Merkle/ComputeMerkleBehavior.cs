@@ -46,6 +46,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private readonly Histogram<long> _stateProcessing;
     private readonly Histogram<long> _totalMerkle;
 
+    private readonly BufferPool _pool = new(1024, true, "Merkle");
+
     /// <summary>
     /// Initializes the Merkle.
     /// </summary>
@@ -162,9 +164,14 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         using (_stateProcessing.Measure())
         {
-            new BuildStateTreeItem(commit, commit.Stats.Keys, budget).DoWork();
+            using var cached = commit.WriteThroughCacheRoot(ShouldCacheKey, ShouldCacheResult, _pool);
+
+            new BuildStateTreeItem(cached, commit.Stats.Keys, budget).DoWork();
+
+            cached.SealCaching();
+
             var root = Key.Merkle(NibblePath.Empty);
-            var rootKeccak = Compute(root, new ComputeContext(commit, TrieType.State, ComputeHint.None, budget));
+            var rootKeccak = Compute(root, new ComputeContext(cached, TrieType.State, ComputeHint.None, budget));
 
             Debug.Assert(rootKeccak.DataType == KeccakOrRlp.Type.Keccak);
 
@@ -180,11 +187,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     /// <param name="commit">The original commit.</param>
     /// <param name="workItems">The work items.</param>
-    private static void ScatterGather(ICommit commit, IEnumerable<IWorkItem> workItems)
+    private void ScatterGather(ICommit commit, IEnumerable<IWorkItem> workItems)
     {
         var children = new ConcurrentQueue<IChildCommit>();
 
-        Parallel.ForEach(workItems, commit.GetChild, (workItem, _, child) =>
+        Parallel.ForEach(workItems, () => commit.GetChild().WriteThroughCacheChild(ShouldCacheKey, ShouldCacheResult, _pool),
+            (workItem, _, child) =>
             {
                 workItem.DoWork(child);
                 return child;
@@ -198,6 +206,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             child.Dispose();
         }
     }
+
+    private static bool ShouldCacheKey(in Key key) => key.Type == DataType.Merkle;
+    private static bool ShouldCacheResult(in ReadOnlySpanOwnerWithMetadata<byte> result) => true;
 
     /// <summary>
     /// Builds works items responsible for building up the storage tries.
@@ -1227,5 +1238,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
     }
 
-    public void Dispose() => _meter.Dispose();
+    public void Dispose()
+    {
+        _pool.Dispose();
+        _meter.Dispose();
+    }
 }

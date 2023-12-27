@@ -69,7 +69,7 @@ public class RootHashFuzzyTests
         var generator = Build(test);
 
         using var db = PagedDb.NativeMemoryDb(16 * 1024 * 1024, 2);
-        var merkle = new ComputeMerkleBehavior(2, 2);
+        var merkle = new ComputeMerkleBehavior(2, 2, false);
         await using var blockchain = new Blockchain(db, merkle);
 
         var rootHash = generator.Run(blockchain, commitEvery);
