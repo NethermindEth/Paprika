@@ -304,11 +304,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     {
         using var owner = ctx.Commit.Get(key);
 
-        if (owner.IsDbQuery && ctx.Budget.ClaimDbWrite())
-        {
-            ctx.Commit.Set(key, owner.Span);
-        }
-
         if (owner.IsEmpty)
         {
             // empty tree, return empty
@@ -347,11 +342,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             : Key.Raw(leafPath, DataType.StorageCell, NibblePath.Empty);
 
         using var leafData = ctx.Commit.Get(leafKey);
-
-        if (leafData.IsDbQuery && ctx.Budget.ClaimDbWrite())
-        {
-            ctx.Commit.Set(leafKey, leafData.Span);
-        }
 
         KeccakOrRlp keccakOrRlp;
         if (ctx.TrieType == TrieType.State)
@@ -907,11 +897,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         {
                             // This is update in place. The parent is marked as parent as dirty.
                             // The structure of Merkle does not change.
-                            // Check if the read was from db and, if there's the budget for the update, schedule it.
-                            if (owner.IsDbQuery && budget.ClaimDbWrite())
-                            {
-                                commit.SetLeaf(key, leftoverPath);
-                            }
 
                             return;
                         }
@@ -1064,10 +1049,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             {
                                 commit.SetBranch(key, children);
                             }
-                            else if (owner.IsDbQuery && budget.ClaimDbWrite())
+                            else if (owner.IsDbQuery)
                             {
-                                // If it was a db query, check budget and update
-                                commit.SetBranch(key, children);
+                                // TODO: cache potentially?
                             }
                         }
                         else
