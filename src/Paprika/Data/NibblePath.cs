@@ -71,6 +71,16 @@ public readonly ref struct NibblePath
     }
 
     /// <summary>
+    /// Keeps the metadata like <see cref="_odd"/> and <see cref="Length"/> of the path, but replaces the underlying raw data.
+    /// </summary>
+    /// <param name="raw">The raw data to replace the old.</param>
+    /// <returns>The new path that has the same length and oddity as the original but different raw data.</returns>
+    public NibblePath ReplaceRaw(ReadOnlySpan<byte> raw)
+    {
+        return new NibblePath(ref MemoryMarshal.GetReference(raw), _odd, Length);
+    }
+
+    /// <summary>
     /// Returns the underlying payload as <see cref="Keccak"/>.
     /// It does it in an unsafe way and requires an external check whether it's possible.
     /// </summary>

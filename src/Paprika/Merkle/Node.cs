@@ -224,13 +224,15 @@ public static partial class Node
         public readonly Header Header;
         public readonly NibbleSet.Readonly Children;
         public readonly Keccak Keccak;
+        public readonly EmbeddedLeafs Leafs;
 
-        private Branch(Header header, NibbleSet.Readonly children, scoped in Keccak keccak)
+        private Branch(Header header, NibbleSet.Readonly children, scoped in Keccak keccak, EmbeddedLeafs leafs)
         {
             ValidateHeaderNodeType(header, Type.Branch);
             Header = header;
             Children = children;
             Keccak = keccak;
+            Leafs = leafs;
         }
 
         public Branch(NibbleSet.Readonly children, Keccak keccak)
@@ -319,7 +321,13 @@ public static partial class Node
                 leftover = Keccak.ReadFrom(leftover, out keccak);
             }
 
-            branch = new Branch(header, children, keccak);
+            EmbeddedLeafs leafs = default;
+            if (HeaderHasEmbeddedLeafs(header))
+            {
+                leftover = EmbeddedLeafs.ReadFrom(leftover, out leafs);
+            }
+
+            branch = new Branch(header, children, keccak, leafs);
 
             return leftover;
         }
