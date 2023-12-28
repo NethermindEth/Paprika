@@ -1,5 +1,4 @@
-﻿using System.Buffers.Binary;
-using NUnit.Framework;
+﻿using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Data;
 using Paprika.Merkle;
@@ -58,12 +57,9 @@ public class DirtyTests
 
         Assert(commit, c =>
         {
-            c.SetLeafWithSplitOn(key0, splitOnNibble);
-            c.SetLeafWithSplitOn(key1, splitOnNibble);
-            c.SetLeafWithSplitOn(key2, splitOnNibble);
-
             NibbleSet.Readonly children = new NibbleSet(0xA, 0xB, 0xC);
-            c.SetBranch(Key.Merkle(NibblePath.Empty), children);
+            var leafs = Leafs(key0, key1, key2);
+            c.SetBranch(Key.Merkle(NibblePath.Empty), children, leafs);
         });
     }
 
@@ -81,18 +77,19 @@ public class DirtyTests
         commit.Set(key1);
         commit.Set(key2);
 
-        const int splitOnNibble = 2;
+        const int split = 1;
 
         Assert(commit, c =>
         {
             var branchPath = NibblePath.Parse(key0).SliceTo(1);
             NibbleSet.Readonly children = new NibbleSet(0, 7, 0xA);
-            c.SetBranch(Key.Merkle(branchPath), children);
 
-            c.SetLeafWithSplitOn(key0, splitOnNibble);
-            c.SetLeafWithSplitOn(key1, splitOnNibble);
-            c.SetLeafWithSplitOn(key2, splitOnNibble);
-
+            // slices need to be aligned. To make it work parse paths and then slice
+            var leafs = Leafs(
+                NibblePath.Parse(key0).SliceFrom(1),
+                NibblePath.Parse(key1).SliceFrom(1),
+                NibblePath.Parse(key2).SliceFrom(1));
+            c.SetBranch(Key.Merkle(branchPath), children, leafs);
             c.SetExtension(Key.Merkle(NibblePath.Empty), branchPath);
         });
     }
@@ -115,18 +112,21 @@ public class DirtyTests
             var path0 = NibblePath.Parse(key0);
             var path1 = NibblePath.Parse(key1);
 
-            c.SetBranch(Key.Merkle(NibblePath.Empty), new NibbleSet(0, 2));
+            var topLeafs =
+                new EmbeddedLeafs(NibblePath.Parse(key2), stackalloc byte[EmbeddedLeafs.DestinationNeeded(1)]);
+
+            c.SetBranch(Key.Merkle(NibblePath.Empty), new NibbleSet(0, 2), topLeafs);
 
             c.SetExtension(Key.Merkle(path0.SliceTo(1)), path0.SliceFrom(1).SliceTo(2));
 
             // most nested children
             const int branchAt = 3;
-            NibbleSet.Readonly children = new NibbleSet(path0.GetAt(branchAt), path1.GetAt(branchAt));
-            c.SetBranch(Key.Merkle(path0.SliceTo(branchAt)), children);
-            c.SetLeafWithSplitOn(path0, branchAt + 1);
-            c.SetLeafWithSplitOn(path1, branchAt + 1);
 
-            c.SetLeafWithSplitOn(key2, 1);
+            var bottomLeafs = new EmbeddedLeafs(path0.SliceFrom(branchAt), path1.SliceFrom(branchAt),
+                stackalloc byte[EmbeddedLeafs.DestinationNeeded(2)]);
+
+            NibbleSet.Readonly children = new NibbleSet(path0.GetAt(branchAt), path1.GetAt(branchAt));
+            c.SetBranch(Key.Merkle(path0.SliceTo(branchAt)), children, bottomLeafs);
         });
     }
 
@@ -147,13 +147,14 @@ public class DirtyTests
         {
             var path0 = NibblePath.Parse(key0);
 
-            c.SetBranch(Key.Merkle(NibblePath.Empty), new NibbleSet(0, 3));
+            c.SetBranch(Key.Merkle(NibblePath.Empty), new NibbleSet(0, 3),
+                Leafs(NibblePath.Parse(key2)));
 
-            c.SetBranch(Key.Merkle(path0.SliceTo(1)), new NibbleSet(0, 7));
-
-            c.SetLeafWithSplitOn(key0, 2);
-            c.SetLeafWithSplitOn(key1, 2);
-            c.SetLeafWithSplitOn(key2, 1);
+            c.SetBranch(Key.Merkle(path0.SliceTo(1)), new NibbleSet(0, 7),
+                Leafs(
+                    NibblePath.Parse(key0).SliceFrom(1),
+                    NibblePath.Parse(key1).SliceFrom(1)
+                ));
         });
     }
 
@@ -175,13 +176,14 @@ public class DirtyTests
             var path0 = NibblePath.Parse(key0);
             c.SetExtension(Key.Merkle(NibblePath.Empty), path0.SliceTo(1));
 
-            c.SetBranch(Key.Merkle(path0.SliceTo(1)), new NibbleSet(0, 0x0B));
+            c.SetBranch(Key.Merkle(path0.SliceTo(1)), new NibbleSet(0, 0x0B),
+                Leafs(NibblePath.Parse(key2).SliceFrom(1))
+            );
 
-            c.SetBranch(Key.Merkle(path0.SliceTo(2)), new NibbleSet(0, 0x0A));
-
-            c.SetLeafWithSplitOn(path0, 3);
-            c.SetLeafWithSplitOn(key1, 3);
-            c.SetLeafWithSplitOn(key2, 2);
+            c.SetBranch(Key.Merkle(path0.SliceTo(2)), new NibbleSet(0, 0x0A),
+                Leafs(NibblePath.Parse(key0).SliceFrom(2),
+                    NibblePath.Parse(key1).SliceFrom(2))
+            );
         });
     }
 
@@ -201,27 +203,25 @@ public class DirtyTests
         Assert(commit, c =>
         {
             var path0 = NibblePath.Parse(key0);
+            var path1 = NibblePath.Parse(key1);
             var path2 = NibblePath.Parse(key2);
 
             c.SetExtension(Key.Merkle(NibblePath.Empty), path0.SliceTo(2));
 
-            c.SetBranch(Key.Merkle(path2.SliceTo(2)), new NibbleSet(0, 0xB));
-
-            // 0x00B
-            c.SetLeafWithSplitOn(path2, 3);
+            c.SetBranch(Key.Merkle(path2.SliceTo(2)), new NibbleSet(0, 0xB),
+                // 0x00B
+                Leafs(path2.SliceFrom(2)));
 
             // 0x000
             c.SetExtension(Key.Merkle(path0.SliceTo(3)), path0.SliceFrom(3).SliceTo(1));
 
             // 0x0000
             const int branchSplitAt = 4;
-            c.SetBranch(Key.Merkle(path0.SliceTo(branchSplitAt)), new NibbleSet(0, 0xA));
-
-            // 0x00000
-            c.SetLeafWithSplitOn(path0, branchSplitAt + 1);
-
-            // 0x0000A
-            c.SetLeafWithSplitOn(key1, branchSplitAt + 1);
+            c.SetBranch(Key.Merkle(path0.SliceTo(branchSplitAt)), new NibbleSet(0, 0xA),
+                // 0x00000, 0x0000A
+                Leafs(path0.SliceFrom(branchSplitAt),
+                    path1.SliceFrom(branchSplitAt))
+            );
         });
     }
 
@@ -302,7 +302,7 @@ public class DirtyTests
         var merkle = new ComputeMerkleBehavior(dontMemoize, dontMemoize, false);
 
         // run merkle before
-        merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());
+        merkle.BeforeCommit(commit, CacheBudget.Options.None.Build(), true);
 
         if (_delete)
         {
@@ -319,7 +319,7 @@ public class DirtyTests
             }
 
             // run Merkle it again to undo the structure
-            merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());
+            merkle.BeforeCommit(commit, CacheBudget.Options.None.Build(), true);
         }
 
         if (!_delete)
@@ -335,6 +335,27 @@ public class DirtyTests
             commit.ShouldHaveSquashedStateEmpty();
         }
     }
+
+    private static EmbeddedLeafs Leafs(scoped in NibblePath a)
+    {
+        return new EmbeddedLeafs(a, new byte[EmbeddedLeafs.DestinationNeeded(1)]);
+    }
+
+    private static EmbeddedLeafs Leafs(scoped in NibblePath a, scoped in NibblePath b)
+    {
+        return new EmbeddedLeafs(a, b, new byte[EmbeddedLeafs.DestinationNeeded(2)]);
+    }
+
+    private static EmbeddedLeafs Leafs(scoped in NibblePath a, scoped in NibblePath b, scoped in NibblePath c)
+    {
+        var leafs = new EmbeddedLeafs(a, b, new byte[EmbeddedLeafs.DestinationNeeded(2)]);
+        return leafs.Add(c, new byte[EmbeddedLeafs.DestinationNeeded(3)]);
+    }
+
+    private static EmbeddedLeafs Leafs(string a, string b, string c)
+    {
+        return Leafs(NibblePath.Parse(a), NibblePath.Parse(b), NibblePath.Parse(c));
+    }
 }
 
 public static class CommitExtensions
@@ -349,7 +370,6 @@ public static class CommitExtensions
         var key = NibblePath.Parse(path);
         commit.SetLeaf(Key.Merkle(key.SliceTo(splitOnNibble)), key.SliceFrom(splitOnNibble));
     }
-
 
     public static void SetLeaf(this ICommit commit, in Key key, string leafPath)
     {

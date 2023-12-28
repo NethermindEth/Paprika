@@ -215,7 +215,8 @@ public static partial class Node
     {
         public int MaxByteLength => Header.Size +
                                     (HeaderHasAllSet(Header) ? 0 : NibbleSet.MaxByteSize) +
-                                    (HeaderHasKeccak(Header) ? Keccak.Size : 0);
+                                    (HeaderHasKeccak(Header) ? Keccak.Size : 0) +
+                                    (HeaderHasEmbeddedLeafs(Header) ? Leafs.MaxByteSize : 0);
 
         private const byte HeaderMetadataKeccakMask = 0b0000_0001;
         private const byte HeaderMetadataAllChildrenSetMask = 0b0000_0010;
@@ -235,16 +236,18 @@ public static partial class Node
             Leafs = leafs;
         }
 
-        public Branch(NibbleSet.Readonly children, Keccak keccak)
+        public Branch(NibbleSet.Readonly children, scoped in Keccak keccak, scoped in EmbeddedLeafs leafs = default)
         {
             var allSet = children.AllSet ? HeaderMetadataAllChildrenSetMask : 0;
             var hasKeccak = keccak == default ? 0 : HeaderMetadataKeccakMask;
+            var hasEmbeddedLeafs = (leafs.IsEmpty == false) ? HeaderMetadataEmbeddedLeafsMask : 0;
 
-            Header = new Header(Type.Branch, metadata: (byte)(hasKeccak | allSet));
+            Header = new Header(Type.Branch, metadata: (byte)(hasKeccak | allSet | hasEmbeddedLeafs));
 
             Assert(children);
 
             Children = children;
+            Leafs = leafs;
             Keccak = keccak;
         }
 
@@ -254,16 +257,6 @@ public static partial class Node
             {
                 throw new ArgumentException($"At least two nibbles should be set, but only {set.SetCount} were found");
             }
-        }
-
-        public Branch(NibbleSet.Readonly children)
-        {
-            Header = new Header(Type.Branch, metadata: (byte)(children.AllSet ? HeaderMetadataAllChildrenSetMask : 0));
-
-            Assert(children);
-
-            Children = children;
-            Keccak = default;
         }
 
         public bool HasKeccak => HeaderHasKeccak(Header);
@@ -296,6 +289,11 @@ public static partial class Node
             if (HeaderHasKeccak(Header))
             {
                 leftover = Keccak.WriteToWithLeftover(leftover);
+            }
+
+            if (HeaderHasEmbeddedLeafs(Header))
+            {
+                leftover = Leafs.WriteToWithLeftover(leftover);
             }
 
             return leftover;

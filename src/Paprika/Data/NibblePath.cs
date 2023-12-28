@@ -104,6 +104,7 @@ public readonly ref struct NibblePath
     /// The estimate of the max length, used for stackalloc estimations.
     /// </summary>
     public int MaxByteLength => Length / 2 + 2;
+    public static int GetMaxByteLength(int length) => length / 2 + 2;
 
     public const int KeccakNibbleCount = Keccak.Size * NibblePerByte;
 
