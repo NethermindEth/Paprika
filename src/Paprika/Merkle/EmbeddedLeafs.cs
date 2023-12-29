@@ -16,6 +16,9 @@ public readonly ref struct EmbeddedLeafs
 
     public static int PathSpanSize(int count) => Keccak.Size * count;
 
+    public int SpanSizeForGrow => _leafs.SetCount == 0 ? Keccak.Size : _paths.Length + _paths.Length / _leafs.SetCount;
+    public int SpanSizeForShrink => _paths.Length - _paths.Length / _leafs.SetCount;
+
     private readonly NibbleSet.Readonly _leafs;
     private readonly ReadOnlySpan<byte> _paths;
 

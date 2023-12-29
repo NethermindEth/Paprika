@@ -896,8 +896,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             }
 
             var newLeaf = concatenated.SliceFrom(at);
-            var newLeafs = branch.Leafs.Add(newLeaf,
-                stackalloc byte[EmbeddedLeafs.PathSpanSize(branch.Leafs.Count + 1)]);
+            var newLeafs = branch.Leafs.Add(newLeaf, stackalloc byte[branch.Leafs.SpanSizeForGrow]);
 
             commit.SetBranch(branchKey, branch.Children, newLeafs);
             commit.DeleteKey(childKey);
@@ -1115,8 +1114,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                                     // update the existing by removing the embedded child
                                     commit.SetBranch(key, branch.Children,
                                         branch.Leafs.Remove(existingLeaf.Path,
-                                            stackalloc byte[EmbeddedLeafs.PathSpanSize(
-                                                (byte)(branch.Leafs.Count - 1))]));
+                                            stackalloc byte[branch.Leafs.SpanSizeForShrink]));
                                 }
 
                                 return;
@@ -1204,11 +1202,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
             if (value.IsEmpty)
             {
-                if (key.Path.FirstNibble == 6 && key.Path.Equals(NibblePath.Parse("6F908C2CB53D16069910210B6C69CD5172F349E7657577AF038D8C9F1C98B087")))
-                {
-                    Debugger.Break();
-                }
-
                 Delete(in key.Path, 0, _commit!, _budget);
             }
             else
