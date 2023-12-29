@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -328,24 +327,6 @@ public static partial class Node
             branch = new Branch(header, children, keccak, leafs);
 
             return leftover;
-        }
-
-        /// <summary>
-        /// Gets only branch data cleaning any leftovers.
-        /// </summary>
-        public static ReadOnlySpan<byte> GetOnlyBranchData(ReadOnlySpan<byte> source)
-        {
-            Header.ReadFrom(source, out var header);
-            var length = GetBranchDataLength(header, source[1..]);
-            return source[..length];
-        }
-
-        private static int GetBranchDataLength(Header header, ReadOnlySpan<byte> slice)
-        {
-            return Header.Size +
-                   (HeaderHasAllSet(header) ? 0 : NibbleSet.MaxByteSize) +
-                   (HeaderHasKeccak(header) ? Keccak.Size : 0) +
-                   (HeaderHasEmbeddedLeafs(header) ? EmbeddedLeafs.GetLength(slice) : 0);
         }
 
         public bool Equals(in Branch other)

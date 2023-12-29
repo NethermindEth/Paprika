@@ -27,12 +27,6 @@ public static class SpanSerialization
         return source.Slice(PrefixLength + length);
     }
 
-    public static int ReadLength(this ReadOnlySpan<byte> source)
-    {
-        var length = BinaryPrimitives.ReadUInt16LittleEndian(source);
-        return PrefixLength + length;
-    }
-
     /// <summary>
     /// Writes the span to the destination.
     /// </summary>

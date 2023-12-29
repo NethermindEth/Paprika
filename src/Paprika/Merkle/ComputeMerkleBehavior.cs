@@ -254,17 +254,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     public ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data)
     {
-        if (data.IsEmpty)
-            return data;
-
-        if (key.Type != DataType.Merkle)
-            return data;
-
-        if (Node.Header.Peek(data).NodeType != Node.Type.Branch)
-            return data;
-
-        // trim the cached rlp from branches
-        return Node.Branch.GetOnlyBranchData(data);
+        return data;
     }
 
     public Keccak RootHash { get; private set; }

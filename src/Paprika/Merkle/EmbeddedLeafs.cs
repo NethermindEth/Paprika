@@ -160,12 +160,6 @@ public readonly ref struct EmbeddedLeafs
         return leftover;
     }
 
-    public static int GetLength(ReadOnlySpan<byte> source)
-    {
-        var nibbleSet = NibbleSet.MaxByteSize;
-        return nibbleSet + source.Slice(nibbleSet).ReadLength();
-    }
-
     public Span<byte> WriteToWithLeftover(Span<byte> destination)
     {
         var leftover = _leafs.WriteToWithLeftover(destination);
