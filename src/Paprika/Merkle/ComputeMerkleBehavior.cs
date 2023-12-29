@@ -4,7 +4,6 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
-using System.Text;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -380,8 +379,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         // Parallelize at the root level any trie, state or storage, that have all children set.
         // This heuristic is used to estimate that the tree should be big enough to gain from making this computation
         // parallel but without calculating and storing additional information how big is the tree.
-        var runInParallel = !ctx.Hint.HasFlag(ComputeHint.DontUseParallel) && key.Path.IsEmpty &&
-                            branch.Children.AllSet;
+        var runInParallel = !ctx.Hint.HasFlag(ComputeHint.DontUseParallel) &&
+                            key.Path.IsEmpty && // only for root
+                            branch.Children.AllSet && // only where all children set
+                            branch.Leafs.IsEmpty; // only if no embedded leafs
 
         var memoize = !ctx.Hint.HasFlag(ComputeHint.SkipCachedInformation) && ShouldMemoizeBranchRlp(key.Path);
         var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
@@ -438,7 +439,17 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     }
 
                     var childPath = key.Path.AppendNibble(i, childSpan);
-                    var value = Compute(Key.Merkle(childPath), ctx);
+
+                    KeccakOrRlp value;
+                    if (branch.Leafs.TryGetLeaf(i, key.Path, out scoped var leaf))
+                    {
+                        // embedded leaf
+                        value = EncodeLeaf(Key.Merkle(childPath), leaf, ctx);
+                    }
+                    else
+                    {
+                        value = Compute(Key.Merkle(childPath), ctx);
+                    }
 
                     // it's either Keccak or a span. Both are encoded the same ways
                     if (value.DataType == KeccakOrRlp.Type.Keccak)

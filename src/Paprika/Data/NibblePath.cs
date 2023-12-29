@@ -73,11 +73,12 @@ public readonly ref struct NibblePath
     /// <summary>
     /// Keeps the metadata like <see cref="_odd"/> and <see cref="Length"/> of the path, but replaces the underlying raw data.
     /// </summary>
+    /// <param name="path">The path to derive metadata from.</param>
     /// <param name="raw">The raw data to replace the old.</param>
     /// <returns>The new path that has the same length and oddity as the original but different raw data.</returns>
-    public NibblePath ReplaceRaw(ReadOnlySpan<byte> raw)
+    public static NibblePath ReplaceRaw(scoped NibblePath path, ReadOnlySpan<byte> raw)
     {
-        return new NibblePath(ref MemoryMarshal.GetReference(raw), _odd, Length);
+        return new NibblePath(ref MemoryMarshal.GetReference(raw), path._odd, path.Length);
     }
 
     /// <summary>

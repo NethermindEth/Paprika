@@ -85,7 +85,26 @@ public readonly ref struct EmbeddedLeafs
 
         var encodedPath = _paths.Slice(slice, length);
 
-        leaf = new Node.Leaf(leafPath.ReplaceRaw(encodedPath));
+        leaf = new Node.Leaf(NibblePath.ReplaceRaw(leafPath, encodedPath));
+        return true;
+    }
+
+    public bool TryGetLeaf(byte nibble, in NibblePath thisBranchPath, out Node.Leaf leaf)
+    {
+        if (_leafs[nibble] == false)
+        {
+            leaf = default;
+            return false;
+        }
+
+        var length = _paths.Length / _leafs.SetCount; ;
+        var beforeCount = _leafs.SetCountToNibble(nibble);
+        var slice = beforeCount * length;
+
+        var encodedPath = _paths.Slice(slice, length);
+
+        var leafPath = NibblePath.FromKey(Keccak.Zero).SliceFrom(thisBranchPath.Length);
+        leaf = new Node.Leaf(NibblePath.ReplaceRaw(leafPath, encodedPath).SliceFrom(1));
         return true;
     }
 
@@ -149,6 +168,6 @@ public readonly ref struct EmbeddedLeafs
     public NibblePath GetSingleLeaf(in NibblePath otherPath)
     {
         Debug.Assert(_leafs.SetCount == 1, "There must be only one child");
-        return otherPath.ReplaceRaw(_paths);
+        return NibblePath.ReplaceRaw(otherPath, _paths);
     }
 }
