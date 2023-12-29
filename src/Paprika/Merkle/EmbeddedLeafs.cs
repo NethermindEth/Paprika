@@ -97,7 +97,8 @@ public readonly ref struct EmbeddedLeafs
             return false;
         }
 
-        var length = _paths.Length / _leafs.SetCount; ;
+        var length = _paths.Length / _leafs.SetCount;
+        ;
         var beforeCount = _leafs.SetCountToNibble(nibble);
         var slice = beforeCount * length;
 
@@ -157,6 +158,12 @@ public readonly ref struct EmbeddedLeafs
         leftover = leftover.ReadFrom(out var paths);
         embedded = new EmbeddedLeafs(leafs, paths);
         return leftover;
+    }
+
+    public static int GetLength(ReadOnlySpan<byte> source)
+    {
+        var nibbleSet = NibbleSet.MaxByteSize;
+        return nibbleSet + source.Slice(nibbleSet).ReadLength();
     }
 
     public Span<byte> WriteToWithLeftover(Span<byte> destination)
