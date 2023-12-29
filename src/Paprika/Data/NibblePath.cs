@@ -222,7 +222,7 @@ public readonly ref struct NibblePath
     /// <summary>
     /// Appends the <see cref="other"/> path using the <paramref name="workingSet"/> as the working memory.
     /// </summary>
-    public NibblePath Append(in NibblePath other, Span<byte> workingSet)
+    public NibblePath Append(scoped in NibblePath other, Span<byte> workingSet)
     {
         if (workingSet.Length <= MaxByteLength)
         {

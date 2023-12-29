@@ -140,6 +140,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     }
 
     public Keccak BeforeCommit(ICommit commit, CacheBudget budget) => BeforeCommit(commit, budget, false);
+
     public Keccak BeforeCommit(ICommit commit, CacheBudget budget, bool skipRootCalculation)
     {
         using var total = _totalMerkle.Measure();
@@ -786,12 +787,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             if (status == DeleteStatus.BranchToLeafOrExtension)
                             {
                                 // Handle branchToLeaf in a different way by checking what is underneath.
-                                var childKey = Key.Merkle(path.SliceTo(newAt));
-                                using var child = commit.Get(childKey);
-                                Node.ReadFrom(child.Span, out var ct, out var l, out _, out _);
-                                if (ct == Node.Type.Leaf)
+                                if (TryInlineChild(commit, path, branch, key, at))
                                 {
-                                    // If the child is a leaf, embed it!    
+                                    // the node is inline and the branch is updated, return
+
+                                    return DeleteStatus.NodeTypePreserved;
                                 }
                             }
 
@@ -862,10 +862,47 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         return DeleteStatus.BranchToLeafOrExtension;
                     }
 
-                    throw new Exception("Leafs should be always embedded!");
+                    // The leaf node might be created only on the collapse of the child
+                    var leafPath = firstNibblePath.Append(childLeaf.Path, stackalloc byte[NibblePath.FullKeccakByteLength]);
+
+                    // replace branch with the leaf
+                    commit.SetLeaf(key, leafPath);
+
+                    // delete the only child
+                    commit.DeleteKey(onlyChildKey);
+
+                    return DeleteStatus.BranchToLeafOrExtension;
                 }
             default:
                 throw new ArgumentOutOfRangeException();
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static bool TryInlineChild(ICommit commit, in NibblePath path, in Node.Branch branch, in Key branchKey, int at)
+        {
+            var childPath = path.SliceTo(at + 1);
+            var childKey = Key.Merkle(childPath);
+
+            scoped NibblePath concatenated;
+            using (var child = commit.Get(childKey))
+            {
+                Node.ReadFrom(child.Span, out var ct, out var l, out _, out _);
+                if (ct != Node.Type.Leaf)
+                {
+                    return false;
+                }
+
+                concatenated = childPath.Append(l.Path, stackalloc byte[NibblePath.FullKeccakByteLength]);
+            }
+
+            var newLeaf = concatenated.SliceFrom(at);
+            var newLeafs = branch.Leafs.Add(newLeaf,
+                stackalloc byte[EmbeddedLeafs.PathSpanSize(branch.Leafs.Count + 1)]);
+
+            commit.SetBranch(branchKey, branch.Children, newLeafs);
+            commit.DeleteKey(childKey);
+
+            return true;
         }
     }
 
@@ -1027,7 +1064,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                         // LO as embedded
                         var leafPathLength = branch1.Length;
-                        commit.SetBranch(Key.Merkle(branch1), children, new EmbeddedLeafs(path.SliceFrom(leafPathLength), span));
+                        commit.SetBranch(Key.Merkle(branch1), children,
+                            new EmbeddedLeafs(path.SliceFrom(leafPathLength), span));
 
                         // E2
                         var extension2 = branch1.AppendNibble(existingNibble, span);
@@ -1069,16 +1107,16 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                                     var set = new NibbleSet(leafPath[diffAt], existingLeaf.Path[diffAt]);
                                     var leafs = new EmbeddedLeafs(leafPath.SliceFrom(diffAt),
                                         existingLeaf.Path.SliceFrom(diffAt),
-                                        stackalloc byte[EmbeddedLeafs.DestinationNeeded(2)]);
+                                        stackalloc byte[EmbeddedLeafs.PathSpanSize(2)]);
 
                                     // set new branch
                                     commit.SetBranch(Key.Merkle(branchKey), set, leafs);
 
                                     // update the existing by removing the embedded child
                                     commit.SetBranch(key, branch.Children,
-                                            branch.Leafs.Remove(existingLeaf.Path,
-                                                stackalloc byte[EmbeddedLeafs.DestinationNeeded(
-                                                    (byte)(branch.Leafs.Count - 1))]));
+                                        branch.Leafs.Remove(existingLeaf.Path,
+                                            stackalloc byte[EmbeddedLeafs.PathSpanSize(
+                                                (byte)(branch.Leafs.Count - 1))]));
                                 }
 
                                 return;
@@ -1166,6 +1204,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
             if (value.IsEmpty)
             {
+                if (key.Path.FirstNibble == 6 && key.Path.Equals(NibblePath.Parse("6F908C2CB53D16069910210B6C69CD5172F349E7657577AF038D8C9F1C98B087")))
+                {
+                    Debugger.Break();
+                }
+
                 Delete(in key.Path, 0, _commit!, _budget);
             }
             else

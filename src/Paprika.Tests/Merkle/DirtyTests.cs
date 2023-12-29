@@ -113,7 +113,7 @@ public class DirtyTests
             var path1 = NibblePath.Parse(key1);
 
             var topLeafs =
-                new EmbeddedLeafs(NibblePath.Parse(key2), stackalloc byte[EmbeddedLeafs.DestinationNeeded(1)]);
+                new EmbeddedLeafs(NibblePath.Parse(key2), stackalloc byte[EmbeddedLeafs.PathSpanSize(1)]);
 
             c.SetBranch(Key.Merkle(NibblePath.Empty), new NibbleSet(0, 2), topLeafs);
 
@@ -123,7 +123,7 @@ public class DirtyTests
             const int branchAt = 3;
 
             var bottomLeafs = new EmbeddedLeafs(path0.SliceFrom(branchAt), path1.SliceFrom(branchAt),
-                stackalloc byte[EmbeddedLeafs.DestinationNeeded(2)]);
+                stackalloc byte[EmbeddedLeafs.PathSpanSize(2)]);
 
             NibbleSet.Readonly children = new NibbleSet(path0.GetAt(branchAt), path1.GetAt(branchAt));
             c.SetBranch(Key.Merkle(path0.SliceTo(branchAt)), children, bottomLeafs);
@@ -338,18 +338,18 @@ public class DirtyTests
 
     private static EmbeddedLeafs Leafs(scoped in NibblePath a)
     {
-        return new EmbeddedLeafs(a, new byte[EmbeddedLeafs.DestinationNeeded(1)]);
+        return new EmbeddedLeafs(a, new byte[EmbeddedLeafs.PathSpanSize(1)]);
     }
 
     private static EmbeddedLeafs Leafs(scoped in NibblePath a, scoped in NibblePath b)
     {
-        return new EmbeddedLeafs(a, b, new byte[EmbeddedLeafs.DestinationNeeded(2)]);
+        return new EmbeddedLeafs(a, b, new byte[EmbeddedLeafs.PathSpanSize(2)]);
     }
 
     private static EmbeddedLeafs Leafs(scoped in NibblePath a, scoped in NibblePath b, scoped in NibblePath c)
     {
-        var leafs = new EmbeddedLeafs(a, b, new byte[EmbeddedLeafs.DestinationNeeded(2)]);
-        return leafs.Add(c, new byte[EmbeddedLeafs.DestinationNeeded(3)]);
+        var leafs = new EmbeddedLeafs(a, b, new byte[EmbeddedLeafs.PathSpanSize(2)]);
+        return leafs.Add(c, new byte[EmbeddedLeafs.PathSpanSize(3)]);
     }
 
     private static EmbeddedLeafs Leafs(string a, string b, string c)
@@ -360,17 +360,6 @@ public class DirtyTests
 
 public static class CommitExtensions
 {
-    public static void SetLeafWithSplitOn(this ICommit commit, in NibblePath key, int splitOnNibble)
-    {
-        commit.SetLeaf(Key.Merkle(key.SliceTo(splitOnNibble)), key.SliceFrom(splitOnNibble));
-    }
-
-    public static void SetLeafWithSplitOn(this ICommit commit, string path, int splitOnNibble)
-    {
-        var key = NibblePath.Parse(path);
-        commit.SetLeaf(Key.Merkle(key.SliceTo(splitOnNibble)), key.SliceFrom(splitOnNibble));
-    }
-
     public static void SetLeaf(this ICommit commit, in Key key, string leafPath)
     {
         var leaf = new Node.Leaf(NibblePath.Parse(leafPath));

@@ -14,7 +14,7 @@ public readonly ref struct EmbeddedLeafs
 {
     public const int MaxWorksetNeeded = 16 * Keccak.Size;
 
-    public static int DestinationNeeded(byte count) => Keccak.Size * count;
+    public static int PathSpanSize(int count) => Keccak.Size * count;
 
     private readonly NibbleSet.Readonly _leafs;
     private readonly ReadOnlySpan<byte> _paths;
@@ -140,10 +140,6 @@ public readonly ref struct EmbeddedLeafs
     public Span<byte> WriteToWithLeftover(Span<byte> destination)
     {
         var leftover = _leafs.WriteToWithLeftover(destination);
-        if (_paths.IndexOf((byte)11) > -1)
-        {
-            Debugger.Break();
-        }
         return _paths.WriteToWithLeftover(leftover);
     }
 
