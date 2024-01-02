@@ -92,6 +92,9 @@ public class Blockchain : IAsyncDisposable
             "The number of the blocks in the flush queue");
         _bloomMissedReads = _meter.CreateCounter<long>("Bloom missed reads", "Reads",
             "Number of reads that passed bloom but missed in dictionary");
+
+        using var batch = _db.BeginReadOnlyBatch();
+        _lastFinalized = batch.Metadata.BlockNumber;
     }
 
     /// <summary>
