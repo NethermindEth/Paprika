@@ -41,6 +41,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private readonly int _minimumTreeLevelToMemoizeKeccak;
     private readonly int _memoizeKeccakEvery;
     private readonly bool _memoizeRlp;
+    private readonly bool _useParallel;
     private readonly Meter _meter;
     private readonly Histogram<long> _storageProcessing;
     private readonly Histogram<long> _stateProcessing;
@@ -58,11 +59,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// This includes invalidating the memoized RLP whenever a path that it caches is marked as dirty.</param>
     public ComputeMerkleBehavior(int minimumTreeLevelToMemoizeKeccak = DefaultMinimumTreeLevelToMemoizeKeccak,
         int memoizeKeccakEvery = MemoizeKeccakEveryNLevel,
-        bool memoizeRlp = true)
+        bool memoizeRlp = true,
+        bool useParallel = true)
     {
         _minimumTreeLevelToMemoizeKeccak = minimumTreeLevelToMemoizeKeccak;
         _memoizeKeccakEvery = memoizeKeccakEvery;
         _memoizeRlp = memoizeRlp;
+        _useParallel = useParallel;
 
         _meter = new Meter("Paprika.Merkle");
         _storageProcessing = _meter.CreateHistogram<long>("State processing", "ms",
@@ -194,22 +197,34 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// <param name="workItems">The work items.</param>
     private void ScatterGather(ICommit commit, IEnumerable<IWorkItem> workItems)
     {
-        var children = new ConcurrentQueue<IChildCommit>();
+        if (_useParallel)
+        {
+            var children = new ConcurrentQueue<IChildCommit>();
 
-        Parallel.ForEach(workItems,
-            () => commit.GetChild().WriteThroughCacheChild(ShouldCacheKey, ShouldCacheResult, _pool),
-            (workItem, _, child) =>
+            Parallel.ForEach(workItems,
+                () => commit.GetChild().WriteThroughCacheChild(ShouldCacheKey, ShouldCacheResult, _pool),
+                (workItem, _, child) =>
+                {
+                    workItem.DoWork(child);
+                    return child;
+                },
+                children.Enqueue
+            );
+
+            while (children.TryDequeue(out var child))
+            {
+                child.Commit();
+                child.Dispose();
+            }
+        }
+        else
+        {
+            using var child = commit.GetChild().WriteThroughCacheChild(ShouldCacheKey, ShouldCacheResult, _pool);
+            foreach (var workItem in workItems)
             {
                 workItem.DoWork(child);
-                return child;
-            },
-            children.Enqueue
-        );
-
-        while (children.TryDequeue(out var child))
-        {
+            }
             child.Commit();
-            child.Dispose();
         }
     }
 

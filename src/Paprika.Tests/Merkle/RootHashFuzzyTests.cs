@@ -1,5 +1,6 @@
 ﻿using System.Buffers.Binary;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Chain;
@@ -54,7 +55,7 @@ public class RootHashFuzzyTests
         var generator = Build(test);
 
         using var db = PagedDb.NativeMemoryDb(32 * 1024 * 1024, 2);
-        var merkle = new ComputeMerkleBehavior(2, 2, true);
+        var merkle = new ComputeMerkleBehavior(2, 2, true, false);
         await using var blockchain = new Blockchain(db, merkle);
 
         var rootHash = generator.Run(blockchain, commitEvery);
@@ -233,7 +234,10 @@ public class RootHashFuzzyTests
 
             var rootHash = block.Commit(_blocks);
 
-            // Console.Out.Write(((IProvideDescription)block).Describe((in Key key) => key.Type == DataType.Account));
+            // Console.Out.Write(((IProvideDescription)block).Describe((in Key key) =>
+            //     key.Type == DataType.StorageCell && key.Path.UnsafeAsKeccak == ToFind));
+            // private static readonly Keccak ToFind = NibblePath
+            // .Parse("4122449c01c6482047cbfc8429f9b995dd96664c809b7f3b5b9929e52cbd4b02").UnsafeAsKeccak;
 
             block.Dispose();
 
