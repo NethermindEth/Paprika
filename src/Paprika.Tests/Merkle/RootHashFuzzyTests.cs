@@ -54,7 +54,7 @@ public class RootHashFuzzyTests
         var generator = Build(test);
 
         using var db = PagedDb.NativeMemoryDb(32 * 1024 * 1024, 2);
-        var merkle = new ComputeMerkleBehavior(2, 2);
+        var merkle = new ComputeMerkleBehavior(2, 2, true);
         await using var blockchain = new Blockchain(db, merkle);
 
         var rootHash = generator.Run(blockchain, commitEvery);
@@ -232,11 +232,13 @@ public class RootHashFuzzyTests
             }
 
             var rootHash = block.Commit(_blocks);
+
+            // Console.Out.Write(((IProvideDescription)block).Describe((in Key key) => key.Type == DataType.Account));
+
             block.Dispose();
 
             return rootHash;
         }
-
 
         private void Next(ref int counter, int newBlockEvery, ref IWorldState block, Blockchain blockchain, bool autoFinalize)
         {

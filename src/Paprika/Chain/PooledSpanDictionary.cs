@@ -350,11 +350,17 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
 
     public override string ToString() => $"Count: {_dict.Count}, Memory: {_pages.Count * BufferSize / 1024}kb";
 
-    public void Describe(TextWriter text)
+    public void Describe(TextWriter text, Key.Predicate? predicate = null)
     {
+        predicate ??= (in Key _) => true;
+
         foreach (var kvp in this)
         {
             Key.ReadFrom(kvp.Key, out var key);
+
+            if (predicate(key) == false)
+                continue;
+
             switch (key.Type)
             {
                 case DataType.Account:

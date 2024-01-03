@@ -55,7 +55,7 @@ public static class CommitExtensions
         }
 
         public override IChildCommit GetChild() => _commit.GetChild();
-        public void SealCaching() => _canCache = true;
+        public void SealCaching() => _canCache = false;
 
         public void Visit(CommitAction action, TrieType type) => _commit.Visit(action, type);
 

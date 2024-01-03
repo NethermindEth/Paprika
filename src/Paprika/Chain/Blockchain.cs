@@ -92,6 +92,9 @@ public class Blockchain : IAsyncDisposable
             "The number of the blocks in the flush queue");
         _bloomMissedReads = _meter.CreateCounter<long>("Bloom missed reads", "Reads",
             "Number of reads that passed bloom but missed in dictionary");
+
+        using var batch = _db.BeginReadOnlyBatch();
+        _lastFinalized = batch.Metadata.BlockNumber;
     }
 
     /// <summary>
@@ -754,20 +757,20 @@ public class Blockchain : IAsyncDisposable
         void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1) =>
             SetImpl(key, payload0, payload1, _preCommit);
 
-        public string Describe()
+        public string Describe(Key.Predicate? predicate = null)
         {
             var writer = new StringWriter();
             var indented = new IndentedTextWriter(writer);
             indented.Indent = 1;
 
             writer.WriteLine("State:");
-            _state.Describe(indented);
+            _state.Describe(indented, predicate);
 
             writer.WriteLine("Storage:");
-            _storage.Describe(indented);
+            _storage.Describe(indented, predicate);
 
             writer.WriteLine("PreCommit:");
-            _preCommit.Describe(indented);
+            _preCommit.Describe(indented, predicate);
 
             return writer.ToString();
         }
