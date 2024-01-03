@@ -106,4 +106,9 @@ public readonly ref partial struct Key
                $"{nameof(Type)}: {Type}, " +
                $"{nameof(StoragePath)}: {StoragePath.ToString()}";
     }
+
+    /// <summary>
+    /// The predicate over a key.
+    /// </summary>
+    public delegate bool Predicate(in Key key);
 }
