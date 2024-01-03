@@ -456,7 +456,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         value = Compute(Key.Merkle(childPath), ctx);
                     }
 
-                    // it's either Keccak or a span. Both are encoded the same ways
+                    if (key.Path.Length == 1 && ctx.TrieType == TrieType.Storage)
+                    {
+                        Console.WriteLine($"Branch[{i}] = {((ReadOnlySpan<byte>)value.Span).ToHexString(false)}");
+                    }
+                    
                     if (value.DataType == KeccakOrRlp.Type.Keccak)
                     {
                         stream.Encode(value.Span);

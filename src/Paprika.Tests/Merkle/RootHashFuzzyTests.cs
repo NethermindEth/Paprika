@@ -62,6 +62,44 @@ public class RootHashFuzzyTests
         AssertRootHash(rootHash, generator);
     }
 
+    [Test]
+    public async Task Embedded_leaf_bug()
+    {
+        var account = NibblePath
+            .Parse("4122449c01c6482047cbfc8429f9b995dd96664c809b7f3b5b9929e52cbd4b02").UnsafeAsKeccak;
+        var expectedRootHash = NibblePath
+            .Parse("641bdf9a3c9830e8ff9a4bceab3cda89292a994f841bc1338c2e81283ec7162e").UnsafeAsKeccak;
+
+        using var db = PagedDb.NativeMemoryDb(8 * 1024 * 1024, 2);
+        var merkle = new ComputeMerkleBehavior(2, 2, true);
+        await using var blockchain = new Blockchain(db, merkle);
+
+        using var block = blockchain.StartNew(Keccak.Zero);
+
+        block.SetAccount(account, new Account(65278556, 65278556));
+
+        await foreach (var (storage, data) in Load())
+        {
+            block.SetStorage(account, storage, data);
+        }
+
+        var keccak = block.Commit(1);
+        keccak.Should().Be(expectedRootHash);
+
+        async static IAsyncEnumerable<(Keccak, byte[])> Load([CallerFilePath] string path = default)
+        {
+            var dataPath = Path.Combine(Path.GetDirectoryName(path), "embedded-leafs.txt");
+            await foreach (var line in File.ReadLinesAsync(dataPath))
+            {
+                var parts = line.Split("->");
+                var keccak = NibblePath.Parse(parts[0].Trim().Replace("0x", "")).UnsafeAsKeccak;
+                var bytes = Convert.FromHexString(parts[1].Trim().Replace("0x", ""));
+
+                yield return (keccak, bytes);
+            }
+        }
+    }
+
     [TestCase(nameof(Accounts_1000_Storage_1), int.MaxValue)]
     [TestCase(nameof(Accounts_1_Storage_100), int.MaxValue)]
     [TestCase(nameof(Accounts_100_Storage_1), int.MaxValue)]
