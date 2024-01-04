@@ -53,7 +53,20 @@ public struct NibbleSet
         }
     }
 
-    public int SetCount => BitOperations.PopCount(_value);
+    /// <summary>
+    /// Gets the number of nibbles set.
+    /// </summary>
+    private int SetCount => BitOperations.PopCount(_value);
+
+    /// <summary>
+    /// Gets the number of nibbles set to the given nibble exclusive.
+    /// </summary>
+    private int SetCountToNibble(byte toNibbleExclusive)
+    {
+        var mask = (1 << toNibbleExclusive) - 1;
+        return BitOperations.PopCount((uint)(_value & mask));
+    }
+
     public byte SmallestNibbleSet => (byte)BitOperations.TrailingZeroCount(_value);
 
     public static implicit operator ushort(NibbleSet set) => set._value;
@@ -97,7 +110,17 @@ public struct NibbleSet
 
         public bool AllSet => _value == AllSetValue;
 
+        /// <summary>
+        /// Gets the number of nibbles set.
+        /// </summary>
         public int SetCount => new NibbleSet(_value).SetCount;
+
+
+        /// <summary>
+        /// Gets the number of nibbles set to the given nibble exclusive.
+        /// </summary>
+        public int SetCountToNibble(byte toNibbleExclusive) => new NibbleSet(_value).SetCountToNibble(toNibbleExclusive);
+
         public byte SmallestNibbleSet => new NibbleSet(_value).SmallestNibbleSet;
 
         public static implicit operator ushort(Readonly set) => set._value;
