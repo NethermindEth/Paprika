@@ -68,7 +68,7 @@ public class RootHashFuzzyTests
         var account = NibblePath
             .Parse("4122449c01c6482047cbfc8429f9b995dd96664c809b7f3b5b9929e52cbd4b02").UnsafeAsKeccak;
         var expectedRootHash = NibblePath
-            .Parse("641bdf9a3c9830e8ff9a4bceab3cda89292a994f841bc1338c2e81283ec7162e").UnsafeAsKeccak;
+            .Parse("f1581cff7c5db8c375fc6146a0af07dffb2ef7c87e3978a002d1ed40d547f48a").UnsafeAsKeccak;
 
         using var db = PagedDb.NativeMemoryDb(8 * 1024 * 1024, 2);
         var merkle = new ComputeMerkleBehavior(2, 2, true);
@@ -78,22 +78,29 @@ public class RootHashFuzzyTests
 
         block.SetAccount(account, new Account(65278556, 65278556));
 
-        await foreach (var (storage, data) in Load())
+        foreach (var (storage, data) in Load())
         {
+
             block.SetStorage(account, storage, data);
         }
 
         var keccak = block.Commit(1);
         keccak.Should().Be(expectedRootHash);
 
-        async static IAsyncEnumerable<(Keccak, byte[])> Load([CallerFilePath] string path = default)
+        static IEnumerable<(Keccak, byte[])> Load()
         {
-            var dataPath = Path.Combine(Path.GetDirectoryName(path), "embedded-leafs.txt");
-            await foreach (var line in File.ReadLinesAsync(dataPath))
+            string[] raw =
+            {
+                "5c108292e00f008362abd451db383b0cc107580749ba0a8762c732f3936a7d11->2f098143",
+                "5c1083f1fe2d312d0994a579bfd3dc37ac18cc3d064d99a18cb5509f25f8a25e->5b7682f4",
+                "5c12bfd75e0a0fdd20ced8ca313359c0f22ddf2307aec79e959c8b4324055c73->6450be7e",
+            };
+
+            foreach (var line in raw)
             {
                 var parts = line.Split("->");
-                var keccak = NibblePath.Parse(parts[0].Trim().Replace("0x", "")).UnsafeAsKeccak;
-                var bytes = Convert.FromHexString(parts[1].Trim().Replace("0x", ""));
+                var keccak = NibblePath.Parse(parts[0].Trim()).UnsafeAsKeccak;
+                var bytes = Convert.FromHexString(parts[1].Trim());
 
                 yield return (keccak, bytes);
             }

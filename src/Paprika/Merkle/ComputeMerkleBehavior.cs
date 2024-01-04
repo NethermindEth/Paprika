@@ -456,11 +456,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         value = Compute(Key.Merkle(childPath), ctx);
                     }
 
-                    if (key.Path.Length == 1 && ctx.TrieType == TrieType.Storage)
-                    {
-                        Console.WriteLine($"Branch[{i}] = {((ReadOnlySpan<byte>)value.Span).ToHexString(false)}");
-                    }
-                    
                     if (value.DataType == KeccakOrRlp.Type.Keccak)
                     {
                         stream.Encode(value.Span);
@@ -1083,11 +1078,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                         // LO as embedded
                         var leafPathLength = branch1.Length;
+                        Span<byte> leafSpan = stackalloc byte[EmbeddedLeafs.PathSpanSize(1)];
                         commit.SetBranch(Key.Merkle(branch1), children,
-                            new EmbeddedLeafs(path.SliceFrom(leafPathLength), span));
+                            new EmbeddedLeafs(path.SliceFrom(leafPathLength), leafSpan));
 
                         // E2
-                        var extension2 = branch1.AppendNibble(existingNibble, span);
+                        Span<byte> ext2Span = stackalloc byte[branch1.MaxByteLength + 1];
+                        var extension2 = branch1.AppendNibble(existingNibble, ext2Span);
                         if (extension2.Length < key.Path.Length + ext.Path.Length)
                         {
                             // there are some bytes to be set in the extension path, create one
