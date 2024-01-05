@@ -165,7 +165,9 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     /// <returns></returns>
     public IBatch BeginNextBatch() => BuildFromRoot(Root);
 
-    public IReadOnlyBatch BeginReadOnlyBatch(string name = "")
+    IReadOnlyBatch IDb.BeginReadOnlyBatch(string name) => BeginReadOnlyBatch(name);
+
+    public IReportingReadOnlyBatch BeginReadOnlyBatch(string name = "")
     {
         lock (_batchLock)
         {
@@ -174,7 +176,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
-    private IReadOnlyBatch BeginReadOnlyBatch(string name, in RootPage root)
+    private ReadOnlyBatch BeginReadOnlyBatch(string name, in RootPage root)
     {
         var batch = new ReadOnlyBatch(this,
             root.Header.BatchId,
@@ -352,7 +354,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         return StoreKey.Encode(in raw, outputSpan);
     }
 
-    class ReadOnlyBatch : IReadOnlyBatch, IReadOnlyBatchContext
+    class ReadOnlyBatch : IReportingReadOnlyBatch, IReadOnlyBatchContext
     {
         private readonly PagedDb _db;
         private volatile bool _disposed;
@@ -908,4 +910,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     public void Flush() => _manager.Flush();
 
     public void ForceFlush() => _manager.ForceFlush();
+}
+
+public interface IReportingReadOnlyBatch : IReporting, IReadOnlyBatch
+{
 }

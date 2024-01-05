@@ -20,6 +20,11 @@ public interface IReporter
     void ReportItem(in StoreKey key, ReadOnlySpan<byte> rawData);
 }
 
+public interface IReporting
+{
+    void Report(IReporter reporter);
+}
+
 public class StatisticsReporter : IReporter
 {
     public readonly SortedDictionary<int, Level> Levels = new();

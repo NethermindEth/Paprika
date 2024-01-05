@@ -376,14 +376,11 @@ public class Blockchain : IAsyncDisposable
         {
             _batch = batch;
             Metadata = batch.Metadata;
-            BatchId = batch.BatchId;
         }
 
         protected override void CleanUp() => _batch.Dispose();
 
         public Metadata Metadata { get; }
-
-        public uint BatchId { get; }
 
 
         public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result) => _batch.TryGet(key, out result);
@@ -391,7 +388,7 @@ public class Blockchain : IAsyncDisposable
         public void Report(IReporter reporter) =>
             throw new NotImplementedException("One should not report over a block");
 
-        public override string ToString() => base.ToString() + $", BatchId:{_batch.BatchId}";
+        public override string ToString() => base.ToString() + $", Batch :{_batch}";
     }
 
     /// <summary>
