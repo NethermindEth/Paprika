@@ -1132,8 +1132,16 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                                     commit.SetBranch(key, branch.Children,
                                         branch.Leafs.Remove(existingLeaf.Path,
                                             stackalloc byte[branch.Leafs.SpanSizeForShrink]));
+
+                                    return;
                                 }
 
+                                // The embedded leaf with a nibble is the same.
+                                // If the branch has Keccak memoized, remove it.
+                                if (branch.HasKeccak)
+                                {
+                                    commit.SetBranch(key, branch.Children, branch.Leafs);
+                                }
                                 return;
                             }
 
