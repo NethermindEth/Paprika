@@ -188,7 +188,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         return batch;
     }
 
-    public IReadOnlyBatch BeginReadOnlyBatch(Keccak stateHash, string name = "")
+    public IReadOnlyBatch BeginReadOnlyBatch(in Keccak stateHash, string name = "")
     {
         lock (_batchLock)
         {
@@ -212,7 +212,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
-    public IReadOnlyBatch BeginReadOnlyBatchOrLatest(Keccak stateHash, string name = "")
+    public IReadOnlyBatch BeginReadOnlyBatchOrLatest(in Keccak stateHash, string name = "")
     {
         lock (_batchLock)
         {
@@ -236,7 +236,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
-    public bool HasState(Keccak stateHash)
+    public bool HasState(in Keccak stateHash)
     {
         lock (_batchLock)
         {
