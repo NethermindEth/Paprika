@@ -21,7 +21,7 @@ namespace Paprika.Chain;
 public class Blockchain : IAsyncDisposable
 {
     // allocate 1024 pages (4MB) at once
-    private readonly BufferPool _pool = new(1024);
+    private readonly BufferPool _pool = new(1024, true, "Blockchain");
 
     private readonly object _blockLock = new();
     private readonly Dictionary<uint, List<BlockState>> _blocksByNumber = new();
@@ -92,6 +92,9 @@ public class Blockchain : IAsyncDisposable
             "The number of the blocks in the flush queue");
         _bloomMissedReads = _meter.CreateCounter<long>("Bloom missed reads", "Reads",
             "Number of reads that passed bloom but missed in dictionary");
+
+        using var batch = _db.BeginReadOnlyBatch();
+        _lastFinalized = batch.Metadata.BlockNumber;
     }
 
     /// <summary>
@@ -441,11 +444,6 @@ public class Blockchain : IAsyncDisposable
 
         private bool _committed;
         private Keccak? _hash;
-
-        // precommit caches
-        private PooledSpanDictionary? _commitCache;
-        private ReaderWriterLockSlim _commitLock = new();
-
         private readonly CacheBudget _cacheBudget;
 
         private void CreateDictionaries()
@@ -576,16 +574,7 @@ public class Blockchain : IAsyncDisposable
         {
             if (_hash == null)
             {
-                _commitCache = new PooledSpanDictionary(Pool, true, true);
-                try
-                {
-                    _hash = _blockchain._preCommit.BeforeCommit(this, _cacheBudget);
-                }
-                finally
-                {
-                    _commitCache.Dispose();
-                    _commitCache = null;
-                }
+                _hash = _blockchain._preCommit.BeforeCommit(this, _cacheBudget);
             }
         }
 
@@ -761,69 +750,27 @@ public class Blockchain : IAsyncDisposable
                 throw new Exception("This blocks has already been committed");
         }
 
-        ReadOnlySpanOwnerWithMetadata<byte> ICommit.Get(scoped in Key key)
-        {
-            Debug.Assert(_committed == false,
-                "The block is committed and it cleaned up some of its dependencies. It cannot provide data for Get method");
-
-            // Precompute hash and pre-encode key
-            var hash = GetHash(key);
-            var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
-
-            if (key.Type != DataType.Merkle)
-            {
-                // for other types than Merkle do not use this
-                return TryGet(key, keyWritten, hash);
-            }
-
-            // Check if it was written locally already
-            var local = TryGetLocal(key, keyWritten, hash, out var succeeded);
-            if (succeeded)
-                return local.WithDepth(0);
-
-            // Try to find in cache now
-            _commitLock.EnterReadLock();
-            if (_commitCache!.TryGet(keyWritten, hash, out var result))
-            {
-                _commitLock.ExitReadLock();
-                return new ReadOnlySpanOwner<byte>(result, null).WithDepth(0);
-            }
-            _commitLock.ExitReadLock();
-
-            var previous = TryGet(key, keyWritten, hash);
-
-            if (previous.IsDbQuery)
-            {
-                // on db query, cache locally
-                _commitLock.EnterWriteLock();
-                _commitCache.Set(keyWritten, hash, previous.Span);
-                _commitLock.ExitWriteLock();
-
-                // TODO: consider returning cached so nothing else needs to deal with db results
-            }
-
-            return previous;
-        }
+        ReadOnlySpanOwnerWithMetadata<byte> ICommit.Get(scoped in Key key) => Get(key);
 
         void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload) => SetImpl(key, payload, _preCommit);
 
         void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1) =>
             SetImpl(key, payload0, payload1, _preCommit);
 
-        public string Describe()
+        public string Describe(Key.Predicate? predicate = null)
         {
             var writer = new StringWriter();
             var indented = new IndentedTextWriter(writer);
             indented.Indent = 1;
 
             writer.WriteLine("State:");
-            _state.Describe(indented);
+            _state.Describe(indented, predicate);
 
             writer.WriteLine("Storage:");
-            _storage.Describe(indented);
+            _storage.Describe(indented, predicate);
 
             writer.WriteLine("PreCommit:");
-            _preCommit.Describe(indented);
+            _preCommit.Describe(indented, predicate);
 
             return writer.ToString();
         }
@@ -1237,7 +1184,7 @@ public class Blockchain : IAsyncDisposable
             $"{nameof(BlockNumber)}: {BlockNumber}";
     }
 
-    private static int GetHash(in Key key) => key.GetHashCode();
+    public static int GetHash(in Key key) => key.GetHashCode();
 
     public async ValueTask DisposeAsync()
     {

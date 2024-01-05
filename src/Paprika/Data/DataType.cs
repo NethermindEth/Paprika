@@ -18,7 +18,7 @@ public enum DataType : byte
     StorageCell = 1,
 
     /// <summary>
-    /// [key, 2] The Merkle entry, either with storage or not
+    /// [key, 2] The Merkle entry representing a Trie node.
     /// </summary>
     Merkle = 2,
 

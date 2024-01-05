@@ -404,6 +404,7 @@ FodyWeavers.xsd
 
 # Paprika files
 src/Paprika.Runner/db
+src/Paprika.Runner.Pareto/db
 src/Tree.Runner/db
 
 /db

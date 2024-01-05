@@ -71,6 +71,17 @@ public readonly ref struct NibblePath
     }
 
     /// <summary>
+    /// Keeps the metadata like <see cref="_odd"/> and <see cref="Length"/> of the path, but replaces the underlying raw data.
+    /// </summary>
+    /// <param name="path">The path to derive metadata from.</param>
+    /// <param name="raw">The raw data to replace the old.</param>
+    /// <returns>The new path that has the same length and oddity as the original but different raw data.</returns>
+    public static NibblePath ReplaceRaw(scoped NibblePath path, ReadOnlySpan<byte> raw)
+    {
+        return new NibblePath(ref MemoryMarshal.GetReference(raw), path._odd, path.Length);
+    }
+
+    /// <summary>
     /// Returns the underlying payload as <see cref="Keccak"/>.
     /// It does it in an unsafe way and requires an external check whether it's possible.
     /// </summary>
@@ -94,6 +105,7 @@ public readonly ref struct NibblePath
     /// The estimate of the max length, used for stackalloc estimations.
     /// </summary>
     public int MaxByteLength => Length / 2 + 2;
+    public static int GetMaxByteLength(int length) => length / 2 + 2;
 
     public const int KeccakNibbleCount = Keccak.Size * NibblePerByte;
 
@@ -211,7 +223,7 @@ public readonly ref struct NibblePath
     /// <summary>
     /// Appends the <see cref="other"/> path using the <paramref name="workingSet"/> as the working memory.
     /// </summary>
-    public NibblePath Append(in NibblePath other, Span<byte> workingSet)
+    public NibblePath Append(scoped in NibblePath other, Span<byte> workingSet)
     {
         if (workingSet.Length <= MaxByteLength)
         {

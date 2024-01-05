@@ -40,9 +40,17 @@ public readonly ref struct RlpMemo
         }
     }
 
-    public void Clear(byte nibble)
+    public bool Clear(byte nibble)
     {
-        GetAtNibble(nibble).Clear();
+        var memoized = GetAtNibble(nibble);
+        if (memoized.IndexOfAnyExcept((byte)0) > -1)
+        {
+            // non-zero, requires clearing
+            memoized.Clear();
+            return true;
+        }
+
+        return false;
     }
 
     public bool TryGetKeccak(byte nibble, out ReadOnlySpan<byte> keccak)

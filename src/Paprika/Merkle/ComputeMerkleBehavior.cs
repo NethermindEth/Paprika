@@ -41,10 +41,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private readonly int _minimumTreeLevelToMemoizeKeccak;
     private readonly int _memoizeKeccakEvery;
     private readonly bool _memoizeRlp;
+    private readonly bool _useParallel;
     private readonly Meter _meter;
     private readonly Histogram<long> _storageProcessing;
     private readonly Histogram<long> _stateProcessing;
     private readonly Histogram<long> _totalMerkle;
+
+    private readonly BufferPool _pool = new(1024, true, "Merkle");
 
     /// <summary>
     /// Initializes the Merkle.
@@ -56,11 +59,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// This includes invalidating the memoized RLP whenever a path that it caches is marked as dirty.</param>
     public ComputeMerkleBehavior(int minimumTreeLevelToMemoizeKeccak = DefaultMinimumTreeLevelToMemoizeKeccak,
         int memoizeKeccakEvery = MemoizeKeccakEveryNLevel,
-        bool memoizeRlp = true)
+        bool memoizeRlp = true,
+        bool useParallel = true)
     {
         _minimumTreeLevelToMemoizeKeccak = minimumTreeLevelToMemoizeKeccak;
         _memoizeKeccakEvery = memoizeKeccakEvery;
         _memoizeRlp = memoizeRlp;
+        _useParallel = useParallel;
 
         _meter = new Meter("Paprika.Merkle");
         _storageProcessing = _meter.CreateHistogram<long>("State processing", "ms",
@@ -136,7 +141,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
     }
 
-    public Keccak BeforeCommit(ICommit commit, CacheBudget budget)
+    public Keccak BeforeCommit(ICommit commit, CacheBudget budget) => BeforeCommit(commit, budget, false);
+
+    public Keccak BeforeCommit(ICommit commit, CacheBudget budget, bool skipRootCalculation)
     {
         using var total = _totalMerkle.Measure();
 
@@ -162,9 +169,17 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         using (_stateProcessing.Measure())
         {
-            new BuildStateTreeItem(commit, commit.Stats.Keys, budget).DoWork();
+            using var cached = commit.WriteThroughCacheRoot(ShouldCacheKey, ShouldCacheResult, _pool);
+
+            new BuildStateTreeItem(cached, commit.Stats.Keys, budget).DoWork();
+
+            cached.SealCaching();
+
+            if (skipRootCalculation)
+                return Keccak.Zero;
+
             var root = Key.Merkle(NibblePath.Empty);
-            var rootKeccak = Compute(root, new ComputeContext(commit, TrieType.State, ComputeHint.None, budget));
+            var rootKeccak = Compute(root, new ComputeContext(cached, TrieType.State, ComputeHint.None, budget));
 
             Debug.Assert(rootKeccak.DataType == KeccakOrRlp.Type.Keccak);
 
@@ -180,24 +195,41 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     /// <param name="commit">The original commit.</param>
     /// <param name="workItems">The work items.</param>
-    private static void ScatterGather(ICommit commit, IEnumerable<IWorkItem> workItems)
+    private void ScatterGather(ICommit commit, IEnumerable<IWorkItem> workItems)
     {
-        var children = new ConcurrentQueue<IChildCommit>();
+        if (_useParallel)
+        {
+            var children = new ConcurrentQueue<IChildCommit>();
 
-        Parallel.ForEach(workItems, commit.GetChild, (workItem, _, child) =>
+            Parallel.ForEach(workItems,
+                () => commit.GetChild().WriteThroughCacheChild(ShouldCacheKey, ShouldCacheResult, _pool),
+                (workItem, _, child) =>
+                {
+                    workItem.DoWork(child);
+                    return child;
+                },
+                children.Enqueue
+            );
+
+            while (children.TryDequeue(out var child))
+            {
+                child.Commit();
+                child.Dispose();
+            }
+        }
+        else
+        {
+            using var child = commit.GetChild().WriteThroughCacheChild(ShouldCacheKey, ShouldCacheResult, _pool);
+            foreach (var workItem in workItems)
             {
                 workItem.DoWork(child);
-                return child;
-            },
-            children.Enqueue
-        );
-
-        while (children.TryDequeue(out var child))
-        {
+            }
             child.Commit();
-            child.Dispose();
         }
     }
+
+    private static bool ShouldCacheKey(in Key key) => key.Type == DataType.Merkle;
+    private static bool ShouldCacheResult(in ReadOnlySpanOwnerWithMetadata<byte> result) => true;
 
     /// <summary>
     /// Builds works items responsible for building up the storage tries.
@@ -237,17 +269,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     public ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data)
     {
-        if (data.IsEmpty)
-            return data;
-
-        if (key.Type != DataType.Merkle)
-            return data;
-
-        if (Node.Header.Peek(data).NodeType != Node.Type.Branch)
-            return data;
-
-        // trim the cached rlp from branches
-        return Node.Branch.GetOnlyBranchData(data);
+        return data;
     }
 
     public Keccak RootHash { get; private set; }
@@ -293,11 +315,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     {
         using var owner = ctx.Commit.Get(key);
 
-        if (owner.IsDbQuery && ctx.Budget.ClaimDbWrite())
-        {
-            ctx.Commit.Set(key, owner.Span);
-        }
-
         if (owner.IsEmpty)
         {
             // empty tree, return empty
@@ -337,11 +354,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         using var leafData = ctx.Commit.Get(leafKey);
 
-        if (leafData.IsDbQuery && ctx.Budget.ClaimDbWrite())
-        {
-            ctx.Commit.Set(leafKey, leafData.Span);
-        }
-
         KeccakOrRlp keccakOrRlp;
         if (ctx.TrieType == TrieType.State)
         {
@@ -372,8 +384,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         // Parallelize at the root level any trie, state or storage, that have all children set.
         // This heuristic is used to estimate that the tree should be big enough to gain from making this computation
         // parallel but without calculating and storing additional information how big is the tree.
-        var runInParallel = !ctx.Hint.HasFlag(ComputeHint.DontUseParallel) && key.Path.IsEmpty &&
-                            branch.Children.AllSet;
+        var runInParallel = !ctx.Hint.HasFlag(ComputeHint.DontUseParallel) &&
+                            key.Path.IsEmpty && // only for root
+                            branch.Children.AllSet && // only where all children set
+                            branch.Leafs.IsEmpty; // only if no embedded leafs
 
         var memoize = !ctx.Hint.HasFlag(ComputeHint.SkipCachedInformation) && ShouldMemoizeBranchRlp(key.Path);
         var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
@@ -430,9 +444,18 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     }
 
                     var childPath = key.Path.AppendNibble(i, childSpan);
-                    var value = Compute(Key.Merkle(childPath), ctx);
 
-                    // it's either Keccak or a span. Both are encoded the same ways
+                    KeccakOrRlp value;
+                    if (branch.Leafs.TryGetLeaf(i, key.Path, out scoped var leaf))
+                    {
+                        // embedded leaf
+                        value = EncodeLeaf(Key.Merkle(childPath), leaf, ctx);
+                    }
+                    else
+                    {
+                        value = Compute(Key.Merkle(childPath), ctx);
+                    }
+
                     if (value.DataType == KeccakOrRlp.Type.Keccak)
                     {
                         stream.Encode(value.Span);
@@ -521,11 +544,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             // Storing RLP for an embedded node is useless as it can be easily re-calculated.
             if (ShouldMemoizeBranchKeccak(key.Path))
             {
-                ctx.Commit.SetBranch(key, branch.Children, new Keccak(result.Span), memo.Raw);
+                ctx.Commit.SetBranch(key, branch.Children, new Keccak(result.Span), branch.Leafs, memo.Raw);
             }
             else
             {
-                ctx.Commit.SetBranch(key, branch.Children, memo.Raw);
+                ctx.Commit.SetBranch(key, branch.Children, branch.Leafs, memo.Raw);
             }
         }
 
@@ -742,28 +765,60 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         return DeleteStatus.KeyDoesNotExist;
                     }
 
-                    var newAt = at + 1;
+                    DeleteStatus status;
+                    var potentialLeafPath = path.SliceFrom(at);
+                    scoped var embedded = branch.Leafs;
 
-                    var status = Delete(path, newAt, commit, budget);
-                    if (status == DeleteStatus.KeyDoesNotExist)
+                    if (branch.Leafs.TryGetLeafWithSameNibble(potentialLeafPath, out var embeddedLeaf))
                     {
-                        // child reports non-existence
-                        return DeleteStatus.KeyDoesNotExist;
-                    }
-
-                    if (status
-                        is DeleteStatus.NodeTypePreserved
-                        or DeleteStatus.ExtensionToLeaf
-                        or DeleteStatus.BranchToLeafOrExtension)
-                    {
-                        // if either has the keccak or has the leftover rlp, clean
-                        if (branch.HasKeccak || leftover.IsEmpty == false)
+                        if (embeddedLeaf.Path.Equals(potentialLeafPath))
                         {
-                            // reset
-                            commit.SetBranch(key, branch.Children);
+                            embedded = branch.Leafs.Remove(potentialLeafPath, stackalloc byte[branch.Leafs.MaxByteSize]);
+
+                            // this is a leaf to remove
+                            status = DeleteStatus.LeafDeleted;
+                        }
+                        else
+                        {
+                            // child reports non-existence
+                            return DeleteStatus.KeyDoesNotExist;
+                        }
+                    }
+                    else
+                    {
+                        var newAt = at + 1;
+                        status = Delete(path, newAt, commit, budget);
+                        if (status == DeleteStatus.KeyDoesNotExist)
+                        {
+                            // child reports non-existence
+                            return DeleteStatus.KeyDoesNotExist;
                         }
 
-                        return DeleteStatus.NodeTypePreserved;
+                        if (status
+                            is DeleteStatus.NodeTypePreserved
+                            or DeleteStatus.ExtensionToLeaf
+                            or DeleteStatus.BranchToLeafOrExtension)
+                        {
+                            if (status == DeleteStatus.BranchToLeafOrExtension)
+                            {
+                                // Handle branchToLeaf in a different way by checking what is underneath.
+                                if (TryInlineChild(commit, path, branch, key, at))
+                                {
+                                    // the node is inline and the branch is updated, return
+
+                                    return DeleteStatus.NodeTypePreserved;
+                                }
+                            }
+
+                            // if either has the keccak or has the leftover rlp, clean
+                            if (branch.HasKeccak)
+                            {
+                                // reset
+                                commit.SetBranch(key, branch.Children, embedded);
+                            }
+
+                            return DeleteStatus.NodeTypePreserved;
+                        }
                     }
 
                     Debug.Assert(status == DeleteStatus.LeafDeleted, "leaf deleted");
@@ -773,11 +828,18 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     // if branch has still more than one child, just update the set
                     if (children.SetCount > 1)
                     {
-                        commit.SetBranch(key, children);
+                        commit.SetBranch(key, children, embedded);
                         return DeleteStatus.NodeTypePreserved;
                     }
 
                     // there's an only child now. The branch should be collapsed
+                    if (embedded.Count == 1)
+                    {
+                        commit.SetLeaf(key, embedded.GetSingleLeaf(leftoverPath));
+                        return DeleteStatus.BranchToLeafOrExtension;
+                        // there's a single child that is an embedded leaf
+                    }
+
                     var onlyNibble = children.SmallestNibbleSet;
                     var onlyChildPath = slice.AppendNibble(onlyNibble,
                         stackalloc byte[slice.MaxByteLength + 1]);
@@ -815,9 +877,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         return DeleteStatus.BranchToLeafOrExtension;
                     }
 
-                    // prepare the new leaf path
-                    var leafPath =
-                        firstNibblePath.Append(childLeaf.Path, stackalloc byte[NibblePath.FullKeccakByteLength]);
+                    // The leaf node might be created only on the collapse of the child
+                    var leafPath = firstNibblePath.Append(childLeaf.Path, stackalloc byte[NibblePath.FullKeccakByteLength]);
 
                     // replace branch with the leaf
                     commit.SetLeaf(key, leafPath);
@@ -829,6 +890,33 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 }
             default:
                 throw new ArgumentOutOfRangeException();
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static bool TryInlineChild(ICommit commit, in NibblePath path, in Node.Branch branch, in Key branchKey, int at)
+        {
+            var childPath = path.SliceTo(at + 1);
+            var childKey = Key.Merkle(childPath);
+
+            scoped NibblePath concatenated;
+            using (var child = commit.Get(childKey))
+            {
+                Node.ReadFrom(child.Span, out var ct, out var l, out _, out _);
+                if (ct != Node.Type.Leaf)
+                {
+                    return false;
+                }
+
+                concatenated = childPath.Append(l.Path, stackalloc byte[NibblePath.FullKeccakByteLength]);
+            }
+
+            var newLeaf = concatenated.SliceFrom(at);
+            var newLeafs = branch.Leafs.Add(newLeaf, stackalloc byte[branch.Leafs.SpanSizeForGrow]);
+
+            commit.SetBranch(branchKey, branch.Children, newLeafs);
+            commit.DeleteKey(childKey);
+
+            return true;
         }
     }
 
@@ -866,7 +954,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private static void MarkPathDirty(in NibblePath path, ICommit commit, CacheBudget budget)
     {
-        Span<byte> span = stackalloc byte[33];
+        Span<byte> span = stackalloc byte[64];
 
         for (var i = 0; i <= path.Length; i++)
         {
@@ -896,25 +984,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         {
                             // This is update in place. The parent is marked as parent as dirty.
                             // The structure of Merkle does not change.
-                            // Check if the read was from db and, if there's the budget for the update, schedule it.
-                            if (owner.IsDbQuery && budget.ClaimDbWrite())
-                            {
-                                commit.SetLeaf(key, leftoverPath);
-                            }
-
                             return;
                         }
 
                         var nibbleA = leaf.Path[diffAt];
                         var nibbleB = leftoverPath[diffAt];
-
-                        // nibbleA, deep copy to write in an unsafe manner
-                        var pathA = path.SliceTo(i + diffAt).AppendNibble(nibbleA, span);
-                        commit.SetLeaf(Key.Merkle(pathA), leaf.Path.SliceFrom(diffAt + 1));
-
-                        // nibbleB, set the newly set leaf, slice to the next nibble
-                        var pathB = path.SliceTo(i + 1 + diffAt);
-                        commit.SetLeaf(Key.Merkle(pathB), leftoverPath.SliceFrom(diffAt + 1));
 
                         // Important! Make it the last in set of changes as it may be updating the key that was read (leaf)
                         if (diffAt > 0)
@@ -923,9 +997,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             commit.SetExtension(key, leftoverPath.SliceTo(diffAt));
                         }
 
-                        // Important! Make it the last in set of changes
+                        // Create branch with embedded leafs
                         var branchKey = Key.Merkle(path.SliceTo(i + diffAt));
-                        commit.SetBranch(branchKey, new NibbleSet(nibbleA, nibbleB));
+                        var embedded = new EmbeddedLeafs(leaf.Path.SliceFrom(diffAt), leftoverPath.SliceFrom(diffAt), span);
+                        commit.SetBranch(branchKey, new NibbleSet(nibbleA, nibbleB), embedded);
 
                         return;
                     }
@@ -946,10 +1021,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                                 // special case of an extension being only 1 nibble long
                                 // 1. replace an extension with a branch
                                 // 2. leave the next branch as is
-                                // 3. add a new leaf
+                                // 3. embed the leaf in the branch
                                 var set = new NibbleSet(ext.Path[0], leftoverPath[0]);
-                                commit.SetBranch(key, set);
-                                commit.SetLeaf(Key.Merkle(path.SliceTo(i + 1)), path.SliceFrom(i + 1));
+                                commit.SetBranch(key, set, new EmbeddedLeafs(leftoverPath, span));
                                 return;
                             }
 
@@ -964,10 +1038,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                                 commit.SetExtension(Key.Merkle(key.Path.AppendNibble(ext0Th, span)),
                                     ext.Path.SliceFrom(1));
 
-                                commit.SetLeaf(Key.Merkle(path.SliceTo(i + 1)), path.SliceFrom(i + 1));
+                                var leafs = new EmbeddedLeafs(path.SliceFrom(i), span);
 
                                 // Important! Make it the last as it's updating the existing key and it might affect the read value
-                                commit.SetBranch(key, new NibbleSet(ext0Th, leftoverPath[0]));
+                                commit.SetBranch(key, new NibbleSet(ext0Th, leftoverPath[0]), leafs);
                                 return;
                             }
                         }
@@ -983,8 +1057,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             var splitAt = i + ext.Path.Length - 1;
                             var set = new NibbleSet(path[splitAt], ext.Path[lastNibblePos]);
 
-                            commit.SetBranch(Key.Merkle(path.SliceTo(splitAt)), set);
-                            commit.SetLeaf(Key.Merkle(path.SliceTo(splitAt + 1)), path.SliceFrom(splitAt + 1));
+                            var leafs = new EmbeddedLeafs(path.SliceFrom(splitAt), span);
+                            commit.SetBranch(Key.Merkle(path.SliceTo(splitAt)), set, leafs);
 
                             // Important! Make it the last as it's updating the existing key and it might affect the read value
                             commit.SetExtension(key, ext.Path.SliceTo(lastNibblePos));
@@ -1001,10 +1075,16 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         var existingNibble = ext.Path[diffAt];
                         var addedNibble = path[i + diffAt];
                         var children = new NibbleSet(existingNibble, addedNibble);
-                        commit.SetBranch(Key.Merkle(branch1), children);
+
+                        // LO as embedded
+                        var leafPathLength = branch1.Length;
+                        Span<byte> leafSpan = stackalloc byte[EmbeddedLeafs.PathSpanSize(1)];
+                        commit.SetBranch(Key.Merkle(branch1), children,
+                            new EmbeddedLeafs(path.SliceFrom(leafPathLength), leafSpan));
 
                         // E2
-                        var extension2 = branch1.AppendNibble(existingNibble, span);
+                        Span<byte> ext2Span = stackalloc byte[branch1.MaxByteLength + 1];
+                        var extension2 = branch1.AppendNibble(existingNibble, ext2Span);
                         if (extension2.Length < key.Path.Length + ext.Path.Length)
                         {
                             // there are some bytes to be set in the extension path, create one
@@ -1012,9 +1092,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             commit.SetExtension(Key.Merkle(extension2), e2Path);
                         }
 
-                        // L0
-                        var leafPath = branch1.AppendNibble(addedNibble, span);
-                        commit.SetLeaf(Key.Merkle(leafPath), path.SliceFrom(leafPath.Length));
+                        // L0 is embedded above
 
                         // Important! Make it the last as it's updating the existing key
                         commit.SetExtension(key, extPath);
@@ -1024,49 +1102,63 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 case Node.Type.Branch:
                     {
                         var nibble = path[i];
-                        Span<byte> rlp = default;
-                        byte[]? array = default;
 
-                        if (leftover.Length == RlpMemo.Size)
+                        var leafPath = path.SliceFrom(i);
+
+                        if (branch.Children[nibble])
                         {
-                            if (owner.IsOwnedBy(commit))
+                            // The child exists. Check if there's a leaf for it
+                            if (branch.Leafs.TryGetLeafWithSameNibble(leafPath, out var existingLeaf))
                             {
-                                rlp = MakeRlpWritable(leftover);
-                            }
-                            else
-                            {
-                                array = ArrayPool<byte>.Shared.Rent(RlpMemo.Size);
-                                rlp = array.AsSpan(0, RlpMemo.Size);
-                                leftover.CopyTo(rlp);
+                                if (!existingLeaf.Path.Equals(leafPath))
+                                {
+                                    var diffAt = existingLeaf.Path.FindFirstDifferentNibble(leafPath);
+                                    if (diffAt > 1)
+                                    {
+                                        var extKey = Key.Merkle(key.Path.AppendNibble(leafPath.FirstNibble, span));
+                                        commit.SetExtension(extKey, leafPath.SliceFrom(1).SliceTo(diffAt - 1));
+                                    }
+
+                                    var branchKey = key.Path.Append(leafPath.SliceTo(diffAt), span);
+                                    var set = new NibbleSet(leafPath[diffAt], existingLeaf.Path[diffAt]);
+                                    var leafs = new EmbeddedLeafs(leafPath.SliceFrom(diffAt),
+                                        existingLeaf.Path.SliceFrom(diffAt),
+                                        stackalloc byte[EmbeddedLeafs.PathSpanSize(2)]);
+
+                                    // set new branch
+                                    commit.SetBranch(Key.Merkle(branchKey), set, leafs);
+
+                                    // update the existing by removing the embedded child
+                                    commit.SetBranch(key, branch.Children,
+                                        branch.Leafs.Remove(existingLeaf.Path,
+                                            stackalloc byte[branch.Leafs.SpanSizeForShrink]));
+                                }
+
+                                return;
                             }
 
-                            var memo = new RlpMemo(rlp);
-                            memo.Clear(nibble);
-                        }
-
-                        var children = branch.Children.Set(nibble);
-
-                        if (rlp.IsEmpty)
-                        {
-                            // Set if the nibble was not set before, or branch has memoized Keccak
-                            if (!branch.Children[nibble] || branch.HasKeccak)
+                            // No embedded leaf with the same first nibble. It must be an extension or a branch, proceed
+                            // Check if there are some memoized data. If they are, clear them and set the branch. 
+                            if (branch.HasKeccak)
                             {
-                                commit.SetBranch(key, children);
-                            }
-                            else if (owner.IsDbQuery && budget.ClaimDbWrite())
-                            {
-                                // If it was a db query, check budget and update
-                                commit.SetBranch(key, children);
+                                commit.SetBranch(key, branch.Children, branch.Leafs);
                             }
                         }
                         else
                         {
-                            commit.SetBranch(key, children, rlp);
-                        }
+                            // The child was not set yet, create and embed one
+                            var children = branch.Children.Set(nibble);
 
-                        if (array != null)
-                        {
-                            ArrayPool<byte>.Shared.Return(array);
+                            var leafBytes = ArrayPool<byte>.Shared.Rent(EmbeddedLeafs.MaxWorksetNeeded);
+                            var leafs = branch.Leafs.Add(leafPath, leafBytes);
+
+                            commit.SetBranch(key, children, leafs);
+
+                            // return leafs
+                            ArrayPool<byte>.Shared.Return(leafBytes);
+
+                            // branch is set
+                            return;
                         }
                     }
                     break;
@@ -1147,7 +1239,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         private readonly CacheBudget _budget;
         private PrefixingCommit? _prefixed;
 
-        public BuildStorageTriesItem(ComputeMerkleBehavior behavior, ICommit parent, HashSet<Keccak> accounts, CacheBudget budget)
+        public BuildStorageTriesItem(ComputeMerkleBehavior behavior, ICommit parent, HashSet<Keccak> accounts,
+            CacheBudget budget)
         {
             _behavior = behavior;
             _parent = parent;
@@ -1227,5 +1320,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
     }
 
-    public void Dispose() => _meter.Dispose();
+    public void Dispose()
+    {
+        _pool.Dispose();
+        _meter.Dispose();
+    }
 }
