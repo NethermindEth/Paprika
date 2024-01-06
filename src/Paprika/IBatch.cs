@@ -1,7 +1,5 @@
-﻿using Nethermind.Int256;
-using Paprika.Crypto;
+﻿using Paprika.Crypto;
 using Paprika.Data;
-using Paprika.Store;
 
 namespace Paprika;
 

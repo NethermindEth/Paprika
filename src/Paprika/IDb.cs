@@ -1,4 +1,6 @@
-﻿namespace Paprika;
+﻿using Paprika.Crypto;
+
+namespace Paprika;
 
 public interface IDb
 {
@@ -13,4 +15,19 @@ public interface IDb
     /// </summary>
     /// <returns></returns>
     IReadOnlyBatch BeginReadOnlyBatch(string name = "");
+
+    /// <summary>
+    /// Force flush
+    /// </summary>
+    void Flush();
+
+    /// <summary>
+    /// Begins the readonly batch with the given Keccak or the latest.
+    /// </summary>
+    IReadOnlyBatch BeginReadOnlyBatchOrLatest(in Keccak stateHash, string name = "");
+
+    /// <summary>
+    /// Whether there's a state with the given keccak.
+    /// </summary>
+    bool HasState(in Keccak keccak);
 }

@@ -37,7 +37,7 @@ public class Blockchain : IAsyncDisposable
     private readonly Counter<long> _bloomMissedReads;
     private readonly MetricsExtensions.IAtomicIntGauge _flusherQueueCount;
 
-    private readonly PagedDb _db;
+    private readonly IDb _db;
     private readonly IPreCommitBehavior _preCommit;
     private readonly CacheBudget.Options _options;
     private readonly TimeSpan _minFlushDelay;
@@ -48,7 +48,7 @@ public class Blockchain : IAsyncDisposable
 
     private static readonly TimeSpan DefaultFlushDelay = TimeSpan.FromSeconds(1);
 
-    public Blockchain(PagedDb db, IPreCommitBehavior preCommit, TimeSpan? minFlushDelay = null,
+    public Blockchain(IDb db, IPreCommitBehavior preCommit, TimeSpan? minFlushDelay = null,
         CacheBudget.Options options = default,
         int? finalizationQueueLimit = null, Action? beforeMetricsDisposed = null)
     {
@@ -274,7 +274,7 @@ public class Blockchain : IAsyncDisposable
         }
 
         // the most recent finalized batch
-        var batch = _db.BeginReadOnlyBatchOrLatest(parentKeccak, $"Blockchain dependency");
+        var batch = _db.BeginReadOnlyBatchOrLatest(parentKeccak, "Blockchain dependency");
 
         // batch matches the parent, return
         if (batch.Metadata.StateHash == parentKeccak)
@@ -366,32 +366,6 @@ public class Blockchain : IAsyncDisposable
 
             return false;
         }
-    }
-
-    private class ReadOnlyBatchCountingRefs : RefCountingDisposable, IReadOnlyBatch
-    {
-        private readonly IReadOnlyBatch _batch;
-
-        public ReadOnlyBatchCountingRefs(IReadOnlyBatch batch)
-        {
-            _batch = batch;
-            Metadata = batch.Metadata;
-            BatchId = batch.BatchId;
-        }
-
-        protected override void CleanUp() => _batch.Dispose();
-
-        public Metadata Metadata { get; }
-
-        public uint BatchId { get; }
-
-
-        public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result) => _batch.TryGet(key, out result);
-
-        public void Report(IReporter reporter) =>
-            throw new NotImplementedException("One should not report over a block");
-
-        public override string ToString() => base.ToString() + $", BatchId:{_batch.BatchId}";
     }
 
     /// <summary>
@@ -1205,8 +1179,6 @@ public class Blockchain : IAsyncDisposable
 
         // once the flushing is done and blocks are disposed, dispose the pool
         _pool.Dispose();
-
-        Debugger.Log(0, null, $"Next free page: {_db.NextFreePage}\n\n");
 
         // dispose metrics, but flush them last time before unregistering
         _beforeMetricsDisposed?.Invoke();
