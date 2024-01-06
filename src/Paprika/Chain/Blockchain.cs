@@ -368,29 +368,6 @@ public class Blockchain : IAsyncDisposable
         }
     }
 
-    private class ReadOnlyBatchCountingRefs : RefCountingDisposable, IReadOnlyBatch
-    {
-        private readonly IReadOnlyBatch _batch;
-
-        public ReadOnlyBatchCountingRefs(IReadOnlyBatch batch)
-        {
-            _batch = batch;
-            Metadata = batch.Metadata;
-        }
-
-        protected override void CleanUp() => _batch.Dispose();
-
-        public Metadata Metadata { get; }
-
-
-        public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result) => _batch.TryGet(key, out result);
-
-        public void Report(IReporter reporter) =>
-            throw new NotImplementedException("One should not report over a block");
-
-        public override string ToString() => base.ToString() + $", Batch :{_batch}";
-    }
-
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload.
     /// </summary>

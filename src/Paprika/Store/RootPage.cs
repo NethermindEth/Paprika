@@ -1,5 +1,7 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography.X509Certificates;
 using Paprika.Crypto;
 using Paprika.Data;
 
@@ -103,16 +105,36 @@ public readonly unsafe struct RootPage : IPage
 [StructLayout(LayoutKind.Explicit, Size = Size, Pack = 1)]
 public struct Metadata
 {
-    public const int Size = sizeof(uint) + Keccak.Size;
+    public const int Size = BlockNumberSize + Keccak.Size;
+    private const int BlockNumberSize = sizeof(uint);
 
-    [FieldOffset(0)]
-    public readonly uint BlockNumber;
-    [FieldOffset(4)]
-    public readonly Keccak StateHash;
+    [FieldOffset(0)] public readonly uint BlockNumber;
+    [FieldOffset(BlockNumberSize)] public readonly Keccak StateHash;
 
     public Metadata(uint blockNumber, Keccak stateHash)
     {
         BlockNumber = blockNumber;
         StateHash = stateHash;
+    }
+
+    public static Metadata ReadFrom(ReadOnlySpan<byte> source)
+    {
+        if (source.IsEmpty)
+        {
+            return new Metadata(0, Keccak.EmptyTreeHash);
+        }
+
+        var blockNumber = BinaryPrimitives.ReadUInt32LittleEndian(source);
+        var keccak = default(Keccak);
+
+        source.Slice(BlockNumberSize).CopyTo(keccak.BytesAsSpan);
+
+        return new Metadata(blockNumber, keccak);
+    }
+
+    public void WriteTo(Span<byte> destination)
+    {
+        BinaryPrimitives.WriteUInt32LittleEndian(destination, BlockNumber);
+        StateHash.Span.CopyTo(destination.Slice(BlockNumberSize));
     }
 }
