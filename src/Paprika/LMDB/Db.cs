@@ -25,6 +25,7 @@ public class Db : IDb, IDisposable
 
     private readonly Meter _meter;
     private readonly MetricsExtensions.IAtomicIntGauge _depth;
+    private readonly MetricsExtensions.IAtomicIntGauge _compressedLength;
 
     /// <summary>
     /// Used for storing metadata and mapping between accounts and their counters.
@@ -33,9 +34,10 @@ public class Db : IDb, IDisposable
     /// 0xFF, 1 - metadata
     /// 0xFF, 2 - account counter
     /// 0xFF + 32bytes -> id of an account
-    /// 
+    /// 0x80 + 32bytes -> account
     /// </remarks>
-    private const byte MetaPrefix = 0xFF;
+    private const byte PrefixMeta = 0xFF;
+    private const byte PrefixAccount = 0x80;
 
     private const int MetaPrefixLength = 1;
 
@@ -48,8 +50,8 @@ public class Db : IDb, IDisposable
     private const int MaxAccountIdLength = 8;
     private const int AccountMapKeyLength = MetaPrefixLength + Keccak.Size;
 
-    private static ReadOnlySpan<byte> MetadataKey => new byte[] { MetaPrefix, 1 };
-    private static ReadOnlySpan<byte> AccountCounter => new byte[] { MetaPrefix, 2 };
+    private static ReadOnlySpan<byte> MetadataKey => new byte[] { PrefixMeta, 1 };
+    private static ReadOnlySpan<byte> AccountCounter => new byte[] { PrefixMeta, 2 };
 
     public Db(string path, int historyDepth, long maxMapSize, bool sync = true)
     {
@@ -65,6 +67,7 @@ public class Db : IDb, IDisposable
 
         _meter = new Meter("Paprika.Store.LMDB");
         _depth = _meter.CreateAtomicObservableGauge("BTree depth", "Depth", "The number of levels in BTree");
+        _compressedLength = _meter.CreateAtomicObservableGauge("Max length compressed prefix of account", "Bytes", "The number of bytes");
 
         PushLatestReader();
     }
@@ -83,7 +86,6 @@ public class Db : IDb, IDisposable
 
     public void Flush()
     {
-        // TODO: what to do here?
     }
 
     public IReadOnlyBatch BeginReadOnlyBatchOrLatest(in Keccak stateHash, string name = "")
@@ -127,7 +129,21 @@ public class Db : IDb, IDisposable
     {
         if (key.Path.Length == NibblePath.KeccakNibbleCount)
         {
-            // It can be Account, Storage, or Merkle for the Storage
+            // It can be either Account, Storage, or Merkle for Storage
+            if (key.Type == DataType.Account)
+            {
+                // Key length optimization.
+                //
+                // The majority of the accounts will have no storage.
+                // It would be wasteful to use additional mapping for them.
+                // Create key directly and skip creating additional mapping for the account.
+                destination[0] = PrefixAccount;
+                key.Path.UnsafeAsKeccak.Span.CopyTo(destination[1..]);
+                mapped = destination[..(1 + Keccak.Size)];
+                return true;
+            }
+
+            // It can be Storage, or Merkle for the Storage
             // First try to get its account id.
             if (TryGetAccountId(ctx.Tx, key.Path.UnsafeAsKeccak, out var id))
             {
@@ -139,6 +155,9 @@ public class Db : IDb, IDisposable
             {
                 id = ctx.Generate(key.Path.UnsafeAsKeccak);
                 mapped = CompressKey(key, id, destination);
+
+                _compressedLength.Set(id.Length);
+
                 return true;
             }
 
@@ -163,20 +182,35 @@ public class Db : IDb, IDisposable
 
         var k = key.Type | DataType.CompressedAccount;
 
-        // move k up, so that the first bit is set
-        var firstByte = ((int)k << 5) + id.Length;
+        // shift left key by 4, so that move k up, so that the first bit is left unset
+        var firstByte = ((int)k << 4) + id.Length;
 
         destination[0] = (byte)firstByte;
         id.CopyTo(destination[1..]);
 
+        var slice = 1 + id.Length;
         if (key.StoragePath.Length == 0)
         {
-            return destination.Slice(0, 1 + id.Length);
+            return destination.Slice(0, slice);
         }
 
-        var storagePathLength = key.StoragePath.WriteTo(destination[(1 + id.Length)..]).Length;
-        var totalLength = 1 + id.Length + storagePathLength;
-        return destination.Slice(0, totalLength);
+        int storagePathLength;
+        if (key.Type == DataType.StorageCell)
+        {
+            // Key length optimization.
+            //
+            // The storage will always have the length of the StoragePath equal to 32. 
+            // This allows to write raw Keccak and skip the byte of preamble of the path for the storage. 
+            key.StoragePath.UnsafeAsKeccak.Span.CopyTo(destination[slice..]);
+            storagePathLength = 32;
+        }
+        else
+        {
+            storagePathLength = key.StoragePath.WriteTo(destination[slice..]).Length;
+        }
+
+        var totalLength = slice + storagePathLength;
+        return destination[..totalLength];
     }
 
     [SkipLocalsInit]
@@ -188,7 +222,7 @@ public class Db : IDb, IDisposable
 
     private static Span<byte> BuildAccountMapKey(in Keccak keccak, Span<byte> span)
     {
-        span[0] = MetaPrefix;
+        span[0] = PrefixMeta;
         keccak.Span.CopyTo(span[1..]);
         return span.Slice(0, AccountMapKeyLength);
     }
@@ -263,6 +297,7 @@ public class Db : IDb, IDisposable
 
         public Metadata Metadata { get; private set; }
 
+        [SkipLocalsInit]
         public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
         {
             var ctx = new ReadonlyAccountContext(_read);
@@ -293,7 +328,14 @@ public class Db : IDb, IDisposable
                 throw new Exception("Should id map properly");
             }
 
-            _db.Put(_tx, mapped, rawData);
+            if (rawData.IsEmpty)
+            {
+                _db.Delete(_tx, mapped);
+            }
+            else
+            {
+                _db.Put(_tx, mapped, rawData);
+            }
         }
 
         [SkipLocalsInit]
@@ -395,5 +437,10 @@ public class Db : IDb, IDisposable
             // TODO: later try to clean this up
             return sliced.ToArray();
         }
+    }
+
+    public void ForceSync()
+    {
+        _env.Sync(true);
     }
 }
