@@ -542,7 +542,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         {
             // Memoize only if Keccak and falls into the criteria.
             // Storing RLP for an embedded node is useless as it can be easily re-calculated.
-            if (ShouldMemoizeBranchKeccak(key.Path))
+            if (ShouldMemoizeBranchKeccak(key.Path, branch, ctx.TrieType))
             {
                 ctx.Commit.SetBranch(key, branch.Children, new Keccak(result.Span), branch.Leafs, memo.Raw);
             }
@@ -571,8 +571,14 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                branchPath.Length >= 1; // a simple condition to memoize only more nested RLPs
     }
 
-    private bool ShouldMemoizeBranchKeccak(in NibblePath branchPath)
+    private bool ShouldMemoizeBranchKeccak(in NibblePath branchPath, in Node.Branch branch, TrieType trieType)
     {
+        if (trieType == TrieType.Storage && branch.Children.SetCount < 4 && branch.Leafs.Count == branch.Children.SetCount)
+        {
+            // It's a branch that has only embedded leafs and has less than 4 of them
+            return false;
+        }
+
         var level = branchPath.Length - _minimumTreeLevelToMemoizeKeccak;
 
         // memoize only if the branch is deeper than _minimumTreeLevelToMemoizeKeccak and every _memoizeKeccakEvery

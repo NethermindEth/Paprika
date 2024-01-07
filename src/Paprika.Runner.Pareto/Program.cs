@@ -3,6 +3,7 @@ using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
 using Paprika.Chain;
 using Paprika.Crypto;
+using Paprika.LMDB;
 using Paprika.Merkle;
 using Paprika.Store;
 using Paprika.Tests;
@@ -68,7 +69,7 @@ public static class Program
 
             Console.WriteLine("Initializing db of size {0}GB", DbFileSize / Gb);
 
-            using var db = PagedDb.MemoryMappedDb(DbFileSize, MaxReorgDepth, dataPath, true);
+            using var db = new Db(dataPath, MaxReorgDepth, DbFileSize, sync: false);
 
             // ReSharper disable once MethodSupportsCancellation
 #pragma warning disable CS4014
