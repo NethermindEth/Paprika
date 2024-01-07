@@ -129,8 +129,8 @@ public readonly ref struct NibblePath
     /// <returns>The actual bytes written.</returns>
     public Span<byte> WriteTo(Span<byte> destination)
     {
-        var lenght = WriteImpl(destination);
-        return destination.Slice(0, lenght);
+        var length = WriteImpl(destination);
+        return destination.Slice(0, length);
     }
 
     private int WriteImpl(Span<byte> destination)

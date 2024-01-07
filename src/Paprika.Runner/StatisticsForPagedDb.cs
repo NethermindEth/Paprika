@@ -8,7 +8,7 @@ namespace Paprika.Runner;
 
 public static class StatisticsForPagedDb
 {
-    public static void Report(Layout reportTo, IReadOnlyBatch read)
+    public static void Report(Layout reportTo, IReporting read)
     {
         reportTo.Update(new Panel("Gathering statistics...").Header("Paprika tree statistics").Expand());
 

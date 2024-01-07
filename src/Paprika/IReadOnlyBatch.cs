@@ -14,10 +14,6 @@ public interface IReadOnlyBatch : IDisposable
     /// <param name="result"></param>
     /// <returns></returns>
     bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result);
-
-    void Report(IReporter reporter);
-
-    public uint BatchId { get; }
 }
 
 public class EmptyReadOnlyBatch : IReadOnlyBatch
@@ -38,9 +34,6 @@ public class EmptyReadOnlyBatch : IReadOnlyBatch
         return false;
     }
 
-    public void Report(IReporter reporter) { }
-
-    public uint BatchId => default;
     public void Dispose() { }
 }
 
