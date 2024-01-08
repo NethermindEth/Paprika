@@ -382,8 +382,15 @@ public class Db : IDb, IDisposable
         {
             Debug.Assert(account.Length == NibblePath.KeccakNibbleCount);
 
-            // TODO: apply proper delete, otherwise db will grow
-            _db.Delete(_tx, BuildAccountMapKey(account.UnsafeAsKeccak, stackalloc byte[AccountMapKeyLength]));
+            Span<byte> bytes = stackalloc byte[AccountMapKeyLength];
+            account.UnsafeAsKeccak.Span.CopyTo(bytes[1..]);
+
+            bytes[0] = PrefixAccount;
+            _db.Delete(_tx, bytes);
+
+            // TODO: apply proper delete, otherwise db will grow, this removes only prefix mapping
+            bytes[0] = PrefixMeta;
+            _db.Delete(_tx, bytes);
         }
 
         public ValueTask Commit(CommitOptions options)
