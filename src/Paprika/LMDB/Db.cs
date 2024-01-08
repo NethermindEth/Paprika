@@ -41,6 +41,7 @@ public class Db : IDb, IDisposable
     /// 0x80 + 32bytes -> account
     /// </remarks>
     private const byte PrefixMeta = 0xFF;
+
     private const byte PrefixAccount = 0x80;
 
     private const int MetaPrefixLength = 1;
@@ -73,7 +74,8 @@ public class Db : IDb, IDisposable
 
         _meter = new Meter("Paprika.Store.LMDB");
         _depth = _meter.CreateAtomicObservableGauge("BTree depth", "Depth", "The number of levels in BTree");
-        _compressedLength = _meter.CreateAtomicObservableGauge("Max length compressed prefix of account", "Bytes", "The number of bytes");
+        _compressedLength = _meter.CreateAtomicObservableGauge("Max length compressed prefix of account", "Bytes",
+            "The number of bytes");
 
         PushLatestReader();
     }
@@ -148,7 +150,6 @@ public class Db : IDb, IDisposable
         }
 
         return stats;
-
     }
 
     private bool TryMapKey<TAccountContext>(in TAccountContext ctx, in Key key, Span<byte> destination,
@@ -363,6 +364,7 @@ public class Db : IDb, IDisposable
             }
             else
             {
+                // TODO: get account id
                 // Merkle, try get as is first
                 if (_db.TryMapKey(ctx, key, destination, out var mapped))
                 {
@@ -386,12 +388,10 @@ public class Db : IDb, IDisposable
                         return false;
                     }
 
-                    var leafPath = NibblePath
-                        .FromKey(lowerBound.Span.Slice(MetaPrefixLength))
-                        .SliceFrom(key.Path.Length);
+                    var found = NibblePath
+                        .FromKey(lowerBound.Span.Slice(MetaPrefixLength));
 
-                    result = CreateLeafResult(leafPath);
-                    return true;
+                    return TryCreateLeafResult(key.Path, found, out result);
                 }
                 else
                 {
@@ -420,8 +420,7 @@ public class Db : IDb, IDisposable
                         .FromKey(lowerBound.Span[^32..])
                         .SliceFrom(key.StoragePath.Length);
 
-                    result = CreateLeafResult(leafPath);
-                    return true;
+                    return TryCreateLeafResult(key.StoragePath, leafPath, out result);
                 }
             }
 
@@ -429,12 +428,20 @@ public class Db : IDb, IDisposable
             return false;
         }
 
-        private static ReadOnlySpan<byte> CreateLeafResult(NibblePath leafPath)
+        private static bool TryCreateLeafResult(scoped in NibblePath searchedPrefix, scoped in NibblePath foundFullPath,
+            out ReadOnlySpan<byte> result)
         {
-            var leaf = new Node.Leaf(leafPath);
-            // TODO: remove allocation
-            var bytes = new byte[leaf.MaxByteLength];
-            return leaf.WriteTo(bytes);
+            if (foundFullPath.FindFirstDifferentNibble(searchedPrefix) == searchedPrefix.Length)
+            {
+                var leaf = new Node.Leaf(foundFullPath.SliceFrom(searchedPrefix.Length));
+                // TODO: remove allocation
+                var bytes = new byte[leaf.MaxByteLength];
+                result = leaf.WriteTo(bytes);
+                return true;
+            }
+
+            result = default;
+            return false;
         }
 
         public void SetMetadata(uint blockNumber, in Keccak blockHash)
@@ -610,7 +617,8 @@ public class Db : IDb, IDisposable
                                 TotalSizeIdMappings += totalLength;
                                 break;
                             case > 2:
-                                throw new Exception($"{((ReadOnlySpan<byte>)key.Span).ToHexString(true)} should not appear here");
+                                throw new Exception(
+                                    $"{((ReadOnlySpan<byte>)key.Span).ToHexString(true)} should not appear here");
                         }
 
                         break;
@@ -631,6 +639,7 @@ public class Db : IDb, IDisposable
                             default:
                                 throw new ArgumentOutOfRangeException();
                         }
+
                         break;
                     }
             }
@@ -665,4 +674,3 @@ public class Db : IDb, IDisposable
         }
     }
 }
-
