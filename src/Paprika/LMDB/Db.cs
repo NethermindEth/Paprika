@@ -532,13 +532,6 @@ public class Db : IDb, IDisposable
                                 break;
                             case DataType.Merkle:
                                 TotalSizeMerkle += totalLength;
-
-                                Node.ReadFrom(value.Span, out var nodeType, out _, out _, out var branch);
-                                if (nodeType == Node.Type.Branch)
-                                {
-                                    TotalSizeEmbeddedMerkleLeafs += branch.Leafs.MaxByteSize;
-                                }
-
                                 break;
                             default:
                                 throw new ArgumentOutOfRangeException();

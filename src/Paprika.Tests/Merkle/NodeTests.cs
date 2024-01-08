@@ -91,7 +91,7 @@ public class NodeTests
     public void Branch_no_keccak()
     {
         ushort nibbles = 0b0110_1001_0101_1010;
-        var branch = new Node.Branch(new NibbleSet.Readonly(nibbles), default);
+        var branch = new Node.Branch(new NibbleSet.Readonly(nibbles));
 
         branch.Keccak.Should().Be(Keccak.Zero);
     }
@@ -137,7 +137,7 @@ public class NodeTests
     public void Branch_no_keccak_encoded_smaller_than_with_keccak()
     {
         const ushort nibbles = 0b0110_1001_0101_1010;
-        var noKeccak = new Node.Branch(new NibbleSet.Readonly(nibbles), default);
+        var noKeccak = new Node.Branch(new NibbleSet.Readonly(nibbles));
         var hasKeccak = new Node.Branch(new NibbleSet.Readonly(nibbles), Values.Key0);
 
         Span<byte> noKeccakBuffer = stackalloc byte[noKeccak.MaxByteLength];
