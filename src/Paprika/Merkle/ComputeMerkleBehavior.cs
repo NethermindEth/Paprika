@@ -1,3 +1,5 @@
+//#define STORE_NO_LEAFS
+
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -191,7 +193,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     {
         var children = new ConcurrentQueue<IChildCommit>();
 
-        Parallel.ForEach(workItems, () => commit.GetChild().WriteThroughCacheChild(ShouldCacheKey, ShouldCacheResult, _pool),
+        Parallel.ForEach(workItems,
+            () => commit.GetChild().WriteThroughCacheChild(ShouldCacheKey, ShouldCacheResult, _pool),
             (workItem, _, child) =>
             {
                 workItem.DoWork(child);
@@ -254,8 +257,22 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         if (key.Type != DataType.Merkle)
             return data;
 
-        if (Node.Header.Peek(data).NodeType != Node.Type.Branch)
+        var node = Node.Header.Peek(data).NodeType;
+
+
+        if (node == Node.Type.Leaf)
+        {
+#if STORE_NO_LEAFS
+            // store only roots
+            return key.StoragePath.Length == 0 ? data : ReadOnlySpan<byte>.Empty;
+#endif
+        }
+
+        if (node != Node.Type.Branch)
+        {
+            // extension is not modified
             return data;
+        }
 
         // trim the cached rlp from branches
         return Node.Branch.GetOnlyBranchData(data);
@@ -302,6 +319,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private KeccakOrRlp Compute(scoped in Key key, scoped in ComputeContext ctx)
     {
+        // As leafs are not stored in the database, hint to lookup again on missing.
         using var owner = ctx.Commit.Get(key);
 
         if (owner.IsDbQuery && ctx.Budget.ClaimDbWrite())
@@ -609,7 +627,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         public void SetPrefix(in Keccak keccak) => _keccak = keccak;
 
-        public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) => _commit.Get(Build(key));
+        public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) =>
+            _commit.Get(Build(key));
 
         public void Set(in Key key, in ReadOnlySpan<byte> payload) => _commit.Set(Build(key), in payload);
 
@@ -639,7 +658,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 _commit = commit;
             }
 
-            public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) => _commit.Get(_parent.Build(key));
+            public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) =>
+                _commit.Get(_parent.Build(key));
 
             public void Set(in Key key, in ReadOnlySpan<byte> payload) => _commit.Set(_parent.Build(key), payload);
 
@@ -905,14 +925,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                         if (diffAt == leaf.Path.Length)
                         {
-                            // This is update in place. The parent is marked as parent as dirty.
-                            // The structure of Merkle does not change.
-                            // Check if the read was from db and, if there's the budget for the update, schedule it.
-                            if (owner.IsDbQuery && budget.ClaimDbWrite())
-                            {
-                                commit.SetLeaf(key, leftoverPath);
-                            }
-
+#if STORE_NO_LEAFS
+                            // Set leaf always, so that the store, so that it's transiently accessible.
+                            commit.SetLeaf(key, leftoverPath);
+#endif
                             return;
                         }
 
@@ -1158,7 +1174,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         private readonly CacheBudget _budget;
         private PrefixingCommit? _prefixed;
 
-        public BuildStorageTriesItem(ComputeMerkleBehavior behavior, ICommit parent, HashSet<Keccak> accounts, CacheBudget budget)
+        public BuildStorageTriesItem(ComputeMerkleBehavior behavior, ICommit parent, HashSet<Keccak> accounts,
+            CacheBudget budget)
         {
             _behavior = behavior;
             _parent = parent;

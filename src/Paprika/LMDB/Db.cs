@@ -12,8 +12,10 @@ using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Store;
 using Paprika.Utils;
+using Spreads;
 using Spreads.Buffers;
 using Spreads.LMDB;
+using Spreads.LMDB.Interop;
 
 namespace Paprika.LMDB;
 
@@ -158,14 +160,7 @@ public class Db : IDb, IDisposable
             // It can be either Account, Storage, or Merkle for Storage
             if (key.Type == DataType.Account)
             {
-                // Key length optimization.
-                //
-                // The majority of the accounts will have no storage.
-                // It would be wasteful to use additional mapping for them.
-                // Create key directly and skip creating additional mapping for the account.
-                destination[0] = PrefixAccount;
-                key.Path.UnsafeAsKeccak.Span.CopyTo(destination[1..]);
-                mapped = destination[..(1 + Keccak.Size)];
+                mapped = CreateAccountKey(destination, key.Path.UnsafeAsKeccak);
                 return true;
             }
 
@@ -213,6 +208,19 @@ public class Db : IDb, IDisposable
         var written = key.Path.WriteTo(destination[headerLength..]);
         mapped = destination[..(written.Length + headerLength)];
         return true;
+    }
+
+    private static Span<byte> CreateAccountKey(Span<byte> destination, scoped in Keccak keccak)
+    {
+        // Key length optimization.
+        //
+        // The majority of the accounts will have no storage.
+        // It would be wasteful to use additional mapping for them.
+        // Create key directly and skip creating additional mapping for the account.
+
+        destination[0] = PrefixAccount;
+        keccak.Span.CopyTo(destination[1..]);
+        return destination[..(1 + Keccak.Size)];
     }
 
     private static Span<byte> CompressKey(in Key key, ReadOnlySpan<byte> id, Span<byte> destination)
@@ -319,6 +327,7 @@ public class Db : IDb, IDisposable
         private readonly Db _db;
         private readonly Transaction _tx;
         private readonly ReadOnlyTransaction _read;
+        private readonly ReadOnlyCursor _cursor;
 
         public static Batch ReadWrite(Db db, Transaction tx) => new(db, tx, tx);
         public static Batch ReadOnly(Db db, ReadOnlyTransaction tx) => new(db, default, tx);
@@ -328,6 +337,7 @@ public class Db : IDb, IDisposable
             _db = db;
             _tx = tx;
             _read = read;
+            _cursor = db._db.OpenReadOnlyCursor(_read);
 
             Metadata = _db.TryGet(_read, MetadataKey, out var value)
                 ? Metadata.ReadFrom(value)
@@ -340,13 +350,91 @@ public class Db : IDb, IDisposable
         public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
         {
             var ctx = new ReadonlyAccountContext(_read);
-            if (_db.TryMapKey(ctx, key, stackalloc byte[MaxMappedKeyLength], out var mapped))
+
+            Span<byte> destination = stackalloc byte[MaxMappedKeyLength];
+
+            if (key.Type != DataType.Merkle)
             {
-                return _db.TryGet(_read, mapped, out result);
+                // not Merkle, just map the key and query
+                if (_db.TryMapKey(ctx, key, destination, out var mapped))
+                {
+                    return _db.TryGet(_read, mapped, out result);
+                }
+            }
+            else
+            {
+                // Merkle, try get as is first
+                if (_db.TryMapKey(ctx, key, destination, out var mapped))
+                {
+                    if (_db.TryGet(_read, mapped, out result))
+                        return true;
+                }
+
+                // This must be a leaf as leafs are not stored.
+                // If the read misses the value,
+                // it must be a leaf and shall be constructed on the basis of the account or the storage
+                if (key.Path.Length != NibblePath.KeccakNibbleCount)
+                {
+                    // this is a leaf account, requires no mapping
+                    Keccak account = default;
+                    key.Path.RawSpan.CopyTo(account.BytesAsSpan);
+
+                    var lowerBound = ToBuffer(CreateAccountKey(destination, account));
+                    if (_cursor.TryFind(Lookup.GE, ref lowerBound, out _) == false)
+                    {
+                        result = default;
+                        return false;
+                    }
+
+                    var leafPath = NibblePath
+                        .FromKey(lowerBound.Span.Slice(MetaPrefixLength))
+                        .SliceFrom(key.Path.Length);
+
+                    result = CreateLeafResult(leafPath);
+                    return true;
+                }
+                else
+                {
+                    // This is a storage, try map account first. No map - nothing was stored.
+                    if (_db.TryGetAccountId(_tx, key.Path.UnsafeAsKeccak, out var id))
+                    {
+                        result = default;
+                        return false;
+                    }
+
+                    // This is a leaf account.
+                    Keccak storage = default;
+                    key.StoragePath.RawSpan.CopyTo(storage.BytesAsSpan);
+
+                    var before = Key.StorageCell(key.Path, storage);
+
+                    var compressed = CompressKey(before, id, destination);
+                    var lowerBound = ToBuffer(compressed);
+                    if (_cursor.TryFind(Lookup.GE, ref lowerBound, out _) == false)
+                    {
+                        result = default;
+                        return false;
+                    }
+
+                    var leafPath = NibblePath
+                        .FromKey(lowerBound.Span[^32..])
+                        .SliceFrom(key.StoragePath.Length);
+
+                    result = CreateLeafResult(leafPath);
+                    return true;
+                }
             }
 
             result = default;
             return false;
+        }
+
+        private static ReadOnlySpan<byte> CreateLeafResult(NibblePath leafPath)
+        {
+            var leaf = new Node.Leaf(leafPath);
+            // TODO: remove allocation
+            var bytes = new byte[leaf.MaxByteLength];
+            return leaf.WriteTo(bytes);
         }
 
         public void SetMetadata(uint blockNumber, in Keccak blockHash)
