@@ -926,8 +926,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         if (diffAt == leaf.Path.Length)
                         {
 #if STORE_NO_LEAFS
-                            // Set leaf always, so that the store, so that it's transiently accessible.
-                            commit.SetLeaf(key, leftoverPath);
+                            // If the query hit db, set the leaf. It will be filtered out by InspectBefore
+                            // so it's safe to store it as is for future usages.
+                            // Use it for the db based queries.
+                            if (owner.IsDbQuery)
+                            {
+                                commit.SetLeaf(key, leftoverPath);
+                            }
 #endif
                             return;
                         }
@@ -1088,7 +1093,16 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         }
                         else
                         {
+                            // potential optimization
+                            // if (!branch.Children[nibble] ||
+                            //     branch.HasKeccak ||
+                            //     !owner.IsOwnedBy(commit))
+                            // {
+                            //     // invalidate branch if the children changed,
+                            //     // or there's a Keccak
+                            //     // or RLP is not owned by this commit 
                             commit.SetBranch(key, children, rlp);
+                            //}
                         }
 
                         if (array != null)
