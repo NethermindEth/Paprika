@@ -14,6 +14,7 @@ using Nethermind.Trie;
 using Nethermind.Trie.Pruning;
 using Paprika.Chain;
 using Paprika.Importer;
+using Paprika.LMDB;
 using Paprika.Merkle;
 using Paprika.Runner;
 using Paprika.Store;
@@ -74,7 +75,7 @@ var dataPath = Path.Combine(dir, "db");
 var dbExists = Directory.Exists(dataPath);
 
 const long GB = 1024 * 1024 * 1024;
-var size = (path.Contains("mainnet") ? 256ul : 32ul) * GB;
+var size = (path.Contains("mainnet") ? 256L : 64L) * GB;
 
 if (dbExists)
 {
@@ -117,7 +118,7 @@ var reportingTask = Task.Run(() => AnsiConsole.Live(dbExists ? layout.GetLayout(
 
 var sw = Stopwatch.StartNew();
 
-using var db = PagedDb.MemoryMappedDb(size, 64, dataPath, false);
+using var db = new Db(dataPath, 64, size, sync: false);
 //using var db = PagedDb.NativeMemoryDb(size, 2);
 
 const bool skipStorage = false;
@@ -131,7 +132,7 @@ var root = MoveDownInTree(nibbles, trie, store);
 // root.Accept(storageCapture, store, false, nibbles);
 // File.WriteAllText("storage-big-tree.txt",storageCapture.Payload);
 
-using var preCommit = new ComputeMerkleBehavior(1, 1, true);
+using var preCommit = new ComputeMerkleBehavior(1, 1, false);
 
 var rootHashActual = Keccak.Zero;
 if (dbExists == false)
@@ -154,34 +155,34 @@ if (dbExists == false)
         rootHashActual = await copy;
     }
 
-    db.ForceFlush();
-
-    using var read = db.BeginReadOnlyBatch("Statistics");
-    StatisticsForPagedDb.Report(layout[stats], read);
+    db.ForceSync();
 }
 else
 {
-    await using (var blockchain =
-                 new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), CacheBudget.Options.None, 100, () => reporter.Observe()))
-    {
-        var visitor = new PaprikaAccountValidatingVisitor(blockchain, preCommit, 1000);
+    // await using (var blockchain =
+    //              new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), CacheBudget.Options.None, 100, () => reporter.Observe()))
+    // {
+    //     var visitor = new PaprikaAccountValidatingVisitor(blockchain, preCommit, 1000);
+    //
+    //     var visit = Task.Run(() =>
+    //     {
+    //         root.Accept(visitor, store, true, nibbles);
+    //         visitor.Finish();
+    //     });
+    //
+    //     var validation = visitor.Validate();
+    //     await Task.WhenAll(visit, validation);
+    //
+    //     var report = await validation;
+    //
+    //     File.WriteAllText("validation-report.txt", report);
+    //
+    //     layout[stats].Update(new Panel("validation-report.txt").Header("Paprika accounts different from the original")
+    //         .Expand());
+    // }
 
-        var visit = Task.Run(() =>
-        {
-            root.Accept(visitor, store, true, nibbles);
-            visitor.Finish();
-        });
-
-        var validation = visitor.Validate();
-        await Task.WhenAll(visit, validation);
-
-        var report = await validation;
-
-        File.WriteAllText("validation-report.txt", report);
-
-        layout[stats].Update(new Panel("validation-report.txt").Header("Paprika accounts different from the original")
-            .Expand());
-    }
+    var statistics = db.GatherStats();
+    layout[stats].Update(new Panel(statistics.ToString()).Header("LMDB stats"));
 }
 
 spectre.Cancel();
