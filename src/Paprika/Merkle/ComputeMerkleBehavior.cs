@@ -37,8 +37,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </remarks>
     private const int MaxBufferNeeded = 1024;
 
-    public const int DefaultMinimumTreeLevelToMemoizeKeccak = 2;
-    public const int MemoizeKeccakEveryNLevel = 2;
+    public const int DefaultMinimumTreeLevelToMemoizeKeccak = 1;
+    public const int MemoizeKeccakEveryNLevel = 1;
 
     private readonly int _minimumTreeLevelToMemoizeKeccak;
     private readonly int _memoizeKeccakEvery;
@@ -48,19 +48,14 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private readonly Histogram<long> _stateProcessing;
     private readonly Histogram<long> _totalMerkle;
 
-    private readonly BufferPool _pool = new(1024, true, "Merkle");
-
     /// <summary>
     /// Initializes the Merkle.
     /// </summary>
     /// <param name="minimumTreeLevelToMemoizeKeccak">Minimum lvl of the tree to memoize the Keccak of a branch node.</param>
     /// <param name="memoizeKeccakEvery">How often (which lvl mod) should Keccaks be memoized.</param>
-    /// <param name="memoizeRlp">Whether the RLP of branches should be memoized in memory (but not stored)
-    /// to limit the number of lookups for the children and their Keccak recalculation.
-    /// This includes invalidating the memoized RLP whenever a path that it caches is marked as dirty.</param>
+    /// <param name="memoizeRlp">For tests purposes only</param>
     public ComputeMerkleBehavior(int minimumTreeLevelToMemoizeKeccak = DefaultMinimumTreeLevelToMemoizeKeccak,
-        int memoizeKeccakEvery = MemoizeKeccakEveryNLevel,
-        bool memoizeRlp = true)
+        int memoizeKeccakEvery = MemoizeKeccakEveryNLevel, bool memoizeRlp = true)
     {
         _minimumTreeLevelToMemoizeKeccak = minimumTreeLevelToMemoizeKeccak;
         _memoizeKeccakEvery = memoizeKeccakEvery;
@@ -166,14 +161,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         using (_stateProcessing.Measure())
         {
-            using var cached = commit.WriteThroughCacheRoot(ShouldCacheKey, ShouldCacheResult, _pool);
-
-            new BuildStateTreeItem(cached, commit.Stats.Keys, budget).DoWork();
-
-            cached.SealCaching();
+            new BuildStateTreeItem(commit, commit.Stats.Keys, budget).DoWork();
 
             var root = Key.Merkle(NibblePath.Empty);
-            var rootKeccak = Compute(root, new ComputeContext(cached, TrieType.State, ComputeHint.None, budget));
+            var rootKeccak = Compute(root, new ComputeContext(commit, TrieType.State, ComputeHint.None, budget));
 
             Debug.Assert(rootKeccak.DataType == KeccakOrRlp.Type.Keccak);
 
@@ -194,7 +185,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         var children = new ConcurrentQueue<IChildCommit>();
 
         Parallel.ForEach(workItems,
-            () => commit.GetChild().WriteThroughCacheChild(ShouldCacheKey, ShouldCacheResult, _pool),
+            commit.GetChild,
             (workItem, _, child) =>
             {
                 workItem.DoWork(child);
@@ -573,8 +564,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private bool ShouldMemoizeBranchRlp(in NibblePath branchPath)
     {
-        return _memoizeRlp &&
-               branchPath.Length >= 1; // a simple condition to memoize only more nested RLPs
+        return _memoizeRlp && branchPath.Length >= 1; // a simple condition to memoize only more nested RLPs
     }
 
     private bool ShouldMemoizeBranchKeccak(in NibblePath branchPath)
@@ -787,29 +777,23 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         or DeleteStatus.ExtensionToLeaf
                         or DeleteStatus.BranchToLeafOrExtension)
                     {
-                        // if either has the keccak or has the leftover rlp, clean
-                        if (branch.HasKeccak || leftover.IsEmpty == false)
-                        {
-                            // reset
-                            commit.SetBranch(key, branch.Children);
-                        }
-
+                        UpdateBranchOnDelete(commit, branch, branch.Children, leftover, owner, nibble, key);
                         return DeleteStatus.NodeTypePreserved;
                     }
 
                     Debug.Assert(status == DeleteStatus.LeafDeleted, "leaf deleted");
 
-                    var children = branch.Children.Remove(nibble);
+                    var updatedChildren = branch.Children.Remove(nibble);
 
                     // if branch has still more than one child, just update the set
-                    if (children.SetCount > 1)
+                    if (updatedChildren.SetCount > 1)
                     {
-                        commit.SetBranch(key, children);
+                        UpdateBranchOnDelete(commit, branch, updatedChildren, leftover, owner, nibble, key);
                         return DeleteStatus.NodeTypePreserved;
                     }
 
                     // there's an only child now. The branch should be collapsed
-                    var onlyNibble = children.SmallestNibbleSet;
+                    var onlyNibble = updatedChildren.SmallestNibbleSet;
                     var onlyChildPath = slice.AppendNibble(onlyNibble,
                         stackalloc byte[slice.MaxByteLength + 1]);
 
@@ -861,7 +845,37 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             default:
                 throw new ArgumentOutOfRangeException();
         }
+
+        static void UpdateBranchOnDelete(ICommit commit, in Node.Branch branch, NibbleSet.Readonly children,
+            ReadOnlySpan<byte> leftover, ReadOnlySpanOwnerWithMetadata<byte> owner, byte nibble, in Key key)
+        {
+            var rlp = TryClearMemoizedKeccakForBranchChild(commit, leftover, owner, nibble, out var array);
+
+            var shouldUpdate = branch.HasKeccak || !branch.Children.Equals(children);
+
+            if (rlp.IsEmpty)
+            {
+                // no memoized RLP. Invalidate if there's the Keccak
+                if (shouldUpdate)
+                {
+                    // reset
+                    commit.SetBranch(key, children);
+                }
+            }
+            else
+            {
+                // There's the cached RLP
+                if (shouldUpdate || RlpMemoRequiresUpdate(commit, owner))
+                {
+                    commit.SetBranch(key, children, rlp);
+                }
+            }
+
+            if (array != null)
+                ArrayPool<byte>.Shared.Return(array);
+        }
     }
+
 
     /// <summary>
     /// Transforms the extension either to a <see cref="Node.Type.Leaf"/> or to a longer <see cref="Node.Type.Extension"/>.
@@ -1056,53 +1070,29 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 case Node.Type.Branch:
                     {
                         var nibble = path[i];
-                        Span<byte> rlp = default;
-                        byte[]? array = default;
-
-                        if (leftover.Length == RlpMemo.Size)
-                        {
-                            if (owner.IsOwnedBy(commit))
-                            {
-                                rlp = MakeRlpWritable(leftover);
-                            }
-                            else
-                            {
-                                array = ArrayPool<byte>.Shared.Rent(RlpMemo.Size);
-                                rlp = array.AsSpan(0, RlpMemo.Size);
-                                leftover.CopyTo(rlp);
-                            }
-
-                            var memo = new RlpMemo(rlp);
-                            memo.Clear(nibble);
-                        }
+                        var rlp = TryClearMemoizedKeccakForBranchChild(commit, leftover, owner, nibble, out var array);
 
                         var children = branch.Children.Set(nibble);
 
+                        var shouldUpdate = !branch.Children[nibble] || branch.HasKeccak;
+
                         if (rlp.IsEmpty)
                         {
-                            // Set if the nibble was not set before, or branch has memoized Keccak
-                            if (!branch.Children[nibble] || branch.HasKeccak)
+                            // Set if the nibble was not set before, or branch has memoized Keccak or it was the db query result.
+                            // In the last case, the branch will be overwritten with Keccak but will be kept locally.
+                            if (shouldUpdate || owner.IsDbQuery)
                             {
-                                commit.SetBranch(key, children);
-                            }
-                            else if (owner.IsDbQuery && budget.ClaimDbWrite())
-                            {
-                                // If it was a db query, check budget and update
                                 commit.SetBranch(key, children);
                             }
                         }
                         else
                         {
-                            // potential optimization
-                            // if (!branch.Children[nibble] ||
-                            //     branch.HasKeccak ||
-                            //     !owner.IsOwnedBy(commit))
-                            // {
-                            //     // invalidate branch if the children changed,
-                            //     // or there's a Keccak
-                            //     // or RLP is not owned by this commit 
-                            commit.SetBranch(key, children, rlp);
-                            //}
+                            if (shouldUpdate || RlpMemoRequiresUpdate(commit, owner))
+                            {
+                                // Invalidate the branch if something changed or if the RLP is not owned by this commit.
+                                // If RLP is owned, it will be written in place.
+                                commit.SetBranch(key, children, rlp);
+                            }
                         }
 
                         if (array != null)
@@ -1115,6 +1105,40 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     throw new ArgumentOutOfRangeException();
             }
         }
+    }
+
+    /// <summary>
+    /// For branch only checks whether rlp is updated in place. If it is, there's no need to write it again.
+    /// </summary>
+    private static bool RlpMemoRequiresUpdate(ICommit commit, ReadOnlySpanOwnerWithMetadata<byte> owner) => !owner.IsOwnedBy(commit);
+
+    /// <summary>
+    /// Checks if there's a memo for the branch and clears it for the given nibble. 
+    /// </summary>
+    private static Span<byte> TryClearMemoizedKeccakForBranchChild(ICommit commit, ReadOnlySpan<byte> leftover,
+        ReadOnlySpanOwnerWithMetadata<byte> owner, byte nibble, out byte[]? arrayToReturn)
+    {
+        Span<byte> rlp = default;
+        arrayToReturn = default;
+
+        if (leftover.Length != RlpMemo.Size)
+            return rlp;
+
+        if (owner.IsOwnedBy(commit))
+        {
+            rlp = MakeRlpWritable(leftover);
+        }
+        else
+        {
+            arrayToReturn = ArrayPool<byte>.Shared.Rent(RlpMemo.Size);
+            rlp = arrayToReturn.AsSpan(0, RlpMemo.Size);
+            leftover.CopyTo(rlp);
+        }
+
+        var memo = new RlpMemo(rlp);
+        memo.Clear(nibble);
+
+        return rlp;
     }
 
     interface IWorkItem
@@ -1271,7 +1295,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     public void Dispose()
     {
-        _pool.Dispose();
         _meter.Dispose();
     }
 }
