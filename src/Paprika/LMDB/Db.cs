@@ -15,7 +15,6 @@ using Paprika.Utils;
 using Spreads;
 using Spreads.Buffers;
 using Spreads.LMDB;
-using Spreads.LMDB.Interop;
 
 namespace Paprika.LMDB;
 
@@ -382,11 +381,16 @@ public class Db : IDb, IDisposable
                     key.Path.RawSpan.CopyTo(account.BytesAsSpan);
 
                     var lowerBound = ToBuffer(CreateAccountKey(destination, account));
-                    if (_cursor.TryFind(Lookup.GE, ref lowerBound, out _) == false)
+
+                    lock (this)
                     {
-                        result = default;
-                        return false;
+                        if (_cursor.TryFind(Lookup.GE, ref lowerBound, out _) == false)
+                        {
+                            result = default;
+                            return false;
+                        }
                     }
+
 
                     var found = NibblePath
                         .FromKey(lowerBound.Span.Slice(MetaPrefixLength));
@@ -410,10 +414,14 @@ public class Db : IDb, IDisposable
 
                     var compressed = CompressKey(before, id, destination);
                     var lowerBound = ToBuffer(compressed);
-                    if (_cursor.TryFind(Lookup.GE, ref lowerBound, out _) == false)
+
+                    lock (this)
                     {
-                        result = default;
-                        return false;
+                        if (_cursor.TryFind(Lookup.GE, ref lowerBound, out _) == false)
+                        {
+                            result = default;
+                            return false;
+                        }
                     }
 
                     var leafPath = NibblePath

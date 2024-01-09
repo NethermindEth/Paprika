@@ -1,4 +1,4 @@
-//#define STORE_NO_LEAFS
+#define STORE_NO_LEAFS
 
 using System.Buffers;
 using System.Collections.Concurrent;
@@ -249,7 +249,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             return data;
 
         var node = Node.Header.Peek(data).NodeType;
-
 
         if (node == Node.Type.Leaf)
         {
@@ -944,6 +943,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             // so it's safe to store it as is for future usages.
                             // Use it for the db based queries.
                             if (owner.IsDbQuery)
+                            {
+                                commit.SetLeaf(key, leftoverPath);
+                            }
+#else
+                            if (owner.IsDbQuery && budget.ClaimDbWrite())
                             {
                                 commit.SetLeaf(key, leftoverPath);
                             }
