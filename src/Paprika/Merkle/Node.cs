@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -40,9 +41,11 @@ public static partial class Node
         }
     }
 
-    private static void ValidateHeaderNodeType(Header header, Type expected)
+    private static Header ValidateHeaderNodeType(Header header, Type expected)
     {
         Assert(header.NodeType == expected, $"Expected {nameof(Header)} with {nameof(Type)} {expected}, got {header.NodeType}");
+
+        return header;
     }
 
     [StructLayout(LayoutKind.Explicit, Pack = 1, Size = Size)]
@@ -214,39 +217,39 @@ public static partial class Node
     {
         public int MaxByteLength => Header.Size +
                                     (HeaderHasAllSet(Header) ? 0 : NibbleSet.MaxByteSize) +
-                                    (HeaderHasKeccak(Header) ? Keccak.Size : 0) +
-                                    (HeaderHasEmbeddedLeafs(Header) ? Leafs.MaxByteSize : 0);
+                                    (HeaderHasKeccak(Header) ? Keccak.Size : 0);
 
         private const byte HeaderMetadataKeccakMask = 0b0000_0001;
         private const byte HeaderMetadataAllChildrenSetMask = 0b0000_0010;
-        private const byte HeaderMetadataEmbeddedLeafsMask = 0b0000_0100;
 
         public readonly Header Header;
         public readonly NibbleSet.Readonly Children;
         public readonly Keccak Keccak;
-        public readonly EmbeddedLeafs Leafs;
 
-        private Branch(Header header, NibbleSet.Readonly children, scoped in Keccak keccak, EmbeddedLeafs leafs)
+        private Branch(Header header, NibbleSet.Readonly children, Keccak keccak)
         {
-            ValidateHeaderNodeType(header, Type.Branch);
-            Header = header;
+            Header = ValidateHeaderKeccak(ValidateHeaderNodeType(header, Type.Branch), shouldHaveKeccak: true);
             Children = children;
             Keccak = keccak;
-            Leafs = leafs;
         }
 
-        public Branch(NibbleSet.Readonly children, scoped in Keccak keccak, scoped in EmbeddedLeafs leafs = default)
+        private Branch(Header header, NibbleSet.Readonly children)
+        {
+            Header = ValidateHeaderKeccak(header, shouldHaveKeccak: false);
+            Children = children;
+            Keccak = default;
+        }
+
+        public Branch(NibbleSet.Readonly children, Keccak keccak)
         {
             var allSet = children.AllSet ? HeaderMetadataAllChildrenSetMask : 0;
             var hasKeccak = keccak == default ? 0 : HeaderMetadataKeccakMask;
-            var hasEmbeddedLeafs = (leafs.IsEmpty == false) ? HeaderMetadataEmbeddedLeafsMask : 0;
 
-            Header = new Header(Type.Branch, metadata: (byte)(hasKeccak | allSet | hasEmbeddedLeafs));
+            Header = new Header(Type.Branch, metadata: (byte)(hasKeccak | allSet));
 
             Assert(children);
 
             Children = children;
-            Leafs = leafs;
             Keccak = keccak;
         }
 
@@ -258,13 +261,31 @@ public static partial class Node
             }
         }
 
+        public Branch(NibbleSet.Readonly children)
+        {
+            Header = new Header(Type.Branch, metadata: (byte)(children.AllSet ? HeaderMetadataAllChildrenSetMask : 0));
+
+            Assert(children);
+
+            Children = children;
+            Keccak = default;
+        }
+
+        private static Header ValidateHeaderKeccak(Header header, bool shouldHaveKeccak)
+        {
+            var expected = shouldHaveKeccak ? HeaderMetadataKeccakMask : 0;
+            var actual = header.Metadata & HeaderMetadataKeccakMask;
+
+            Debug.Assert(actual == expected,
+                $"Expected {nameof(Header)} to have {nameof(Keccak)} = {shouldHaveKeccak}, got {!shouldHaveKeccak}");
+
+            return header;
+        }
+
         public bool HasKeccak => HeaderHasKeccak(Header);
 
         private static bool HeaderHasKeccak(Header header) =>
             (header.Metadata & HeaderMetadataKeccakMask) == HeaderMetadataKeccakMask;
-
-        private static bool HeaderHasEmbeddedLeafs(Header header) =>
-            (header.Metadata & HeaderMetadataEmbeddedLeafsMask) == HeaderMetadataEmbeddedLeafsMask;
 
         private static bool HeaderHasAllSet(Header header) =>
             (header.Metadata & HeaderMetadataAllChildrenSetMask) == HeaderMetadataAllChildrenSetMask;
@@ -290,11 +311,6 @@ public static partial class Node
                 leftover = Keccak.WriteToWithLeftover(leftover);
             }
 
-            if (HeaderHasEmbeddedLeafs(Header))
-            {
-                leftover = Leafs.WriteToWithLeftover(leftover);
-            }
-
             return leftover;
         }
 
@@ -312,22 +328,41 @@ public static partial class Node
                 leftover = NibbleSet.Readonly.ReadFrom(leftover, out children);
             }
 
-            Keccak keccak = default;
             if (HeaderHasKeccak(header))
             {
-                leftover = Keccak.ReadFrom(leftover, out keccak);
+                leftover = Keccak.ReadFrom(leftover, out var keccak);
+                branch = new Branch(header, children, keccak);
             }
-
-            EmbeddedLeafs leafs = default;
-            if (HeaderHasEmbeddedLeafs(header))
+            else
             {
-                leftover = EmbeddedLeafs.ReadFrom(leftover, out leafs);
+                branch = new Branch(header, children);
             }
-
-            branch = new Branch(header, children, keccak, leafs);
 
             return leftover;
         }
+
+        /// <summary>
+        /// Skips the branch at source, returning just the leftover.
+        /// </summary>
+        public static ReadOnlySpan<byte> Skip(ReadOnlySpan<byte> source)
+        {
+            Header.ReadFrom(source, out var header);
+            return source.Slice(GetBranchDataLength(header));
+        }
+
+        /// <summary>
+        /// Gets only branch data cleaning any leftovers.
+        /// </summary>
+        public static ReadOnlySpan<byte> GetOnlyBranchData(ReadOnlySpan<byte> source)
+        {
+            Header.ReadFrom(source, out var header);
+            return source[..GetBranchDataLength(header)];
+        }
+
+        private static int GetBranchDataLength(Header header) =>
+            Header.Size +
+            (HeaderHasAllSet(header) ? 0 : NibbleSet.MaxByteSize) +
+            (HeaderHasKeccak(header) ? Keccak.Size : 0);
 
         public bool Equals(in Branch other)
         {

@@ -5,11 +5,14 @@ using System.Diagnostics.Metrics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Merkle;
 using Paprika.Store;
 using Paprika.Utils;
+using Spreads;
 using Spreads.Buffers;
 using Spreads.LMDB;
 
@@ -37,6 +40,7 @@ public class Db : IDb, IDisposable
     /// 0x80 + 32bytes -> account
     /// </remarks>
     private const byte PrefixMeta = 0xFF;
+
     private const byte PrefixAccount = 0x80;
 
     private const int MetaPrefixLength = 1;
@@ -49,6 +53,8 @@ public class Db : IDb, IDisposable
 
     private const int MaxAccountIdLength = 8;
     private const int AccountMapKeyLength = MetaPrefixLength + Keccak.Size;
+    private const int TypeShift = 4;
+    private const int IdLengthShift = 1;
 
     private static ReadOnlySpan<byte> MetadataKey => new byte[] { PrefixMeta, 1 };
     private static ReadOnlySpan<byte> AccountCounter => new byte[] { PrefixMeta, 2 };
@@ -67,7 +73,8 @@ public class Db : IDb, IDisposable
 
         _meter = new Meter("Paprika.Store.LMDB");
         _depth = _meter.CreateAtomicObservableGauge("BTree depth", "Depth", "The number of levels in BTree");
-        _compressedLength = _meter.CreateAtomicObservableGauge("Max length compressed prefix of account", "Bytes", "The number of bytes");
+        _compressedLength = _meter.CreateAtomicObservableGauge("Max length compressed prefix of account", "Bytes",
+            "The number of bytes");
 
         PushLatestReader();
     }
@@ -123,6 +130,27 @@ public class Db : IDb, IDisposable
         }
     }
 
+    public Stats GatherStats()
+    {
+        using var read = _env.BeginReadOnlyTransaction();
+        using var cursor = _db.OpenReadOnlyCursor(read);
+
+        Stats stats = new Stats();
+
+        DirectBuffer key = default, value = default;
+        if (cursor.TryGet(ref key, ref value, CursorGetOption.First))
+        {
+            stats.Record(key, value);
+
+            while (cursor.TryGet(ref key, ref value, CursorGetOption.Next))
+            {
+                stats.Record(key, value);
+            }
+        }
+
+        return stats;
+    }
+
     private bool TryMapKey<TAccountContext>(in TAccountContext ctx, in Key key, Span<byte> destination,
         out Span<byte> mapped)
         where TAccountContext : struct, IAccountContext
@@ -132,14 +160,7 @@ public class Db : IDb, IDisposable
             // It can be either Account, Storage, or Merkle for Storage
             if (key.Type == DataType.Account)
             {
-                // Key length optimization.
-                //
-                // The majority of the accounts will have no storage.
-                // It would be wasteful to use additional mapping for them.
-                // Create key directly and skip creating additional mapping for the account.
-                destination[0] = PrefixAccount;
-                key.Path.UnsafeAsKeccak.Span.CopyTo(destination[1..]);
-                mapped = destination[..(1 + Keccak.Size)];
+                mapped = CreateAccountKey(destination, key.Path.UnsafeAsKeccak);
                 return true;
             }
 
@@ -170,10 +191,36 @@ public class Db : IDb, IDisposable
                      key.StoragePath.Length == 0 &&
                      key.Path.Length < NibblePath.KeccakNibbleCount);
 
-        // directly use path as the key. Path will have set the first bit to zero,
-        // which will not collide with the encoding above
-        mapped = key.Path.WriteTo(destination);
+
+        // shift left key by 4, so that move k up, so that the first bit is left unset
+        // store oddity at the end
+        const byte firstByte = (int)DataType.Merkle << TypeShift;
+        const int headerLength = 1;
+
+        if (key.Path.IsEmpty)
+        {
+            destination[0] = firstByte;
+            mapped = destination[..headerLength];
+            return true;
+        }
+
+        destination[0] = firstByte;
+        var written = key.Path.WriteTo(destination[headerLength..]);
+        mapped = destination[..(written.Length + headerLength)];
         return true;
+    }
+
+    private static Span<byte> CreateAccountKey(Span<byte> destination, scoped in Keccak keccak)
+    {
+        // Key length optimization.
+        //
+        // The majority of the accounts will have no storage.
+        // It would be wasteful to use additional mapping for them.
+        // Create key directly and skip creating additional mapping for the account.
+
+        destination[0] = PrefixAccount;
+        keccak.Span.CopyTo(destination[1..]);
+        return destination[..(1 + Keccak.Size)];
     }
 
     private static Span<byte> CompressKey(in Key key, ReadOnlySpan<byte> id, Span<byte> destination)
@@ -183,7 +230,7 @@ public class Db : IDb, IDisposable
         var k = key.Type | DataType.CompressedAccount;
 
         // shift left key by 4, so that move k up, so that the first bit is left unset
-        var firstByte = ((int)k << 4) + id.Length;
+        var firstByte = ((int)k << TypeShift) + (id.Length << IdLengthShift);
 
         destination[0] = (byte)firstByte;
         id.CopyTo(destination[1..]);
@@ -280,6 +327,7 @@ public class Db : IDb, IDisposable
         private readonly Db _db;
         private readonly Transaction _tx;
         private readonly ReadOnlyTransaction _read;
+        private readonly ReadOnlyCursor _cursor;
 
         public static Batch ReadWrite(Db db, Transaction tx) => new(db, tx, tx);
         public static Batch ReadOnly(Db db, ReadOnlyTransaction tx) => new(db, default, tx);
@@ -289,6 +337,7 @@ public class Db : IDb, IDisposable
             _db = db;
             _tx = tx;
             _read = read;
+            _cursor = db._db.OpenReadOnlyCursor(_read);
 
             Metadata = _db.TryGet(_read, MetadataKey, out var value)
                 ? Metadata.ReadFrom(value)
@@ -301,9 +350,102 @@ public class Db : IDb, IDisposable
         public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
         {
             var ctx = new ReadonlyAccountContext(_read);
-            if (_db.TryMapKey(ctx, key, stackalloc byte[MaxMappedKeyLength], out var mapped))
+
+            Span<byte> destination = stackalloc byte[MaxMappedKeyLength];
+
+            if (key.Type != DataType.Merkle)
             {
-                return _db.TryGet(_read, mapped, out result);
+                // not Merkle, just map the key and query
+                if (_db.TryMapKey(ctx, key, destination, out var mapped))
+                {
+                    return _db.TryGet(_read, mapped, out result);
+                }
+            }
+            else
+            {
+                // TODO: get account id
+                // Merkle, try get as is first
+                if (_db.TryMapKey(ctx, key, destination, out var mapped))
+                {
+                    if (_db.TryGet(_read, mapped, out result))
+                        return true;
+                }
+
+                // This must be a leaf as leafs are not stored.
+                // If the read misses the value,
+                // it must be a leaf and shall be constructed on the basis of the account or the storage
+                if (key.Path.Length != NibblePath.KeccakNibbleCount)
+                {
+                    // this is a leaf account, requires no mapping
+                    Keccak account = default;
+                    key.Path.RawSpan.CopyTo(account.BytesAsSpan);
+
+                    var lowerBound = ToBuffer(CreateAccountKey(destination, account));
+
+                    lock (this)
+                    {
+                        if (_cursor.TryFind(Lookup.GE, ref lowerBound, out _) == false)
+                        {
+                            result = default;
+                            return false;
+                        }
+                    }
+
+
+                    var found = NibblePath
+                        .FromKey(lowerBound.Span.Slice(MetaPrefixLength));
+
+                    return TryCreateLeafResult(key.Path, found, out result);
+                }
+                else
+                {
+                    // This is a storage, try map account first. No map - nothing was stored.
+                    if (_db.TryGetAccountId(_tx, key.Path.UnsafeAsKeccak, out var id))
+                    {
+                        result = default;
+                        return false;
+                    }
+
+                    // This is a leaf account.
+                    Keccak storage = default;
+                    key.StoragePath.RawSpan.CopyTo(storage.BytesAsSpan);
+
+                    var before = Key.StorageCell(key.Path, storage);
+
+                    var compressed = CompressKey(before, id, destination);
+                    var lowerBound = ToBuffer(compressed);
+
+                    lock (this)
+                    {
+                        if (_cursor.TryFind(Lookup.GE, ref lowerBound, out _) == false)
+                        {
+                            result = default;
+                            return false;
+                        }
+                    }
+
+                    var leafPath = NibblePath
+                        .FromKey(lowerBound.Span[^32..])
+                        .SliceFrom(key.StoragePath.Length);
+
+                    return TryCreateLeafResult(key.StoragePath, leafPath, out result);
+                }
+            }
+
+            result = default;
+            return false;
+        }
+
+        private static bool TryCreateLeafResult(scoped in NibblePath searchedPrefix, scoped in NibblePath foundFullPath,
+            out ReadOnlySpan<byte> result)
+        {
+            if (foundFullPath.FindFirstDifferentNibble(searchedPrefix) == searchedPrefix.Length)
+            {
+                var leaf = new Node.Leaf(foundFullPath.SliceFrom(searchedPrefix.Length));
+                // TODO: remove allocation
+                var bytes = new byte[leaf.MaxByteLength];
+                result = leaf.WriteTo(bytes);
+                return true;
             }
 
             result = default;
@@ -343,8 +485,15 @@ public class Db : IDb, IDisposable
         {
             Debug.Assert(account.Length == NibblePath.KeccakNibbleCount);
 
-            // TODO: apply proper delete, otherwise db will grow
-            _db.Delete(_tx, BuildAccountMapKey(account.UnsafeAsKeccak, stackalloc byte[AccountMapKeyLength]));
+            Span<byte> bytes = stackalloc byte[AccountMapKeyLength];
+            account.UnsafeAsKeccak.Span.CopyTo(bytes[1..]);
+
+            bytes[0] = PrefixAccount;
+            _db.Delete(_tx, bytes);
+
+            // TODO: apply proper delete, otherwise db will grow, this removes only prefix mapping
+            bytes[0] = PrefixMeta;
+            _db.Delete(_tx, bytes);
         }
 
         public ValueTask Commit(CommitOptions options)
@@ -442,5 +591,94 @@ public class Db : IDb, IDisposable
     public void ForceSync()
     {
         _env.Sync(true);
+    }
+
+    public class Stats
+    {
+        public int Accounts { get; private set; }
+        public long TotalSizeAccounts { get; private set; }
+        public int IdMappings { get; private set; }
+        public long TotalSizeIdMappings { get; private set; }
+
+        public long TotalSizeStorage { get; private set; }
+        public long TotalSizeMerkle { get; private set; }
+
+        public long TotalSizeEmbeddedMerkleLeafs { get; private set; }
+
+        public void Record(in DirectBuffer key, in DirectBuffer value)
+        {
+            var totalLength = key.Length + value.Length + 8;
+
+            var first = key.Span[0];
+            switch (first)
+            {
+                case PrefixAccount:
+                    Accounts++;
+                    TotalSizeAccounts += totalLength;
+                    break;
+                case PrefixMeta:
+                    {
+                        switch (key.Span.Length)
+                        {
+                            case 1 + Keccak.Size:
+                                IdMappings++;
+                                TotalSizeIdMappings += totalLength;
+                                break;
+                            case > 2:
+                                throw new Exception(
+                                    $"{((ReadOnlySpan<byte>)key.Span).ToHexString(true)} should not appear here");
+                        }
+
+                        break;
+                    }
+                default:
+                    {
+                        // complex key
+                        var type = (DataType)(first >> TypeShift) & ~DataType.CompressedAccount;
+
+                        switch (type)
+                        {
+                            case DataType.StorageCell:
+                                TotalSizeStorage += totalLength;
+                                break;
+                            case DataType.Merkle:
+                                TotalSizeMerkle += totalLength;
+                                break;
+                            default:
+                                throw new ArgumentOutOfRangeException();
+                        }
+
+                        break;
+                    }
+            }
+        }
+
+        public override string ToString()
+        {
+            var sb = new StringBuilder();
+
+            var props = this.GetType().GetProperties();
+
+            foreach (var prop in props)
+            {
+                var value = prop.GetValue(this);
+
+                if (value == null)
+                {
+                    sb.AppendLine($"{prop.Name}: null");
+                }
+                else if (prop.Name.StartsWith("total", StringComparison.OrdinalIgnoreCase))
+                {
+                    var size = ((double)((long)value!)) / (1024 * 1024 * 1024);
+                    sb.AppendLine($"{prop.Name}: {size:F2}");
+                }
+                else
+                {
+                    sb.AppendLine($"{prop.Name}: {value.ToString()}");
+                }
+            }
+
+            return sb.ToString();
+        }
     }
 }

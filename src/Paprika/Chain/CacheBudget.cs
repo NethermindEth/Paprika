@@ -10,20 +10,26 @@ namespace Paprika.Chain;
 /// </summary>
 public class CacheBudget
 {
-    public readonly record struct Options(int TransientWrites)
+    public readonly record struct Options(int DbWrites, int TransientWrites)
     {
         [Pure]
-        public CacheBudget Build() => new(TransientWrites);
+        public CacheBudget Build() => new(DbWrites, TransientWrites);
 
         public static Options None => default;
     }
 
+    private int _dbWrites;
     private int _transientWrites;
 
-    private CacheBudget(int transientWrites)
+    private CacheBudget(int dbWrites, int transientWrites)
     {
+        _dbWrites = dbWrites;
         _transientWrites = transientWrites;
     }
+
+    public bool ClaimDbWrite() => Interlocked.Decrement(ref _dbWrites) >= 0;
+
+    public bool IsDbWrite => Volatile.Read(ref _transientWrites) > 0;
 
     public bool ClaimTransient() => Interlocked.Decrement(ref _transientWrites) >= 0;
 

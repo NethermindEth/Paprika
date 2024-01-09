@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -18,22 +17,22 @@ public static class CommitExtensions
         commit.Set(key, leaf.WriteTo(stackalloc byte[leaf.MaxByteLength]));
     }
 
-    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, in EmbeddedLeafs leafs)
+    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children)
     {
-        var branch = new Node.Branch(children, default, leafs);
+        var branch = new Node.Branch(children);
         commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
     }
 
-    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, in EmbeddedLeafs leafs, ReadOnlySpan<byte> rlp)
+    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, ReadOnlySpan<byte> rlp)
     {
-        var branch = new Node.Branch(children, default, leafs);
-        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
+        var branch = new Node.Branch(children);
+        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), rlp);
     }
 
-    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, Keccak keccak, in EmbeddedLeafs leafs, ReadOnlySpan<byte> rlp)
+    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, Keccak keccak, ReadOnlySpan<byte> rlp)
     {
-        var branch = new Node.Branch(children, keccak, leafs);
-        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
+        var branch = new Node.Branch(children, keccak);
+        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), rlp);
     }
 
     public static void SetExtension(this ICommit commit, in Key key, in NibblePath path)

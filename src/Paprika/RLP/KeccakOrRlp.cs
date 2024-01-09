@@ -7,7 +7,7 @@ namespace Paprika.RLP;
 /// Represents a result of encoding a node in Trie. If it's length is shorter than 32 bytes, then it's an RLP.
 /// If it's equal or bigger, then it's its Keccak.
 /// </summary>
-public readonly struct KeccakOrRlp
+public readonly ref struct KeccakOrRlp
 {
     private const int NonKeccakOffset = 1;
 
