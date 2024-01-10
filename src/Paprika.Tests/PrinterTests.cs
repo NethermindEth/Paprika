@@ -13,7 +13,7 @@ public class PrinterTests : BasePageTests
     [Test]
     public void Test()
     {
-        const ulong size = 1 * 1024 * 1024;
+        const long size = 1 * 1024 * 1024;
         const int blocks = 3;
         const byte maxReorgDepth = 2;
 

@@ -118,8 +118,8 @@ var reportingTask = Task.Run(() => AnsiConsole.Live(dbExists ? layout.GetLayout(
 
 var sw = Stopwatch.StartNew();
 
-using var db = new Db(dataPath, 64, size, sync: false);
-//using var db = PagedDb.NativeMemoryDb(size, 2);
+//using var db = new Db(dataPath, 64, size, sync: false);
+using var db = PagedDb.MemoryMappedDb(size, 64, dataPath, false);
 
 const bool skipStorage = false;
 
@@ -155,34 +155,38 @@ if (dbExists == false)
         rootHashActual = await copy;
     }
 
-    db.ForceSync();
+    db.ForceFlush();
+
+    // LMDB
+    // db.ForceSync();
 }
 else
 {
-    // await using (var blockchain =
-    //              new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), CacheBudget.Options.None, 100, () => reporter.Observe()))
-    // {
-    //     var visitor = new PaprikaAccountValidatingVisitor(blockchain, preCommit, 1000);
-    //
-    //     var visit = Task.Run(() =>
-    //     {
-    //         root.Accept(visitor, store, true, nibbles);
-    //         visitor.Finish();
-    //     });
-    //
-    //     var validation = visitor.Validate();
-    //     await Task.WhenAll(visit, validation);
-    //
-    //     var report = await validation;
-    //
-    //     File.WriteAllText("validation-report.txt", report);
-    //
-    //     layout[stats].Update(new Panel("validation-report.txt").Header("Paprika accounts different from the original")
-    //         .Expand());
-    // }
+    await using (var blockchain =
+                 new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), CacheBudget.Options.None, 100, () => reporter.Observe()))
+    {
+        var visitor = new PaprikaAccountValidatingVisitor(blockchain, preCommit, 1000);
 
-    var statistics = db.GatherStats();
-    layout[stats].Update(new Panel(statistics.ToString()).Header("LMDB stats"));
+        var visit = Task.Run(() =>
+        {
+            root.Accept(visitor, store, true, nibbles);
+            visitor.Finish();
+        });
+
+        var validation = visitor.Validate();
+        await Task.WhenAll(visit, validation);
+
+        var report = await validation;
+
+        File.WriteAllText("validation-report.txt", report);
+
+        layout[stats].Update(new Panel("validation-report.txt").Header("Paprika accounts different from the original")
+            .Expand());
+    }
+
+    // LMDB
+    // var statistics = db.GatherStats();
+    // layout[stats].Update(new Panel(statistics.ToString()).Header("LMDB stats"));
 }
 
 spectre.Cancel();

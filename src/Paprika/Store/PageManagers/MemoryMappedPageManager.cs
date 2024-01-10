@@ -27,7 +27,7 @@ public class MemoryMappedPageManager : PointerPageManager
     private readonly List<Task> _pendingWrites = new();
     private DbAddress[] _toWrite = new DbAddress[1];
 
-    public unsafe MemoryMappedPageManager(ulong size, byte historyDepth, string dir,
+    public unsafe MemoryMappedPageManager(long size, byte historyDepth, string dir,
         PersistenceOptions options = PersistenceOptions.FlushFile) : base(size)
     {
         Path = GetPaprikaFilePath(dir);
@@ -38,7 +38,7 @@ public class MemoryMappedPageManager : PointerPageManager
                 PaprikaFileOptions);
 
             // set length
-            _file.SetLength((long)size);
+            _file.SetLength(size);
 
             // clear first pages to make it clean
             var page = new byte[Page.PageSize];

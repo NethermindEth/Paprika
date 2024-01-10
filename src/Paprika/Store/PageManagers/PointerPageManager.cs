@@ -7,7 +7,7 @@ public abstract unsafe class PointerPageManager : IPageManager
 {
     public int MaxPage { get; }
 
-    protected PointerPageManager(ulong size) => MaxPage = (int)(size / Page.PageSize);
+    protected PointerPageManager(long size) => MaxPage = (int)(size / Page.PageSize);
 
     protected abstract void* Ptr { get; }
 

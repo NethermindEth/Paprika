@@ -1,5 +1,3 @@
-#define STORE_NO_LEAFS
-
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -249,14 +247,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             return data;
 
         var node = Node.Header.Peek(data).NodeType;
-
-        if (node == Node.Type.Leaf)
-        {
-#if STORE_NO_LEAFS
-            // store only roots
-            return key.StoragePath.Length == 0 ? data : ReadOnlySpan<byte>.Empty;
-#endif
-        }
 
         if (node != Node.Type.Branch)
         {
@@ -938,20 +928,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                         if (diffAt == leaf.Path.Length)
                         {
-#if STORE_NO_LEAFS
-                            // If the query hit db, set the leaf. It will be filtered out by InspectBefore
-                            // so it's safe to store it as is for future usages.
-                            // Use it for the db based queries.
-                            if (owner.IsDbQuery)
-                            {
-                                commit.SetLeaf(key, leftoverPath);
-                            }
-#else
                             if (owner.IsDbQuery && budget.ClaimDbWrite())
                             {
                                 commit.SetLeaf(key, leftoverPath);
                             }
-#endif
                             return;
                         }
 

@@ -23,7 +23,7 @@ namespace Paprika.Runner;
 public record Case(
     uint BlockCount,
     int AccountsPerBlock,
-    ulong DbFileSize,
+    long DbFileSize,
     bool PersistentDb,
     TimeSpan FlushEvery,
     bool Fsync,

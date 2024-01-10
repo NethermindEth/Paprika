@@ -6,7 +6,7 @@ public unsafe class NativeMemoryPageManager : PointerPageManager
 {
     private readonly void* _ptr;
 
-    public NativeMemoryPageManager(ulong size, byte historyDepth) : base(size)
+    public NativeMemoryPageManager(long size, byte historyDepth) : base(size)
     {
         _ptr = NativeMemory.AlignedAlloc((UIntPtr)size, (UIntPtr)Page.PageSize);
 

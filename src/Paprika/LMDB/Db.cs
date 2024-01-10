@@ -9,7 +9,6 @@ using System.Text;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
-using Paprika.Merkle;
 using Paprika.Store;
 using Paprika.Utils;
 using Spreads;
@@ -345,7 +344,6 @@ public class Db : IDb, IDisposable
             _tx = tx;
             _read = read;
             _lock = shared ? new object() : null;
-            _cursor = db._db.OpenReadOnlyCursor(_read);
 
             Metadata = _db.TryGet(_read, MetadataKey, out var value)
                 ? Metadata.ReadFrom(value)
@@ -363,117 +361,18 @@ public class Db : IDb, IDisposable
 
             using (GetMonitor())
             {
-                if (key.Type != DataType.Merkle)
+                if (_db.TryMapKey(ctx, key, destination, out var mapped))
                 {
-                    //using(GetMonitor())
-                    {
-                        // not Merkle, just map the key and query
-                        if (_db.TryMapKey(ctx, key, destination, out var mapped))
-                        {
-                            return _db.TryGet(_read, mapped, out result);
-                        }
-                    }
-
-                    result = default;
-                    return false;
+                    return _db.TryGet(_read, mapped, out result);
                 }
-
-                {
-                    // TODO: get account id
-                    // Merkle, try get as is first
-                    //using (GetMonitor())
-                    {
-                        if (_db.TryMapKey(ctx, key, destination, out var mapped))
-                        {
-                            if (_db.TryGet(_read, mapped, out result))
-                                return true;
-                        }
-                    }
-
-                    // This must be a leaf as leafs are not stored.
-                    // If the read misses the value,
-                    // it must be a leaf and shall be constructed on the basis of the account or the storage
-                    if (key.Path.Length != NibblePath.KeccakNibbleCount)
-                    {
-                        // this is a leaf account, requires no mapping
-                        Keccak account = default;
-                        key.Path.RawSpan.CopyTo(account.BytesAsSpan);
-
-                        var lowerBound = ToBuffer(CreateAccountKey(destination, account));
-
-                        //using (GetMonitor())
-                        {
-                            if (_cursor.TryFind(Lookup.GE, ref lowerBound, out _) == false)
-                            {
-                                result = default;
-                                return false;
-                            }
-                        }
-
-                        var found = NibblePath
-                            .FromKey(lowerBound.Span.Slice(MetaPrefixLength));
-
-                        return TryCreateLeafResult(key.Path, found, out result);
-                    }
-                    else
-                    {
-                        ReadOnlySpan<byte> id;
-                        //using (GetMonitor())
-                        {
-                            // This is a storage, try map account first. No map - nothing was stored.
-                            if (_db.TryGetAccountId(_read, key.Path.UnsafeAsKeccak, out id))
-                            {
-                                result = default;
-                                return false;
-                            }
-                        }
-
-                        // This is a leaf account.
-                        Keccak storage = default;
-                        key.StoragePath.RawSpan.CopyTo(storage.BytesAsSpan);
-
-                        var before = Key.StorageCell(key.Path, storage);
-
-                        var compressed = CompressKey(before, id, destination);
-                        var lowerBound = ToBuffer(compressed);
-
-                        //using (GetMonitor())
-                        {
-                            if (_cursor.TryFind(Lookup.GE, ref lowerBound, out _) == false)
-                            {
-                                result = default;
-                                return false;
-                            }
-                        }
-
-                        var leafPath = NibblePath
-                            .FromKey(lowerBound.Span[^32..])
-                            .SliceFrom(key.StoragePath.Length);
-
-                        return TryCreateLeafResult(key.StoragePath, leafPath, out result);
-                    }
-                }
-            }
-        }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private OptionalMonitor GetMonitor() => _lock != null ? new OptionalMonitor(this) : default;
-
-        private static bool TryCreateLeafResult(scoped in NibblePath searchedPrefix, scoped in NibblePath foundFullPath,
-            out ReadOnlySpan<byte> result)
-        {
-            if (foundFullPath.FindFirstDifferentNibble(searchedPrefix) == searchedPrefix.Length)
-            {
-                var leaf = new Node.Leaf(foundFullPath.SliceFrom(searchedPrefix.Length));
-                // TODO: remove allocation
-                var bytes = new byte[leaf.MaxByteLength];
-                result = leaf.WriteTo(bytes);
-                return true;
             }
 
             result = default;
             return false;
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private OptionalMonitor GetMonitor() => _lock != null ? new OptionalMonitor(this) : default;
 
         public void SetMetadata(uint blockNumber, in Keccak blockHash)
         {
@@ -529,7 +428,6 @@ public class Db : IDb, IDisposable
 
         public void Dispose()
         {
-            _cursor.Dispose();
             _read.Dispose();
             // _tx doesn't have to be disposed. It should be the same as read.
         }
@@ -639,39 +537,39 @@ public class Db : IDb, IDisposable
                     TotalSizeAccounts += totalLength;
                     break;
                 case PrefixMeta:
-                {
-                    switch (key.Span.Length)
                     {
-                        case 1 + Keccak.Size:
-                            IdMappings++;
-                            TotalSizeIdMappings += totalLength;
-                            break;
-                        case > 2:
-                            throw new Exception(
-                                $"{((ReadOnlySpan<byte>)key.Span).ToHexString(true)} should not appear here");
-                    }
+                        switch (key.Span.Length)
+                        {
+                            case 1 + Keccak.Size:
+                                IdMappings++;
+                                TotalSizeIdMappings += totalLength;
+                                break;
+                            case > 2:
+                                throw new Exception(
+                                    $"{((ReadOnlySpan<byte>)key.Span).ToHexString(true)} should not appear here");
+                        }
 
-                    break;
-                }
+                        break;
+                    }
                 default:
-                {
-                    // complex key
-                    var type = (DataType)(first >> TypeShift) & ~DataType.CompressedAccount;
-
-                    switch (type)
                     {
-                        case DataType.StorageCell:
-                            TotalSizeStorage += totalLength;
-                            break;
-                        case DataType.Merkle:
-                            TotalSizeMerkle += totalLength;
-                            break;
-                        default:
-                            throw new ArgumentOutOfRangeException();
-                    }
+                        // complex key
+                        var type = (DataType)(first >> TypeShift) & ~DataType.CompressedAccount;
 
-                    break;
-                }
+                        switch (type)
+                        {
+                            case DataType.StorageCell:
+                                TotalSizeStorage += totalLength;
+                                break;
+                            case DataType.Merkle:
+                                TotalSizeMerkle += totalLength;
+                                break;
+                            default:
+                                throw new ArgumentOutOfRangeException();
+                        }
+
+                        break;
+                    }
             }
         }
 

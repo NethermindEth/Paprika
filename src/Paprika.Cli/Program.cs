@@ -38,7 +38,7 @@ public class ValidateRootHashesSettingsCommand : AsyncCommand<ValidateRootHashes
 
         var length = new FileInfo(file).Length;
 
-        using var db = PagedDb.MemoryMappedDb((ulong)length, settings.HistoryDepth, settings.Path);
+        using var db = PagedDb.MemoryMappedDb(length, settings.HistoryDepth, settings.Path);
 
         // configure merkle to memoize none and recalculate all
         const int none = int.MaxValue;

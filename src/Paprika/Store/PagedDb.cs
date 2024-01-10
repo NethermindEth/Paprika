@@ -87,10 +87,10 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             "The number of pages flushed during the commit");
     }
 
-    public static PagedDb NativeMemoryDb(ulong size, byte historyDepth = 2) =>
+    public static PagedDb NativeMemoryDb(long size, byte historyDepth = 2) =>
         new(new NativeMemoryPageManager(size, historyDepth), historyDepth);
 
-    public static PagedDb MemoryMappedDb(ulong size, byte historyDepth, string directory, bool flushToDisk = true) =>
+    public static PagedDb MemoryMappedDb(long size, byte historyDepth, string directory, bool flushToDisk = true) =>
         new(
             new MemoryMappedPageManager(size, historyDepth, directory,
                 flushToDisk ? PersistenceOptions.FlushFile : PersistenceOptions.MMapOnly), historyDepth);
