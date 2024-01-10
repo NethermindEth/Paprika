@@ -10,12 +10,13 @@ public static partial class Node
 {
     public enum Type : byte
     {
-        Leaf = 0,
+        Leaf = 2,
         Extension = 1,
-        Branch = 2,
+        Branch = 0,
     }
 
-    public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Type nodeType, out Leaf leaf, out Extension extension, out Branch branch)
+    public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Type nodeType, out Leaf leaf,
+        out Extension extension, out Branch branch)
     {
         leaf = new Leaf();
         extension = new Extension();
@@ -43,7 +44,8 @@ public static partial class Node
 
     private static Header ValidateHeaderNodeType(Header header, Type expected)
     {
-        Assert(header.NodeType == expected, $"Expected {nameof(Header)} with {nameof(Type)} {expected}, got {header.NodeType}");
+        Assert(header.NodeType == expected,
+            $"Expected {nameof(Header)} with {nameof(Type)} {expected}, got {header.NodeType}");
 
         return header;
     }
@@ -53,17 +55,32 @@ public static partial class Node
     {
         public const int Size = sizeof(byte);
 
-        private const byte NodeTypeMask = 0b0000_0011;
-        private const int NodeTypeMaskShift = 0;
+        private const byte HighestBit = 0b1000_0000;
 
-        private const byte MetadataMask = 0b1111_1100;
-        private const int MetadataMaskShift = 2;
+        private const byte NodeTypeMask = 0b1100_0000;
+        private const int NodeTypeMaskShift = 6;
 
-        [FieldOffset(0)]
-        private readonly byte _header;
+        private const byte MetadataMask = 0b0011_1111;
+        private const int MetadataMaskShift = 0;
 
-        public Type NodeType => (Type)((_header & NodeTypeMask) >> NodeTypeMaskShift);
-        public byte Metadata => (byte)((_header & MetadataMask) >> MetadataMaskShift);
+        [FieldOffset(0)] private readonly byte _header;
+
+        public Type NodeType
+        {
+            get
+            {
+                var value = (_header & NodeTypeMask) >> NodeTypeMaskShift;
+
+                // 2 eliminates cases where a leaf takes 7bits for metadata
+                return value >= 2 ? Type.Leaf : (Type)value;
+            }
+        }
+
+        /// <summary>
+        /// The part ((_header & HighestBit) >> 1)) allows for node types with the highest bit set
+        /// <see cref="Type.Leaf"/> to have 7 bits of metadata.
+        /// </summary>
+        public byte Metadata => (byte)((((_header & MetadataMask) | ((_header & HighestBit) >> 1)) & _header) >> MetadataMaskShift);
 
         public Header(Type nodeType, byte metadata = 0b0000)
         {
@@ -107,7 +124,23 @@ public static partial class Node
 
     public readonly ref partial struct Leaf
     {
-        public int MaxByteLength => Header.Size + Path.MaxByteLength;
+        public int MaxByteLength => Header.Size + Path.RawSpan.Length;
+
+        private const byte OddPathMetadata = 0b0100_0000;
+        private const byte OddPathMetadataShift = 6;
+        private const byte LengthMetadata = 0b0011_1111;
+
+        /// <summary>
+        /// There's a single 64-nibble long path.
+        /// There are two 63-nibble long paths:
+        /// 1. an odd, encoded: 0b0111_1110
+        /// 2. an even, encoded: 0b0011_1110
+        /// aw we subtract 1 from length as no leafs with 0 paths are stored.
+        /// This make it unique addressing and allows to save one byte for the nibble path length. 
+        /// </summary>
+        private const byte FullPathMetadata = 0b0111_1111;
+
+        public const int MinimalLeafPathLength = 1;
 
         public readonly Header Header;
         public readonly NibblePath Path;
@@ -121,8 +154,21 @@ public static partial class Node
 
         public Leaf(NibblePath path)
         {
-            // leaves shall never be marked as dirty or not. This information will be held by branch
-            Header = new Header(Type.Leaf);
+            // Leaves shall never be marked as dirty or not. This information will be held by branch
+
+            Assert(path.Length >= MinimalLeafPathLength);
+
+            if (path.Length == NibblePath.KeccakNibbleCount)
+            {
+                Header = new Header(Type.Leaf, FullPathMetadata);
+            }
+            else
+            {
+                var oddity = path.IsOdd ? OddPathMetadata : default;
+                var length = path.Length - MinimalLeafPathLength;
+                Header = new Header(Type.Leaf, (byte)(oddity | length));
+            }
+
             Path = path;
         }
 
@@ -135,18 +181,31 @@ public static partial class Node
         public Span<byte> WriteToWithLeftover(Span<byte> output)
         {
             var leftover = Header.WriteToWithLeftover(output);
-            leftover = Path.WriteToWithLeftover(leftover);
-
-            return leftover;
+            Path.RawSpan.CopyTo(leftover);
+            return leftover[Path.RawSpan.Length..];
         }
 
         public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Leaf leaf)
         {
             var leftover = Header.ReadFrom(source, out var header);
-            leftover = NibblePath.ReadFrom(leftover, out var path);
+
+            if (header.Metadata == FullPathMetadata)
+            {
+                leaf = new Leaf(header, NibblePath.FromKey(leftover[..Keccak.Size]));
+                return leftover[Keccak.Size..];
+            }
+
+            var length = (header.Metadata & LengthMetadata) + MinimalLeafPathLength;
+            var oddity = (header.Metadata & OddPathMetadata) >> OddPathMetadataShift;
+
+            var actualLength = (length + oddity + MinimalLeafPathLength) / 2;
+
+            var path = NibblePath.FromKey(leftover.Slice(0, actualLength))
+                .SliceFrom(oddity)
+                .SliceTo(length);
 
             leaf = new Leaf(header, path);
-            return leftover;
+            return leftover[actualLength..];
         }
 
         public bool Equals(in Leaf other) =>

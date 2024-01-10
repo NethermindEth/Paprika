@@ -336,13 +336,17 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private KeccakOrRlp EncodeLeaf(scoped in Key key, scoped in Node.Leaf leaf, scoped in ComputeContext ctx)
     {
-        var leafPath =
-            key.Path.Append(leaf.Path, stackalloc byte[key.Path.MaxByteLength + leaf.Path.MaxByteLength + 1]);
+        return EncodeLeafByPath(key, ctx, leaf.Path);
+    }
+
+    private KeccakOrRlp EncodeLeafByPath(scoped in Key key, scoped in ComputeContext ctx, scoped in NibblePath leafPath)
+    {
+        var leafTotalPath = key.Path.Append(leafPath, stackalloc byte[key.Path.MaxByteLength + leafPath.MaxByteLength + 1]);
 
         var leafKey = ctx.TrieType == TrieType.State
-            ? Key.Account(leafPath)
+            ? Key.Account(leafTotalPath)
             // the prefix will be added by the prefixing commit
-            : Key.Raw(leafPath, DataType.StorageCell, NibblePath.Empty);
+            : Key.Raw(leafTotalPath, DataType.StorageCell, NibblePath.Empty);
 
         using var leafData = ctx.Commit.Get(leafKey);
 
@@ -365,13 +369,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 account = new Account(account.Balance, account.Nonce, account.CodeHash, new Keccak(storageRoot.Span));
             }
 
-            Node.Leaf.KeccakOrRlp(leaf.Path, account, out keccakOrRlp);
+            Node.Leaf.KeccakOrRlp(leafPath, account, out keccakOrRlp);
             return keccakOrRlp;
         }
 
         Debug.Assert(ctx.TrieType == TrieType.Storage, "Only accounts now");
 
-        Node.Leaf.KeccakOrRlp(leaf.Path, leafData.Span, out keccakOrRlp);
+        Node.Leaf.KeccakOrRlp(leafPath, leafData.Span, out keccakOrRlp);
         return keccakOrRlp;
     }
 
@@ -439,7 +443,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     }
 
                     var childPath = key.Path.AppendNibble(i, childSpan);
-                    var value = Compute(Key.Merkle(childPath), ctx);
+
+                    var value = childPath.Length == NibblePath.KeccakNibbleCount ?
+                        EncodeLeafByPath(Key.Merkle(childPath), ctx, NibblePath.Empty) :
+                        Compute(Key.Merkle(childPath), ctx);
 
                     // it's either Keccak or a span. Both are encoded the same ways
                     if (value.DataType == KeccakOrRlp.Type.Keccak)
@@ -754,7 +761,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                     var newAt = at + 1;
 
-                    var status = Delete(path, newAt, commit, budget);
+                    var status = LeafCanBeOmitted(newAt) ? DeleteStatus.LeafDeleted : Delete(path, newAt, commit, budget);
                     if (status == DeleteStatus.KeyDoesNotExist)
                     {
                         // child reports non-existence
@@ -863,6 +870,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             if (array != null)
                 ArrayPool<byte>.Shared.Return(array);
         }
+    }
+
+    private static bool LeafCanBeOmitted(int pathLength)
+    {
+        return pathLength == NibblePath.KeccakNibbleCount;
     }
 
 
@@ -1082,6 +1094,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         if (array != null)
                         {
                             ArrayPool<byte>.Shared.Return(array);
+                        }
+
+                        if (LeafCanBeOmitted(i + 1))
+                        {
+                            // no need to store leaf on the last level
+                            return;
                         }
                     }
                     break;

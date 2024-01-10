@@ -13,6 +13,12 @@ public static class CommitExtensions
 {
     public static void SetLeaf(this ICommit commit, in Key key, in NibblePath leafPath)
     {
+        if (leafPath.Length == 0)
+        {
+            // Last level leafs are omitted.
+            return;
+        }
+
         var leaf = new Node.Leaf(leafPath);
         commit.Set(key, leaf.WriteTo(stackalloc byte[leaf.MaxByteLength]));
     }

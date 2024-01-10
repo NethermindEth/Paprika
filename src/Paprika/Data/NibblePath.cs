@@ -28,6 +28,8 @@ public readonly ref struct NibblePath
     private readonly ref byte _span;
     private readonly byte _odd;
 
+    public bool IsOdd => _odd == OddBit;
+
     public static NibblePath Empty => default;
 
     /// <summary>
