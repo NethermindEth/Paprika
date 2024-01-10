@@ -249,6 +249,11 @@ public class Blockchain : IAsyncDisposable
         }
     }
 
+    public IRawState StartRaw()
+    {
+        return new RawState(this, _db);
+    }
+
     public IReadOnlyWorldState StartReadOnly(Keccak keccak)
     {
         lock (_blockLock)
@@ -520,6 +525,32 @@ public class Blockchain : IAsyncDisposable
             _committed = true;
 
             return hash;
+        }
+
+        public void CommitRaw()
+        {
+            EnsureHash();
+
+            var hash = _hash!.Value;
+
+            // After this step, this block requires no batch or ancestors.
+            // It just provides data on its own as it was committed.
+            // Clean up dependencies here: batch and ancestors.
+            _batch.Dispose();
+
+            foreach (var ancestor in _ancestors)
+            {
+                ancestor.Dispose();
+            }
+
+            _ancestors = Array.Empty<BlockState>();
+
+            // create xor filter
+            _xor = new Xor8(_bloom!);
+
+            // clean no longer used fields
+            _bloom = null;
+            _stats = null;
         }
 
         public void Reset()
@@ -1183,5 +1214,48 @@ public class Blockchain : IAsyncDisposable
         // dispose metrics, but flush them last time before unregistering
         _beforeMetricsDisposed?.Invoke();
         _meter.Dispose();
+    }
+
+    private class RawState : IRawState
+    {
+        private readonly Blockchain _blockchain;
+        private readonly IDb _db;
+        private BlockState _current;
+        private IBatch _batch;
+
+        public RawState(Blockchain blockchain, IDb db)
+        {
+            _blockchain = blockchain;
+            _db = db;
+            Renew();
+        }
+
+        private void Renew()
+        {
+            _batch = _db.BeginNextBatch();
+            _current = new BlockState(Keccak.Zero, _batch, [], _blockchain);
+        }
+
+        public void Dispose()
+        {
+        }
+
+        public Account GetAccount(in Keccak address) => _current.GetAccount(address);
+
+        public Span<byte> GetStorage(in Keccak address, in Keccak storage, Span<byte> destination) =>
+            _current.GetStorage(address, in storage, destination);
+
+        public void SetAccount(in Keccak address, in Account account) => _current.SetAccount(address, account);
+
+        public void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value) =>
+            _current.SetStorage(address, storage, value);
+
+        public void Commit()
+        {
+            _current.CommitRaw();
+            _current.Apply(_batch);
+            _batch.Commit(CommitOptions.FlushDataAndRoot);
+            _current.Dispose();
+        }
     }
 }
