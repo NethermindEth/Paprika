@@ -38,9 +38,7 @@ public readonly unsafe struct DataPage : IPage
     //TODO: [SkipLocalsInit]
     public Page Set(in SetContext ctx)
     {
-        var size = StoreKey.GetMaxByteSize(ctx.Key);
-        var key = StoreKey.Encode(ctx.Key, stackalloc byte[size]);
-        return Set(NibblePath.FromKey(key.Payload), ctx.Data, ctx.Batch);
+        return Set(ctx.Key, ctx.Data, ctx.Batch);
     }
 
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
@@ -332,12 +330,6 @@ public readonly unsafe struct DataPage : IPage
         public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
     }
 
-    public bool TryGet(Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
-    {
-        var k = StoreKey.Encode(key, stackalloc byte[StoreKey.GetMaxByteSize(key)]);
-        return TryGet(NibblePath.FromKey(k.Payload), batch, out result);
-    }
-
     public bool TryGet(scoped NibblePath key, IPageResolver batch, out ReadOnlySpan<byte> result)
     {
         // read in-page
@@ -397,7 +389,7 @@ public readonly unsafe struct DataPage : IPage
 
                 foreach (var item in leafMap.EnumerateAll())
                 {
-                    reporter.ReportItem(new StoreKey(item.Key), item.RawData);
+                    //reporter.ReportItem(new StoreKey(item.Key), item.RawData);
                 }
 
                 reporter.ReportDataUsage(page.Header.PageType, level + 1, 0, leafMap.Count,
@@ -425,7 +417,7 @@ public readonly unsafe struct DataPage : IPage
 
         foreach (var item in slotted.EnumerateAll())
         {
-            reporter.ReportItem(new StoreKey(item.Key), item.RawData);
+            // reporter.ReportItem(new StoreKey(item.Key), item.RawData);
         }
 
         reporter.ReportDataUsage(Header.PageType, level, BucketCount - emptyBuckets, slotted.Count,

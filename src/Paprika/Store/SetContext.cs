@@ -7,11 +7,11 @@ namespace Paprika.Store;
 /// </summary>
 public readonly ref struct SetContext
 {
-    public readonly Key Key;
+    public readonly NibblePath Key;
     public readonly IBatchContext Batch;
     public readonly ReadOnlySpan<byte> Data;
 
-    public SetContext(Key key, ReadOnlySpan<byte> data, IBatchContext batch)
+    public SetContext(NibblePath key, ReadOnlySpan<byte> data, IBatchContext batch)
     {
         Key = key;
         Batch = batch;

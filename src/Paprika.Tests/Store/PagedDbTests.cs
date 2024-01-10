@@ -15,7 +15,7 @@ public class PagedDbTests
     public async Task BiggerTest()
     {
         const int accounts = 1;
-        const int merkleCount = NibblePath.KeccakNibbleCount;
+        const int merkleCount = 31;
 
         using var db = PagedDb.NativeMemoryDb(256 * Mb, 2);
 
