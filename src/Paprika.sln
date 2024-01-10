@@ -12,8 +12,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Paprika.Cli", "Paprika.Cli\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Paprika.Runner.Pareto", "Paprika.Runner.Pareto\Paprika.Runner.Pareto.csproj", "{CFE8AF26-C8F0-45D6-863B-AF5AC37A2E17}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Paprika.Importer", "Paprika.Importer\Paprika.Importer.csproj", "{A7E575C6-5B24-46A1-8FC6-D71C9A5A66A1}"
-EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -50,10 +48,6 @@ Global
 		{CFE8AF26-C8F0-45D6-863B-AF5AC37A2E17}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{CFE8AF26-C8F0-45D6-863B-AF5AC37A2E17}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{CFE8AF26-C8F0-45D6-863B-AF5AC37A2E17}.Release|Any CPU.Build.0 = Release|Any CPU
-		{A7E575C6-5B24-46A1-8FC6-D71C9A5A66A1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{A7E575C6-5B24-46A1-8FC6-D71C9A5A66A1}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{A7E575C6-5B24-46A1-8FC6-D71C9A5A66A1}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{A7E575C6-5B24-46A1-8FC6-D71C9A5A66A1}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 	EndGlobalSection
