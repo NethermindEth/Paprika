@@ -171,10 +171,11 @@ public readonly ref struct SlottedArray
             ref var slot = ref _map._slots[_index];
             var span = _map.GetSlotPayload(ref slot);
 
-            var keyLenght = span[0];
+            var shift = slot.KeyLength == Slot.KeyLongerMarker ? KeyLengthLength : 0;
+            var keyLength = slot.KeyLength == Slot.KeyLongerMarker ? span[0] : slot.KeyLength;
 
-            var key = span.Slice(KeyLengthLength, keyLenght);
-            var data = span.Slice(KeyLengthLength + keyLenght);
+            var key = span.Slice(shift, keyLength);
+            var data = span.Slice(shift + keyLength);
 
             return new Item(key, data, _index);
         }
@@ -339,6 +340,7 @@ public readonly ref struct SlottedArray
 
                 copyTo.Hash = copyFrom.Hash;
                 copyTo.ItemAddress = high;
+                copyTo.KeyLength = copyFrom.KeyLength;
 
                 copy._header.Low += Slot.Size;
                 copy._header.High = (ushort)(copy._header.High + fromSpan.Length);
