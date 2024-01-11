@@ -88,9 +88,21 @@ public readonly ref struct SlottedArray
         // write item: length_key, key, data
         var dest = _data.Slice(slot.ItemAddress, total);
 
-        dest[0] = (byte)key.Length;
-        key.CopyTo(dest.Slice(KeyLengthLength));
-        data.CopyTo(dest.Slice(KeyLengthLength + key.Length));
+        int offset;
+        if (key.Length <= Slot.MaxSlotLengthKey)
+        {
+            slot.KeyLength = key.Length;
+            offset = 0;
+        }
+        else
+        {
+            slot.KeyLength = Slot.KeyLongerMarker;
+            dest[0] = (byte)key.Length;
+            offset = 1;
+        }
+
+        key.CopyTo(dest.Slice(offset));
+        data.CopyTo(dest.Slice(offset + key.Length));
 
         // commit low and high
         _header.Low += Slot.Size;
@@ -267,9 +279,11 @@ public readonly ref struct SlottedArray
     }
 
     private const int KeyLengthLength = 1;
+
     private static int GetTotalSpaceRequired(in ReadOnlySpan<byte> key, ReadOnlySpan<byte> data)
     {
-        return KeyLengthLength + key.Length + data.Length;
+        return (key.Length <= Slot.MaxSlotLengthKey ? 0 : KeyLengthLength) +
+               key.Length + data.Length;
     }
 
     /// <summary>
@@ -415,11 +429,14 @@ public readonly ref struct SlottedArray
 
                     // The StartsWith check assumes that all the keys have the same length.
                     var length = key.Length;
-                    if (actual[0] == length)
+                    var shift = slot.KeyLength == Slot.KeyLongerMarker ? KeyLengthLength : 0;
+                    var actualLength = slot.KeyLength == Slot.KeyLongerMarker ? actual[0] : slot.KeyLength;
+
+                    if (actualLength == length)
                     {
-                        if (actual.Slice(KeyLengthLength, length).SequenceEqual(key))
+                        if (actual.Slice(shift, length).SequenceEqual(key))
                         {
-                            data = actual.Slice(KeyLengthLength + length);
+                            data = actual.Slice(shift + length);
                             slotIndex = i;
                             return true;
                         }
@@ -478,7 +495,7 @@ public readonly ref struct SlottedArray
             set => Raw = (ushort)((Raw & ~AddressMask) | value);
         }
 
-        private const ushort DeletedMask = 0b0010_0000_0000_0000;
+        private const ushort DeletedMask = 0b0001_0000_0000_0000;
 
         /// <summary>
         /// The data type contained in this slot.
@@ -487,6 +504,17 @@ public readonly ref struct SlottedArray
         {
             get => (Raw & DeletedMask) == DeletedMask;
             set => Raw = (ushort)((Raw & ~DeletedMask) | (ushort)(value ? DeletedMask : 0));
+        }
+
+        private const ushort KeyLengthMask = 0b1110_0000_0000_0000;
+        private const ushort KeyLengthShift = 13;
+        public const int MaxSlotLengthKey = 6;
+        public const int KeyLongerMarker = 7;
+
+        public int KeyLength
+        {
+            get => (Raw & KeyLengthMask) >> KeyLengthShift;
+            set => Raw = (ushort)((Raw & ~DeletedMask) | (value << KeyLengthShift));
         }
 
         [FieldOffset(0)] private ushort Raw;

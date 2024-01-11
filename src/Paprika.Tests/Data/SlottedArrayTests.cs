@@ -126,7 +126,7 @@ public class SlottedArrayTests
         Span<byte> key = stackalloc byte[1];
         Span<byte> value = stackalloc byte[2];
 
-        const int count = 32;
+        const int count = 34;
 
         for (byte i = 0; i < count; i++)
         {
