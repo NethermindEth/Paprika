@@ -5,7 +5,7 @@ namespace Paprika.Chain;
 /// <summary>
 /// Allows raw data state for syncing purposes.
 /// </summary>
-public interface IRawState : IDisposable
+public interface IRawState : IReadOnlyWorldState
 {
     Account GetAccount(in Keccak address);
 
@@ -14,6 +14,8 @@ public interface IRawState : IDisposable
     void SetAccount(in Keccak address, in Account account);
 
     void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value);
+
+    void DestroyAccount(in Keccak address);
 
     /// <summary>
     /// Commits the pending changes.
