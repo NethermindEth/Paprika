@@ -12,6 +12,9 @@ public class NodeTests
     [TestCase(Node.Type.Branch, 0b0000)]
     [TestCase(Node.Type.Branch, 0b0101)]
     [TestCase(Node.Type.Leaf, 0b0000)]
+    [TestCase(Node.Type.Leaf, 0b1000)]
+    [TestCase(Node.Type.Leaf, 0b0100_0000, TestName = "7th bit used")]
+    [TestCase(Node.Type.Leaf, 0b0010_0000, TestName = "6th bit used")]
     [TestCase(Node.Type.Extension, 0b0000)]
     public void Header_properties(Node.Type nodeType, byte metadata)
     {
@@ -201,6 +204,24 @@ public class NodeTests
         decoded.Equals(leaf).Should().BeTrue($"Expected {leaf.ToString()}, got {decoded.ToString()}");
     }
 
+    [TestCase(new byte[] { 253, 137 }, 0, 1)]
+    [TestCase(new byte[] { 253, 137 }, 0, 2)]
+    [TestCase(new byte[] { 253, 137 }, 1, 1)]
+    [TestCase(new byte[] { 253, 137 }, 1, 2)]
+    [TestCase(new byte[] { 253, 137 }, 1, 3)]
+    public void Leaf_paths(byte[] raw, int odd, int length)
+    {
+        var path = NibblePath.FromKey(raw).SliceFrom(odd).SliceTo(length);
+        var leaf = new Node.Leaf(path);
+        Span<byte> buffer = stackalloc byte[leaf.MaxByteLength];
+
+        var encoded = leaf.WriteTo(buffer);
+        var leftover = Node.Leaf.ReadFrom(encoded, out var decoded);
+
+        leftover.Length.Should().Be(0);
+        decoded.Equals(leaf).Should().BeTrue($"Expected {leaf.ToString()}, got {decoded.ToString()}");
+    }
+
     [Test]
     public void Extension_properties()
     {
@@ -307,17 +328,5 @@ public class NodeTests
         actualLeaf.Equals(leaf).Should().BeTrue();
         actualExtension.Equals(extension).Should().BeTrue();
         actualBranch.Equals(branch).Should().BeTrue();
-    }
-
-    [Test]
-    public void Node_read_invalid_header()
-    {
-        Assert.Throws<ArgumentOutOfRangeException>(() =>
-        {
-            Span<byte> header = stackalloc byte[Node.Header.Size];
-            header[0] = 0b1111_1111;
-
-            _ = Node.ReadFrom(header, out _, out _, out _, out _);
-        });
     }
 }
