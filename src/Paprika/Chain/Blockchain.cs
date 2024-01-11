@@ -249,6 +249,11 @@ public class Blockchain : IAsyncDisposable
         }
     }
 
+    public IRawState StartRaw()
+    {
+        return new RawState(this, _db);
+    }
+
     public IReadOnlyWorldState StartReadOnly(Keccak keccak)
     {
         lock (_blockLock)
@@ -417,6 +422,11 @@ public class Blockchain : IAsyncDisposable
         private PooledSpanDictionary _transient = null!;
 
         private bool _committed;
+
+        /// <summary>
+        /// Raw blocks are used for batching under sync and should not be tracked by the blockchain at all.
+        /// </summary>
+        private readonly bool _raw;
         private Keccak? _hash;
         private readonly CacheBudget _cacheBudget;
 
@@ -445,8 +455,9 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-        public BlockState(Keccak parentStateRoot, IReadOnlyBatch batch, BlockState[] ancestors, Blockchain blockchain)
+        public BlockState(Keccak parentStateRoot, IReadOnlyBatch batch, BlockState[] ancestors, Blockchain blockchain, bool raw = false)
         {
+            _raw = raw;
             _batch = new ReadOnlyBatchCountingRefs(batch);
 
             _ancestors = ancestors;
@@ -520,6 +531,32 @@ public class Blockchain : IAsyncDisposable
             _committed = true;
 
             return hash;
+        }
+
+        public void CommitRaw()
+        {
+            EnsureHash();
+
+            _committed = true;
+
+            // After this step, this block requires no batch or ancestors.
+            // It just provides data on its own as it was committed.
+            // Clean up dependencies here: batch and ancestors.
+            _batch.Dispose();
+
+            foreach (var ancestor in _ancestors)
+            {
+                ancestor.Dispose();
+            }
+
+            _ancestors = Array.Empty<BlockState>();
+
+            // create xor filter
+            _xor = new Xor8(_bloom!);
+
+            // clean no longer used fields
+            _bloom = null;
+            _stats = null;
         }
 
         public void Reset()
@@ -968,7 +1005,7 @@ public class Blockchain : IAsyncDisposable
                 ancestor.Dispose();
             }
 
-            if (_committed)
+            if (_committed && _raw == false)
             {
                 _blockchain.Remove(this);
             }
@@ -1183,5 +1220,65 @@ public class Blockchain : IAsyncDisposable
         // dispose metrics, but flush them last time before unregistering
         _beforeMetricsDisposed?.Invoke();
         _meter.Dispose();
+    }
+
+    /// <summary>
+    /// The raw state implementation that provides a 1 layer of read-through caching with the last block.
+    /// </summary>
+    private class RawState : IRawState
+    {
+        private readonly Blockchain _blockchain;
+        private readonly IDb _db;
+        private BlockState _current;
+
+        public RawState(Blockchain blockchain, IDb db)
+        {
+            _blockchain = blockchain;
+            _db = db;
+            _current = new BlockState(Keccak.Zero, _db.BeginReadOnlyBatch(), [], _blockchain, raw: true);
+        }
+
+        public void Dispose()
+        {
+            _current.Dispose();
+        }
+
+        public Account GetAccount(in Keccak address) => _current.GetAccount(address);
+
+        public Span<byte> GetStorage(in Keccak address, in Keccak storage, Span<byte> destination) =>
+            _current.GetStorage(address, in storage, destination);
+
+        public Keccak Hash { get; private set; }
+
+        public void SetAccount(in Keccak address, in Account account) => _current.SetAccount(address, account);
+
+        public void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value) =>
+            _current.SetStorage(address, storage, value);
+
+        public void DestroyAccount(in Keccak address) => _current.DestroyAccount(address);
+
+        public void Commit()
+        {
+            // Committing Nth block:
+            // 1. open read tx as this block did
+            // 2. open write tx and apply Nth block onto it
+            // 3. start new N+1th block
+            // 4. use read tx as the read + add the current as parent
+
+            var read = _db.BeginReadOnlyBatch();
+
+            using var batch = _db.BeginNextBatch();
+            _current.Apply(batch);
+            _current.CommitRaw();
+            batch.Commit(CommitOptions.DangerNoWrite);
+
+            Hash = _current.Hash;
+
+            // Lease is taken automatically by the ctor of the block state, not needed
+            //_current.AcquireLease();
+            _current = new BlockState(Keccak.Zero, read, [_current], _blockchain, raw: true);
+        }
+
+        public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) => ((IReadOnlyWorldState)_current).Get(key);
     }
 }
