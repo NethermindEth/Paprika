@@ -29,7 +29,7 @@ public readonly unsafe struct RootPage : IPage
     {
         private const int Size = Page.PageSize - PageHeader.Size;
 
-        private const int MetadataStart = 3 * DbAddress.Size + sizeof(uint);
+        private const int MetadataStart = 4 * DbAddress.Size + sizeof(uint);
 
         private const int AbandonedPagesStart = MetadataStart + Metadata.Size;
 
@@ -47,17 +47,22 @@ public readonly unsafe struct RootPage : IPage
         /// <summary>
         /// The first of the data pages.
         /// </summary>
-        [FieldOffset(DbAddress.Size)] public DbAddress DataRoot;
+        [FieldOffset(DbAddress.Size)] public DbAddress StateRoot;
+
+        /// <summary>
+        /// The first of the data pages.
+        /// </summary>
+        [FieldOffset(DbAddress.Size * 2)] public DbAddress StorageRoot;
 
         /// <summary>
         /// The root of the id pages.
         /// </summary>
-        [FieldOffset(DbAddress.Size * 2)] public DbAddress IdRoot;
+        [FieldOffset(DbAddress.Size * 3)] public DbAddress IdRoot;
 
         /// <summary>
         /// The account counter
         /// </summary>
-        [FieldOffset(DbAddress.Size * 3)] public uint AccountCounter;
+        [FieldOffset(DbAddress.Size * 4)] public uint AccountCounter;
 
         [FieldOffset(MetadataStart)]
         public Metadata Metadata;
@@ -83,10 +88,10 @@ public readonly unsafe struct RootPage : IPage
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver)
     {
-        if (Data.DataRoot.IsNull == false)
+        if (Data.StateRoot.IsNull == false)
         {
-            var data = new DataPage(resolver.GetAt(Data.DataRoot));
-            visitor.On(data, Data.DataRoot);
+            var data = new DataPage(resolver.GetAt(Data.StateRoot));
+            visitor.On(data, Data.StateRoot);
         }
 
         foreach (var addr in Data.AbandonedPages)

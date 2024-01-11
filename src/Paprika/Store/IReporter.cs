@@ -17,7 +17,7 @@ public interface IReporter
     /// </summary>
     void ReportPage(uint ageInBatches, PageType type);
 
-    void ReportItem(in StoreKey key, ReadOnlySpan<byte> rawData);
+    // void ReportItem(in StoreKey key, ReadOnlySpan<byte> rawData);
 }
 
 public interface IReporting
@@ -58,40 +58,40 @@ public class StatisticsReporter : IReporter
         PageTypes[type] = value + 1;
     }
 
-    public void ReportItem(in StoreKey key, ReadOnlySpan<byte> rawData)
-    {
-        var index = GetKey(key, rawData);
-
-        // total size
-        const int slottedArraySlot = 4;
-        var keyEstimatedLength = key.Payload.Length + slottedArraySlot;
-        var total = rawData.Length + keyEstimatedLength;
-
-        ref var value = ref CollectionsMarshal.GetValueRefOrAddDefault(Sizes, index, out _);
-        value += total;
-
-        if (!SizeHistograms.TryGetValue(index, out var histogram))
-        {
-            SizeHistograms[index] = histogram = new IntHistogram(1000, 3);
-        }
-
-        histogram.RecordValue(total);
-    }
+    // public void ReportItem(in StoreKey key, ReadOnlySpan<byte> rawData)
+    // {
+    //     var index = GetKey(key, rawData);
+    //
+    //     // total size
+    //     const int slottedArraySlot = 4;
+    //     var keyEstimatedLength = key.Payload.Length + slottedArraySlot;
+    //     var total = rawData.Length + keyEstimatedLength;
+    //
+    //     ref var value = ref CollectionsMarshal.GetValueRefOrAddDefault(Sizes, index, out _);
+    //     value += total;
+    //
+    //     if (!SizeHistograms.TryGetValue(index, out var histogram))
+    //     {
+    //         SizeHistograms[index] = histogram = new IntHistogram(1000, 3);
+    //     }
+    //
+    //     histogram.RecordValue(total);
+    // }
 
     private const int KeyShift = 8;
     private const int KeyDiff = 1;
 
-    private static int GetKey(in StoreKey key, in ReadOnlySpan<byte> data)
-    {
-        var encoded = (int)key.Type;
-        if ((key.Type & DataType.Merkle) != DataType.Merkle)
-        {
-            return encoded;
-        }
-
-        Node.Header.ReadFrom(data, out var header);
-        return encoded | (((int)header.NodeType + KeyDiff) << KeyShift);
-    }
+    // private static int GetKey(in StoreKey key, in ReadOnlySpan<byte> data)
+    // {
+    //     var encoded = (int)key.Type;
+    //     if ((key.Type & DataType.Merkle) != DataType.Merkle)
+    //     {
+    //         return encoded;
+    //     }
+    //
+    //     Node.Header.ReadFrom(data, out var header);
+    //     return encoded | (((int)header.NodeType + KeyDiff) << KeyShift);
+    // }
 
     public static string GetNameForSize(int i)
     {

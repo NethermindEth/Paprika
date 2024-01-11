@@ -49,6 +49,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     private readonly Histogram<int> _commitPageCountNewlyAllocated;
     private readonly MetricsExtensions.IAtomicIntGauge _dbSize;
 
+    public const int StorageKeySize = Keccak.Size + Keccak.Size + 1;
+
     // pool
     private Context? _ctx;
 
@@ -180,7 +182,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     {
         var batch = new ReadOnlyBatch(this,
             root.Header.BatchId,
-            root.Data.DataRoot,
+            root.Data.StateRoot,
+            root.Data.StorageRoot,
             root.Data.IdRoot,
             root.Data.Metadata,
             root.Data.NextFreePage, name);
@@ -346,30 +349,30 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
     private void CommitNewRoot() => _lastRoot += 1;
 
-    private static bool ShouldCompress(in Key key) => key.Path.Length == NibblePath.KeccakNibbleCount;
 
-    private static StoreKey BuildCompressed(scoped in Key key, ReadOnlySpan<byte> compressed, in Span<byte> outputSpan)
-    {
-        var raw = Key.Raw(NibblePath.FromKey(compressed), key.Type | DataType.CompressedAccount, key.StoragePath);
-        return StoreKey.Encode(in raw, outputSpan);
-    }
+    private static bool IsState(in Key key) =>
+        key.Type == DataType.Account ||
+        (key.Type == DataType.Merkle && key.Path.Length < NibblePath.KeccakNibbleCount);
 
     class ReadOnlyBatch : IReportingReadOnlyBatch, IReadOnlyBatchContext
     {
         private readonly PagedDb _db;
         private volatile bool _disposed;
 
-        private readonly DbAddress _rootDataPage;
+        private readonly DbAddress _stateRootPage;
+        private readonly DbAddress _storageRootPage;
         private readonly DbAddress _rootIdPage;
         private readonly DbAddress _nextFreePage;
         private readonly string _name;
         private long _reads;
 
-        public ReadOnlyBatch(PagedDb db, uint batchId, DbAddress rootDataPage, DbAddress rootIdPage, Metadata metadata,
+        public ReadOnlyBatch(PagedDb db, uint batchId, DbAddress stateRootPage, DbAddress storageRootPage,
+            DbAddress rootIdPage, Metadata metadata,
             DbAddress nextFreePage, string name)
         {
             _db = db;
-            _rootDataPage = rootDataPage;
+            _stateRootPage = stateRootPage;
+            _storageRootPage = storageRootPage;
             _rootIdPage = rootIdPage;
             _nextFreePage = nextFreePage;
             _name = name;
@@ -393,46 +396,42 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             Interlocked.Increment(ref _reads);
 
-            var addr = _rootDataPage;
-            if (addr.IsNull)
+            if (IsState(key))
+            {
+                if (_stateRootPage.IsNull)
+                {
+                    result = default;
+                    return false;
+                }
+
+                var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength]);
+                return new DataPage(GetAt(_stateRootPage)).TryGet(encoded, this, out result);
+            }
+
+            if (_storageRootPage.IsNull || _rootIdPage.IsNull)
             {
                 result = default;
                 return false;
             }
 
-            Span<byte> span = stackalloc byte[StoreKey.MaxByteSize];
-            scoped StoreKey storeKey;
-
-            if (ShouldCompress(key) && _rootIdPage.IsNull == false)
+            var ids = new DataPage(GetAt(_rootIdPage));
+            if (ids.TryGet(key.Path, this, out var id) == false)
             {
-                // full extraction of key possible, get it
-                var ids = new DataPage(GetAt(_rootIdPage));
-                var idKey = new StoreKey(key.Path.RawSpan);
-
-                // try fetch existing first
-                if (ids.TryGet(NibblePath.FromKey(idKey.Payload), this, out var compressed))
-                {
-                    storeKey = BuildCompressed(key, compressed, span);
-                }
-                else
-                {
-                    result = default;
-                    return false;
-                }
-            }
-            else
-            {
-                storeKey = StoreKey.Encode(in key, span);
+                result = default;
+                return false;
             }
 
-            return new DataPage(GetAt(addr)).TryGet(NibblePath.FromKey(storeKey.Payload), this, out result);
+            var encodedStorage = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength]);
+            var path = NibblePath.FromKey(id).Append(encodedStorage, stackalloc byte[StorageKeySize]);
+
+            return new DataPage(GetAt(_storageRootPage)).TryGet(path, this, out result);
         }
 
         public void Report(IReporter reporter)
         {
-            if (_rootDataPage.IsNull == false)
+            if (_stateRootPage.IsNull == false)
             {
-                new DataPage(GetAt(_rootDataPage)).Report(reporter, this, 1);
+                new DataPage(GetAt(_stateRootPage)).Report(reporter, this, 1);
             }
 
             for (uint i = _db._historyDepth; i < _nextFreePage.Raw; i++)
@@ -450,6 +449,24 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         public override string ToString() => $"{nameof(ReadOnlyBatch)}, Name: {_name}, BatchId: {BatchId}";
     }
 
+    /// <summary>
+    /// Encode the path so that the prefix is at the end.
+    /// The data pages use raw of the path so it's treated like a span.
+    /// </summary>
+    private static NibblePath Encode(in NibblePath path, in Span<byte> destination)
+    {
+        var span = path.WriteTo(destination);
+        if (span.Length <= 1)
+            return NibblePath.FromKey(span);
+
+        var last = span[^1];
+        var first = span[0];
+
+        span[0] = last;
+        span[^1] = first;
+
+        return NibblePath.FromKey(span);
+    }
 
     class Batch : BatchContextBase, IBatch
     {
@@ -498,44 +515,39 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
         {
-            CheckDisposed();
-
-            var addr = _root.Data.DataRoot;
+            if (_disposed)
+                throw new ObjectDisposedException("The readonly batch has already been disposed");
 
             _db.ReportRead();
 
-            if (addr.IsNull)
+            if (IsState(key))
+            {
+                if (_root.Data.StateRoot.IsNull)
+                {
+                    result = default;
+                    return false;
+                }
+
+                var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength]);
+                return new DataPage(GetAt(_root.Data.StateRoot)).TryGet(encoded, this, out result);
+            }
+
+            if (_root.Data.StorageRoot.IsNull || _root.Data.IdRoot.IsNull)
             {
                 result = default;
                 return false;
             }
 
-            Span<byte> span = stackalloc byte[StoreKey.MaxByteSize];
-            scoped StoreKey storeKey;
-
-            if (ShouldCompress(key) && _root.Data.IdRoot.IsNull == false)
+            var ids = new DataPage(GetAt(_root.Data.IdRoot));
+            if (ids.TryGet(key.Path, this, out var id) == false)
             {
-                // full extraction of key possible, get it
-                var ids = new DataPage(GetAt(_root.Data.IdRoot));
-                var idKey = new StoreKey(key.Path.RawSpan);
-
-                // try fetch existing first
-                if (ids.TryGet(NibblePath.FromKey(idKey.Payload), this, out var compressed))
-                {
-                    storeKey = BuildCompressed(key, compressed, span);
-                }
-                else
-                {
-                    result = default;
-                    return false;
-                }
-            }
-            else
-            {
-                storeKey = StoreKey.Encode(in key, span);
+                result = default;
+                return false;
             }
 
-            return new DataPage(GetAt(addr)).TryGet(NibblePath.FromKey(storeKey.Payload), this, out result);
+            var encodedStorage = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength]);
+            var path = NibblePath.FromKey(id).Append(encodedStorage, stackalloc byte[StorageKeySize]);
+            return new DataPage(GetAt(_root.Data.StorageRoot)).TryGet(path, this, out result);
         }
 
         public void SetMetadata(uint blockNumber, in Keccak blockHash)
@@ -547,41 +559,42 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         {
             _db.ReportWrite();
 
-            Span<byte> span = stackalloc byte[StoreKey.MaxByteSize];
-
-            scoped StoreKey storeKey;
-
-            if (ShouldCompress(key))
+            if (IsState(key))
+            {
+                var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength]);
+                SetAtRoot(encoded, rawData, ref _root.Data.StateRoot);
+            }
+            else
             {
                 // full extraction of key possible, get it
                 var ids = new DataPage(TryGetPageAlloc(ref _root.Data.IdRoot, PageType.Identity));
 
+                Span<byte> newId = stackalloc byte[sizeof(uint)];
                 // try fetch existing first
-                if (ids.TryGet(key.Path, this, out var result))
-                {
-                    storeKey = BuildCompressed(key, result, span);
-                }
-                else
+                if (ids.TryGet(key.Path, this, out var id) == false)
                 {
                     _root.Data.AccountCounter++;
-                    Span<byte> id = stackalloc byte[sizeof(uint)];
-                    BinaryPrimitives.WriteUInt32LittleEndian(id, _root.Data.AccountCounter);
+                    BinaryPrimitives.WriteUInt32LittleEndian(newId, _root.Data.AccountCounter);
 
                     // update root
-                    _root.Data.IdRoot = GetAddress(ids.Set(key.Path, id, this));
+                    _root.Data.IdRoot = GetAddress(ids.Set(key.Path, newId, this));
 
-                    // build compressed key
-                    storeKey = BuildCompressed(key, id, span);
+                    // TODO: remove alloc
+                    id = newId.ToArray();
                 }
-            }
-            else
-            {
-                storeKey = StoreKey.Encode(in key, span);
-            }
 
-            var data = TryGetPageAlloc(ref _root.Data.DataRoot, PageType.Standard);
-            var updated = new DataPage(data).Set(NibblePath.FromKey(storeKey.Payload), rawData, this);
-            _root.Data.DataRoot = _db.GetAddress(updated);
+                var encoded = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength]);
+                var path = NibblePath.FromKey(id).Append(encoded, stackalloc byte[StorageKeySize]);
+
+                SetAtRoot(path, rawData, ref _root.Data.StorageRoot);
+            }
+        }
+
+        private void SetAtRoot(in NibblePath path, in ReadOnlySpan<byte> rawData, ref DbAddress root)
+        {
+            var data = TryGetPageAlloc(ref root, PageType.Standard);
+            var updated = new DataPage(data).Set(path, rawData, this);
+            root = _db.GetAddress(updated);
         }
 
         public void Destroy(in NibblePath account)
@@ -591,16 +604,14 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             // Get the id page
             var ids = new DataPage(TryGetPageAlloc(ref _root.Data.IdRoot, PageType.Identity));
 
-            // Ensure that it exists
-            if (!ids.TryGet(account, this, out _))
-            {
-                return;
-            }
-
             // Write empty data so that it is a delete
             _root.Data.IdRoot = GetAddress(ids.Set(account, ReadOnlySpan<byte>.Empty, this));
 
-            // TODO: there' no garbage collection now while it should as data with the given prefix are left dangling
+            SetAtRoot(Encode(account, stackalloc byte[account.MaxByteLength]), ReadOnlySpan<byte>.Empty,
+                ref _root.Data.StateRoot);
+
+            // TODO: there' no garbage collection for storage
+            // It should not be hard. Walk down by the mapped path, then remove all the pages underneath.
         }
 
         private Page TryGetPageAlloc(ref DbAddress addr, PageType pageType)
