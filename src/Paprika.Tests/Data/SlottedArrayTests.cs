@@ -105,7 +105,7 @@ public class SlottedArrayTests
     [Test]
     public void Update_in_resize()
     {
-        // by trial and error, found the smallest value that will allow to put these two
+        // Update the value, with the next one being bigger.
         Span<byte> span = stackalloc byte[56];
         var map = new SlottedArray(span);
 
@@ -115,6 +115,36 @@ public class SlottedArrayTests
         map.SetAssert(key0, Data2);
 
         map.GetAssert(key0, Data2);
+    }
+
+    [Test]
+    public void Small_keys_compression()
+    {
+        Span<byte> span = stackalloc byte[256];
+        var map = new SlottedArray(span);
+
+        Span<byte> key = stackalloc byte[1];
+        Span<byte> value = stackalloc byte[2];
+
+        const int count = 32;
+
+        for (byte i = 0; i < count; i++)
+        {
+            key[0] = i;
+            value[0] = i;
+            value[1] = i;
+
+            map.SetAssert(key, value, $"{i}th was not set");
+        }
+
+        for (byte i = 0; i < count; i++)
+        {
+            key[0] = i;
+            value[0] = i;
+            value[1] = i;
+
+            map.GetAssert(key, value);
+        }
     }
 }
 
