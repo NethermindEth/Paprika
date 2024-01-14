@@ -89,6 +89,7 @@ public readonly ref struct SlottedArray
         var dest = _data.Slice(slot.ItemAddress, total);
 
         int offset;
+
         if (key.Length <= Slot.MaxSlotLengthKey)
         {
             slot.KeyLength = key.Length;
@@ -107,6 +108,7 @@ public readonly ref struct SlottedArray
         // commit low and high
         _header.Low += Slot.Size;
         _header.High += (ushort)total;
+
         return true;
     }
 
@@ -230,31 +232,6 @@ public readonly ref struct SlottedArray
     public const int BucketCount = 16;
 
     /// <summary>
-    /// Gets the aggregated sizes per nibble.
-    /// </summary>
-    public void GatherSizeStatistics(Span<ushort> buckets, NibbleSelector selector)
-    {
-        Debug.Assert(buckets.Length == BucketCount);
-
-        var to = _header.Low / Slot.Size;
-        for (var i = 0; i < to; i++)
-        {
-            ref var slot = ref _slots[i];
-
-            // extract only not deleted and these which have at least one nibble
-            if (slot.IsDeleted == false)
-            {
-                var payload = GetSlotPayload(ref slot);
-                var first = selector(payload);
-                if (first < BucketCount)
-                {
-                    buckets[first] += (ushort)(payload.Length + Slot.Size);
-                }
-            }
-        }
-    }
-
-    /// <summary>
     /// Gets the aggregated count of entries per nibble.
     /// </summary>
     public void GatherCountStatistics(Span<ushort> buckets, NibbleSelector selector)
@@ -270,7 +247,11 @@ public readonly ref struct SlottedArray
             if (slot.IsDeleted == false)
             {
                 var payload = GetSlotPayload(ref slot);
-                var first = selector(payload.Slice(KeyLengthLength));
+
+                var shift = slot.KeyLength == Slot.KeyLongerMarker ? KeyLengthLength : 0;
+                var keyLength = slot.KeyLength == Slot.KeyLongerMarker ? payload[0] : slot.KeyLength;
+
+                var first = selector(payload.Slice(shift, keyLength));
                 if (first < BucketCount)
                 {
                     buckets[first] += 1;
@@ -516,7 +497,7 @@ public readonly ref struct SlottedArray
         public int KeyLength
         {
             get => (Raw & KeyLengthMask) >> KeyLengthShift;
-            set => Raw = (ushort)((Raw & ~DeletedMask) | (value << KeyLengthShift));
+            set => Raw = (ushort)((Raw & ~KeyLengthMask) | (value << KeyLengthShift));
         }
 
         [FieldOffset(0)] private ushort Raw;
