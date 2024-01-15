@@ -162,27 +162,30 @@ if (dbExists == false)
 }
 else
 {
-    await using (var blockchain =
-                 new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), CacheBudget.Options.None, 100, () => reporter.Observe()))
-    {
-        var visitor = new PaprikaAccountValidatingVisitor(blockchain, preCommit, 1000);
-
-        var visit = Task.Run(() =>
-        {
-            root.Accept(visitor, store, true, nibbles);
-            visitor.Finish();
-        });
-
-        var validation = visitor.Validate();
-        await Task.WhenAll(visit, validation);
-
-        var report = await validation;
-
-        File.WriteAllText("validation-report.txt", report);
-
-        layout[stats].Update(new Panel("validation-report.txt").Header("Paprika accounts different from the original")
-            .Expand());
-    }
+    using var read = db.BeginReadOnlyBatch();
+    StatisticsForPagedDb.Report(layout[stats], read);
+    // await using (var blockchain =
+    //              new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), CacheBudget.Options.None, 100, () => reporter.Observe()))
+    // {
+    //     
+    //     var visitor = new PaprikaAccountValidatingVisitor(blockchain, preCommit, 1000);
+    //
+    //     var visit = Task.Run(() =>
+    //     {
+    //         root.Accept(visitor, store, true, nibbles);
+    //         visitor.Finish();
+    //     });
+    //
+    //     var validation = visitor.Validate();
+    //     await Task.WhenAll(visit, validation);
+    //
+    //     var report = await validation;
+    //
+    //     File.WriteAllText("validation-report.txt", report);
+    //
+    //     layout[stats].Update(new Panel("validation-report.txt").Header("Paprika accounts different from the original")
+    //         .Expand());
+    // }
 
     // LMDB
     // var statistics = db.GatherStats();
