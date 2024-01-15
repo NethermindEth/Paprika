@@ -22,7 +22,7 @@ public interface IReporter
 
 public interface IReporting
 {
-    void Report(IReporter reporter);
+    void Report(IReporter state, IReporter storage);
 }
 
 public class StatisticsReporter : IReporter

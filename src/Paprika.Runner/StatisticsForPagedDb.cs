@@ -14,54 +14,15 @@ public static class StatisticsForPagedDb
 
         try
         {
-            var stats = new StatisticsReporter();
-            read.Report(stats);
-
-            var levelStats = new Table();
-            levelStats.AddColumn(new TableColumn("Level of Paprika tree"));
-            levelStats.AddColumn(new TableColumn("Child page count"));
-
-            levelStats.AddColumn(new TableColumn("Entries in page"));
-            levelStats.AddColumn(new TableColumn("Capacity left (bytes)"));
-
-            foreach (var (key, level) in stats.Levels)
-            {
-                var entries = level.Entries;
-                var capacity = level.CapacityLeft;
-
-                levelStats.AddRow(
-                    new Text(key.ToString()),
-                    WriteHistogram(level.ChildCount),
-                    WriteHistogram(entries),
-                    WriteHistogram(capacity));
-            }
-
-            var mb = (long)stats.PageCount * Page.PageSize / 1024 / 1024;
-
-            var types = string.Join(", ", stats.PageTypes.Select(kvp => $"{kvp.Key}: {kvp.Value}"));
-
-            // histogram description
-            var sb = new StringBuilder();
-            sb.Append("Histogram percentiles: ");
-            foreach (var percentile in Percentiles)
-            {
-                sb.Append($"[{percentile.color}]P{percentile.value}: {percentile.value}th percentile [/] ");
-            }
+            var state = new StatisticsReporter();
+            var storage = new StatisticsReporter();
+            
+            read.Report(state, storage);
 
             var report = new Layout()
-                .SplitRows(
-                    new Layout(
-                            new Rows(
-                                new Markup(sb.ToString()),
-                                new Text("General stats:"),
-                                new Text($"1. Size of this Paprika tree: {mb}MB"),
-                                new Text($"2. Types of pages: {types}"),
-                                WriteHistogram(stats.PageAge, "3. Age of pages: "),
-                                WriteSizePerType(stats.Sizes, "4. Size per entry type:"),
-                                WriteHistogramSizePerType(stats.SizeHistograms, "5. Median of size per entry type:")
-                                ))
-                        .Size(10),
-                    new Layout(levelStats.Expand()));
+                .SplitColumns(
+                    new Layout(BuildTable(state).Expand()),
+                    new Layout(BuildTable(storage).Expand()));
 
             reportTo.Update(new Panel(report).Header("Paprika tree statistics").Expand());
         }
@@ -75,6 +36,30 @@ public static class StatisticsForPagedDb
 
             reportTo.Update(new Panel(paragraph).Header("Paprika tree statistics").Expand());
         }
+    }
+
+    private static Table BuildTable(StatisticsReporter reporter)
+    {
+        var t = new Table();
+        t.AddColumn(new TableColumn("Level of the tree"));
+        t.AddColumn(new TableColumn("Child page count"));
+
+        t.AddColumn(new TableColumn("Entries in page"));
+        t.AddColumn(new TableColumn("Capacity left (bytes)"));
+
+        foreach (var (key, level) in reporter.Levels)
+        {
+            var entries = level.Entries;
+            var capacity = level.CapacityLeft;
+
+            t.AddRow(
+                new Text(key.ToString()),
+                WriteHistogram(level.ChildCount),
+                WriteHistogram(entries),
+                WriteHistogram(capacity));
+        }
+        
+        return t;
     }
 
     private static IRenderable WriteSizePerType(Dictionary<int, long> sizes, string prefix)

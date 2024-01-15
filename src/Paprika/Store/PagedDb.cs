@@ -427,18 +427,16 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             return new DataPage(GetAt(_storageRootPage)).TryGet(path, this, out result);
         }
 
-        public void Report(IReporter reporter)
+        public void Report(IReporter state, IReporter storage)
         {
             if (_stateRootPage.IsNull == false)
             {
-                new DataPage(GetAt(_stateRootPage)).Report(reporter, this, 1);
+                new DataPage(GetAt(_stateRootPage)).Report(state, this, 1);
             }
-
-            for (uint i = _db._historyDepth; i < _nextFreePage.Raw; i++)
+            
+            if (_storageRootPage.IsNull == false)
             {
-                ref readonly var header = ref GetAt(DbAddress.Page(i)).Header;
-                var pageBatchId = header.BatchId;
-                reporter.ReportPage(BatchId - pageBatchId, header.PageType);
+                new DataPage(GetAt(_storageRootPage)).Report(storage, this, 1);
             }
         }
 
