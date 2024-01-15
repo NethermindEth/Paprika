@@ -231,35 +231,6 @@ public readonly ref struct SlottedArray
 
     public const int BucketCount = 16;
 
-    /// <summary>
-    /// Gets the aggregated count of entries per nibble.
-    /// </summary>
-    public void GatherCountStatistics(Span<ushort> buckets, NibbleSelector selector)
-    {
-        Debug.Assert(buckets.Length == BucketCount);
-
-        var to = _header.Low / Slot.Size;
-        for (var i = 0; i < to; i++)
-        {
-            ref var slot = ref _slots[i];
-
-            // extract only not deleted and these which have at least one nibble
-            if (slot.IsDeleted == false)
-            {
-                var payload = GetSlotPayload(ref slot);
-
-                var shift = slot.KeyLength == Slot.KeyLongerMarker ? KeyLengthLength : 0;
-                var keyLength = slot.KeyLength == Slot.KeyLongerMarker ? payload[0] : slot.KeyLength;
-
-                var first = selector(payload.Slice(shift, keyLength));
-                if (first < BucketCount)
-                {
-                    buckets[first] += 1;
-                }
-            }
-        }
-    }
-
     private const int KeyLengthLength = 1;
 
     private static int GetTotalSpaceRequired(in ReadOnlySpan<byte> key, ReadOnlySpan<byte> data)

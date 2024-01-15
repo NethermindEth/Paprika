@@ -56,20 +56,6 @@ public readonly unsafe struct DataPage : IPage
 
         if (isDelete)
         {
-            // delete locally
-            if (LeafCount <= MaxLeafCount)
-            {
-                map.Delete(key.RawSpan);
-                for (var i = 0; i < MaxLeafCount; i++)
-                {
-                    // TODO: consider checking whether the array contains the data first,
-                    // only then make it writable as it results in a COW
-                    if (TryGetWritableLeaf(i, batch, out var leaf)) leaf.Delete(key.RawSpan);
-                }
-
-                return _page;
-            }
-
             var childPageAddress = Data.Buckets[key.FirstNibble];
             if (childPageAddress.IsNull)
             {
@@ -84,7 +70,27 @@ public readonly unsafe struct DataPage : IPage
         {
             return _page;
         }
+        
+        // no left space in map, gather statistics to find what to do
+        Span<ushort> deletes = stackalloc ushort[BucketCount];
+        Span<ushort> sizes = stackalloc ushort[BucketCount];
+        
+        GatherMapStats(map, deletes, sizes);
 
+        // if deletes, try flush down all the deletes first
+        if (deletes.IndexOfAnyExcept((ushort)0) > 0)
+        {
+            foreach (var item in map.EnumerateAll())
+            {
+                if (item.RawData.IsEmpty)
+                {
+                    var toDelete = NibblePath.FromKey(item.Key).SliceFrom(TreeLevelOddity + 1);
+
+                    
+                }
+            }
+        }
+        
         // if no Descendants, create first leaf
         if (LeafCount == 0)
         {
@@ -188,6 +194,25 @@ public readonly unsafe struct DataPage : IPage
         return Set(key, data, batch);
     }
 
+    private void GatherMapStats(SlottedArray map, Span<ushort> deletes, Span<ushort> sizes)
+    {
+        foreach (var item in map.EnumerateAll())
+        {
+            if (item.Key.IsEmpty) 
+                continue;
+            
+            var nib = NibblePath.FromKey(item.RawData).GetAt(TreeLevelOddity);
+            if (item.RawData.IsEmpty)
+            {
+                deletes[nib] += 1;
+            }
+            else
+            {
+                sizes[nib] += (ushort)item.RawData.Length;
+            }
+        }
+    }
+
     private DataPage FlushDown(in SlottedArray map, byte nibble, DataPage destination, IBatchContext batch)
     {
         foreach (var item in map.EnumerateAll())
@@ -215,9 +240,6 @@ public readonly unsafe struct DataPage : IPage
 
         return destination;
     }
-
-    private ref byte LeafCount => ref Header.Metadata;
-    private const byte MaxLeafCount = 6;
 
     private bool TryGetWritableLeaf(int index, IBatchContext batch, out SlottedArray leaf,
         bool allocateOnMissing = false)
