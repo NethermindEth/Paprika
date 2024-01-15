@@ -88,13 +88,27 @@ public readonly ref struct SlottedArray
         // write item: length_key, key, data
         var dest = _data.Slice(slot.ItemAddress, total);
 
-        dest[0] = (byte)key.Length;
-        key.CopyTo(dest.Slice(KeyLengthLength));
-        data.CopyTo(dest.Slice(KeyLengthLength + key.Length));
+        int offset;
+
+        if (key.Length <= Slot.MaxSlotLengthKey)
+        {
+            slot.KeyLength = key.Length;
+            offset = 0;
+        }
+        else
+        {
+            slot.KeyLength = Slot.KeyLongerMarker;
+            dest[0] = (byte)key.Length;
+            offset = 1;
+        }
+
+        key.CopyTo(dest.Slice(offset));
+        data.CopyTo(dest.Slice(offset + key.Length));
 
         // commit low and high
         _header.Low += Slot.Size;
         _header.High += (ushort)total;
+
         return true;
     }
 
@@ -159,10 +173,11 @@ public readonly ref struct SlottedArray
             ref var slot = ref _map._slots[_index];
             var span = _map.GetSlotPayload(ref slot);
 
-            var keyLenght = span[0];
+            var shift = slot.KeyLength == Slot.KeyLongerMarker ? KeyLengthLength : 0;
+            var keyLength = slot.KeyLength == Slot.KeyLongerMarker ? span[0] : slot.KeyLength;
 
-            var key = span.Slice(KeyLengthLength, keyLenght);
-            var data = span.Slice(KeyLengthLength + keyLenght);
+            var key = span.Slice(shift, keyLength);
+            var data = span.Slice(shift + keyLength);
 
             return new Item(key, data, _index);
         }
@@ -217,31 +232,6 @@ public readonly ref struct SlottedArray
     public const int BucketCount = 16;
 
     /// <summary>
-    /// Gets the aggregated sizes per nibble.
-    /// </summary>
-    public void GatherSizeStatistics(Span<ushort> buckets, NibbleSelector selector)
-    {
-        Debug.Assert(buckets.Length == BucketCount);
-
-        var to = _header.Low / Slot.Size;
-        for (var i = 0; i < to; i++)
-        {
-            ref var slot = ref _slots[i];
-
-            // extract only not deleted and these which have at least one nibble
-            if (slot.IsDeleted == false)
-            {
-                var payload = GetSlotPayload(ref slot);
-                var first = selector(payload);
-                if (first < BucketCount)
-                {
-                    buckets[first] += (ushort)(payload.Length + Slot.Size);
-                }
-            }
-        }
-    }
-
-    /// <summary>
     /// Gets the aggregated count of entries per nibble.
     /// </summary>
     public void GatherCountStatistics(Span<ushort> buckets, NibbleSelector selector)
@@ -257,7 +247,11 @@ public readonly ref struct SlottedArray
             if (slot.IsDeleted == false)
             {
                 var payload = GetSlotPayload(ref slot);
-                var first = selector(payload.Slice(KeyLengthLength));
+
+                var shift = slot.KeyLength == Slot.KeyLongerMarker ? KeyLengthLength : 0;
+                var keyLength = slot.KeyLength == Slot.KeyLongerMarker ? payload[0] : slot.KeyLength;
+
+                var first = selector(payload.Slice(shift, keyLength));
                 if (first < BucketCount)
                 {
                     buckets[first] += 1;
@@ -267,9 +261,11 @@ public readonly ref struct SlottedArray
     }
 
     private const int KeyLengthLength = 1;
+
     private static int GetTotalSpaceRequired(in ReadOnlySpan<byte> key, ReadOnlySpan<byte> data)
     {
-        return KeyLengthLength + key.Length + data.Length;
+        return (key.Length <= Slot.MaxSlotLengthKey ? 0 : KeyLengthLength) +
+               key.Length + data.Length;
     }
 
     /// <summary>
@@ -325,6 +321,7 @@ public readonly ref struct SlottedArray
 
                 copyTo.Hash = copyFrom.Hash;
                 copyTo.ItemAddress = high;
+                copyTo.KeyLength = copyFrom.KeyLength;
 
                 copy._header.Low += Slot.Size;
                 copy._header.High = (ushort)(copy._header.High + fromSpan.Length);
@@ -415,11 +412,14 @@ public readonly ref struct SlottedArray
 
                     // The StartsWith check assumes that all the keys have the same length.
                     var length = key.Length;
-                    if (actual[0] == length)
+                    var shift = slot.KeyLength == Slot.KeyLongerMarker ? KeyLengthLength : 0;
+                    var actualLength = slot.KeyLength == Slot.KeyLongerMarker ? actual[0] : slot.KeyLength;
+
+                    if (actualLength == length)
                     {
-                        if (actual.Slice(KeyLengthLength, length).SequenceEqual(key))
+                        if (actual.Slice(shift, length).SequenceEqual(key))
                         {
-                            data = actual.Slice(KeyLengthLength + length);
+                            data = actual.Slice(shift + length);
                             slotIndex = i;
                             return true;
                         }
@@ -478,7 +478,7 @@ public readonly ref struct SlottedArray
             set => Raw = (ushort)((Raw & ~AddressMask) | value);
         }
 
-        private const ushort DeletedMask = 0b0010_0000_0000_0000;
+        private const ushort DeletedMask = 0b0001_0000_0000_0000;
 
         /// <summary>
         /// The data type contained in this slot.
@@ -487,6 +487,17 @@ public readonly ref struct SlottedArray
         {
             get => (Raw & DeletedMask) == DeletedMask;
             set => Raw = (ushort)((Raw & ~DeletedMask) | (ushort)(value ? DeletedMask : 0));
+        }
+
+        private const ushort KeyLengthMask = 0b1110_0000_0000_0000;
+        private const ushort KeyLengthShift = 13;
+        public const int MaxSlotLengthKey = 6;
+        public const int KeyLongerMarker = 7;
+
+        public int KeyLength
+        {
+            get => (Raw & KeyLengthMask) >> KeyLengthShift;
+            set => Raw = (ushort)((Raw & ~KeyLengthMask) | (value << KeyLengthShift));
         }
 
         [FieldOffset(0)] private ushort Raw;
