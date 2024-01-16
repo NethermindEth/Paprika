@@ -170,6 +170,9 @@ public readonly ref struct NibblePath
 
     public byte GetAt(int nibble) => (byte)((GetRefAt(nibble) >> GetShift(nibble)) & NibbleMask);
 
+    public static byte GetAt(byte singleByte, int nibble) =>
+        (byte)((singleByte >> ((1 - nibble) * NibbleShift)) & NibbleMask);
+
     private int GetShift(int nibble) => (1 - ((nibble + _odd) & OddBit)) * NibbleShift;
 
     /// <summary>

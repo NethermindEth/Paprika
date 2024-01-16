@@ -22,7 +22,7 @@ public static class TestExtensions
         return bytes;
     }
 
-    public static void ShouldHaveAccount(this IReadOnlyBatch read, in Keccak key, ReadOnlySpan<byte> expected)
+    public static void ShouldHave(this IReadOnlyBatch read, in Keccak key, ReadOnlySpan<byte> expected)
     {
         read.TryGet(Key.Account(key), out var value).Should().BeTrue();
         value.SequenceEqual(expected);
@@ -89,83 +89,53 @@ public static class TestExtensions
     public static void SetStorage(this IBatch batch, in Keccak key, in Keccak storage, ReadOnlySpan<byte> value) =>
         batch.SetRaw(Key.StorageCell(NibblePath.FromKey(key), storage), value);
 
-    // public static DataPage SetStorage(this DataPage page, in Keccak key, in Keccak storage, ReadOnlySpan<byte> data,
-    //     IBatchContext batch)
-    // {
-    //     var k = Key.StorageCell(NibblePath.FromKey(key), storage);
-    //     return new DataPage(page.Set(new SetContext(k, data, batch)));
-    // }
-    //
-    // public static DataPage SetAccount(this DataPage page, in Keccak key, ReadOnlySpan<byte> data, IBatchContext batch)
-    // {
-    //     return new DataPage(page.Set(new SetContext(NibblePath.FromKey(key), data, batch)));
-    // }
-    //
-    // public static DataPage SetMerkle(this DataPage page, in Keccak key, ReadOnlySpan<byte> data, IBatchContext batch)
-    // {
-    //     var k = Key.Merkle(NibblePath.FromKey(key));
-    //     return new DataPage(page.Set(new SetContext(k, data, batch)));
-    // }
-    //
-    // public static DataPage SetMerkle(this DataPage page, in Keccak key, in NibblePath storagePath, ReadOnlySpan<byte> data, IBatchContext batch)
-    // {
-    //     var k = Key.Raw(NibblePath.FromKey(key), DataType.Merkle, storagePath);
-    //     return new DataPage(page.Set(new SetContext(k, data, batch)));
-    // }
-    //
-    // public static void ShouldHaveMerkle(this DataPage read, in Keccak key, ReadOnlySpan<byte> expected,
-    //     IReadOnlyBatchContext batch, int? iteration = null)
-    // {
-    //     var account = Key.Merkle(NibblePath.FromKey(key));
-    //     var because = $"Merkle for {account.Path.ToString()} should exist.";
-    //     if (iteration != null)
-    //     {
-    //         because += $" Iteration: {iteration}";
-    //     }
-    //
-    //     read.TryGet(account, batch, out var value).Should().BeTrue(because);
-    //     value.SequenceEqual(expected).Should()
-    //         .BeTrue($"Expected value is {expected.ToHexString(false)} while actual is {value.ToHexString(false)}");
-    // }
-    //
-    // public static void ShouldHaveMerkle(this DataPage read, in Keccak key, NibblePath storagePath, ReadOnlySpan<byte> expected,
-    //     IReadOnlyBatchContext batch, int? iteration = null)
-    // {
-    //     var k = Key.Raw(NibblePath.FromKey(key), DataType.Merkle, storagePath);
-    //     var because = $"Merkle for {k.ToString()} should exist.";
-    //     if (iteration != null)
-    //     {
-    //         because += $" Iteration: {iteration}";
-    //     }
-    //
-    //     read.TryGet(k, batch, out var value).Should().BeTrue(because);
-    //     value.SequenceEqual(expected).Should()
-    //         .BeTrue($"Expected value is {expected.ToHexString(false)} while actual is {value.ToHexString(false)}");
-    // }
-    //
-    // public static void ShouldHaveAccount(this DataPage read, in Keccak key, ReadOnlySpan<byte> expected,
-    //     IReadOnlyBatchContext batch, int? iteration = null)
-    // {
-    //     var account = Key.Account(key);
-    //     var because = $"Data for {account.Path.ToString()} should exist.";
-    //     if (iteration != null)
-    //     {
-    //         because += $" Iteration: {iteration}";
-    //     }
-    //     read.TryGet(account, batch, out var value).Should().BeTrue(because);
-    //     value.SequenceEqual(expected).Should()
-    //         .BeTrue($"Expected value is {expected.ToHexString(false)} while actual is {value.ToHexString(false)}");
-    // }
-    //
-    // public static void ShouldHaveStorage(this DataPage read, in Keccak key, in Keccak storage, ReadOnlySpan<byte> expected,
-    //     IReadOnlyBatchContext batch)
-    // {
-    //     var storageCell = Key.StorageCell(NibblePath.FromKey(key), storage);
-    //     var because = $"Storage at {storageCell.ToString()} should exist";
-    //     read.TryGet(storageCell, batch, out var value).Should().BeTrue(because);
-    //     value.SequenceEqual(expected).Should().BeTrue();
-    // }
 
+    public static DataPage Set(this DataPage page, in Keccak key, in ReadOnlySpan<byte> data, IBatchContext batch)
+    {
+        return new DataPage(page.Set(NibblePath.FromKey(key.Span), data, batch));
+    }
+
+    public static DataPage Set(this DataPage page, in NibblePath path, in ReadOnlySpan<byte> data, IBatchContext batch)
+    {
+        return new DataPage(page.Set(path, data, batch));
+    }
+    
+    public static DataPage GetAssert(this DataPage page, in NibblePath path, in ReadOnlySpan<byte> data, IBatchContext batch, int? ith = null)
+    {
+        var cause = $"{ith}th iteration";
+        page.TryGet(path, batch, out var existing).Should().BeTrue(cause);
+        existing.SequenceEqual(data).Should().BeTrue(cause);
+        return page;
+    }
+    
+    public static DataPage GetAssert(this DataPage page, in Keccak key, in ReadOnlySpan<byte> data, IBatchContext batch, int? ith = null)
+    {
+        var path = NibblePath.FromKey(key.Span);
+        if (page.TryGet(path, batch, out var existing) == false)
+        {
+            false.Should().BeTrue($"{ith}th iteration for {path.ToString()} did not get data");
+        }
+        
+        if (existing.SequenceEqual(data) == false)
+        {
+            false.Should().BeTrue($"{ith}th iteration for {path.ToString()} got WRONG data");
+        }
+        return page;
+    }
+    
+    public static void ShouldHave(this DataPage read, in Keccak key, ReadOnlySpan<byte> expected,
+        IReadOnlyBatchContext batch, int? iteration = null)
+    {
+        var because = $"Data for {key.Span.ToHexString(true)} should exist.";
+        if (iteration != null)
+        {
+            because += $" Iteration: {iteration}";
+        }
+        read.TryGet(NibblePath.FromKey(key.Span), batch, out var value).Should().BeTrue(because);
+        value.SequenceEqual(expected).Should()
+            .BeTrue($"Expected value is {expected.ToHexString(false)} while actual is {value.ToHexString(false)}");
+    }
+    
     public static Keccak NextKeccak(this Random random)
     {
         Keccak keccak = default;

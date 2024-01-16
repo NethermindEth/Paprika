@@ -67,7 +67,7 @@ public readonly ref struct SlottedArray
             }
 
             // there are some deleted entries, run defragmentation of the buffer and try again
-            Deframent();
+            Defragment();
 
             // re-evaluate again
             if (_header.Taken + total + Slot.Size > _data.Length)
@@ -110,6 +110,36 @@ public readonly ref struct SlottedArray
         _header.High += (ushort)total;
 
         return true;
+    }
+    
+    /// <summary>
+    /// Gets stats size for the map.
+    /// </summary>
+    /// <remarks>Highly optimized, without usage of the enumerator.</remarks>
+    public int GatherMapStats(Span<ushort> sizes, int atNibble)
+    {
+        sizes.Clear();
+
+        var total = 0;
+
+        for (var i = 0; i < Count; i++)
+        {
+            ref var slot = ref _slots[i];
+            if (slot.IsDeleted || slot.KeyLength == 0)
+                continue;
+
+            var offset = slot.KeyLength <= Slot.MaxSlotLengthKey ? 0 : 1;
+            var firstKeyByte = _data[slot.ItemAddress + offset];
+
+            var nibble = NibblePath.GetAt(firstKeyByte, atNibble);
+
+            var length = GetSlotLength(ref slot);
+            total += length + Slot.Size;
+
+            sizes[nibble] += (ushort)length;
+        }
+
+        return total;
     }
 
     /// <summary>
@@ -194,6 +224,8 @@ public readonly ref struct SlottedArray
             public ReadOnlySpan<byte> Key { get; }
             public ReadOnlySpan<byte> RawData { get; }
 
+            public ushort Size => (ushort)(Key.Length + RawData.Length + Slot.Size);
+
             public Item(ReadOnlySpan<byte> key, ReadOnlySpan<byte> rawData, int index)
             {
                 Index = index;
@@ -266,7 +298,17 @@ public readonly ref struct SlottedArray
         CollectTombstones();
     }
 
-    private void Deframent()
+    public bool TryDefragment()
+    {
+        if (_header.Deleted == 0)
+            return false;
+        
+        Defragment();
+
+        return true;
+    }
+
+    private void Defragment()
     {
         // As data were fitting before, the will fit after so all the checks can be skipped
         var size = _raw.Length;
@@ -423,13 +465,19 @@ public readonly ref struct SlottedArray
     /// </summary>
     private Span<byte> GetSlotPayload(ref Slot slot)
     {
+        var length = GetSlotLength(ref slot);
+        return _data.Slice(slot.ItemAddress, length);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int GetSlotLength(ref Slot slot)
+    {
         // assert whether the slot has a previous, if not use data.length
         var previousSlotAddress = Unsafe.IsAddressLessThan(ref _slots[0], ref slot)
             ? Unsafe.Add(ref slot, -1).ItemAddress
             : _data.Length;
 
-        var length = previousSlotAddress - slot.ItemAddress;
-        return _data.Slice(slot.ItemAddress, length);
+        return previousSlotAddress - slot.ItemAddress;
     }
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]

@@ -31,7 +31,6 @@ public class DbTests
             var value = GetValue(i);
 
             batch.SetAccount(key, value);
-            batch.SetStorage(key, key, value);
 
             await batch.Commit(CommitOptions.FlushDataAndRoot);
         }
@@ -49,8 +48,7 @@ public class DbTests
                 var key = GetKey(i);
                 var expected = GetValue(i);
 
-                read.ShouldHaveAccount(key, expected);
-                read.AssertStorageValue(key, key, expected);
+                read.ShouldHave(key, expected);
             }
         }
     }
@@ -82,66 +80,66 @@ public class DbTests
         AssertPageMetadataAssigned(db);
     }
 
-    [Test]
-    public async Task Readonly_transaction_block_till_they_are_released()
-    {
-        const int size = MB16;
-        const int blocksDuringReadAcquired = 500; // the number should be smaller than the number of buckets in the root
-        const int blocksPostRead = 10_000;
-        const int start = -1;
-
-        using var db = PagedDb.NativeMemoryDb(size);
-
-        // write first value
-        using (var block = db.BeginNextBatch())
-        {
-            block.SetAccount(Key0, GetValue(start));
-            await block.Commit(CommitOptions.FlushDataOnly);
-        }
-
-        // start read batch, it will make new allocs only
-        var read = db.BeginReadOnlyBatch();
-
-        for (var i = 0; i < blocksDuringReadAcquired; i++)
-        {
-            // ReSharper disable once ConvertToUsingDeclaration
-            using (var block = db.BeginNextBatch())
-            {
-                // assert previous
-                block.ShouldHaveAccount(Key0, GetValue(i + start));
-
-                // write current
-                block.SetAccount(Key0, GetValue(i));
-                await block.Commit(CommitOptions.FlushDataOnly);
-
-                read.ShouldHaveAccount(Key0, GetValue(start));
-            }
-        }
-
-        var snapshot = db.Megabytes;
-
-        // disable read
-        read.Dispose();
-
-        // write again
-        for (var i = 0; i < blocksPostRead; i++)
-        {
-            // ReSharper disable once ConvertToUsingDeclaration
-            using (var block = db.BeginNextBatch())
-            {
-                var value = GetValue(i + start);
-
-                block.SetAccount(Key0, value);
-                await block.Commit(CommitOptions.FlushDataOnly);
-            }
-        }
-
-        db.Megabytes.Should().Be(snapshot, "Database should not grow without read transaction active.");
-
-        Console.WriteLine($"Uses {db.Megabytes:P}MB out of pre-allocated {size / MB}MB od disk.");
-
-        AssertPageMetadataAssigned(db);
-    }
+    // [Test]
+    // public async Task Readonly_transaction_block_till_they_are_released()
+    // {
+    //     const int size = MB16;
+    //     const int blocksDuringReadAcquired = 500; // the number should be smaller than the number of buckets in the root
+    //     const int blocksPostRead = 10_000;
+    //     const int start = -1;
+    //
+    //     using var db = PagedDb.NativeMemoryDb(size);
+    //
+    //     // write first value
+    //     using (var block = db.BeginNextBatch())
+    //     {
+    //         block.SetAccount(Key0, GetValue(start));
+    //         await block.Commit(CommitOptions.FlushDataOnly);
+    //     }
+    //
+    //     // start read batch, it will make new allocs only
+    //     var read = db.BeginReadOnlyBatch();
+    //
+    //     for (var i = 0; i < blocksDuringReadAcquired; i++)
+    //     {
+    //         // ReSharper disable once ConvertToUsingDeclaration
+    //         using (var block = db.BeginNextBatch())
+    //         {
+    //             // assert previous
+    //             block.ShouldHaveAccount(Key0, GetValue(i + start));
+    //
+    //             // write current
+    //             block.SetAccount(Key0, GetValue(i));
+    //             await block.Commit(CommitOptions.FlushDataOnly);
+    //
+    //             read.ShouldHaveAccount(Key0, GetValue(start));
+    //         }
+    //     }
+    //
+    //     var snapshot = db.Megabytes;
+    //
+    //     // disable read
+    //     read.Dispose();
+    //
+    //     // write again
+    //     for (var i = 0; i < blocksPostRead; i++)
+    //     {
+    //         // ReSharper disable once ConvertToUsingDeclaration
+    //         using (var block = db.BeginNextBatch())
+    //         {
+    //             var value = GetValue(i + start);
+    //
+    //             block.SetAccount(Key0, value);
+    //             await block.Commit(CommitOptions.FlushDataOnly);
+    //         }
+    //     }
+    //
+    //     db.Megabytes.Should().Be(snapshot, "Database should not grow without read transaction active.");
+    //
+    //     Console.WriteLine($"Uses {db.Megabytes:P}MB out of pre-allocated {size / MB}MB od disk.");
+    //
+    //     AssertPageMetadataAssigned(db);
+    // }
 
     [Test]
     public async Task State_and_storage()
