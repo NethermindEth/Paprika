@@ -111,7 +111,7 @@ public readonly ref struct SlottedArray
 
         return true;
     }
-    
+
     /// <summary>
     /// Gets stats size for the map.
     /// </summary>
@@ -302,7 +302,7 @@ public readonly ref struct SlottedArray
     {
         if (_header.Deleted == 0)
             return false;
-        
+
         Defragment();
 
         return true;

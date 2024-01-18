@@ -23,8 +23,8 @@ public class DataPageTests : BasePageTests
         return keccak;
     }
 
-    
-    
+
+
     [Test]
     public void Set_then_Get()
     {
@@ -102,7 +102,7 @@ public class DataPageTests : BasePageTests
             dataPage.GetAssert(random.NextKeccak(), GetValue(i), batch, i);
         }
     }
-    
+
     [Test]
     public void Page_overflows_big_shared_distro()
     {
@@ -110,13 +110,13 @@ public class DataPageTests : BasePageTests
         page.Clear();
 
         var batch = NewBatch(BatchId);
-        
+
         var dataPage = new DataPage(page);
         const int count = 128; // little endian, should have 128 / 16 = 8 items per nibble
         for (var i = 0; i < count; i++)
         {
             dataPage = dataPage.Set(Generate(i), BigValue(i), batch);
-            
+
             for (var j = 0; j <= i; j++)
             {
                 dataPage.GetAssert(Generate(j), BigValue(j), batch, i);
@@ -132,7 +132,7 @@ public class DataPageTests : BasePageTests
             BinaryPrimitives.WriteInt32LittleEndian(k.BytesAsSpan, i);
             return k;
         }
-        
+
         static byte[] BigValue(int i)
         {
             var bytes = new byte[1024];

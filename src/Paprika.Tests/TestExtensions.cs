@@ -99,7 +99,7 @@ public static class TestExtensions
     {
         return new DataPage(page.Set(path, data, batch));
     }
-    
+
     public static DataPage GetAssert(this DataPage page, in NibblePath path, in ReadOnlySpan<byte> data, IBatchContext batch, int? ith = null)
     {
         var cause = $"{ith}th iteration";
@@ -107,7 +107,7 @@ public static class TestExtensions
         existing.SequenceEqual(data).Should().BeTrue(cause);
         return page;
     }
-    
+
     public static DataPage GetAssert(this DataPage page, in Keccak key, in ReadOnlySpan<byte> data, IBatchContext batch, int? ith = null)
     {
         var path = NibblePath.FromKey(key.Span);
@@ -115,14 +115,14 @@ public static class TestExtensions
         {
             false.Should().BeTrue($"{ith}th iteration for {path.ToString()} did not get data");
         }
-        
+
         if (existing.SequenceEqual(data) == false)
         {
             false.Should().BeTrue($"{ith}th iteration for {path.ToString()} got WRONG data");
         }
         return page;
     }
-    
+
     public static void ShouldHave(this DataPage read, in Keccak key, ReadOnlySpan<byte> expected,
         IReadOnlyBatchContext batch, int? iteration = null)
     {
@@ -135,7 +135,7 @@ public static class TestExtensions
         value.SequenceEqual(expected).Should()
             .BeTrue($"Expected value is {expected.ToHexString(false)} while actual is {value.ToHexString(false)}");
     }
-    
+
     public static Keccak NextKeccak(this Random random)
     {
         Keccak keccak = default;

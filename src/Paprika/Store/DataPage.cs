@@ -1,6 +1,4 @@
-﻿using System.Buffers;
-using System.Collections.Specialized;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
@@ -20,6 +18,8 @@ namespace Paprika.Store;
 public readonly unsafe struct DataPage : IPage
 {
     private const int BucketCount = 16;
+
+    private static readonly byte[] NibbleIndexes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF];
 
     private readonly Page _page;
 
@@ -58,6 +58,8 @@ public readonly unsafe struct DataPage : IPage
         return (map.TrySet(key.RawSpan, data), _page);
     }
 
+    
+    
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
         if (Header.BatchId != batch.BatchId)
@@ -93,7 +95,7 @@ public readonly unsafe struct DataPage : IPage
         var anyChildren = Data.Buckets.ContainsAnyExcept(DbAddress.Null);
         if (anyChildren == false)
         {
-            // If the page has no leafs, select the nibble with the biggest size.
+            // If the page has no leafs, select the nibble with the biggest size to create one.
             GatherMapStats(map, sizes);
 
             var biggest = FindBiggestNibble(sizes);
@@ -109,36 +111,41 @@ public readonly unsafe struct DataPage : IPage
             }
         }
 
-        if (Data.Buckets.Contains(DbAddress.Null))
+        // Try gently push down to the existing ones
+        // Try push down to child pages nibbles that have something to push.
+        // Do not cause the further flushes, just try to set. If it fails, it's ok.
+        GatherMapStats(map, sizes);
+
+        Span<byte> indexes = stackalloc byte[BucketCount];
+
+        // sort from the biggest one to the smallest
+        NibbleIndexes.AsSpan().CopyTo(indexes);
+        sizes.Sort(indexes);
+
+        for (int i = BucketCount - 1; i >= 0; i--)
         {
-            // Not all children exist, try gently push down to the existing ones
-            // Try push down to child pages nibbles that have something to push.
-            // Do not cause the further flushes, just try to set.
-            GatherMapStats(map, sizes);
+            var nibble = indexes[i];
+            var size = sizes[i];
 
-            for (byte i = 0; i < BucketCount; i++)
+            ref var child = ref Data.Buckets[nibble];
+            if (child.IsNull == false && size > 0)
             {
-                ref var child = ref Data.Buckets[i];
-                if (child.IsNull == false && sizes[i] > 0)
-                {
-                    // The child exist and has some data to be written to.
-                    // Try to flush it down.
-                    var childPage = new DataPage(batch.GetAt(child));
-                    childPage = FlushDown<TrySetStrategy>(map, i, childPage, batch);
-                    child = batch.GetAddress(childPage.AsPage());
+                // The child exist and has some data to be written to.
+                // Try to flush it down.
+                var childPage = new DataPage(batch.GetAt(child));
+                childPage = FlushDown<TrySetStrategy>(map, nibble, childPage, batch);
+                child = batch.GetAddress(childPage.AsPage());
 
-                    // Something was flushed down, try to set.
-                    if (map.TrySet(key.RawSpan, data))
-                    {
-                        return _page;
-                    }
+                // Something was flushed down, try to set.
+                if (map.TrySet(key.RawSpan, data))
+                {
+                    return _page;
                 }
             }
         }
 
         {
-            // Either soft flushing failed or all children are set.
-            // This means a full tree, flush fully.
+            // Soft flushing failed. Flush fully.
             GatherMapStats(map, sizes);
 
             var biggest = FindBiggestNibble(sizes);
@@ -171,10 +178,7 @@ public readonly unsafe struct DataPage : IPage
         return new DataPage(child);
     }
 
-    private int GatherMapStats(SlottedArray map, Span<ushort> sizes)
-    {
-        return map.GatherMapStats(sizes, TreeLevelOddity);
-    }
+    private int GatherMapStats(SlottedArray map, Span<ushort> sizes) => map.GatherMapStats(sizes, TreeLevelOddity);
 
     private static byte FindBiggestNibble(Span<ushort> sizes)
     {
@@ -217,7 +221,7 @@ public readonly unsafe struct DataPage : IPage
 
             if (success == false)
                 break;
-            
+
             // use the special delete for the item that is much faster than map.Delete(item.Key);
             map.Delete(item);
         }
@@ -295,6 +299,8 @@ public readonly unsafe struct DataPage : IPage
     }
 
     private SlottedArray Map => new(Data.DataSpan);
+
+    private bool IsLeaf => Data.Buckets.ContainsAnyExcept(DbAddress.Null);
 
     public void Report(IReporter reporter, IPageResolver resolver, int level)
     {
