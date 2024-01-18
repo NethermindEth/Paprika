@@ -152,6 +152,9 @@ public readonly ref struct SlottedArray
     public Enumerator EnumerateAll() =>
         new(this);
 
+    public NibbleEnumerator EnumerateNibble(int nibblePosition, byte nibble) =>
+        new(this, nibblePosition, nibble);
+
     public ref struct Enumerator
     {
         /// <summary>The map being enumerated.</summary>
@@ -160,14 +163,12 @@ public readonly ref struct SlottedArray
         /// <summary>The next index to yield.</summary>
         private int _index;
 
-        private readonly byte[] _bytes;
         private Item _current;
 
         internal Enumerator(SlottedArray map)
         {
             _map = map;
             _index = -1;
-            _bytes = ArrayPool<byte>.Shared.Rent(128);
         }
 
         /// <summary>Advances the enumerator to the next element of the span.</summary>
@@ -214,28 +215,99 @@ public readonly ref struct SlottedArray
 
         public void Dispose()
         {
-            if (_bytes != null)
-                ArrayPool<byte>.Shared.Return(_bytes);
-        }
-
-        public readonly ref struct Item
-        {
-            public int Index { get; }
-            public ReadOnlySpan<byte> Key { get; }
-            public ReadOnlySpan<byte> RawData { get; }
-
-            public ushort Size => (ushort)(Key.Length + RawData.Length + Slot.Size);
-
-            public Item(ReadOnlySpan<byte> key, ReadOnlySpan<byte> rawData, int index)
-            {
-                Index = index;
-                Key = key;
-                RawData = rawData;
-            }
         }
 
         // a shortcut to not allocate, just copy the enumerator
         public Enumerator GetEnumerator() => this;
+    }
+
+    public readonly ref struct Item(ReadOnlySpan<byte> key, ReadOnlySpan<byte> rawData, int index)
+    {
+        public int Index { get; } = index;
+        public ReadOnlySpan<byte> Key { get; } = key;
+        public ReadOnlySpan<byte> RawData { get; } = rawData;
+    }
+
+    public ref struct NibbleEnumerator
+    {
+        /// <summary>The map being enumerated.</summary>
+        private readonly SlottedArray _map;
+
+        private readonly int _nibblePosition;
+        private readonly byte _nibble;
+
+        /// <summary>The next index to yield.</summary>
+        private int _index;
+
+        private Item _current;
+
+        internal NibbleEnumerator(SlottedArray map, int nibblePosition, byte nibble)
+        {
+            _map = map;
+            _nibblePosition = nibblePosition;
+            _nibble = nibble;
+            _index = -1;
+        }
+
+        /// <summary>Advances the enumerator to the next element of the span.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool MoveNext()
+        {
+            int index = _index + 1;
+            var to = _map.Count;
+
+            ref var slot = ref _map._slots[index];
+
+
+            while (index < to && (slot.IsDeleted || !HasNibble(slot))) // filter out deleted
+            {
+                // move by 1
+                index += 1;
+                slot = ref Unsafe.Add(ref slot, 1);
+            }
+
+            if (index < to)
+            {
+                _index = index;
+                _current = Build();
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool HasNibble(in Slot slot)
+        {
+            if (slot.KeyLength == 0)
+                return false;
+
+            var shift = slot.KeyLength == Slot.KeyLongerMarker ? KeyLengthLength : 0;
+            var first = _map.GetSlotByte(slot, shift);
+            return NibblePath.GetAt(first, _nibblePosition) == _nibble;
+        }
+
+        public Item Current => _current;
+
+        private Item Build()
+        {
+            ref var slot = ref _map._slots[_index];
+            var span = _map.GetSlotPayload(ref slot);
+
+            var shift = slot.KeyLength == Slot.KeyLongerMarker ? KeyLengthLength : 0;
+            var keyLength = slot.KeyLength == Slot.KeyLongerMarker ? span[0] : slot.KeyLength;
+
+            var key = span.Slice(shift, keyLength);
+            var data = span.Slice(shift + keyLength);
+
+            return new Item(key, data, _index);
+        }
+
+        public void Dispose()
+        {
+        }
+
+        // a shortcut to not allocate, just copy the enumerator
+        public NibbleEnumerator GetEnumerator() => this;
     }
 
     /// <summary>
@@ -286,7 +358,7 @@ public readonly ref struct SlottedArray
         return false;
     }
 
-    public void Delete(in Enumerator.Item item) => DeleteImpl(item.Index);
+    public void Delete(in Item item) => DeleteImpl(item.Index);
 
     private void DeleteImpl(int index)
     {
@@ -469,6 +541,10 @@ public readonly ref struct SlottedArray
         return _data.Slice(slot.ItemAddress, length);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    private byte GetSlotByte(in Slot slot, int pos) =>
+        Unsafe.Add(ref MemoryMarshal.GetReference(_data), slot.ItemAddress + pos);
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private int GetSlotLength(ref Slot slot)
     {
@@ -493,6 +569,7 @@ public readonly ref struct SlottedArray
         /// </summary>
         public ushort ItemAddress
         {
+            [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
             get => (ushort)(Raw & AddressMask);
             set => Raw = (ushort)((Raw & ~AddressMask) | value);
         }

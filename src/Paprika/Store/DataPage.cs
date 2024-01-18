@@ -58,8 +58,8 @@ public readonly unsafe struct DataPage : IPage
         return (map.TrySet(key.RawSpan, data), _page);
     }
 
-    
-    
+
+
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
         if (Header.BatchId != batch.BatchId)
@@ -128,19 +128,21 @@ public readonly unsafe struct DataPage : IPage
             var size = sizes[i];
 
             ref var child = ref Data.Buckets[nibble];
-            if (child.IsNull == false && size > 0)
+            if (child.IsNull || size == 0)
             {
-                // The child exist and has some data to be written to.
-                // Try to flush it down.
-                var childPage = new DataPage(batch.GetAt(child));
-                childPage = FlushDown<TrySetStrategy>(map, nibble, childPage, batch);
-                child = batch.GetAddress(childPage.AsPage());
+                continue;
+            }
 
-                // Something was flushed down, try to set.
-                if (map.TrySet(key.RawSpan, data))
-                {
-                    return _page;
-                }
+            // The child exist and has some data to be written to.
+            // Try to flush it down.
+            var childPage = new DataPage(batch.GetAt(child));
+            childPage = FlushDown<TrySetStrategy>(map, nibble, childPage, batch);
+            child = batch.GetAddress(childPage.AsPage());
+
+            // Something was flushed down, try to set.
+            if (map.TrySet(key.RawSpan, data))
+            {
+                return _page;
             }
         }
 
@@ -199,7 +201,7 @@ public readonly unsafe struct DataPage : IPage
         IBatchContext batch)
         where TSetStrategy : struct, ISetStrategy
     {
-        foreach (var item in map.EnumerateAll())
+        foreach (var item in map.EnumerateNibble(TreeLevelOddity, nibble))
         {
             var key = NibblePath.FromKey(item.Key);
             if (key.IsEmpty) // empty keys are left in page

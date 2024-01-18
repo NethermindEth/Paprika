@@ -170,6 +170,7 @@ public readonly ref struct NibblePath
 
     public byte GetAt(int nibble) => (byte)((GetRefAt(nibble) >> GetShift(nibble)) & NibbleMask);
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static byte GetAt(byte singleByte, int nibble) =>
         (byte)((singleByte >> ((1 - nibble) * NibbleShift)) & NibbleMask);
 
