@@ -58,8 +58,6 @@ public readonly unsafe struct DataPage : IPage
         return (map.TrySet(key.RawSpan, data), _page);
     }
 
-
-
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
         if (Header.BatchId != batch.BatchId)
@@ -136,7 +134,19 @@ public readonly unsafe struct DataPage : IPage
             // The child exist and has some data to be written to.
             // Try to flush it down.
             var childPage = new DataPage(batch.GetAt(child));
-            childPage = FlushDown<TrySetStrategy>(map, nibble, childPage, batch);
+            if (childPage.IsLeaf)
+            {
+                // For leafs, meaning, pages that have no children,
+                // try flush softly to not overflow the page. 
+                childPage = FlushDown<TrySetStrategy>(map, nibble, childPage, batch);
+            }
+            else
+            {
+                // For pages that have descendant, flush forcefully, 
+                // so that if there's an overflow, it's propagated down.
+                childPage = FlushDown<SetForcefully>(map, nibble, childPage, batch);
+            }
+
             child = batch.GetAddress(childPage.AsPage());
 
             // Something was flushed down, try to set.
@@ -147,7 +157,8 @@ public readonly unsafe struct DataPage : IPage
         }
 
         {
-            // Soft flushing failed. Flush fully.
+            // Flushing nibble by nibble, from the biggest did not result in providing space.
+            // Select the biggest, flush forcefully, then, set.
             GatherMapStats(map, sizes);
 
             var biggest = FindBiggestNibble(sizes);
