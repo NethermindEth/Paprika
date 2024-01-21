@@ -120,6 +120,31 @@ public readonly unsafe struct DataPage : IPage
         NibbleIndexes.AsSpan().CopyTo(indexes);
         sizes.Sort(indexes);
 
+        // First, try to write to leaves
+        if (FlushThenTryWrite(key, data, batch, indexes, sizes, map, true, out var page))
+            return page;
+
+        // Then, try to write force to existing non-leaves
+        if (FlushThenTryWrite(key, data, batch, indexes, sizes, map, false, out page))
+            return page;
+
+        {
+            // Flushing nibble by nibble, from the biggest did not result in providing space.
+            // Select the biggest, flush forcefully, then, set.
+            GatherMapStats(map, sizes);
+
+            var biggest = FindBiggestNibble(sizes);
+            var child = FlushDown<SetForcefully>(map, biggest, GetPageForNibble(batch, biggest), batch);
+            Data.Buckets[biggest] = batch.GetAddress(child.AsPage());
+        }
+
+        // It should just work now with a single lvl recursion.
+        return Set(key, data, batch);
+    }
+
+    private bool FlushThenTryWrite(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch, in Span<byte> indexes, in Span<ushort> sizes,
+        in SlottedArray map, bool leaf, out Page page)
+    {
         for (int i = BucketCount - 1; i >= 0; i--)
         {
             var nibble = indexes[i];
@@ -134,40 +159,40 @@ public readonly unsafe struct DataPage : IPage
             // The child exist and has some data to be written to.
             // Try to flush it down.
             var childPage = new DataPage(batch.GetAt(child));
-            if (childPage.IsLeaf)
+            if (leaf && childPage.IsLeaf)
             {
                 // For leafs, meaning, pages that have no children,
                 // try flush softly to not overflow the page. 
                 childPage = FlushDown<TrySetStrategy>(map, nibble, childPage, batch);
+
+                child = batch.GetAddress(childPage.AsPage());
+
+                // Something was flushed down, try to set.
+                if (map.TrySet(key.RawSpan, data))
+                {
+                    page = _page;
+                    return true;
+                }
             }
-            else
+            else if (leaf == false && childPage.IsLeaf == false)
             {
                 // For pages that have descendant, flush forcefully, 
                 // so that if there's an overflow, it's propagated down.
                 childPage = FlushDown<SetForcefully>(map, nibble, childPage, batch);
-            }
 
-            child = batch.GetAddress(childPage.AsPage());
+                child = batch.GetAddress(childPage.AsPage());
 
-            // Something was flushed down, try to set.
-            if (map.TrySet(key.RawSpan, data))
-            {
-                return _page;
+                // Something was flushed down, try to set.
+                if (map.TrySet(key.RawSpan, data))
+                {
+                    page = _page;
+                    return true;
+                }
             }
         }
 
-        {
-            // Flushing nibble by nibble, from the biggest did not result in providing space.
-            // Select the biggest, flush forcefully, then, set.
-            GatherMapStats(map, sizes);
-
-            var biggest = FindBiggestNibble(sizes);
-            var child = FlushDown<SetForcefully>(map, biggest, GetPageForNibble(batch, biggest), batch);
-            Data.Buckets[biggest] = batch.GetAddress(child.AsPage());
-        }
-
-        // It should just work now with a single lvl recursion.
-        return Set(key, data, batch);
+        page = default;
+        return false;
     }
 
     private DataPage GetPageForNibble(IBatchContext batch, byte nibble)
