@@ -387,10 +387,10 @@ public readonly unsafe struct DataPage : IPage
                 var page = resolver.GetAt(leaf);
                 var leafMap = GetLeafSlottedArray(page);
 
-                foreach (var item in leafMap.EnumerateAll())
-                {
-                    //reporter.ReportItem(new StoreKey(item.Key), item.RawData);
-                }
+                // foreach (var item in leafMap.EnumerateAll())
+                // {
+                //     //reporter.ReportItem(new StoreKey(item.Key), item.RawData);
+                // }
 
                 reporter.ReportDataUsage(page.Header.PageType, level + 1, 0, leafMap.Count,
                     leafMap.CapacityLeft);
@@ -415,10 +415,10 @@ public readonly unsafe struct DataPage : IPage
 
         var slotted = new SlottedArray(Data.DataSpan);
 
-        foreach (var item in slotted.EnumerateAll())
-        {
-            // reporter.ReportItem(new StoreKey(item.Key), item.RawData);
-        }
+        // foreach (var item in slotted.EnumerateAll())
+        // {
+        //     // reporter.ReportItem(new StoreKey(item.Key), item.RawData);
+        // }
 
         reporter.ReportDataUsage(Header.PageType, level, BucketCount - emptyBuckets, slotted.Count,
             slotted.CapacityLeft);

@@ -433,7 +433,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             {
                 new DataPage(GetAt(_stateRootPage)).Report(state, this, 1);
             }
-            
+
             if (_storageRootPage.IsNull == false)
             {
                 new DataPage(GetAt(_storageRootPage)).Report(storage, this, 1);

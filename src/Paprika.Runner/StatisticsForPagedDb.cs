@@ -16,13 +16,13 @@ public static class StatisticsForPagedDb
         {
             var state = new StatisticsReporter();
             var storage = new StatisticsReporter();
-            
+
             read.Report(state, storage);
 
             var report = new Layout()
                 .SplitColumns(
-                    new Layout(BuildTable(state).Expand()),
-                    new Layout(BuildTable(storage).Expand()));
+                    BuildReport(state, "State"),
+                    BuildReport(storage, "Storage"));
 
             reportTo.Update(new Panel(report).Header("Paprika tree statistics").Expand());
         }
@@ -38,10 +38,18 @@ public static class StatisticsForPagedDb
         }
     }
 
-    private static Table BuildTable(StatisticsReporter reporter)
+    private static Layout BuildReport(StatisticsReporter reporter, string name)
     {
+        var up = new Layout("up");
+        var down = new Layout("down");
+
+        var layout = new Layout().SplitRows(up, down);
+
+        var general = $"Number of pages: {reporter.PageCount}";
+        up.Update(new Panel(general).Header($"General stats for {name}").Expand());
+
         var t = new Table();
-        t.AddColumn(new TableColumn("Level of the tree"));
+        t.AddColumn(new TableColumn("Depth"));
         t.AddColumn(new TableColumn("Child page count"));
 
         t.AddColumn(new TableColumn("Entries in page"));
@@ -58,8 +66,10 @@ public static class StatisticsForPagedDb
                 WriteHistogram(entries),
                 WriteHistogram(capacity));
         }
-        
-        return t;
+
+        down.Update(t.Expand());
+
+        return layout;
     }
 
     private static IRenderable WriteSizePerType(Dictionary<int, long> sizes, string prefix)
