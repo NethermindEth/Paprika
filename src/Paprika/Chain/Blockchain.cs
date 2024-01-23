@@ -813,7 +813,7 @@ public class Blockchain : IAsyncDisposable
 
         public IReadOnlyDictionary<Keccak, int> Stats => _stats!;
 
-        class ChildCommit : IChildCommit
+        class ChildCommit : RefCountingDisposable, IChildCommit
         {
             private readonly PooledSpanDictionary _dict;
             private readonly BufferPool _pool;
@@ -833,7 +833,8 @@ public class Blockchain : IAsyncDisposable
 
                 if (_dict.TryGet(keyWritten, hash, out var result))
                 {
-                    return new ReadOnlySpanOwnerWithMetadata<byte>(new ReadOnlySpanOwner<byte>(result, null), 0);
+                    AcquireLease();
+                    return new ReadOnlySpanOwnerWithMetadata<byte>(new ReadOnlySpanOwner<byte>(result, this), 0);
                 }
 
                 return _parent.Get(key);
@@ -869,7 +870,11 @@ public class Blockchain : IAsyncDisposable
             public IReadOnlyDictionary<Keccak, int> Stats =>
                 throw new NotImplementedException("Child commits provide no stats");
 
-            public void Dispose() => _dict.Dispose();
+            protected override void CleanUp()
+            {
+                _dict.Dispose();
+            }
+
             public override string ToString() => _dict.ToString();
         }
 
