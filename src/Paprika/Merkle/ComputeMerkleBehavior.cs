@@ -573,6 +573,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private KeccakOrRlp EncodeExtension(scoped in Key key, scoped in Node.Extension ext, scoped in ComputeContext ctx)
     {
+        if (ext.IsBoundaryNode)
+        {
+            return ext.Path.UnsafeAsKeccak;
+        }
+        
         Span<byte> span = stackalloc byte[Math.Max(ext.Path.HexEncodedLength, key.Path.MaxByteLength + 1)];
 
         // retrieve the children keccak-or-rlp
@@ -973,6 +978,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     }
                 case Node.Type.Extension:
                     {
+                        if (ext.IsBoundaryNode)
+                        {
+                            // the boundary node should be overwritten immediately
+                            commit.SetLeaf(key, leftoverPath);
+                            return;
+                        }
+                        
                         var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
                         if (diffAt == ext.Path.Length)
                         {

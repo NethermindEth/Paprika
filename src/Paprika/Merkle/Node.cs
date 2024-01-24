@@ -11,13 +11,14 @@ public static partial class Node
     public enum Type : byte
     {
         Leaf = 2,
-        Extension = 1,
-        Branch = 0,
-
+        
         /// <summary>
-        /// The boundary node of the snap sync. Used for snap syncing. 
+        /// The extension is used both, to encode the Extension but also to encode the <see cref="Boundary"/> nodes for the snap sync.
+        /// The fact that no extension can have a nibble path of length of 64 is used here.
         /// </summary>
-        Boundary = Extension  | 4,
+        Extension = 1,
+        
+        Branch = 0,
     }
 
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Type nodeType, out Leaf leaf,
@@ -266,6 +267,8 @@ public static partial class Node
             return leftover;
         }
 
+        public bool IsBoundaryNode => Path.Length == NibblePath.KeccakNibbleCount;
+
         public bool Equals(in Extension other) =>
             Header.Equals(other.Header)
             && Path.Equals(other.Path);
@@ -277,62 +280,6 @@ public static partial class Node
             $"}}";
     }
     
-    /// <summary>
-    /// The boundary node representing only the hash of the underlying tree.
-    /// </summary>
-    public readonly ref struct Boundary
-    {
-        public const int MaxByteLength = Header.Size + Keccak.Size;
-
-        public readonly Header Header;
-        public readonly Keccak Keccak;
-
-        private Boundary(Header header, Keccak keccak)
-        {
-            ValidateHeaderNodeType(header, Type.Boundary);
-            Header = header;
-            Keccak = keccak;
-        }
-
-        public Boundary(Keccak keccak)
-        {
-            Header = new Header(Type.Boundary);
-            Keccak = keccak;
-        }
-
-        public Span<byte> WriteTo(Span<byte> output)
-        {
-            var leftover = WriteToWithLeftover(output);
-            return output.Slice(0, output.Length - leftover.Length);
-        }
-
-        public Span<byte> WriteToWithLeftover(Span<byte> output)
-        {
-            var leftover = Header.WriteToWithLeftover(output);
-            Keccak.Span.CopyTo(leftover);
-            return leftover.Slice(Keccak.Size);
-        }
-
-        public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Boundary extension)
-        {
-            var leftover = Header.ReadFrom(source, out var header);
-            Keccak keccak = default;
-            leftover.Slice(0, Keccak.Size).CopyTo(keccak.BytesAsSpan);
-            extension = new Boundary(header, keccak);
-            return leftover.Slice(Keccak.Size);
-        }
-
-        public bool Equals(in Boundary other) =>
-            Header.Equals(other.Header)
-            && Keccak.Equals(other.Keccak);
-
-        public override string ToString() =>
-            $"{nameof(Boundary)} {{ " +
-            $"{nameof(Header)}: {Header.ToString()}, " +
-            $"{nameof(Keccak)}: {Keccak.ToString()}, " +
-            $"}}";
-    }
-
     public readonly ref struct Branch
     {
         public int MaxByteLength => Header.Size +
