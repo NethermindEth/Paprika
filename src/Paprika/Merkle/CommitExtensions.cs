@@ -46,7 +46,7 @@ public static class CommitExtensions
         var extension = new Node.Extension(path);
         commit.Set(key, extension.WriteTo(stackalloc byte[extension.MaxByteLength]));
     }
-    
+
     /// <summary>
     /// Sets the boundary node by putting an artificial node that has only the keccak.
     /// </summary>

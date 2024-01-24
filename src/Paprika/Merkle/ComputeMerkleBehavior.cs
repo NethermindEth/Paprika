@@ -577,7 +577,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         {
             return ext.Path.UnsafeAsKeccak;
         }
-        
+
         Span<byte> span = stackalloc byte[Math.Max(ext.Path.HexEncodedLength, key.Path.MaxByteLength + 1)];
 
         // retrieve the children keccak-or-rlp
@@ -984,7 +984,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             commit.SetLeaf(key, leftoverPath);
                             return;
                         }
-                        
+
                         var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
                         if (diffAt == ext.Path.Length)
                         {
