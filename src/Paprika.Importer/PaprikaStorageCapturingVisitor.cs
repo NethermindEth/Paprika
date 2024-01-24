@@ -14,7 +14,7 @@ using Keccak = Paprika.Crypto.Keccak;
 
 namespace Paprika.Importer;
 
-public class PaprikaStorageCapturingVisitor : ITreeLeafVisitor
+public class PaprikaStorageCapturingVisitor : ITreeVisitor
 {
     private readonly StringBuilder _sb = new();
 

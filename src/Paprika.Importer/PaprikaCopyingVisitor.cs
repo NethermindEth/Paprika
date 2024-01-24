@@ -11,7 +11,7 @@ using Keccak = Paprika.Crypto.Keccak;
 
 namespace Paprika.Importer;
 
-public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
+public class PaprikaCopyingVisitor : ITreeVisitor, IDisposable
 {
     struct Item
     {
@@ -205,4 +205,37 @@ public class PaprikaCopyingVisitor : ITreeLeafVisitor, IDisposable
     }
 
     public void Dispose() => _meter.Dispose();
+    public bool IsFullDbScan => true;
+
+    public bool ShouldVisit(Hash256 nextNode) => true;
+
+    public void VisitTree(Hash256 rootHash, TrieVisitContext trieVisitContext)
+    {
+        throw new NotImplementedException();
+    }
+
+    public void VisitMissingNode(Hash256 nodeHash, TrieVisitContext trieVisitContext)
+    {
+        throw new NotImplementedException();
+    }
+
+    public void VisitBranch(TrieNode node, TrieVisitContext trieVisitContext)
+    {
+        throw new NotImplementedException();
+    }
+
+    public void VisitExtension(TrieNode node, TrieVisitContext trieVisitContext)
+    {
+        throw new NotImplementedException();
+    }
+
+    public void VisitLeaf(TrieNode node, TrieVisitContext trieVisitContext, byte[] value = null)
+    {
+        throw new NotImplementedException();
+    }
+
+    public void VisitCode(Hash256 codeHash, TrieVisitContext trieVisitContext)
+    {
+        throw new NotImplementedException();
+    }
 }
