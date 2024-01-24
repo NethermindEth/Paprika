@@ -50,11 +50,15 @@ public static class CommitExtensions
     /// <summary>
     /// Sets the boundary node by putting an artificial node that has only the keccak.
     /// </summary>
-    public static void SetBoundary(this ICommit commit, in Key key, in Keccak keccak)
+    public static void SetBoundaryAccount(this ICommit commit, in NibblePath account, in Keccak keccak)
     {
-        var extension = new Node.Extension(NibblePath.FromKey(keccak));
-        commit.Set(key, extension.WriteTo(stackalloc byte[extension.MaxByteLength]));
+        var fillWithZeroes = NibblePath.FromKey(Keccak.Zero, NibblePath.KeccakNibbleCount - account.Length);
+        account.Append(fillWithZeroes, stackalloc byte [NibblePath.])
+        
+        commit.SetAccount(Key.Account(account), keccak.Span);
     }
+    
+    public static void SetBoundary(this ICommit commit, in )
 
     public static void DeleteKey(this ICommit commit, in Key key) => commit.Set(key, ReadOnlySpan<byte>.Empty);
 }

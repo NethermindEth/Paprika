@@ -17,7 +17,7 @@ public interface IWorldState : IDisposable
     Keccak Hash { get; }
 
     void SetAccount(in Keccak address, in Account account);
-
+    
     /// <summary>
     /// Destroys the given account.
     /// </summary>
