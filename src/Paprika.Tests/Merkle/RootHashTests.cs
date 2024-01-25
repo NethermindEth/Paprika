@@ -37,9 +37,8 @@ public class RootHashTests
         AssertRoot("E2533A0A0C4F1DDB72FEB7BFAAD12A83853447DEAAB6F28FA5C443DD2D37C3FB", commit);
     }
 
-    [TestCase(false)]
-    [TestCase(true)]
-    public void Branch_two_leafs(bool useBoundaryNode)
+    [Test]
+    public void Branch_two_leafs()
     {
         var commit = new Commit();
 
@@ -60,16 +59,8 @@ public class RootHashTests
 
         span[0] = nibbleB;
 
-        if (useBoundaryNode)
-        {
-            var accountBKeccak = NibblePath.Parse("f133c8912d53564c07e2da33b0254e829a5f3ce071e235c7675cefe5a7fd8294").UnsafeAsKeccak;
-            commit.SetBoundary(Key.Merkle(NibblePath.FromKey(span).SliceTo(1)), accountBKeccak);
-        }
-        else
-        {
-            commit.Set(Key.Account(new Keccak(span)),
-                new Account(balanceB, nonceB).WriteTo(stackalloc byte[Paprika.Account.MaxByteCount]));    
-        }
+        commit.Set(Key.Account(new Keccak(span)),
+                new Account(balanceB, nonceB).WriteTo(stackalloc byte[Paprika.Account.MaxByteCount]));
 
         AssertRoot("73130daa1ae507554a72811c06e28d4fee671bfe2e1d0cef828a7fade54384f9", commit);
     }

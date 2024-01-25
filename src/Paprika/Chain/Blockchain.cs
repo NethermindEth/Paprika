@@ -685,13 +685,16 @@ public class Blockchain : IAsyncDisposable
 
         public void SetAccount(in Keccak address, in Account account)
         {
-            var path = NibblePath.FromKey(address);
-            var key = Key.Account(path);
-
             var payload = account.WriteTo(stackalloc byte[Account.MaxByteCount]);
 
-            SetImpl(key, payload, _state);
+            SetAccountRaw(address, payload);
+        }
 
+        public void SetAccountRaw(in Keccak address, Span<byte> payload)
+        {
+            var path = NibblePath.FromKey(address);
+            var key = Key.Account(path);
+            SetImpl(key, payload, _state);
             _stats!.RegisterSetAccount(address);
         }
 
@@ -1254,6 +1257,32 @@ public class Blockchain : IAsyncDisposable
             _current.GetStorage(address, in storage, destination);
 
         public Keccak Hash { get; private set; }
+
+        public void SetBoundary(in NibblePath account, in Keccak boundaryNodeKeccak)
+        {
+            var fillWithZeroes = NibblePath.FromKey(Keccak.Zero).SliceFrom(account.Length);
+            var combined = account.Append(fillWithZeroes, stackalloc byte[NibblePath.FullKeccakByteLength]);
+
+            Span<byte> payload = stackalloc byte [Keccak.Size + 2];
+            payload[0] = 0;
+            payload[1] = 0;
+            boundaryNodeKeccak.Span.CopyTo(payload[2..]);
+            
+            _current.SetAccountRaw(combined.UnsafeAsKeccak, payload);
+        }
+
+        public void SetBoundary(in Keccak account, in NibblePath storage, in Keccak boundaryNodeKeccak)
+        {
+            var fillWithZeroes = NibblePath.FromKey(Keccak.Zero).SliceFrom(storage.Length);
+            var combined = storage.Append(fillWithZeroes, stackalloc byte[NibblePath.FullKeccakByteLength]);
+
+            // over 32 bytes which makes it an invalid boundary
+            Span<byte> payload = stackalloc byte [Keccak.Size + 1];
+            payload[0] = 0;
+            boundaryNodeKeccak.Span.CopyTo(payload[1..]);
+            
+            _current.SetStorage(account, combined.UnsafeAsKeccak, payload);
+        }
 
         public void SetAccount(in Keccak address, in Account account) => _current.SetAccount(address, account);
 

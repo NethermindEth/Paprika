@@ -931,19 +931,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             if (owner.IsEmpty)
             {
                 // No value set now, create one.
-
-                // First check if the paths are right. If they are shorter then the expected nibble count, set it as a boundary.
-                if (key.Path.Length + leftoverPath.Length < NibblePath.KeccakNibbleCount)
-                {
-                    commit.SetBoundaryAccount();
-                    Debugger.Break();
-                }
-                else
-                {
-                    // This is a regular leaf
-                    commit.SetLeaf(key, leftoverPath);    
-                }
-                
+                commit.SetLeaf(key, leftoverPath);
                 return;
             }
 

@@ -227,44 +227,6 @@ public class DirtyTests
     }
 
     [Test]
-    public void Boundary_nodes()
-    {
-        var commit = new Commit();
-
-        const string key0 = "0123";
-        const string key1 = "A123";
-        const string key2 = "B123";
-        const string key3 = "B1CD";
-
-        commit.Set(key0);
-        commit.Set(key1);
-        commit.SetBoundary(Key.Merkle(NibblePath.Parse("B")), Keccak.OfAnEmptyString);
-
-        commit.Set(key2);
-        commit.Set(key3);
-
-        Assert(commit, c =>
-        {
-            c.SetBranch(Key.Merkle(NibblePath.Empty), new NibbleSet(0, 0xA, 0xB));
-
-            c.SetLeafWithSplitOn(NibblePath.Parse(key0), 1);
-            c.SetLeafWithSplitOn(NibblePath.Parse(key1), 1);
-
-            var path2 = NibblePath.Parse(key2);
-            var path3 = NibblePath.Parse(key3);
-
-            c.SetExtension(Key.Merkle(path2.SliceTo(1)), path2.SliceFrom(1).SliceTo(1));
-            c.SetBranch(Key.Merkle(path2.SliceTo(2)), new NibbleSet(2, 0xC));
-
-            // 0xB12
-            c.SetLeafWithSplitOn(path2, 3);
-
-            // 0xB1C
-            c.SetLeafWithSplitOn(path3, 3);
-        });
-    }
-
-    [Test]
     public void Branch_with_extension_child_even()
     {
         var commit = new Commit();
