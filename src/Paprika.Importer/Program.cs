@@ -144,7 +144,7 @@ if (dbExists == false)
             {
                 ExpectAccounts = true,
                 MaxDegreeOfParallelism = Environment.ProcessorCount,
-                FullScanMemoryBudget = 8L * 1024 * 1024 * 1024
+                FullScanMemoryBudget = 2L * 1024 * 1024 * 1024
             });
             
             visitor.Finish();
