@@ -123,11 +123,6 @@ using var db = PagedDb.MemoryMappedDb(size, 64, dataPath, false);
 
 const bool skipStorage = false;
 
-// the prefix that should only be scanned
-// byte[] nibbles = nibs.AsSpan(0,i).ToArray().Select(n=>(byte)n).ToArray();
-byte[] nibbles = Array.Empty<byte>();
-var root = MoveDownInTree(nibbles, trie, store);
-
 // var storageCapture = new PaprikaStorageCapturingVisitor();
 // root.Accept(storageCapture, store, false, nibbles);
 // File.WriteAllText("storage-big-tree.txt",storageCapture.Payload);
@@ -145,7 +140,13 @@ if (dbExists == false)
 
         var visit = Task.Run(() =>
         {
-            root.Accept(visitor, store, false, nibbles);
+            trie.Accept(visitor, trie.RootHash, new VisitingOptions
+            {
+                ExpectAccounts = true,
+                MaxDegreeOfParallelism = Environment.ProcessorCount,
+                FullScanMemoryBudget = 8L * 1024 * 1024 * 1024
+            });
+            
             visitor.Finish();
         });
 
@@ -202,7 +203,7 @@ if (dbExists == false)
 
 return;
 
-RocksDbSettings GetSettings(string dbName)
+DbSettings GetSettings(string dbName)
 {
     var dbPath = dbName;
 
@@ -213,7 +214,7 @@ RocksDbSettings GetSettings(string dbName)
         dbName += "0";
     }
 
-    return new RocksDbSettings(dbName, dbPath);
+    return new DbSettings(dbName, dbPath);
 }
 
 static TrieNode MoveDownInTree(byte[] nibbles, PatriciaTree trie, ITrieNodeResolver store)

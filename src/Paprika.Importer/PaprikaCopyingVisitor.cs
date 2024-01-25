@@ -1,6 +1,5 @@
 ﻿using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Nethermind.Core.Crypto;
 using Nethermind.Serialization.Rlp;
@@ -11,26 +10,26 @@ using Keccak = Paprika.Crypto.Keccak;
 
 namespace Paprika.Importer;
 
-public class PaprikaCopyingVisitor : ITreeVisitor, IDisposable
+public class PaprikaCopyingVisitor : ITreeVisitor<PathContext>, IDisposable
 {
     struct Item
     {
-        private readonly ValueKeccak _account;
+        private readonly ValueHash256 _account;
 
         // account
         private readonly Nethermind.Core.Account? _accountValue;
 
         // storage
-        private readonly ValueKeccak _storage;
+        private readonly ValueHash256 _storage;
         private readonly byte[]? _data;
 
-        public Item(ValueKeccak account, Nethermind.Core.Account accountValue)
+        public Item(ValueHash256 account, Nethermind.Core.Account accountValue)
         {
             _account = account;
             _accountValue = accountValue;
         }
 
-        public Item(ValueKeccak account, ValueKeccak storage, byte[] data)
+        public Item(ValueHash256 account, ValueHash256 storage, byte[] data)
         {
             _account = account;
             _storage = storage;
@@ -95,19 +94,6 @@ public class PaprikaCopyingVisitor : ITreeVisitor, IDisposable
 
         _batchSize = batchSize;
         _skipStorage = skipStorage;
-    }
-
-    public void VisitLeafAccount(in ValueKeccak account, Nethermind.Core.Account value)
-    {
-        _accountsVisitedGauge.Add(1);
-        Add(new Item(account, value));
-    }
-
-    public void VisitLeafStorage(in ValueKeccak account, in ValueKeccak storage, ReadOnlySpan<byte> value)
-    {
-        var span = MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(value), value.Length);
-        Rlp.ValueDecoderContext rlp = new Rlp.ValueDecoderContext(span);
-        Add(new(account, storage, rlp.DecodeByteArray()));
     }
 
     private void Add(Item item)
@@ -190,14 +176,14 @@ public class PaprikaCopyingVisitor : ITreeVisitor, IDisposable
         }
     }
 
-    private static Keccak AsPaprika(Nethermind.Core.Crypto.Keccak keccak)
+    private static Keccak AsPaprika(Hash256 keccak)
     {
         Unsafe.SkipInit(out Keccak k);
         keccak.Bytes.CopyTo(k.BytesAsSpan);
         return k;
     }
 
-    private static Keccak AsPaprika(ValueKeccak keccak)
+    private static Keccak AsPaprika(ValueHash256 keccak)
     {
         Unsafe.SkipInit(out Keccak k);
         keccak.Bytes.CopyTo(k.BytesAsSpan);
@@ -206,36 +192,51 @@ public class PaprikaCopyingVisitor : ITreeVisitor, IDisposable
 
     public void Dispose() => _meter.Dispose();
     public bool IsFullDbScan => true;
+    public bool ShouldVisit(in PathContext nodeContext, Hash256 nextNode) => true;
 
-    public bool ShouldVisit(Hash256 nextNode) => true;
-
-    public void VisitTree(Hash256 rootHash, TrieVisitContext trieVisitContext)
-    {
-        throw new NotImplementedException();
+    public void VisitTree(in PathContext nodeContext, Hash256 rootHash, TrieVisitContext trieVisitContext) {
     }
 
-    public void VisitMissingNode(Hash256 nodeHash, TrieVisitContext trieVisitContext)
+    public void VisitMissingNode(in PathContext nodeContext, Hash256 nodeHash, TrieVisitContext trieVisitContext)
     {
-        throw new NotImplementedException();
+        throw new Exception("The node is missing!");
     }
 
-    public void VisitBranch(TrieNode node, TrieVisitContext trieVisitContext)
+    public void VisitBranch(in PathContext nodeContext, TrieNode node, TrieVisitContext trieVisitContext)
     {
-        throw new NotImplementedException();
     }
 
-    public void VisitExtension(TrieNode node, TrieVisitContext trieVisitContext)
+    public void VisitExtension(in PathContext nodeContext, TrieNode node, TrieVisitContext trieVisitContext)
     {
-        throw new NotImplementedException();
     }
 
-    public void VisitLeaf(TrieNode node, TrieVisitContext trieVisitContext, byte[] value = null)
+    public void VisitLeaf(in PathContext nodeContext, TrieNode node, TrieVisitContext trieVisitContext, byte[] value = null)
     {
-        throw new NotImplementedException();
+        var context = nodeContext.Add(node.Key!);
+        var path = context.AsNibblePath;
+
+        if (path.Length == 64)
+        {
+            ValueHash256 account = default;
+            path.RawSpan.CopyTo(account.BytesAsSpan);
+            
+            _accountsVisitedGauge.Add(1);
+            Add(new Item(account, Rlp.Decode<Nethermind.Core.Account>(value)));
+        }
+        else
+        {
+            ValueHash256 account = default;
+            ValueHash256 storage = default;
+            
+            path.RawSpan.Slice(0, 32).CopyTo(account.BytesAsSpan);
+            path.RawSpan.Slice(32).CopyTo(storage.BytesAsSpan);
+            
+            Rlp.ValueDecoderContext rlp = new Rlp.ValueDecoderContext(value);
+            Add(new(account, storage, rlp.DecodeByteArray()));
+        }
     }
 
-    public void VisitCode(Hash256 codeHash, TrieVisitContext trieVisitContext)
+    public void VisitCode(in PathContext nodeContext, Hash256 codeHash, TrieVisitContext trieVisitContext)
     {
-        throw new NotImplementedException();
     }
 }

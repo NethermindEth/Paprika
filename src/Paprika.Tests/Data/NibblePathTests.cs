@@ -295,4 +295,33 @@ public class NibblePathTests
 
         NibblePath.FromKey(expected).SliceFrom(1).Equals(appended);
     }
+    
+    [TestCaseSource(nameof(GetRawNibbles))]
+    public void Raw_nibbles(byte[] nibbles)
+    {
+        var path = NibblePath.FromRawNibbles(nibbles, stackalloc byte[(nibbles.Length + 1) / 2]);
+
+        path.Length.Should().Be((byte)nibbles.Length);
+        for (var i = 0; i < nibbles.Length; i++)
+        {
+            path[i].Should().Be(nibbles[i]);
+        }
+    }
+
+    public static IEnumerable<TestCaseData> GetRawNibbles()
+    {
+        yield return new TestCaseData(new byte[] { 1, 2, 3 }).SetName("Short - odd");
+        yield return new TestCaseData(new byte[] { 1, 2, 3, 4 }).SetName("Short - even");
+
+        var @long = new byte[]
+        {
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 0xA, 0xB, 0xC, 0xD, 0xE,
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 0xA, 0xB, 0xC, 0xD, 0xE,
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 0xA, 0xB, 0xC, 0xD, 0xE,
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 0xA, 0xB, 0xC, 0xD, 0xE,
+        };
+        
+        yield return new TestCaseData(@long.AsSpan()[..^1].ToArray()).SetName("Long - odd");
+        yield return new TestCaseData(@long).SetName("Long - even");
+    }
 }

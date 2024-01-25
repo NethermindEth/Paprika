@@ -57,6 +57,22 @@ public readonly ref struct NibblePath
         var count = key.Length * NibblePerByte;
         return new NibblePath(key, nibbleFrom, count - nibbleFrom);
     }
+    
+    /// <summary>
+    /// Creates a nibble path from raw nibbles (a byte per nibble), using the <paramref name="workingSet"/> as the memory to use.
+    /// </summary>
+    public static NibblePath FromRawNibbles(ReadOnlySpan<byte> nibbles, Span<byte> workingSet)
+    {
+        var span = workingSet.Slice(0, (nibbles.Length + 1) / 2);
+        var copy = new NibblePath(span, 0, nibbles.Length);
+
+        for (int i = 0; i < nibbles.Length; i++)
+        {
+            copy.UnsafeSetAt(i, 0, nibbles[i]);
+        }
+
+        return copy;
+    }
 
     /// <summary>
     /// </summary>
