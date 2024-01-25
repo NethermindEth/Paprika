@@ -1,9 +1,12 @@
 ﻿// See https://aka.ms/new-console-template for more information
 
+using System;
 using System.Diagnostics;
+using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using Nethermind.Blockchain.Headers;
 using Nethermind.Core;
-using Nethermind.Core.Crypto;
 using Nethermind.Db;
 using Nethermind.Db.Rocks;
 using Nethermind.Db.Rocks.Config;
@@ -14,7 +17,6 @@ using Nethermind.Trie;
 using Nethermind.Trie.Pruning;
 using Paprika.Chain;
 using Paprika.Importer;
-using Paprika.LMDB;
 using Paprika.Merkle;
 using Paprika.Runner;
 using Paprika.Store;
@@ -22,7 +24,10 @@ using Spectre.Console;
 using Keccak = Paprika.Crypto.Keccak;
 
 //const string path = @"C:\Users\Szymon\ethereum\mainnet";
-const string path = @"C:\Git\nethermind\src\Nethermind\artifacts\bin\Nethermind.Runner\release\nethermind_db\mainnet";
+string path = args.Length == 0
+    ? @"C:\Git\nethermind\src\Nethermind\artifacts\bin\Nethermind.Runner\release\nethermind_db\mainnet"
+    : args[0];
+
 //const string path = "~/execution-data/nethermind_db/mainnet/";
 
 var logs = LimboLogs.Instance;
