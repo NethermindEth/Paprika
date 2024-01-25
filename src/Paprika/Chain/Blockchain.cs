@@ -427,6 +427,7 @@ public class Blockchain : IAsyncDisposable
         /// Raw blocks are used for batching under sync and should not be tracked by the blockchain at all.
         /// </summary>
         private readonly bool _raw;
+
         private Keccak? _hash;
         private readonly CacheBudget _cacheBudget;
 
@@ -455,7 +456,8 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-        public BlockState(Keccak parentStateRoot, IReadOnlyBatch batch, BlockState[] ancestors, Blockchain blockchain, bool raw = false)
+        public BlockState(Keccak parentStateRoot, IReadOnlyBatch batch, BlockState[] ancestors, Blockchain blockchain,
+            bool raw = false)
         {
             _raw = raw;
             _batch = new ReadOnlyBatchCountingRefs(batch);
@@ -1260,28 +1262,18 @@ public class Blockchain : IAsyncDisposable
 
         public void SetBoundary(in NibblePath account, in Keccak boundaryNodeKeccak)
         {
-            var fillWithZeroes = NibblePath.FromKey(Keccak.Zero).SliceFrom(account.Length);
-            var combined = account.Append(fillWithZeroes, stackalloc byte[NibblePath.FullKeccakByteLength]);
+            var path = SnapSync.CreateKey(account, stackalloc byte[NibblePath.FullKeccakByteLength]);
+            var payload = SnapSync.WriteBoundaryValue(boundaryNodeKeccak, stackalloc byte[SnapSync.BoundaryValueSize]);
 
-            Span<byte> payload = stackalloc byte [Keccak.Size + 2];
-            payload[0] = 0;
-            payload[1] = 0;
-            boundaryNodeKeccak.Span.CopyTo(payload[2..]);
-            
-            _current.SetAccountRaw(combined.UnsafeAsKeccak, payload);
+            _current.SetAccountRaw(path.UnsafeAsKeccak, payload);
         }
 
         public void SetBoundary(in Keccak account, in NibblePath storage, in Keccak boundaryNodeKeccak)
         {
-            var fillWithZeroes = NibblePath.FromKey(Keccak.Zero).SliceFrom(storage.Length);
-            var combined = storage.Append(fillWithZeroes, stackalloc byte[NibblePath.FullKeccakByteLength]);
+            var path = SnapSync.CreateKey(storage, stackalloc byte[NibblePath.FullKeccakByteLength]);
+            var payload = SnapSync.WriteBoundaryValue(boundaryNodeKeccak, stackalloc byte[SnapSync.BoundaryValueSize]);
 
-            // over 32 bytes which makes it an invalid boundary
-            Span<byte> payload = stackalloc byte [Keccak.Size + 1];
-            payload[0] = 0;
-            boundaryNodeKeccak.Span.CopyTo(payload[1..]);
-            
-            _current.SetStorage(account, combined.UnsafeAsKeccak, payload);
+            _current.SetStorage(account, path.UnsafeAsKeccak, payload);
         }
 
         public void SetAccount(in Keccak address, in Account account) => _current.SetAccount(address, account);
@@ -1314,5 +1306,37 @@ public class Blockchain : IAsyncDisposable
         }
 
         public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) => ((IReadOnlyWorldState)_current).Get(key);
+    }
+}
+
+public static class SnapSync
+{
+    public const int BoundaryValueSize = Keccak.Size + 2;
+    private const byte Byte0 = 0;
+    private const byte Byte1 = 0;
+    
+    public static Span<byte> WriteBoundaryValue(in Keccak value, in Span<byte> payload)
+    {
+        payload[0] = Byte0;
+        payload[1] = Byte1;
+        value.Span.CopyTo(payload[2..]);
+
+        return payload.Slice(0, BoundaryValueSize);
+    }
+
+    public static bool CanBeBoundaryLeaf(in Node.Leaf leaf)
+    {
+        return leaf.Path.HasOnlyZeroes();
+    }
+    
+    public static bool IsBoundaryValue(in ReadOnlySpan<byte> value)
+    {
+        return value.Length == BoundaryValueSize && value[0] == Byte0 && value[1] == Byte1;
+    }
+
+    public static NibblePath CreateKey(scoped in NibblePath path, Span<byte> bytes)
+    {
+        var fillWithZeroes = NibblePath.FromKey(Keccak.Zero).SliceFrom(path.Length);
+        return path.Append(fillWithZeroes, bytes);
     }
 }
