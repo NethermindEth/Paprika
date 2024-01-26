@@ -1,6 +1,7 @@
 ﻿using System.Buffers.Binary;
 using NUnit.Framework;
 using Paprika.Chain;
+using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
 
