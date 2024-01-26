@@ -64,7 +64,7 @@ public class RootHashTests
 
         AssertRoot("73130daa1ae507554a72811c06e28d4fee671bfe2e1d0cef828a7fade54384f9", commit);
     }
-    
+
     [Test]
     public void Extension()
     {

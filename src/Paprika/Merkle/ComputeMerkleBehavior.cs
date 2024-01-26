@@ -350,6 +350,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         using var leafData = ctx.Commit.Get(leafKey);
 
+        if (SnapSync.TryGetBoundaryValue(leafData.Span, out var keccak))
+        {
+            return keccak;
+        }
+
         if (leafData.IsDbQuery && ctx.Budget.ClaimDbWrite())
         {
             ctx.Commit.Set(leafKey, leafData.Span);
@@ -948,20 +953,20 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                             var keyType = trieType == TrieType.State ? DataType.Account : DataType.StorageCell;
                             var valueKey = Key.Raw(concatenated, keyType, NibblePath.Empty);
-                            
+
                             using var read = commit.Get(valueKey);
-                            
+
                             if (SnapSync.IsBoundaryValue(read.Span))
                             {
                                 // delete memoized keccak
                                 commit.Set(valueKey, ReadOnlySpan<byte>.Empty);
-                                
+
                                 // commit the new leaf
                                 commit.SetLeaf(key, leftoverPath);
                                 return;
                             }
                         }
-                        
+
                         var diffAt = leaf.Path.FindFirstDifferentNibble(leftoverPath);
 
                         if (diffAt == leaf.Path.Length)

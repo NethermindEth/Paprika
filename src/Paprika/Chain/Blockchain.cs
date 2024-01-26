@@ -1241,6 +1241,7 @@ public class Blockchain : IAsyncDisposable
         private readonly IDb _db;
         private BlockState _current;
 
+
         public RawState(Blockchain blockchain, IDb db)
         {
             _blockchain = blockchain;
@@ -1272,7 +1273,6 @@ public class Blockchain : IAsyncDisposable
         {
             var path = SnapSync.CreateKey(storage, stackalloc byte[NibblePath.FullKeccakByteLength]);
             var payload = SnapSync.WriteBoundaryValue(boundaryNodeKeccak, stackalloc byte[SnapSync.BoundaryValueSize]);
-
             _current.SetStorage(account, path.UnsafeAsKeccak, payload);
         }
 
@@ -1293,50 +1293,20 @@ public class Blockchain : IAsyncDisposable
 
             var read = _db.BeginReadOnlyBatch();
 
+            Hash = _current.Hash;
+
             using var batch = _db.BeginNextBatch();
             _current.Apply(batch);
             _current.CommitRaw();
             batch.Commit(CommitOptions.DangerNoWrite);
 
-            Hash = _current.Hash;
-
             // Lease is taken automatically by the ctor of the block state, not needed
             //_current.AcquireLease();
-            _current = new BlockState(Keccak.Zero, read, [_current], _blockchain, raw: true);
+            var ancestors = new[] { _current };
+
+            _current = new BlockState(Keccak.Zero, read, ancestors, _blockchain, raw: true);
         }
 
         public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) => ((IReadOnlyWorldState)_current).Get(key);
-    }
-}
-
-public static class SnapSync
-{
-    public const int BoundaryValueSize = Keccak.Size + 2;
-    private const byte Byte0 = 0;
-    private const byte Byte1 = 0;
-    
-    public static Span<byte> WriteBoundaryValue(in Keccak value, in Span<byte> payload)
-    {
-        payload[0] = Byte0;
-        payload[1] = Byte1;
-        value.Span.CopyTo(payload[2..]);
-
-        return payload.Slice(0, BoundaryValueSize);
-    }
-
-    public static bool CanBeBoundaryLeaf(in Node.Leaf leaf)
-    {
-        return leaf.Path.HasOnlyZeroes();
-    }
-    
-    public static bool IsBoundaryValue(in ReadOnlySpan<byte> value)
-    {
-        return value.Length == BoundaryValueSize && value[0] == Byte0 && value[1] == Byte1;
-    }
-
-    public static NibblePath CreateKey(scoped in NibblePath path, Span<byte> bytes)
-    {
-        var fillWithZeroes = NibblePath.FromKey(Keccak.Zero).SliceFrom(path.Length);
-        return path.Append(fillWithZeroes, bytes);
     }
 }
