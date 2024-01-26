@@ -58,8 +58,9 @@ public class RootHashTests
             new Account(balanceA, nonceA).WriteTo(stackalloc byte[Paprika.Account.MaxByteCount]));
 
         span[0] = nibbleB;
+
         commit.Set(Key.Account(new Keccak(span)),
-            new Account(balanceB, nonceB).WriteTo(stackalloc byte[Paprika.Account.MaxByteCount]));
+                new Account(balanceB, nonceB).WriteTo(stackalloc byte[Paprika.Account.MaxByteCount]));
 
         AssertRoot("73130daa1ae507554a72811c06e28d4fee671bfe2e1d0cef828a7fade54384f9", commit);
     }

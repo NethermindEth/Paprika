@@ -229,7 +229,7 @@ public readonly ref struct NibblePath
     /// <summary>
     /// Appends the <see cref="other"/> path using the <paramref name="workingSet"/> as the working memory.
     /// </summary>
-    public NibblePath Append(in NibblePath other, Span<byte> workingSet)
+    public NibblePath Append(scoped in NibblePath other, Span<byte> workingSet)
     {
         if (workingSet.Length <= MaxByteLength)
         {
@@ -524,15 +524,35 @@ public readonly ref struct NibblePath
         {
             ref var span = ref _span;
 
-            long hash = 0;
+            long hash = 1;
             var length = Length;
 
             if (_odd == OddBit)
             {
-                hash = _span & 0x0F;
+                // mix in
+                unchecked
+                {
+                    hash *= prime;
+                    hash ^= _span & 0x0F;
+                }
+
                 span = ref Unsafe.Add(ref span, 1);
                 length -= 1;
             }
+
+            if (length % 2 == 1)
+            {
+                // mix in
+                unchecked
+                {
+                    hash *= prime;
+                    hash ^= GetAt(length - 1);
+                }
+
+                length -= 1;
+            }
+
+            Debug.Assert(length % 2 == 0, "Length should be even here");
 
             length /= 2; // make it byte
 
@@ -549,31 +569,54 @@ public readonly ref struct NibblePath
             }
 
             // 4 bytes
-            if (remainder > sizeof(int))
+            if (remainder >= sizeof(int))
             {
-                hash *= prime;
-                hash ^= Unsafe.ReadUnaligned<int>(ref span);
-                span = ref Unsafe.Add(ref span, sizeof(int));
-                remainder -= sizeof(int);
+                unchecked
+                {
+                    hash *= prime;
+                    hash ^= Unsafe.ReadUnaligned<int>(ref span);
+                    span = ref Unsafe.Add(ref span, sizeof(int));
+                    remainder -= sizeof(int);
+                }
             }
 
             // 2 bytes
-            if (remainder > sizeof(short))
+            if (remainder >= sizeof(short))
             {
-                hash *= prime;
-                hash ^= Unsafe.ReadUnaligned<short>(ref span);
-                span = ref Unsafe.Add(ref span, sizeof(short));
-                remainder -= sizeof(short);
+                unchecked
+                {
+                    hash *= prime;
+                    hash ^= Unsafe.ReadUnaligned<short>(ref span);
+                    span = ref Unsafe.Add(ref span, sizeof(short));
+                    remainder -= sizeof(short);
+                }
             }
 
             // 1 byte
             if (remainder > 0)
             {
-                hash *= prime;
-                hash ^= span;
+                unchecked
+                {
+                    hash *= prime;
+                    hash ^= span;
+                }
             }
 
             return unchecked((int)((hash >> 32) ^ hash));
         }
+    }
+
+    public bool HasOnlyZeroes()
+    {
+        // TODO: optimize
+        for (var i = 0; i < Length; i++)
+        {
+            if (GetAt(i) != 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

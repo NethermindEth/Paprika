@@ -324,4 +324,30 @@ public class NibblePathTests
         yield return new TestCaseData(@long.AsSpan()[..^1].ToArray()).SetName("Long - odd");
         yield return new TestCaseData(@long).SetName("Long - even");
     }
+
+    [Parallelizable(ParallelScope.None)]
+    [TestCase(0, 0, TestName = "Empty")]
+    [TestCase(0, 1, TestName = "Single, start from 0")]
+    [TestCase(1, 1, TestName = "Single, start from 1")]
+    [TestCase(1, 4, TestName = "Odd 1")]
+    [TestCase(1, 7, TestName = "Odd 2")]
+    [TestCase(1, 9, TestName = "Odd 3")]
+    [TestCase(1, 11, TestName = "Odd 4")]
+    [TestCase(1, 19, TestName = "Odd 5")]
+    [TestCase(0, 4, TestName = "Even 1")]
+    [TestCase(0, 7, TestName = "Even 2")]
+    [TestCase(0, 9, TestName = "Even 3")]
+    [TestCase(0, 11, TestName = "Even 4")]
+    [TestCase(0, 20, TestName = "Even 5")]
+    public void GetHashCode(int from, int length)
+    {
+        Span<byte> span = stackalloc byte[10] { 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, 0x73, 0x64 };
+
+        var path = NibblePath.FromKey(span).SliceFrom(from).SliceTo(length);
+        var hash = path.GetHashCode();
+
+        _hashes.Add(hash).Should().BeTrue();
+    }
+
+    private HashSet<int> _hashes = new();
 }

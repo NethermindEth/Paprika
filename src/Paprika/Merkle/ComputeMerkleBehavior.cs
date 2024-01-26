@@ -350,6 +350,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         using var leafData = ctx.Commit.Get(leafKey);
 
+        if (SnapSync.TryGetBoundaryValue(leafData.Span, out var keccak))
+        {
+            return keccak;
+        }
+
         if (leafData.IsDbQuery && ctx.Budget.ClaimDbWrite())
         {
             ctx.Commit.Set(leafKey, leafData.Span);
@@ -573,6 +578,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private KeccakOrRlp EncodeExtension(scoped in Key key, scoped in Node.Extension ext, scoped in ComputeContext ctx)
     {
+        if (ext.IsBoundaryNode)
+        {
+            return ext.Path.UnsafeAsKeccak;
+        }
+
         Span<byte> span = stackalloc byte[Math.Max(ext.Path.HexEncodedLength, key.Path.MaxByteLength + 1)];
 
         // retrieve the children keccak-or-rlp
@@ -910,7 +920,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         return DeleteStatus.ExtensionToLeaf;
     }
 
-    private static void MarkPathDirty(in NibblePath path, ICommit commit, CacheBudget budget)
+    private static void MarkPathDirty(in NibblePath path, ICommit commit, CacheBudget budget, TrieType trieType)
     {
         Span<byte> span = stackalloc byte[33];
 
@@ -925,7 +935,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
             if (owner.IsEmpty)
             {
-                // no value set now, create one
+                // No value set now, create one.
                 commit.SetLeaf(key, leftoverPath);
                 return;
             }
@@ -936,6 +946,27 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             {
                 case Node.Type.Leaf:
                     {
+                        if (SnapSync.CanBeBoundaryLeaf(leaf))
+                        {
+                            var concatenated = key.Path.Append(leaf.Path,
+                                stackalloc byte[NibblePath.FullKeccakByteLength]);
+
+                            var keyType = trieType == TrieType.State ? DataType.Account : DataType.StorageCell;
+                            var valueKey = Key.Raw(concatenated, keyType, NibblePath.Empty);
+
+                            using var read = commit.Get(valueKey);
+
+                            if (SnapSync.IsBoundaryValue(read.Span))
+                            {
+                                // delete memoized keccak
+                                commit.Set(valueKey, ReadOnlySpan<byte>.Empty);
+
+                                // commit the new leaf
+                                commit.SetLeaf(key, leftoverPath);
+                                return;
+                            }
+                        }
+
                         var diffAt = leaf.Path.FindFirstDifferentNibble(leftoverPath);
 
                         if (diffAt == leaf.Path.Length)
@@ -973,6 +1004,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     }
                 case Node.Type.Extension:
                     {
+                        if (ext.IsBoundaryNode)
+                        {
+                            // the boundary node should be overwritten immediately
+                            commit.SetLeaf(key, leftoverPath);
+                            return;
+                        }
+
                         var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
                         if (diffAt == ext.Path.Length)
                         {
@@ -1183,7 +1221,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 }
                 else
                 {
-                    MarkPathDirty(in key.Path, _commit, _budget);
+                    MarkPathDirty(in key.Path, _commit, _budget, TrieType.State);
                 }
             }
         }
@@ -1198,7 +1236,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             }
             else
             {
-                MarkPathDirty(in key.Path, _commit!, _budget);
+                MarkPathDirty(in key.Path, _commit!, _budget, TrieType.State);
             }
 
             // mark as touched already
@@ -1249,7 +1287,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             }
             else
             {
-                MarkPathDirty(in key.StoragePath, _prefixed, _budget);
+                MarkPathDirty(in key.StoragePath, _prefixed, _budget, TrieType.Storage);
             }
         }
 

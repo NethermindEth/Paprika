@@ -427,6 +427,7 @@ public class Blockchain : IAsyncDisposable
         /// Raw blocks are used for batching under sync and should not be tracked by the blockchain at all.
         /// </summary>
         private readonly bool _raw;
+
         private Keccak? _hash;
         private readonly CacheBudget _cacheBudget;
 
@@ -455,7 +456,8 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-        public BlockState(Keccak parentStateRoot, IReadOnlyBatch batch, BlockState[] ancestors, Blockchain blockchain, bool raw = false)
+        public BlockState(Keccak parentStateRoot, IReadOnlyBatch batch, BlockState[] ancestors, Blockchain blockchain,
+            bool raw = false)
         {
             _raw = raw;
             _batch = new ReadOnlyBatchCountingRefs(batch);
@@ -685,13 +687,16 @@ public class Blockchain : IAsyncDisposable
 
         public void SetAccount(in Keccak address, in Account account)
         {
-            var path = NibblePath.FromKey(address);
-            var key = Key.Account(path);
-
             var payload = account.WriteTo(stackalloc byte[Account.MaxByteCount]);
 
-            SetImpl(key, payload, _state);
+            SetAccountRaw(address, payload);
+        }
 
+        public void SetAccountRaw(in Keccak address, Span<byte> payload)
+        {
+            var path = NibblePath.FromKey(address);
+            var key = Key.Account(path);
+            SetImpl(key, payload, _state);
             _stats!.RegisterSetAccount(address);
         }
 
@@ -1236,6 +1241,7 @@ public class Blockchain : IAsyncDisposable
         private readonly IDb _db;
         private BlockState _current;
 
+
         public RawState(Blockchain blockchain, IDb db)
         {
             _blockchain = blockchain;
@@ -1255,6 +1261,21 @@ public class Blockchain : IAsyncDisposable
 
         public Keccak Hash { get; private set; }
 
+        public void SetBoundary(in NibblePath account, in Keccak boundaryNodeKeccak)
+        {
+            var path = SnapSync.CreateKey(account, stackalloc byte[NibblePath.FullKeccakByteLength]);
+            var payload = SnapSync.WriteBoundaryValue(boundaryNodeKeccak, stackalloc byte[SnapSync.BoundaryValueSize]);
+
+            _current.SetAccountRaw(path.UnsafeAsKeccak, payload);
+        }
+
+        public void SetBoundary(in Keccak account, in NibblePath storage, in Keccak boundaryNodeKeccak)
+        {
+            var path = SnapSync.CreateKey(storage, stackalloc byte[NibblePath.FullKeccakByteLength]);
+            var payload = SnapSync.WriteBoundaryValue(boundaryNodeKeccak, stackalloc byte[SnapSync.BoundaryValueSize]);
+            _current.SetStorage(account, path.UnsafeAsKeccak, payload);
+        }
+
         public void SetAccount(in Keccak address, in Account account) => _current.SetAccount(address, account);
 
         public void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value) =>
@@ -1272,16 +1293,18 @@ public class Blockchain : IAsyncDisposable
 
             var read = _db.BeginReadOnlyBatch();
 
+            Hash = _current.Hash;
+
             using var batch = _db.BeginNextBatch();
             _current.Apply(batch);
             _current.CommitRaw();
             batch.Commit(CommitOptions.DangerNoWrite);
 
-            Hash = _current.Hash;
-
             // Lease is taken automatically by the ctor of the block state, not needed
             //_current.AcquireLease();
-            _current = new BlockState(Keccak.Zero, read, [_current], _blockchain, raw: true);
+            var ancestors = new[] { _current };
+
+            _current = new BlockState(Keccak.Zero, read, ancestors, _blockchain, raw: true);
         }
 
         public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) => ((IReadOnlyWorldState)_current).Get(key);

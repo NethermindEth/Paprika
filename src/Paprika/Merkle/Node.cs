@@ -11,7 +11,13 @@ public static partial class Node
     public enum Type : byte
     {
         Leaf = 2,
+
+        /// <summary>
+        /// The extension is used both, to encode the Extension but also to encode the <see cref="Boundary"/> nodes for the snap sync.
+        /// The fact that no extension can have a nibble path of length of 64 is used here.
+        /// </summary>
         Extension = 1,
+
         Branch = 0,
     }
 
@@ -260,6 +266,8 @@ public static partial class Node
             extension = new Extension(header, path);
             return leftover;
         }
+
+        public bool IsBoundaryNode => Path.Length == NibblePath.KeccakNibbleCount;
 
         public bool Equals(in Extension other) =>
             Header.Equals(other.Header)
