@@ -1,6 +1,7 @@
 ﻿using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -567,18 +568,15 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 // full extraction of key possible, get it
                 var ids = new DataPage(TryGetPageAlloc(ref _root.Data.IdRoot, PageType.Identity));
 
-                Span<byte> newId = stackalloc byte[sizeof(uint)];
                 // try fetch existing first
                 if (ids.TryGet(key.Path, this, out var id) == false)
                 {
                     _root.Data.AccountCounter++;
-                    BinaryPrimitives.WriteUInt32LittleEndian(newId, _root.Data.AccountCounter);
+
+                    id = Id.WriteId(_root.Data.AccountCounter);
 
                     // update root
-                    _root.Data.IdRoot = GetAddress(ids.Set(key.Path, newId, this));
-
-                    // TODO: remove alloc
-                    id = newId.ToArray();
+                    _root.Data.IdRoot = GetAddress(ids.Set(key.Path, id, this));
                 }
 
                 var encoded = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength]);
