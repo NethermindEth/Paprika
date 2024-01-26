@@ -97,7 +97,7 @@ public readonly ref partial struct Key
     [SkipLocalsInit]
     public override int GetHashCode()
     {
-        return unchecked((int)XxHash32.HashToUInt32(WriteTo(stackalloc byte[MaxByteLength])));
+        return (int)Type ^ Path.GetHashCode() ^ StoragePath.GetHashCode();
     }
 
     public override string ToString()
