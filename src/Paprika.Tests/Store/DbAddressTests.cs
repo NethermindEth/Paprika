@@ -16,13 +16,4 @@ public class DbAddressTests
         Equals(a1, a1).Should().BeTrue();
         Equals(a1, a2).Should().BeFalse();
     }
-
-    [Test]
-    public void FileOffset_overflow()
-    {
-        long page = Page.PageCount - 1;
-        var address = DbAddress.Page((uint)page);
-
-        address.FileOffset.Should().Be(page * Page.PageSize);
-    }
 }

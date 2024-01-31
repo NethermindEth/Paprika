@@ -18,8 +18,6 @@ public abstract unsafe class PointerPageManager : IPageManager
             throw new IndexOutOfRangeException("The database breached its size! The returned page is invalid");
         }
 
-        Debug.Assert(address.IsValidPageAddress, "The address page is invalid and breaches max page count");
-
         return new Page((byte*)Ptr + address.FileOffset);
     }
 

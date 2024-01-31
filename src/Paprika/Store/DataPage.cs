@@ -16,37 +16,21 @@ namespace Paprika.Store;
 /// The page preserves locality of the data though. It's either all the children with a given nibble stored
 /// in the parent page, or they are flushed underneath. 
 /// </remarks>
-public readonly unsafe struct DataPage : IPage
+[method: DebuggerStepThrough]
+public readonly unsafe struct DataPage(Page page) : IPage
 {
     private const int BucketCount = 16;
 
-    private readonly Page _page;
+    public ref PageHeader Header => ref page.Header;
 
-    [DebuggerStepThrough]
-    public DataPage(Page page) => _page = page;
-
-    public ref PageHeader Header => ref _page.Header;
-
-    public ref Payload Data => ref Unsafe.AsRef<Payload>(_page.Payload);
-
-    /// <summary>
-    /// Sets values for the given <see cref="SetContext.Key"/>
-    /// </summary>
-    /// <returns>
-    /// The actual page which handled the set operation. Due to page being COWed, it may be a different page.
-    /// </returns>
-    //TODO: [SkipLocalsInit]
-    public Page Set(in SetContext ctx)
-    {
-        return Set(ctx.Key, ctx.Data, ctx.Batch);
-    }
+    public ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
 
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
         if (Header.BatchId != batch.BatchId)
         {
             // the page is from another batch, meaning, it's readonly. Copy
-            var writable = batch.GetWritableCopy(_page);
+            var writable = batch.GetWritableCopy(page);
 
             return new DataPage(writable).Set(key, data, batch);
         }
@@ -67,7 +51,7 @@ public readonly unsafe struct DataPage : IPage
                     if (TryGetWritableLeaf(i, batch, out var leaf)) leaf.Delete(key.RawSpan);
                 }
 
-                return _page;
+                return page;
             }
 
             var childPageAddress = Data.Buckets[key.FirstNibble];
@@ -75,14 +59,14 @@ public readonly unsafe struct DataPage : IPage
             {
                 // there's no lower level, delete in map
                 map.Delete(key.RawSpan);
-                return _page;
+                return page;
             }
         }
 
         // try write in map
         if (map.TrySet(key.RawSpan, data))
         {
-            return _page;
+            return page;
         }
 
         // if no Descendants, create first leaf
@@ -102,7 +86,7 @@ public readonly unsafe struct DataPage : IPage
 
             if (anyMoved && map.TrySet(key.RawSpan, data))
             {
-                return _page;
+                return page;
             }
 
             this.LeafCount += 1;
@@ -115,11 +99,11 @@ public readonly unsafe struct DataPage : IPage
                 map.MoveTo(newest);
                 if (map.TrySet(key.RawSpan, data))
                 {
-                    return _page;
+                    return page;
                 }
 
                 Debug.Fail("Shall never enter here as new entries are copied to the map");
-                return _page;
+                return page;
             }
 
             // copy leafs and clear the buckets as they will be used by child pages now

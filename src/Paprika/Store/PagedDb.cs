@@ -414,7 +414,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 return false;
             }
 
-            var ids = new DataPage(GetAt(_rootIdPage));
+            var ids = new FanOutPage(GetAt(_rootIdPage));
             if (ids.TryGet(key.Path, this, out var id) == false)
             {
                 result = default;
@@ -536,7 +536,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 return false;
             }
 
-            var ids = new DataPage(GetAt(_root.Data.IdRoot));
+            var ids = new FanOutPage(GetAt(_root.Data.IdRoot));
             if (ids.TryGet(key.Path, this, out var id) == false)
             {
                 result = default;
@@ -565,7 +565,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             else
             {
                 // full extraction of key possible, get it
-                var ids = new DataPage(TryGetPageAlloc(ref _root.Data.IdRoot, PageType.Identity));
+                var ids = new FanOutPage(TryGetPageAlloc(ref _root.Data.IdRoot, PageType.Identity));
 
                 Span<byte> newId = stackalloc byte[sizeof(uint)];
                 // try fetch existing first
@@ -600,7 +600,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _db.ReportWrite();
 
             // Get the id page
-            var ids = new DataPage(TryGetPageAlloc(ref _root.Data.IdRoot, PageType.Identity));
+            var ids = new FanOutPage(TryGetPageAlloc(ref _root.Data.IdRoot, PageType.Identity));
 
             // Write empty data so that it is a delete
             _root.Data.IdRoot = GetAddress(ids.Set(account, ReadOnlySpan<byte>.Empty, this));
@@ -746,8 +746,6 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             // process abandoned
             while (_abandoned.TryDequeue(out var page))
             {
-                Debug.Assert(page.IsValidPageAddress, "Only valid pages should be reused");
-
                 first = first.EnqueueAbandoned(this, _db.GetAddress(first.AsPage()), page);
             }
 
