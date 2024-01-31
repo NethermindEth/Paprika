@@ -448,22 +448,39 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     }
 
     /// <summary>
-    /// Encode the path so that the prefix is at the end.
-    /// The data pages use raw of the path so it's treated like a span.
+    /// Encodes the path in a way that makes it byte-aligned and unique.
+    /// - empty path is left empty
+    /// - odd-length path is padded with a single nibble with value of 0x01
+    /// - even-length path is padded with a single byte (2 nibbles with value of 0x00)
     /// </summary>
     private static NibblePath Encode(in NibblePath path, in Span<byte> destination)
     {
-        var span = path.WriteTo(destination);
-        if (span.Length <= 1)
-            return NibblePath.FromKey(span);
+        const byte oddEnd = 0x01;
+        const byte evenEnd = 0x00;
+        
+        Debug.Assert(path.IsOdd == false, "Encoded paths should not be odd. They always start at 0");
 
-        var last = span[^1];
-        var first = span[0];
+        if (path.IsEmpty)
+            return path;
 
-        span[0] = last;
-        span[^1] = first;
+        var raw = path.RawSpan;
+        
+        if (path.Length % 2 == 1)
+        {
+            // Odd case
+            
+            raw.CopyTo(destination);
+            ref var last = ref destination[raw.Length - 1];
+            last &= 0xF0;
+            last |= oddEnd;
 
-        return NibblePath.FromKey(span);
+            return NibblePath.FromKey(destination[..raw.Length]);
+        }
+
+        // Even case
+        raw.CopyTo(destination);
+        destination[raw.Length] = evenEnd;
+        return NibblePath.FromKey(destination[..(raw.Length + 1)]);
     }
 
     class Batch : BatchContextBase, IBatch
