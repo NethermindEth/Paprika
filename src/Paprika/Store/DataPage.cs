@@ -17,8 +17,10 @@ namespace Paprika.Store;
 /// in the parent page, or they are flushed underneath. 
 /// </remarks>
 [method: DebuggerStepThrough]
-public readonly unsafe struct DataPage(Page page) : IPage
+public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 {
+    public static DataPage Wrap(Page page) => new(page);
+    
     private const int BucketCount = 16;
 
     public ref PageHeader Header => ref page.Header;

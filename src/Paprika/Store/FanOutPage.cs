@@ -6,8 +6,10 @@ using Paprika.Data;
 namespace Paprika.Store;
 
 [method: DebuggerStepThrough]
-public readonly unsafe struct FanOutPage(Page page) : IPage
+public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
 {
+    public static FanOutPage Wrap(Page page) => new(page);
+    
     private const int ConsumedNibbles = 2;
 
     public ref PageHeader Header => ref page.Header;
@@ -27,7 +29,7 @@ public readonly unsafe struct FanOutPage(Page page) : IPage
         public Span<DbAddress> Addresses => MemoryMarshal.CreateSpan(ref Address, Size);
     }
 
-    public bool TryGet(scoped in NibblePath key, IPageResolver batch, out ReadOnlySpan<byte> result)
+    public bool TryGet(scoped NibblePath key, IPageResolver batch, out ReadOnlySpan<byte> result)
     {
         if (key.Length < ConsumedNibbles)
         {
@@ -47,7 +49,7 @@ public readonly unsafe struct FanOutPage(Page page) : IPage
         return new DataPage(batch.GetAt(addr)).TryGet(key.SliceFrom(ConsumedNibbles), batch, out result);
     }
 
-    private static int GetIndex(in NibblePath key) => (key.GetAt(0) << NibblePath.NibbleShift) + key.GetAt(1);
+    private static int GetIndex(scoped in NibblePath key) => (key.GetAt(0) << NibblePath.NibbleShift) + key.GetAt(1);
 
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {

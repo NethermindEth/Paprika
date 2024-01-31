@@ -424,7 +424,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             var encodedStorage = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength]);
             var path = NibblePath.FromKey(id).Append(encodedStorage, stackalloc byte[StorageKeySize]);
 
-            return new DataPage(GetAt(_storageRootPage)).TryGet(path, this, out result);
+            return new FanOutPage(GetAt(_storageRootPage)).TryGet(path, this, out result);
         }
 
         public void Report(IReporter state, IReporter storage)
@@ -545,7 +545,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             var encodedStorage = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength]);
             var path = NibblePath.FromKey(id).Append(encodedStorage, stackalloc byte[StorageKeySize]);
-            return new DataPage(GetAt(_root.Data.StorageRoot)).TryGet(path, this, out result);
+            return new FanOutPage(GetAt(_root.Data.StorageRoot)).TryGet(path, this, out result);
         }
 
         public void SetMetadata(uint blockNumber, in Keccak blockHash)
@@ -560,7 +560,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             if (IsState(key))
             {
                 var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength]);
-                SetAtRoot(encoded, rawData, ref _root.Data.StateRoot);
+                SetAtRoot<DataPage>(encoded, rawData, ref _root.Data.StateRoot);
             }
             else
             {
@@ -584,14 +584,15 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 var encoded = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength]);
                 var path = NibblePath.FromKey(id).Append(encoded, stackalloc byte[StorageKeySize]);
 
-                SetAtRoot(path, rawData, ref _root.Data.StorageRoot);
+                SetAtRoot<FanOutPage>(path, rawData, ref _root.Data.StorageRoot);
             }
         }
 
-        private void SetAtRoot(in NibblePath path, in ReadOnlySpan<byte> rawData, ref DbAddress root)
+        private void SetAtRoot<TPage>(in NibblePath path, in ReadOnlySpan<byte> rawData, ref DbAddress root)
+            where TPage: struct, IPageWithData<TPage>
         {
             var data = TryGetPageAlloc(ref root, PageType.Standard);
-            var updated = new DataPage(data).Set(path, rawData, this);
+            var updated = TPage.Wrap(data).Set(path, rawData, this);
             root = _db.GetAddress(updated);
         }
 
@@ -605,7 +606,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             // Write empty data so that it is a delete
             _root.Data.IdRoot = GetAddress(ids.Set(account, ReadOnlySpan<byte>.Empty, this));
 
-            SetAtRoot(Encode(account, stackalloc byte[account.MaxByteLength]), ReadOnlySpan<byte>.Empty,
+            SetAtRoot<DataPage>(Encode(account, stackalloc byte[account.MaxByteLength]), ReadOnlySpan<byte>.Empty,
                 ref _root.Data.StateRoot);
 
             // TODO: there' no garbage collection for storage
