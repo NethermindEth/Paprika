@@ -9,7 +9,7 @@ namespace Paprika.Store;
 public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
 {
     public static FanOutPage Wrap(Page page) => new(page);
-    
+
     private const int ConsumedNibbles = 2;
 
     public ref PageHeader Header => ref page.Header;
@@ -62,15 +62,15 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
 
         var index = GetIndex(key);
         var sliced = key.SliceFrom(ConsumedNibbles);
-        
+
         ref var addr = ref Data.Addresses[index];
-        
+
         if (addr.IsNull)
         {
             var newPage = batch.GetNewPage(out addr, true);
             newPage.Header.PageType = Header.PageType;
             newPage.Header.Level = 0;
-            
+
             new DataPage(newPage).Set(sliced, data, batch);
             return page;
         }

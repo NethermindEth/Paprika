@@ -295,7 +295,7 @@ public class NibblePathTests
 
         NibblePath.FromKey(expected).SliceFrom(1).Equals(appended);
     }
-    
+
     [TestCaseSource(nameof(GetRawNibbles))]
     public void Raw_nibbles(byte[] nibbles)
     {
@@ -320,7 +320,7 @@ public class NibblePathTests
             1, 2, 3, 4, 5, 6, 7, 8, 9, 0xA, 0xB, 0xC, 0xD, 0xE,
             1, 2, 3, 4, 5, 6, 7, 8, 9, 0xA, 0xB, 0xC, 0xD, 0xE,
         };
-        
+
         yield return new TestCaseData(@long.AsSpan()[..^1].ToArray()).SetName("Long - odd");
         yield return new TestCaseData(@long).SetName("Long - even");
     }

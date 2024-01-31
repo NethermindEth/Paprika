@@ -457,18 +457,18 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     {
         const byte oddEnd = 0x01;
         const byte evenEnd = 0x00;
-        
+
         Debug.Assert(path.IsOdd == false, "Encoded paths should not be odd. They always start at 0");
 
         if (path.IsEmpty)
             return path;
 
         var raw = path.RawSpan;
-        
+
         if (path.Length % 2 == 1)
         {
             // Odd case
-            
+
             raw.CopyTo(destination);
             ref var last = ref destination[raw.Length - 1];
             last &= 0xF0;
@@ -606,7 +606,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         }
 
         private void SetAtRoot<TPage>(in NibblePath path, in ReadOnlySpan<byte> rawData, ref DbAddress root)
-            where TPage: struct, IPageWithData<TPage>
+            where TPage : struct, IPageWithData<TPage>
         {
             var data = TryGetPageAlloc(ref root, PageType.Standard);
             var updated = TPage.Wrap(data).Set(path, rawData, this);
