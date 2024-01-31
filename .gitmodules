@@ -1,0 +1,4 @@
+[submodule "src/Nethermind"]
+	path = src/Nethermind
+	url = https://github.com/NethermindEth/nethermind.git
+	branch = master
