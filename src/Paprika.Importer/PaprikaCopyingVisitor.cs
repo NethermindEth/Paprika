@@ -211,7 +211,8 @@ public class PaprikaCopyingVisitor : ITreeVisitor<PathContext>, IDisposable
     {
     }
 
-    public void VisitLeaf(in PathContext nodeContext, TrieNode node, TrieVisitContext trieVisitContext, byte[] value = null)
+
+    public void VisitLeaf(in PathContext nodeContext, TrieNode node, TrieVisitContext trieVisitContext, ReadOnlySpan<byte> value)
     {
         var context = nodeContext.Add(node.Key!);
         var path = context.AsNibblePath;
@@ -222,7 +223,9 @@ public class PaprikaCopyingVisitor : ITreeVisitor<PathContext>, IDisposable
             path.RawSpan.CopyTo(account.BytesAsSpan);
 
             _accountsVisitedGauge.Add(1);
-            Add(new Item(account, Rlp.Decode<Nethermind.Core.Account>(value)));
+
+            Rlp.ValueDecoderContext decoderContext = new Rlp.ValueDecoderContext(value);
+            Add(new Item(account, Rlp.Decode<Nethermind.Core.Account>(ref decoderContext)));
         }
         else
         {
