@@ -404,7 +404,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                     return false;
                 }
 
-                var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength]);
+                var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength], key.Type);
                 return new DataPage(GetAt(_stateRootPage)).TryGet(encoded, this, out result);
             }
 
@@ -421,7 +421,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 return false;
             }
 
-            var encodedStorage = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength]);
+            var encodedStorage = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength], key.Type);
             var path = NibblePath.FromKey(id).Append(encodedStorage, stackalloc byte[StorageKeySize]);
 
             return new FanOutPage(GetAt(_storageRootPage)).TryGet(path, this, out result);
@@ -448,13 +448,19 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     }
 
     /// <summary>
-    /// Encodes the path in a way that makes it byte-aligned and unique.
+    /// Encodes the path in a way that makes it byte-aligned and unique, but also sort:
+    ///
     /// - empty path is left empty
     /// - odd-length path is padded with a single nibble with value of 0x01
     /// - even-length path is padded with a single byte (2 nibbles with value of 0x00)
+    ///
+    /// To ensure that <see cref="DataType.Merkle"/> and <see cref="DataType.Account"/>/<see cref="DataType.StorageCell"/>
+    /// of the same length can coexist, the merkle marker is added as well.
     /// </summary>
-    private static NibblePath Encode(in NibblePath path, in Span<byte> destination)
+    private static NibblePath Encode(in NibblePath path, in Span<byte> destination, DataType type)
     {
+        var typeFlag = (byte)(type & DataType.Merkle);
+
         const byte oddEnd = 0x01;
         const byte evenEnd = 0x00;
 
@@ -473,13 +479,14 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             ref var last = ref destination[raw.Length - 1];
             last &= 0xF0;
             last |= oddEnd;
+            last |= typeFlag;
 
             return NibblePath.FromKey(destination[..raw.Length]);
         }
 
         // Even case
         raw.CopyTo(destination);
-        destination[raw.Length] = evenEnd;
+        destination[raw.Length] = (byte)(evenEnd | typeFlag);
         return NibblePath.FromKey(destination[..(raw.Length + 1)]);
     }
 
@@ -543,7 +550,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                     return false;
                 }
 
-                var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength]);
+                var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength], key.Type);
                 return new DataPage(GetAt(_root.Data.StateRoot)).TryGet(encoded, this, out result);
             }
 
@@ -560,7 +567,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 return false;
             }
 
-            var encodedStorage = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength]);
+            var encodedStorage = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength], key.Type);
             var path = NibblePath.FromKey(id).Append(encodedStorage, stackalloc byte[StorageKeySize]);
             return new FanOutPage(GetAt(_root.Data.StorageRoot)).TryGet(path, this, out result);
         }
@@ -576,7 +583,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             if (IsState(key))
             {
-                var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength]);
+                var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength], key.Type);
                 SetAtRoot<DataPage>(encoded, rawData, ref _root.Data.StateRoot);
             }
             else
@@ -598,7 +605,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                     id = newId.ToArray();
                 }
 
-                var encoded = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength]);
+                var encoded = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength], key.Type);
                 var path = NibblePath.FromKey(id).Append(encoded, stackalloc byte[StorageKeySize]);
 
                 SetAtRoot<FanOutPage>(path, rawData, ref _root.Data.StorageRoot);
@@ -623,8 +630,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             // Write empty data so that it is a delete
             _root.Data.IdRoot = GetAddress(ids.Set(account, ReadOnlySpan<byte>.Empty, this));
 
-            SetAtRoot<DataPage>(Encode(account, stackalloc byte[account.MaxByteLength]), ReadOnlySpan<byte>.Empty,
-                ref _root.Data.StateRoot);
+            SetAtRoot<DataPage>(Encode(account, stackalloc byte[account.MaxByteLength], DataType.Account),
+                ReadOnlySpan<byte>.Empty, ref _root.Data.StateRoot);
 
             // TODO: there' no garbage collection for storage
             // It should not be hard. Walk down by the mapped path, then remove all the pages underneath.
