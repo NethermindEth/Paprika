@@ -1,5 +1,6 @@
 ﻿using FluentAssertions;
 using NUnit.Framework;
+using Paprika.Crypto;
 using Paprika.Data;
 
 namespace Paprika.Tests.Data;
@@ -144,6 +145,50 @@ public class SlottedArrayTests
             value[1] = i;
 
             map.GetAssert(key, value);
+        }
+    }
+
+    [Test]
+    public void Hashing()
+    {
+        var hashes = new Dictionary<ushort, string>();
+
+        // empty
+        Unique(ReadOnlySpan<byte>.Empty);
+
+        // single byte
+        Unique(stackalloc byte[] { 1 });
+        Unique(stackalloc byte[] { 2 });
+        Unique(stackalloc byte[] { 16 });
+        Unique(stackalloc byte[] { 17 });
+
+
+        // two bytes
+        Unique(stackalloc byte[] { 0xA, 0xC });
+        Unique(stackalloc byte[] { 0xA, 0xB });
+        Unique(stackalloc byte[] { 0xB, 0xC });
+
+        // three bytes
+        Unique(stackalloc byte[] { 0xA, 0xD, 0xC });
+        Unique(stackalloc byte[] { 0xA, 0xE, 0xC });
+        Unique(stackalloc byte[] { 0xA, 0xF, 0xC });
+
+        // three bytes
+        Unique(stackalloc byte[] { 0xA, 0xD, 0xC, 0x1 });
+        Unique(stackalloc byte[] { 0xA, 0xE, 0xC, 0x1 });
+        Unique(stackalloc byte[] { 0xA, 0xF, 0xC, 0x1 });
+
+        return;
+
+        void Unique(in ReadOnlySpan<byte> key)
+        {
+            var hash = SlottedArray.GetHash(key);
+            var hex = key.ToHexString(true);
+
+            if (hashes.TryAdd(hash, hex) == false)
+            {
+                Assert.Fail($"The hash for {hex} is the same as for {hashes[hash]}");
+            }
         }
     }
 }

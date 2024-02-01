@@ -404,7 +404,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                     return false;
                 }
 
-                var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength]);
+                var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength], key.Type);
                 return new DataPage(GetAt(_stateRootPage)).TryGet(encoded, this, out result);
             }
 
@@ -414,17 +414,17 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 return false;
             }
 
-            var ids = new DataPage(GetAt(_rootIdPage));
+            var ids = new FanOutPage(GetAt(_rootIdPage));
             if (ids.TryGet(key.Path, this, out var id) == false)
             {
                 result = default;
                 return false;
             }
 
-            var encodedStorage = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength]);
+            var encodedStorage = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength], key.Type);
             var path = NibblePath.FromKey(id).Append(encodedStorage, stackalloc byte[StorageKeySize]);
 
-            return new DataPage(GetAt(_storageRootPage)).TryGet(path, this, out result);
+            return new FanOutPage(GetAt(_storageRootPage)).TryGet(path, this, out result);
         }
 
         public void Report(IReporter state, IReporter storage)
@@ -448,22 +448,46 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     }
 
     /// <summary>
-    /// Encode the path so that the prefix is at the end.
-    /// The data pages use raw of the path so it's treated like a span.
+    /// Encodes the path in a way that makes it byte-aligned and unique, but also sort:
+    ///
+    /// - empty path is left empty
+    /// - odd-length path is padded with a single nibble with value of 0x01
+    /// - even-length path is padded with a single byte (2 nibbles with value of 0x00)
+    ///
+    /// To ensure that <see cref="DataType.Merkle"/> and <see cref="DataType.Account"/>/<see cref="DataType.StorageCell"/>
+    /// of the same length can coexist, the merkle marker is added as well.
     /// </summary>
-    private static NibblePath Encode(in NibblePath path, in Span<byte> destination)
+    private static NibblePath Encode(in NibblePath path, in Span<byte> destination, DataType type)
     {
-        var span = path.WriteTo(destination);
-        if (span.Length <= 1)
-            return NibblePath.FromKey(span);
+        var typeFlag = (byte)(type & DataType.Merkle);
 
-        var last = span[^1];
-        var first = span[0];
+        const byte oddEnd = 0x01;
+        const byte evenEnd = 0x00;
 
-        span[0] = last;
-        span[^1] = first;
+        Debug.Assert(path.IsOdd == false, "Encoded paths should not be odd. They always start at 0");
 
-        return NibblePath.FromKey(span);
+        if (path.IsEmpty)
+            return path;
+
+        var raw = path.RawSpan;
+
+        if (path.Length % 2 == 1)
+        {
+            // Odd case
+
+            raw.CopyTo(destination);
+            ref var last = ref destination[raw.Length - 1];
+            last &= 0xF0;
+            last |= oddEnd;
+            last |= typeFlag;
+
+            return NibblePath.FromKey(destination[..raw.Length]);
+        }
+
+        // Even case
+        raw.CopyTo(destination);
+        destination[raw.Length] = (byte)(evenEnd | typeFlag);
+        return NibblePath.FromKey(destination[..(raw.Length + 1)]);
     }
 
     class Batch : BatchContextBase, IBatch
@@ -526,7 +550,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                     return false;
                 }
 
-                var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength]);
+                var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength], key.Type);
                 return new DataPage(GetAt(_root.Data.StateRoot)).TryGet(encoded, this, out result);
             }
 
@@ -536,16 +560,16 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 return false;
             }
 
-            var ids = new DataPage(GetAt(_root.Data.IdRoot));
+            var ids = new FanOutPage(GetAt(_root.Data.IdRoot));
             if (ids.TryGet(key.Path, this, out var id) == false)
             {
                 result = default;
                 return false;
             }
 
-            var encodedStorage = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength]);
+            var encodedStorage = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength], key.Type);
             var path = NibblePath.FromKey(id).Append(encodedStorage, stackalloc byte[StorageKeySize]);
-            return new DataPage(GetAt(_root.Data.StorageRoot)).TryGet(path, this, out result);
+            return new FanOutPage(GetAt(_root.Data.StorageRoot)).TryGet(path, this, out result);
         }
 
         public void SetMetadata(uint blockNumber, in Keccak blockHash)
@@ -559,13 +583,13 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             if (IsState(key))
             {
-                var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength]);
-                SetAtRoot(encoded, rawData, ref _root.Data.StateRoot);
+                var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength], key.Type);
+                SetAtRoot<DataPage>(encoded, rawData, ref _root.Data.StateRoot);
             }
             else
             {
                 // full extraction of key possible, get it
-                var ids = new DataPage(TryGetPageAlloc(ref _root.Data.IdRoot, PageType.Identity));
+                var ids = new FanOutPage(TryGetPageAlloc(ref _root.Data.IdRoot, PageType.Identity));
 
                 Span<byte> newId = stackalloc byte[sizeof(uint)];
                 // try fetch existing first
@@ -581,17 +605,18 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                     id = newId.ToArray();
                 }
 
-                var encoded = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength]);
+                var encoded = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength], key.Type);
                 var path = NibblePath.FromKey(id).Append(encoded, stackalloc byte[StorageKeySize]);
 
-                SetAtRoot(path, rawData, ref _root.Data.StorageRoot);
+                SetAtRoot<FanOutPage>(path, rawData, ref _root.Data.StorageRoot);
             }
         }
 
-        private void SetAtRoot(in NibblePath path, in ReadOnlySpan<byte> rawData, ref DbAddress root)
+        private void SetAtRoot<TPage>(in NibblePath path, in ReadOnlySpan<byte> rawData, ref DbAddress root)
+            where TPage : struct, IPageWithData<TPage>
         {
             var data = TryGetPageAlloc(ref root, PageType.Standard);
-            var updated = new DataPage(data).Set(path, rawData, this);
+            var updated = TPage.Wrap(data).Set(path, rawData, this);
             root = _db.GetAddress(updated);
         }
 
@@ -600,13 +625,13 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _db.ReportWrite();
 
             // Get the id page
-            var ids = new DataPage(TryGetPageAlloc(ref _root.Data.IdRoot, PageType.Identity));
+            var ids = new FanOutPage(TryGetPageAlloc(ref _root.Data.IdRoot, PageType.Identity));
 
             // Write empty data so that it is a delete
             _root.Data.IdRoot = GetAddress(ids.Set(account, ReadOnlySpan<byte>.Empty, this));
 
-            SetAtRoot(Encode(account, stackalloc byte[account.MaxByteLength]), ReadOnlySpan<byte>.Empty,
-                ref _root.Data.StateRoot);
+            SetAtRoot<DataPage>(Encode(account, stackalloc byte[account.MaxByteLength], DataType.Account),
+                ReadOnlySpan<byte>.Empty, ref _root.Data.StateRoot);
 
             // TODO: there' no garbage collection for storage
             // It should not be hard. Walk down by the mapped path, then remove all the pages underneath.
@@ -746,8 +771,6 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             // process abandoned
             while (_abandoned.TryDequeue(out var page))
             {
-                Debug.Assert(page.IsValidPageAddress, "Only valid pages should be reused");
-
                 first = first.EnqueueAbandoned(this, _db.GetAddress(first.AsPage()), page);
             }
 
