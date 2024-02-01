@@ -40,7 +40,7 @@ public readonly ref struct SlottedArray
 
     public bool TrySet(in ReadOnlySpan<byte> key, ReadOnlySpan<byte> data, ushort? keyHash = default)
     {
-        var hash = keyHash ?? Slot.GetHash(key);
+        var hash = keyHash ?? GetHash(key);
 
         if (TryGetImpl(key, hash, out var existingData, out var index))
         {
@@ -274,7 +274,7 @@ public readonly ref struct SlottedArray
     /// </summary>
     public bool Delete(in ReadOnlySpan<byte> key)
     {
-        if (TryGetImpl(key, Slot.GetHash(key), out _, out var index))
+        if (TryGetImpl(key, GetHash(key), out _, out var index))
         {
             DeleteImpl(index);
             return true;
@@ -364,7 +364,7 @@ public readonly ref struct SlottedArray
 
     public bool TryGet(ReadOnlySpan<byte> key, out ReadOnlySpan<byte> data)
     {
-        if (TryGetImpl(key, Slot.GetHash(key), out var span, out _))
+        if (TryGetImpl(key, GetHash(key), out var span, out _))
         {
             data = span;
             return true;
@@ -512,26 +512,38 @@ public readonly ref struct SlottedArray
         /// </summary>
         [FieldOffset(2)] public ushort Hash;
 
-        /// <summary>
-        /// Builds the hash for the key.
-        /// </summary>
-        public static ushort GetHash(in ReadOnlySpan<byte> key)
-        {
-            return key.Length switch
-            {
-                0 => 0,
-                1 => key[0],
-
-                // The last byte may provide not the best entropy as the last byte for StoreKey may be half empty. Mix it with a middle one.
-                _ => (ushort)((key[0] << 8) | (byte)(key[^1] ^ key[key.Length / 2]))
-            };
-        }
-
         public override string ToString()
         {
             return
                 $"{nameof(Hash)}: {Hash}, {nameof(ItemAddress)}: {ItemAddress}";
         }
+    }
+
+    /// <summary>
+    /// Builds the hash for the key. 
+    /// </summary>
+    /// <remarks>
+    /// Highly optimized to eliminate bound checks and special cases
+    /// </remarks>
+    public static ushort GetHash(ReadOnlySpan<byte> key)
+    {
+        // First, special cases for short paths
+        if (key.Length <= 2)
+        {
+            if (key.Length == 2)
+            {
+                return Unsafe.ReadUnaligned<ushort>(in key[0]);
+            }
+
+            return key.Length == 0 ? (ushort)0 : MemoryMarshal.GetReference(key);
+        }
+
+        // At least 3 bytes long, read start and end
+        var a = Unsafe.ReadUnaligned<ushort>(in key[0]);
+        var b = Unsafe.ReadUnaligned<ushort>(in key[^2]);
+
+        // xor first two bytes as ushort with last two bytes as ushort but negated. This allows to short
+        return (ushort)(a ^ b);
     }
 
     public override string ToString() => $"{nameof(Count)}: {Count}, {nameof(CapacityLeft)}: {CapacityLeft}";
