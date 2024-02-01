@@ -99,7 +99,7 @@ public class Printer : IPageVisitor
 
     public void On(DataPage page, DbAddress addr)
     {
-        var nextPages = page.Data.Buckets.ToArray().Where(a => a.IsNull == false && a.IsValidPageAddress).ToArray();
+        var nextPages = page.Data.Buckets.ToArray().Where(a => a.IsNull == false).ToArray();
         var p = new[]
         {
             (Type, "DataPage"),

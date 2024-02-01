@@ -1,9 +1,7 @@
 ﻿using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Security.Cryptography.X509Certificates;
 using Paprika.Crypto;
-using Paprika.Data;
 
 namespace Paprika.Store;
 
@@ -11,15 +9,11 @@ namespace Paprika.Store;
 /// Root page is a page that contains all the needed metadata from the point of view of the database.
 /// It also includes the blockchain information like block hash or block number
 /// </summary>
-public readonly unsafe struct RootPage : IPage
+public readonly unsafe struct RootPage(Page root) : IPage
 {
-    private readonly Page _page;
+    public ref PageHeader Header => ref root.Header;
 
-    public RootPage(Page root) => _page = root;
-
-    public ref PageHeader Header => ref _page.Header;
-
-    public ref Payload Data => ref Unsafe.AsRef<Payload>(_page.Payload);
+    public ref Payload Data => ref Unsafe.AsRef<Payload>(root.Payload);
 
     /// <summary>
     /// Represents the data of the page.

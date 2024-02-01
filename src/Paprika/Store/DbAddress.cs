@@ -38,11 +38,7 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     /// </summary>
     /// <param name="page">The page to go to.</param>
     /// <returns></returns>
-    public static DbAddress Page(uint page)
-    {
-        Debug.Assert(page < Store.Page.PageCount, "The page number breached the PageCount maximum");
-        return new(page);
-    }
+    public static DbAddress Page(uint page) => new(page);
 
     /// <summary>
     /// Gets the next address.
@@ -52,9 +48,6 @@ public readonly struct DbAddress : IEquatable<DbAddress>
     public DbAddress(uint value) => _value = value;
 
     public bool IsNull => _value == NullValue;
-
-    // ReSharper disable once MergeIntoPattern
-    public bool IsValidPageAddress => _value < Store.Page.PageCount;
 
     public static implicit operator uint(DbAddress address) => address._value;
     public static implicit operator int(DbAddress address) => (int)address._value;

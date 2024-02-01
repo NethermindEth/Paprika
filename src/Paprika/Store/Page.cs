@@ -16,6 +16,14 @@ public interface IPage
 {
 }
 
+public interface IPageWithData<TPage> : IPage
+    where TPage : struct, IPageWithData<TPage>
+{
+    static abstract TPage Wrap(Page page);
+
+    Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch);
+}
+
 /// <summary>
 /// Convenient methods for transforming page types.
 /// </summary>
@@ -100,8 +108,6 @@ public enum PageType : byte
 /// </summary>
 public readonly unsafe struct Page : IPage, IEquatable<Page>
 {
-    public const int PageCount = 0x1000_0000; // 64GB addressable
-    public const int PageAddressMask = PageCount - 1;
     public const int PageSize = 4 * 1024;
 
     private readonly byte* _ptr;
@@ -124,5 +130,6 @@ public readonly unsafe struct Page : IPage, IEquatable<Page>
 
     public override int GetHashCode() => unchecked((int)(long)_ptr);
 
-    public static Page DevOnlyNativeAlloc() => new((byte*)NativeMemory.AlignedAlloc((UIntPtr)PageSize, (UIntPtr)PageSize));
+    public static Page DevOnlyNativeAlloc() =>
+        new((byte*)NativeMemory.AlignedAlloc((UIntPtr)PageSize, (UIntPtr)PageSize));
 }
