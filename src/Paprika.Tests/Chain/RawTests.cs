@@ -31,6 +31,8 @@ public class RawTests
         raw.DestroyAccount(account);
         raw.Commit();
 
+        raw.Finalize(1);
+
         raw.Hash.Should().Be(Keccak.EmptyTreeHash);
     }
 
@@ -54,18 +56,20 @@ public class RawTests
         raw.SetAccount(account, new Account(1, 1));
         raw.Commit();
 
+        raw.Finalize(1);
+
         var root2 = raw.Hash;
 
         root1.Should().NotBe(root2);
     }
-    
+
     [Test]
     public async Task Metadata_are_preserved()
     {
         var a = Values.Key1;
         var b = Values.Key2;
         var c = Values.Key3;
-        
+
         UInt256 valueA = 1;
         UInt256 valueB = 1;
         UInt256 valueC = 1;
@@ -78,7 +82,7 @@ public class RawTests
 
         raw.SetAccount(a, new Account(valueA, valueA));
         raw.Commit();
-        
+
         raw.SetAccount(b, new Account(valueB, valueB));
         raw.Commit();
 
@@ -86,6 +90,8 @@ public class RawTests
         raw.Commit();
 
         var root = raw.Hash;
+
+        raw.Finalize(1);
 
         using var read = db.BeginReadOnlyBatch(root);
 
@@ -115,6 +121,8 @@ public class RawTests
 
         raw.DestroyAccount(account);
         raw.Commit();
+
+        raw.Finalize(1);
 
         raw.Hash.Should().Be(Keccak.EmptyTreeHash);
     }
