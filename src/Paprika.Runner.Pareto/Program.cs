@@ -66,10 +66,9 @@ public static class Program
             Directory.CreateDirectory(dataPath);
             Console.WriteLine($"Using persistent DB on disk, located: {dataPath}");
 
-
             Console.WriteLine("Initializing db of size {0}GB", DbFileSize / Gb);
 
-            using var db = new Db(dataPath, MaxReorgDepth, DbFileSize, sync: false);
+            using var db = PagedDb.MemoryMappedDb(DbFileSize, MaxReorgDepth, dataPath);
 
             // ReSharper disable once MethodSupportsCancellation
 #pragma warning disable CS4014
