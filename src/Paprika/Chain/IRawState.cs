@@ -21,4 +21,9 @@ public interface IRawState : IReadOnlyWorldState
     /// Commits the pending changes.
     /// </summary>
     void Commit();
+
+    /// <summary>
+    /// Finalizes the raw state flushing the metadata.
+    /// </summary>
+    void Finalize(uint blockNumber);
 }

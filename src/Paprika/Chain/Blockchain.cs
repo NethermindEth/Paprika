@@ -1241,6 +1241,8 @@ public class Blockchain : IAsyncDisposable
         private readonly IDb _db;
         private BlockState _current;
 
+        private bool _finalized;
+
 
         public RawState(Blockchain blockchain, IDb db)
         {
@@ -1251,6 +1253,12 @@ public class Blockchain : IAsyncDisposable
 
         public void Dispose()
         {
+            if (!_finalized)
+            {
+                throw new Exception("Finalize not called. You need to call it before disposing the raw state. " +
+                                    "Otherwise it won't be preserved properly");
+            }
+
             _current.Dispose();
         }
 
@@ -1285,6 +1293,8 @@ public class Blockchain : IAsyncDisposable
 
         public void Commit()
         {
+            ThrowOnFinalized();
+
             // Committing Nth block:
             // 1. open read tx as this block did
             // 2. open write tx and apply Nth block onto it
@@ -1305,6 +1315,25 @@ public class Blockchain : IAsyncDisposable
             var ancestors = new[] { _current };
 
             _current = new BlockState(Keccak.Zero, read, ancestors, _blockchain, raw: true);
+        }
+
+        public void Finalize(uint blockNumber)
+        {
+            ThrowOnFinalized();
+
+            using var batch = _db.BeginNextBatch();
+            batch.SetMetadata(blockNumber, Hash);
+            batch.Commit(CommitOptions.DangerNoWrite);
+
+            _finalized = true;
+        }
+
+        private void ThrowOnFinalized()
+        {
+            if (_finalized)
+            {
+                throw new Exception("This ras state has already been finalized!");
+            }
         }
 
         public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) => ((IReadOnlyWorldState)_current).Get(key);
