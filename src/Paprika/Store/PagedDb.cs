@@ -436,7 +436,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             if (_storageRootPage.IsNull == false)
             {
-                new DataPage(GetAt(_storageRootPage)).Report(storage, this, 1);
+                new FanOutPage(GetAt(_storageRootPage)).Report(storage, this, 1);
             }
         }
 

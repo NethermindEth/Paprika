@@ -194,7 +194,8 @@ public class PaprikaCopyingVisitor : ITreeVisitor<PathContext>, IDisposable
     public bool IsFullDbScan => true;
     public bool ShouldVisit(in PathContext nodeContext, Hash256 nextNode) => true;
 
-    public void VisitTree(in PathContext nodeContext, Hash256 rootHash, TrieVisitContext trieVisitContext) {
+    public void VisitTree(in PathContext nodeContext, Hash256 rootHash, TrieVisitContext trieVisitContext)
+    {
     }
 
     public void VisitMissingNode(in PathContext nodeContext, Hash256 nodeHash, TrieVisitContext trieVisitContext)
@@ -219,7 +220,7 @@ public class PaprikaCopyingVisitor : ITreeVisitor<PathContext>, IDisposable
         {
             ValueHash256 account = default;
             path.RawSpan.CopyTo(account.BytesAsSpan);
-            
+
             _accountsVisitedGauge.Add(1);
             Add(new Item(account, Rlp.Decode<Nethermind.Core.Account>(value)));
         }
@@ -227,10 +228,10 @@ public class PaprikaCopyingVisitor : ITreeVisitor<PathContext>, IDisposable
         {
             ValueHash256 account = default;
             ValueHash256 storage = default;
-            
+
             path.RawSpan.Slice(0, 32).CopyTo(account.BytesAsSpan);
             path.RawSpan.Slice(32).CopyTo(storage.BytesAsSpan);
-            
+
             Rlp.ValueDecoderContext rlp = new Rlp.ValueDecoderContext(value);
             Add(new(account, storage, rlp.DecodeByteArray()));
         }
