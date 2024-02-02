@@ -177,6 +177,12 @@ public static class Program
                 blockchain.Finalize(finalization.Last());
             }
 
+            using var read = db.BeginReadOnlyBatch();
+
+            var state = new StatisticsReporter();
+            var storage = new StatisticsReporter();
+            read.Report(state, storage);
+
             spectre.Cancel();
             await reportingTask;
         }

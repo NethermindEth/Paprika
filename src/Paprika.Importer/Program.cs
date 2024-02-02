@@ -151,7 +151,7 @@ if (dbExists == false)
                 MaxDegreeOfParallelism = Environment.ProcessorCount,
                 FullScanMemoryBudget = 2L * 1024 * 1024 * 1024
             });
-            
+
             visitor.Finish();
         });
 

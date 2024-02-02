@@ -1,6 +1,7 @@
 ﻿using System.Buffers.Binary;
 using FluentAssertions;
 using NUnit.Framework;
+using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store;
 
@@ -16,6 +17,8 @@ public class PagedDbTests
     {
         const int accounts = 1;
         const int merkleCount = 31;
+
+        ushort counter = 0;
 
         using var db = PagedDb.NativeMemoryDb(256 * Mb, 2);
 
@@ -42,7 +45,7 @@ public class PagedDbTests
 
         // reset
         random = new Random(Seed);
-        _counter = 0;
+        counter = 0;
 
         Assert();
         return;
@@ -58,31 +61,81 @@ public class PagedDbTests
                 read.TryGet(Key.Account(keccak), out var value).Should().BeTrue("The account should exist");
                 value.SequenceEqual(GetData()).Should().BeTrue("The account should have data right");
 
-                read.TryGet(Key.StorageCell(NibblePath.FromKey(keccak), keccak), out value).Should().BeTrue("The storage cell should exist");
+                read.TryGet(Key.StorageCell(NibblePath.FromKey(keccak), keccak), out value).Should()
+                    .BeTrue("The storage cell should exist");
                 value.SequenceEqual(GetData()).Should().BeTrue("The storage cell should have data right");
 
                 for (var j = 0; j < merkleCount; j++)
                 {
                     // all the Merkle values
-                    read.TryGet(Key.Merkle(NibblePath.FromKey(keccak).SliceTo(j)), out value).Should().BeTrue("The Merkle should exist");
+                    read.TryGet(Key.Merkle(NibblePath.FromKey(keccak).SliceTo(j)), out value).Should()
+                        .BeTrue("The Merkle should exist");
 
                     var actual = value.ToArray();
                     var expected = GetData();
 
-                    actual.SequenceEqual(expected).Should().BeTrue($"The Merkle @{j} of {i}th account should have data right");
+                    actual.SequenceEqual(expected).Should()
+                        .BeTrue($"The Merkle @{j} of {i}th account should have data right");
                 }
             }
         }
+
+        byte[] GetData()
+        {
+            var bytes = new byte[2];
+            BinaryPrimitives.WriteUInt16LittleEndian(bytes, counter);
+            counter++;
+            return bytes;
+        }
     }
 
-    private ushort _counter;
-
-    private byte[] GetData()
+    [Test]
+    public async Task FanOut()
     {
-        BinaryPrimitives.WriteUInt16LittleEndian(bytes, _counter);
-        _counter++;
-        return bytes;
-    }
+        const int size = 256 * 256;
 
-    private static readonly byte[] bytes = new byte[2];
+        using var db = PagedDb.NativeMemoryDb(16 * Mb, 2);
+
+        var value = new byte[4];
+
+        for (var i = 0; i < size; i++)
+        {
+            using var batch = db.BeginNextBatch();
+
+            Keccak keccak = default;
+            BinaryPrimitives.WriteInt32LittleEndian(keccak.BytesAsSpan, i);
+            BinaryPrimitives.WriteInt32LittleEndian(value, i);
+
+            batch.SetRaw(Key.StorageCell(NibblePath.FromKey(keccak), keccak), value);
+
+            await batch.Commit(CommitOptions.FlushDataAndRoot);
+        }
+
+        Assert(db);
+
+        static void Assert(PagedDb db)
+        {
+            var expected = new byte[4];
+
+            using var read = db.BeginReadOnlyBatch();
+
+            for (var i = 0; i < size; i++)
+            {
+                Keccak keccak = default;
+                BinaryPrimitives.WriteInt32LittleEndian(keccak.BytesAsSpan, i);
+                BinaryPrimitives.WriteInt32LittleEndian(expected, i);
+
+                var storageCell = Key.StorageCell(NibblePath.FromKey(keccak), keccak);
+                read.TryGet(storageCell, out var actual)
+                    .Should().BeTrue();
+
+                actual.SequenceEqual(expected).Should().BeTrue();
+            }
+
+            var state = new StatisticsReporter();
+            var storage = new StatisticsReporter();
+
+            read.Report(state, storage);
+        }
+    }
 }

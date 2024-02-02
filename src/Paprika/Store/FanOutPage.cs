@@ -19,14 +19,19 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Payload
     {
-        public const int Size = 256 * DbAddress.Size;
+        private const int Size = FanOut * DbAddress.Size;
+
+        /// <summary>
+        /// The number of buckets to fan out to.
+        /// </summary>
+        private const int FanOut = 256;
 
         /// <summary>
         /// The first item of map of frames to allow ref to it.
         /// </summary>
         [FieldOffset(0)] private DbAddress Address;
 
-        public Span<DbAddress> Addresses => MemoryMarshal.CreateSpan(ref Address, Size);
+        public Span<DbAddress> Addresses => MemoryMarshal.CreateSpan(ref Address, FanOut);
     }
 
     public bool TryGet(scoped NibblePath key, IPageResolver batch, out ReadOnlySpan<byte> result)
@@ -68,8 +73,8 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
         if (addr.IsNull)
         {
             var newPage = batch.GetNewPage(out addr, true);
-            newPage.Header.PageType = Header.PageType;
-            newPage.Header.Level = 0;
+            newPage.Header.PageType = PageType.Standard;
+            newPage.Header.Level = 2;
 
             new DataPage(newPage).Set(sliced, data, batch);
             return page;
@@ -78,5 +83,16 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
         // update after set
         addr = batch.GetAddress(new DataPage(batch.GetAt(addr)).Set(sliced, data, batch));
         return page;
+    }
+
+    public void Report(IReporter reporter, IPageResolver resolver, int level)
+    {
+        foreach (var bucket in Data.Addresses)
+        {
+            if (!bucket.IsNull)
+            {
+                new DataPage(resolver.GetAt(bucket)).Report(reporter, resolver, level + 1);
+            }
+        }
     }
 }
