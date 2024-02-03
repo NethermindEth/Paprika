@@ -90,6 +90,56 @@ public class PagedDbTests
     }
 
     [Test]
+    public async Task Multiple_storages_per_commit()
+    {
+        var account = Values.Key0;
+
+        const int accounts = 512 * 1024;
+        const int size = 10_000;
+
+        using var db = PagedDb.NativeMemoryDb(128 * Mb, 2);
+
+        var value = new byte[1] {13};
+
+        using var batch = db.BeginNextBatch();
+
+        // First, set the account that will be tested later
+        batch.SetRaw(Key.StorageCell(NibblePath.FromKey(account), Keccak.EmptyTreeHash), value);
+
+        // Then flood the id cache so that the account is flushed down
+        for (var i = 0; i < accounts; i++)
+        {
+            Keccak keccak = default;
+            BinaryPrimitives.WriteInt32LittleEndian(keccak.BytesAsSpan, i);
+
+            batch.SetRaw(Key.StorageCell(NibblePath.FromKey(keccak), keccak), value);
+        }
+
+        await batch.Commit(CommitOptions.FlushDataAndRoot);
+
+        await InsertLoadsOfStorages(db, account);
+
+        static async Task InsertLoadsOfStorages(IDb db, Keccak account)
+        {
+            var value = new byte[4];
+            
+            using var batch2 = db.BeginNextBatch();
+
+            // Now try to store many
+            for (var i = 0; i < size; i++)
+            {
+                Keccak keccak = default;
+                BinaryPrimitives.WriteInt32LittleEndian(keccak.BytesAsSpan, i);
+                BinaryPrimitives.WriteInt32LittleEndian(value, i);
+
+                batch2.SetRaw(Key.StorageCell(NibblePath.FromKey(account), keccak), value);
+            }
+
+            await batch2.Commit(CommitOptions.FlushDataAndRoot);
+        }
+    }
+
+    [Test]
     public async Task FanOut()
     {
         const int size = 256 * 256;
