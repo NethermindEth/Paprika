@@ -138,9 +138,9 @@ var rootHashActual = Keccak.Zero;
 if (dbExists == false)
 {
     await using (var blockchain =
-                 new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), CacheBudget.Options.None, 100, () => reporter.Observe()))
+                 new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), CacheBudget.Options.None, 50, () => reporter.Observe()))
     {
-        var visitor = new PaprikaCopyingVisitor(blockchain, 5000, skipStorage);
+        var visitor = new PaprikaCopyingVisitor(blockchain, 50000, skipStorage);
         Console.WriteLine("Starting...");
 
         var visit = Task.Run(() =>
@@ -149,7 +149,7 @@ if (dbExists == false)
             {
                 ExpectAccounts = true,
                 MaxDegreeOfParallelism = Environment.ProcessorCount,
-                FullScanMemoryBudget = 2L * 1024 * 1024 * 1024
+                FullScanMemoryBudget = 4L * 1024 * 1024 * 1024
             });
 
             visitor.Finish();
