@@ -99,7 +99,7 @@ public class PagedDbTests
 
         using var db = PagedDb.NativeMemoryDb(128 * Mb, 2);
 
-        var value = new byte[1] {13};
+        var value = new byte[1] { 13 };
 
         using var batch = db.BeginNextBatch();
 
@@ -122,7 +122,7 @@ public class PagedDbTests
         static async Task InsertLoadsOfStorages(IDb db, Keccak account)
         {
             var value = new byte[4];
-            
+
             using var batch2 = db.BeginNextBatch();
 
             // Now try to store many
