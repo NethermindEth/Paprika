@@ -530,6 +530,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _abandoned = new Queue<DbAddress>();
             _written = ctx.Written;
 
+            IdCache = ctx.IdCache;
+
             _metrics = new BatchMetrics();
         }
 
@@ -588,25 +590,43 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             }
             else
             {
-                // full extraction of key possible, get it
-                var ids = new FanOutPage(TryGetPageAlloc(ref _root.Data.IdRoot, PageType.Identity));
+                scoped NibblePath id;
+                Span<byte> idSpan = stackalloc byte[sizeof(uint)];
 
-                Span<byte> newId = stackalloc byte[sizeof(uint)];
-                // try fetch existing first
-                if (ids.TryGet(key.Path, this, out var id) == false)
+                if (IdCache.TryGetValue(key.Path.UnsafeAsKeccak, out var cachedId))
                 {
-                    _root.Data.AccountCounter++;
-                    BinaryPrimitives.WriteUInt32LittleEndian(newId, _root.Data.AccountCounter);
+                    BinaryPrimitives.WriteUInt32LittleEndian(idSpan, cachedId);
+                    id = NibblePath.FromKey(idSpan);
+                }
+                else
+                {
+                    // full extraction of key possible, get it
+                    var ids = new FanOutPage(TryGetPageAlloc(ref _root.Data.IdRoot, PageType.Identity));
 
-                    // update root
-                    _root.Data.IdRoot = GetAddress(ids.Set(key.Path, newId, this));
+                    // try fetch existing first
+                    if (ids.TryGet(key.Path, this, out var existingId) == false)
+                    {
+                        _root.Data.AccountCounter++;
+                        BinaryPrimitives.WriteUInt32LittleEndian(idSpan, _root.Data.AccountCounter);
 
-                    // TODO: remove alloc
-                    id = newId.ToArray();
+                        // memoize in cache
+                        IdCache[key.Path.UnsafeAsKeccak] = _root.Data.AccountCounter;
+
+                        // update root
+                        _root.Data.IdRoot = GetAddress(ids.Set(key.Path, idSpan, this));
+
+                        id = NibblePath.FromKey(idSpan);
+                    }
+                    else
+                    {
+                        // memoize in cache
+                        IdCache[key.Path.UnsafeAsKeccak] = BinaryPrimitives.ReadUInt32LittleEndian(existingId);
+                        id = NibblePath.FromKey(existingId);
+                    }
                 }
 
                 var encoded = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength], key.Type);
-                var path = NibblePath.FromKey(id).Append(encoded, stackalloc byte[StorageKeySize]);
+                var path = id.Append(encoded, stackalloc byte[StorageKeySize]);
 
                 SetAtRoot<FanOutPage>(path, rawData, ref _root.Data.StorageRoot);
             }
@@ -627,11 +647,15 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             // Get the id page
             var ids = new FanOutPage(TryGetPageAlloc(ref _root.Data.IdRoot, PageType.Identity));
 
-            // Write empty data so that it is a delete
+            // Destroy the Id entry about it
             _root.Data.IdRoot = GetAddress(ids.Set(account, ReadOnlySpan<byte>.Empty, this));
 
+            // Destroy the account entry
             SetAtRoot<DataPage>(Encode(account, stackalloc byte[account.MaxByteLength], DataType.Account),
                 ReadOnlySpan<byte>.Empty, ref _root.Data.StateRoot);
+
+            // Remove the cached
+            IdCache.Remove(account.UnsafeAsKeccak);
 
             // TODO: there' no garbage collection for storage
             // It should not be hard. Walk down by the mapped path, then remove all the pages underneath.
@@ -890,6 +914,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _abandoned.Enqueue(addr);
         }
 
+        public override Dictionary<Keccak, uint> IdCache { get; }
+
         public void Dispose()
         {
             _disposed = true;
@@ -919,7 +945,10 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             Abandoned = new Queue<DbAddress>();
             Unused = new Queue<DbAddress>();
             Written = new HashSet<DbAddress>();
+            IdCache = new Dictionary<Keccak, uint>();
         }
+
+        public Dictionary<Keccak, uint> IdCache { get; }
 
         public Page Page { get; }
 
@@ -933,6 +962,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             Unused.Clear();
             Abandoned.Clear();
             Written.Clear();
+            IdCache.Clear();
 
             // no need to clear, it's always overwritten
             //Page.Clear();

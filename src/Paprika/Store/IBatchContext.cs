@@ -1,4 +1,6 @@
-﻿namespace Paprika.Store;
+﻿using Paprika.Crypto;
+
+namespace Paprika.Store;
 
 public interface IBatchContext : IReadOnlyBatchContext
 {
@@ -29,6 +31,8 @@ public interface IBatchContext : IReadOnlyBatchContext
     /// Abandon this page from this batch on.
     /// </summary>
     void RegisterForFutureReuse(Page page);
+
+    Dictionary<Keccak, uint> IdCache { get; }
 }
 
 public interface IReadOnlyBatchContext : IPageResolver

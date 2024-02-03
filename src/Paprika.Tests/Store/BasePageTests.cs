@@ -1,4 +1,5 @@
 ﻿using System.Runtime.InteropServices;
+using Paprika.Crypto;
 using Paprika.Store;
 
 namespace Paprika.Tests.Store;
@@ -21,8 +22,10 @@ public abstract class BasePageTests
         // 0-N is take by metadata pages
         private uint _pageCount = 1U;
 
-        public TestBatchContext(uint batchId) : base(batchId) { }
-
+        public TestBatchContext(uint batchId) : base(batchId)
+        {
+            IdCache = new Dictionary<Keccak, uint>();
+        }
 
         public override Page GetAt(DbAddress address) => _address2Page[address];
 
@@ -51,6 +54,8 @@ public abstract class BasePageTests
         {
             // NOOP
         }
+
+        public override Dictionary<Keccak, uint> IdCache { get; }
 
         public override string ToString() => $"Batch context used {_pageCount} pages to write the data";
 
