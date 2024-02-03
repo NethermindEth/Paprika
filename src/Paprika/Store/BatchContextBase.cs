@@ -1,4 +1,6 @@
-﻿namespace Paprika.Store;
+﻿using Paprika.Crypto;
+
+namespace Paprika.Store;
 
 /// <summary>
 /// The base class for all context implementations.
@@ -46,6 +48,8 @@ abstract class BatchContextBase : IBatchContext
     /// <param name="page">The page to be analyzed and registered for future GC.</param>
 
     public abstract void RegisterForFutureReuse(Page page);
+
+    public abstract Dictionary<Keccak, uint> IdCache { get; }
 
     /// <summary>
     /// Assigns the batch identifier to a given page, marking it writable by this batch.
