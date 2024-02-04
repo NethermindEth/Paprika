@@ -136,7 +136,7 @@ public static class CommitExtensions
             _commit.Set(key, payload0, payload1);
         }
 
-        private static int Hash(in Key key) => Blockchain.GetHash(key);
+        private static ulong Hash(in Key key) => Blockchain.GetHash(key);
 
         public abstract IChildCommit GetChild();
 

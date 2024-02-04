@@ -367,7 +367,7 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// A simple bloom filter to assert whether the given key was set in a given block, used to speed up getting the keys.
         /// </summary>
-        private readonly HashSet<int> _bloom;
+        private readonly HashSet<ulong> _bloom;
 
         private readonly Dictionary<Keccak, int>? _stats;
 
@@ -416,7 +416,7 @@ public class Blockchain : IAsyncDisposable
 
             ParentHash = parentStateRoot;
 
-            _bloom = new HashSet<int>();
+            _bloom = new HashSet<ulong>();
             _destroyed = null;
             _stats = new Dictionary<Keccak, int>();
 
@@ -839,7 +839,7 @@ public class Blockchain : IAsyncDisposable
         /// chain.
         /// </summary>
         private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
-            int bloom)
+            ulong bloom)
         {
             var owner = TryGetLocal(key, keyWritten, bloom, out var succeeded);
             if (succeeded)
@@ -872,7 +872,7 @@ public class Blockchain : IAsyncDisposable
         /// Tries to get the key only from this block, acquiring no lease as it assumes that the lease is taken.
         /// </summary>
         private ReadOnlySpanOwner<byte> TryGetLocal(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
-            int bloom, out bool succeeded)
+            ulong bloom, out bool succeeded)
         {
             var mayHave = _bloom!.Contains(bloom);
 
@@ -1069,7 +1069,7 @@ public class Blockchain : IAsyncDisposable
         /// Tries to get the key only from this block, acquiring no lease as it assumes that the lease is taken.
         /// </summary>
         public ReadOnlySpanOwner<byte> TryGetLocal(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
-            int bloom, out bool succeeded)
+            ulong bloom, out bool succeeded)
         {
             var mayHave = _xor.MayContain(unchecked((ulong)bloom));
 
@@ -1232,7 +1232,7 @@ public class Blockchain : IAsyncDisposable
         /// chain.
         /// </summary>
         private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
-            int bloom,
+            ulong bloom,
             out bool succeeded)
         {
             ushort depth = 1;
@@ -1274,7 +1274,7 @@ public class Blockchain : IAsyncDisposable
             $"{nameof(BlockNumber)}: {BlockNumber}";
     }
 
-    public static int GetHash(in Key key) => key.GetHashCode();
+    public static ulong GetHash(in Key key) => key.GetHashCodeULong();
 
     public async ValueTask DisposeAsync()
     {

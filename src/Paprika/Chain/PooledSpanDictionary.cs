@@ -66,7 +66,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         AllocateNewPage();
     }
 
-    public bool TryGet(scoped ReadOnlySpan<byte> key, int hash, out ReadOnlySpan<byte> result)
+    public bool TryGet(scoped ReadOnlySpan<byte> key, ulong hash, out ReadOnlySpan<byte> result)
     {
         var mixed = Mix(hash);
         if (_dict.TryGetValue(BuildKeyTemp(key, mixed), out var value))
@@ -96,11 +96,11 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         return _dict.ContainsKey(BuildKeyTemp(key, shortHash));
     }
 
-    public void Set(scoped ReadOnlySpan<byte> key, int hash, ReadOnlySpan<byte> data) =>
+    public void Set(scoped ReadOnlySpan<byte> key, ulong hash, ReadOnlySpan<byte> data) =>
         Set(key, hash, data, ReadOnlySpan<byte>.Empty);
 
 
-    public void Set(scoped ReadOnlySpan<byte> key, int hash, ReadOnlySpan<byte> data0, ReadOnlySpan<byte> data1)
+    public void Set(scoped ReadOnlySpan<byte> key, ulong hash, ReadOnlySpan<byte> data0, ReadOnlySpan<byte> data1)
     {
         var mixed = Mix(hash);
 
@@ -134,7 +134,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         refValue = BuildValue(data0, data1);
     }
 
-    public void Remove(ReadOnlySpan<byte> key, int hash)
+    public void Remove(ReadOnlySpan<byte> key, ulong hash)
     {
         if (_dict.Count == 0)
             return;
@@ -145,7 +145,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         _dict.Remove(tempKey);
     }
 
-    public void Destroy(scoped ReadOnlySpan<byte> key, int hash)
+    public void Destroy(scoped ReadOnlySpan<byte> key, ulong hash)
     {
         var mixed = Mix(hash);
         var tempKey = BuildKeyTemp(key, mixed);
@@ -230,6 +230,15 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
 
     private ValueSpan BuildValue(ReadOnlySpan<byte> value0, ReadOnlySpan<byte> value1) =>
         new(Write(value0, value1), (ushort)(value0.Length + value1.Length));
+
+    private static ushort Mix(ulong hash)
+    {
+        unchecked
+        {
+            var mixed = (uint)((hash >> 32) ^ hash);
+            return (ushort)((mixed >> 16) ^ mixed);
+        }
+    }
 
     private static ushort Mix(int hash) => unchecked((ushort)((hash >> 16) ^ hash));
 
