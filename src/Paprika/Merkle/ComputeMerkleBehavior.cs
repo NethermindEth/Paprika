@@ -348,7 +348,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private KeccakOrRlp EncodeLeafByPath(scoped in Key key, scoped in ComputeContext ctx, scoped in NibblePath leafPath)
     {
-        var leafTotalPath = key.Path.Append(leafPath, stackalloc byte[key.Path.MaxByteLength + leafPath.MaxByteLength + 1]);
+        var leafTotalPath =
+            key.Path.Append(leafPath, stackalloc byte[key.Path.MaxByteLength + leafPath.MaxByteLength + 1]);
 
         var leafKey = ctx.TrieType == TrieType.State
             ? Key.Account(leafTotalPath)
@@ -458,9 +459,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                     var childPath = key.Path.AppendNibble(i, childSpan);
 
-                    var value = childPath.Length == NibblePath.KeccakNibbleCount ?
-                        EncodeLeafByPath(Key.Merkle(childPath), ctx, NibblePath.Empty) :
-                        Compute(Key.Merkle(childPath), ctx);
+                    var value = childPath.Length == NibblePath.KeccakNibbleCount
+                        ? EncodeLeafByPath(Key.Merkle(childPath), ctx, NibblePath.Empty)
+                        : Compute(Key.Merkle(childPath), ctx);
 
                     // it's either Keccak or a span. Both are encoded the same ways
                     if (value.DataType == KeccakOrRlp.Type.Keccak)
@@ -931,17 +932,26 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private static void MarkPathDirty(in NibblePath path, ICommit commit, CacheBudget budget, TrieType trieType)
     {
+        // Flag forcing the leaf creation, that saves one get of the non-existent value.
+        var createLeaf = false;
+
         Span<byte> span = stackalloc byte[33];
 
         for (var i = 0; i <= path.Length; i++)
         {
             var slice = path.SliceTo(i);
             var key = Key.Merkle(slice);
-
             var leftoverPath = path.SliceFrom(i);
 
-            using var owner = commit.Get(key);
+            // The creation of the leaf is forced, create and return.
+            if (createLeaf)
+            {
+                commit.SetLeaf(key, leftoverPath);
+                return;
+            }
 
+            // Query for the node
+            using var owner = commit.Get(key);
             if (owner.IsEmpty)
             {
                 // No value set now, create one.
@@ -986,6 +996,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             {
                                 commit.SetLeaf(key, leftoverPath);
                             }
+
                             return;
                         }
 
@@ -1117,9 +1128,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         var nibble = path[i];
                         var rlp = TryClearMemoizedKeccakForBranchChild(commit, leftover, owner, nibble, out var array);
 
+                        createLeaf = !branch.Children[nibble];
                         var children = branch.Children.Set(nibble);
-
-                        var shouldUpdate = !branch.Children[nibble] || branch.HasKeccak;
+                        var shouldUpdate = createLeaf || branch.HasKeccak;
 
                         if (rlp.IsEmpty)
                         {
@@ -1161,7 +1172,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// <summary>
     /// For branch only checks whether rlp is updated in place. If it is, there's no need to write it again.
     /// </summary>
-    private static bool RlpMemoRequiresUpdate(ICommit commit, ReadOnlySpanOwnerWithMetadata<byte> owner) => !owner.IsOwnedBy(commit);
+    private static bool RlpMemoRequiresUpdate(ICommit commit, ReadOnlySpanOwnerWithMetadata<byte> owner) =>
+        !owner.IsOwnedBy(commit);
 
     /// <summary>
     /// Checks if there's a memo for the branch and clears it for the given nibble. 
