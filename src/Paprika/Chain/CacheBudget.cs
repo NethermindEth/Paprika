@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics.Contracts;
+using Paprika.Utils;
 
 namespace Paprika.Chain;
 
@@ -27,9 +28,10 @@ public class CacheBudget
         _transientWrites = transientWrites;
     }
 
-    public bool ClaimDbWrite() => Interlocked.Decrement(ref _dbWrites) >= 0;
-
-    public bool IsDbWrite => Volatile.Read(ref _transientWrites) > 0;
+    public bool ShouldWrite(in ReadOnlySpanOwnerWithMetadata<byte> owner)
+    {
+        return owner.IsDbQuery && Interlocked.Decrement(ref _dbWrites) >= 0;
+    }
 
     public bool ClaimTransient() => Interlocked.Decrement(ref _transientWrites) >= 0;
 

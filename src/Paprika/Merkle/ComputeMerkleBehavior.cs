@@ -255,7 +255,14 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
 
         // trim the cached rlp from branches
-        return Node.Branch.GetOnlyBranchData(data);
+        var branchOnlyData = Node.Branch.GetOnlyBranchData(data);
+
+        Debug.Assert(key.Path.IsEmpty ||
+                     (key.Path.Length == 64 && key.StoragePath.IsEmpty) ||
+                     branchOnlyData.Length < data.Length,
+            "Only roots in Patricia trees can not memoize RLPs");
+
+        return branchOnlyData;
     }
 
     public Keccak RootHash { get; private set; }
@@ -302,7 +309,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         // As leafs are not stored in the database, hint to lookup again on missing.
         using var owner = ctx.Commit.Get(key);
 
-        if (owner.IsDbQuery && ctx.Budget.ClaimDbWrite())
+        if (ctx.Budget.ShouldWrite(owner))
         {
             ctx.Commit.Set(key, owner.Span);
         }
@@ -355,7 +362,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             return keccak;
         }
 
-        if (leafData.IsDbQuery && ctx.Budget.ClaimDbWrite())
+        if (ctx.Budget.ShouldWrite(leafData))
         {
             ctx.Commit.Set(leafKey, leafData.Span);
         }
@@ -971,7 +978,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                         if (diffAt == leaf.Path.Length)
                         {
-                            if (owner.IsDbQuery && budget.ClaimDbWrite())
+                            if (budget.ShouldWrite(owner))
                             {
                                 commit.SetLeaf(key, leftoverPath);
                             }
