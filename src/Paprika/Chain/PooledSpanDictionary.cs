@@ -346,6 +346,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         }
 
         _pages.Clear();
+        _dict.Clear();
     }
 
     public override string ToString() => $"Count: {_dict.Count}, Memory: {_pages.Count * BufferSize / 1024}kb";
