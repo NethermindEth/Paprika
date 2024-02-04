@@ -357,10 +357,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         using var leafData = ctx.Commit.Get(leafKey);
 
+#if SNAP_SYNC_SUPPORT
         if (SnapSync.TryGetBoundaryValue(leafData.Span, out var keccak))
         {
             return keccak;
         }
+#endif
 
         if (ctx.Budget.ShouldWrite(leafData))
         {
@@ -953,6 +955,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             {
                 case Node.Type.Leaf:
                     {
+#if SNAP_SYNC_SUPPORT
                         if (SnapSync.CanBeBoundaryLeaf(leaf))
                         {
                             var concatenated = key.Path.Append(leaf.Path,
@@ -973,6 +976,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                                 return;
                             }
                         }
+#endif
 
                         var diffAt = leaf.Path.FindFirstDifferentNibble(leftoverPath);
 

@@ -1271,18 +1271,23 @@ public class Blockchain : IAsyncDisposable
 
         public void SetBoundary(in NibblePath account, in Keccak boundaryNodeKeccak)
         {
+#if SNAP_SYNC_SUPPORT
             var path = SnapSync.CreateKey(account, stackalloc byte[NibblePath.FullKeccakByteLength]);
             var payload = SnapSync.WriteBoundaryValue(boundaryNodeKeccak, stackalloc byte[SnapSync.BoundaryValueSize]);
 
             _current.SetAccountRaw(path.UnsafeAsKeccak, payload);
+#endif
         }
 
         public void SetBoundary(in Keccak account, in NibblePath storage, in Keccak boundaryNodeKeccak)
         {
+#if SNAP_SYNC_SUPPORT
             var path = SnapSync.CreateKey(storage, stackalloc byte[NibblePath.FullKeccakByteLength]);
             var payload = SnapSync.WriteBoundaryValue(boundaryNodeKeccak, stackalloc byte[SnapSync.BoundaryValueSize]);
             _current.SetStorage(account, path.UnsafeAsKeccak, payload);
+#endif
         }
+
 
         public void SetAccount(in Keccak address, in Account account) => _current.SetAccount(address, account);
 
