@@ -148,8 +148,8 @@ if (dbExists == false)
             trie.Accept(visitor, trie.RootHash, new VisitingOptions
             {
                 ExpectAccounts = true,
-                MaxDegreeOfParallelism = Environment.ProcessorCount,
-                FullScanMemoryBudget = 4L * 1024 * 1024 * 1024
+                MaxDegreeOfParallelism = 4,
+                //FullScanMemoryBudget = 4L * 1024 * 1024 * 1024
             });
 
             visitor.Finish();
