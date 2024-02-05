@@ -403,7 +403,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         var runInParallel = !ctx.Hint.HasFlag(ComputeHint.DontUseParallel) && key.Path.IsEmpty &&
                             branch.Children.AllSet;
 
-        var memoize = !ctx.Hint.HasFlag(ComputeHint.SkipCachedInformation) && ShouldMemoizeBranchRlp(key.Path);
+        var memoize = !ctx.Hint.HasFlag(ComputeHint.SkipCachedInformation) && ShouldMemoizeBranchRlp(key.Path, ctx.TrieType);
         var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
 
         byte[]? rlpMemoization = null;
@@ -573,9 +573,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private static Span<byte> MakeRlpWritable(ReadOnlySpan<byte> previousRlp) =>
         MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(previousRlp), previousRlp.Length);
 
-    private bool ShouldMemoizeBranchRlp(in NibblePath branchPath)
+    private bool ShouldMemoizeBranchRlp(in NibblePath branchPath, TrieType trieType)
     {
-        return _memoizeRlp && branchPath.Length >= 1; // a simple condition to memoize only more nested RLPs
+        // A simple condition to memoize only more nested RLPs for state
+        return _memoizeRlp && (branchPath.Length >= 1 || trieType == TrieType.Storage);
     }
 
     private bool ShouldMemoizeBranchKeccak(in NibblePath branchPath)
@@ -1144,7 +1145,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                         if (updated == false && budget.ShouldCache(owner))
                         {
-                            commit.SetBranch(key, children);
+                            commit.SetBranch(key, children, EntryType.TransientCache);
                         }
 
                         if (array != null)
