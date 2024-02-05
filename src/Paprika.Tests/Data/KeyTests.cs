@@ -75,13 +75,22 @@ public class KeyTests
         Unique(Key.StorageCell(aPath, path1));
         Unique(Key.StorageCell(aPath, path2));
 
-        // merkle, all the account prefixes
+        // Merkle, all the account prefixes
         for (var i = 0; i < 32; i++)
         {
             Unique(Key.Merkle(aPath.SliceTo(i)));
         }
 
-        // merkle, all the storage prefixes
+        // Merkle, branches of 000 addresses
+        var zero = NibblePath.FromKey(Keccak.Zero);
+
+        // Start from 1st as the root is covered above
+        for (var i = 1; i < 32; i++)
+        {
+            Unique(Key.Merkle(zero.SliceTo(i)));
+        }
+
+        // Merkle, all the storage prefixes
         for (var i = 0; i < 32; i++)
         {
             Unique(Key.Raw(aPath, DataType.Merkle,
@@ -97,7 +106,8 @@ public class KeyTests
             var hash = key.GetHashCodeULong();
             if (hashes.TryAdd(hash, hex) == false)
             {
-                Assert.Fail($"The hash for {hex} is the same as for {hashes[hash]}");
+                var existing = hashes[hash];
+                Assert.Fail($"The hash for {hex} is the same as for {existing}");
             }
         }
     }

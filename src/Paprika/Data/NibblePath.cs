@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Globalization;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
@@ -517,14 +518,15 @@ public readonly ref struct NibblePath
 
         if (Length <= 1)
         {
-            return Length == 0 ? 0 : GetAt(0);
+            // for a single nibble path, make it different from empty.
+            return Length == 0 ? 0 : 1 << GetAt(0);
         }
 
         unchecked
         {
             ref var span = ref _span;
 
-            long hash = 1;
+            long hash = prime;
             var length = Length;
 
             if (_odd == OddBit)
@@ -562,7 +564,7 @@ public readonly ref struct NibblePath
             {
                 unchecked
                 {
-                    hash *= prime;
+                    hash *= prime >> sizeof(long);
                     hash ^= Unsafe.ReadUnaligned<long>(ref span);
                     span = ref Unsafe.Add(ref span, sizeof(long));
                 }
@@ -573,7 +575,7 @@ public readonly ref struct NibblePath
             {
                 unchecked
                 {
-                    hash *= prime;
+                    hash *= prime >> sizeof(int);
                     hash ^= Unsafe.ReadUnaligned<int>(ref span);
                     span = ref Unsafe.Add(ref span, sizeof(int));
                     remainder -= sizeof(int);
@@ -585,7 +587,7 @@ public readonly ref struct NibblePath
             {
                 unchecked
                 {
-                    hash *= prime;
+                    hash *= prime >> sizeof(short);
                     hash ^= Unsafe.ReadUnaligned<short>(ref span);
                     span = ref Unsafe.Add(ref span, sizeof(short));
                     remainder -= sizeof(short);
@@ -597,7 +599,7 @@ public readonly ref struct NibblePath
             {
                 unchecked
                 {
-                    hash *= prime;
+                    hash *= prime >> 1;
                     hash ^= span;
                 }
             }

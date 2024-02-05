@@ -844,7 +844,7 @@ public class Blockchain : IAsyncDisposable
         private ReadOnlySpanOwner<byte> TryGetLocal(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
             ulong bloom, out bool succeeded)
         {
-            var mayHave = _bloom!.Contains(bloom);
+            var mayHave = _bloom.Contains(bloom);
 
             // check if the change is in the block
             if (!mayHave)
