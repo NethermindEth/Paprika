@@ -97,7 +97,7 @@ public static class Program
             // add finality and 10 just to make it a bit slower
             var gate = new SingleAsyncGate(FinalizeEvery + 10);
 
-            await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds(5), new CacheBudget.Options(100, 1000), 1000, reporter.Observe))
+            await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds(5), new CacheBudget.Options(5_000, 8), 1000, reporter.Observe))
             {
                 blockchain.Flushed += (_, e) => gate.Signal(e.blockNumber);
 

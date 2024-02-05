@@ -108,12 +108,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) => _readOnly.Get(key);
 
-        public void Set(in Key key, in ReadOnlySpan<byte> payload)
+        public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type)
         {
             // NOP
         }
 
-        public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
+        public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1, EntryType type)
         {
             // NOP
         }
@@ -309,9 +309,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         // As leafs are not stored in the database, hint to lookup again on missing.
         using var owner = ctx.Commit.Get(key);
 
-        if (ctx.Budget.ShouldWrite(owner))
+        if (ctx.Budget.ShouldCache(owner))
         {
-            ctx.Commit.Set(key, owner.Span);
+            ctx.Commit.Set(key, owner.Span, EntryType.TransientCache);
         }
 
         if (owner.IsEmpty)
@@ -365,9 +365,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
 #endif
 
-        if (ctx.Budget.ShouldWrite(leafData))
+        if (ctx.Budget.ShouldCache(leafData))
         {
-            ctx.Commit.Set(leafKey, leafData.Span);
+            ctx.Commit.Set(leafKey, leafData.Span, EntryType.TransientCache);
         }
 
         KeccakOrRlp keccakOrRlp;
@@ -588,11 +588,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private KeccakOrRlp EncodeExtension(scoped in Key key, scoped in Node.Extension ext, scoped in ComputeContext ctx)
     {
-        if (ext.IsBoundaryNode)
-        {
-            return ext.Path.UnsafeAsKeccak;
-        }
-
         Span<byte> span = stackalloc byte[Math.Max(ext.Path.HexEncodedLength, key.Path.MaxByteLength + 1)];
 
         // retrieve the children keccak-or-rlp
@@ -636,10 +631,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) =>
             _commit.Get(Build(key));
 
-        public void Set(in Key key, in ReadOnlySpan<byte> payload) => _commit.Set(Build(key), in payload);
+        public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type) => _commit.Set(Build(key), in payload, type);
 
-        public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
-            => _commit.Set(Build(key), payload0, payload1);
+        public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1, EntryType type)
+            => _commit.Set(Build(key), payload0, payload1, type);
 
         /// <summary>
         /// Builds the <see cref="_keccak"/> aware key, treating the path as the path for the storage.
@@ -667,10 +662,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) =>
                 _commit.Get(_parent.Build(key));
 
-            public void Set(in Key key, in ReadOnlySpan<byte> payload) => _commit.Set(_parent.Build(key), payload);
+            public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type) => _commit.Set(_parent.Build(key), payload, type);
 
-            public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1) =>
-                _commit.Set(_parent.Build(key), payload0, payload1);
+            public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1, EntryType type) =>
+                _commit.Set(_parent.Build(key), payload0, payload1, type);
 
             public void Dispose() => _commit.Dispose();
 
@@ -992,9 +987,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                         if (diffAt == leaf.Path.Length)
                         {
-                            if (budget.ShouldWrite(owner))
+                            if (budget.ShouldCache(owner))
                             {
-                                commit.SetLeaf(key, leftoverPath);
+                                commit.SetLeaf(key, leftoverPath, EntryType.TransientCache);
                             }
 
                             return;
@@ -1026,13 +1021,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     }
                 case Node.Type.Extension:
                     {
-                        if (ext.IsBoundaryNode)
-                        {
-                            // the boundary node should be overwritten immediately
-                            commit.SetLeaf(key, leftoverPath);
-                            return;
-                        }
-
                         var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
                         if (diffAt == ext.Path.Length)
                         {

@@ -267,8 +267,6 @@ public static partial class Node
             return leftover;
         }
 
-        public bool IsBoundaryNode => Path.Length == NibblePath.KeccakNibbleCount;
-
         public bool Equals(in Extension other) =>
             Header.Equals(other.Header)
             && Path.Equals(other.Path);
