@@ -1119,14 +1119,16 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         createLeaf = !branch.Children[nibble];
                         var children = branch.Children.Set(nibble);
                         var shouldUpdate = createLeaf || branch.HasKeccak;
+                        var updated = false;
 
                         if (rlp.IsEmpty)
                         {
                             // Set if the nibble was not set before, or branch has memoized Keccak or it was the db query result.
                             // In the last case, the branch will be overwritten with Keccak but will be kept locally.
-                            if (shouldUpdate || owner.IsDbQuery)
+                            if (shouldUpdate)
                             {
                                 commit.SetBranch(key, children);
+                                updated = true;
                             }
                         }
                         else
@@ -1136,7 +1138,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                                 // Invalidate the branch if something changed or if the RLP is not owned by this commit.
                                 // If RLP is owned, it will be written in place.
                                 commit.SetBranch(key, children, rlp);
+                                updated = true;
                             }
+                        }
+
+                        if (updated == false && budget.ShouldCache(owner))
+                        {
+                            commit.SetBranch(key, children);
                         }
 
                         if (array != null)

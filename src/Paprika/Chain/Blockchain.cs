@@ -94,7 +94,7 @@ public class Blockchain : IAsyncDisposable
         _bloomMissedReads = _meter.CreateCounter<long>("Bloom missed reads", "Reads",
             "Number of reads that passed bloom but missed in dictionary");
         _transientCacheUsage =
-            _meter.CreateHistogram<int>("Transient cache usage", "%", "How much used was the transient cache");
+            _meter.CreateHistogram<int>("Transient cache usage per commit", "%", "How much used was the transient cache");
 
         using var batch = _db.BeginReadOnlyBatch();
         _lastFinalized = batch.Metadata.BlockNumber;

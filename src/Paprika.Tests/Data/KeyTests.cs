@@ -97,6 +97,17 @@ public class KeyTests
                 NibblePath.FromKey(Keccak.EmptyTreeHash).SliceTo(i)));
         }
 
+        // Additional colliding ones
+        Unique(Key.Merkle(NibblePath.Parse("DAE3")));
+        Unique(Key.Merkle(NibblePath.Parse("251C")));
+
+        // Unique(Key.Merkle(NibblePath.Parse(""))); is added above
+        // Unique(Key.Merkle(NibblePath.Parse("0")));
+        Unique(Key.Merkle(NibblePath.Parse("02")));
+        Unique(Key.Merkle(NibblePath.Parse("002")));
+        Unique(Key.Merkle(NibblePath.Parse("0002")));
+
+
         return;
 
         void Unique(in Key key)
