@@ -100,6 +100,13 @@ public readonly ref partial struct Key
         return (int)Type ^ Path.GetHashCode() ^ StoragePath.GetHashCode();
     }
 
+    [SkipLocalsInit]
+    public ulong GetHashCodeULong()
+    {
+        return unchecked((ulong)(((long)Path.GetHashCode() << 32) |
+                                 (long)(StoragePath.GetHashCode() ^ (byte)Type)));
+    }
+
     public override string ToString()
     {
         return $"{nameof(Path)}: {Path.ToString()}, " +

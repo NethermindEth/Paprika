@@ -66,7 +66,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         AllocateNewPage();
     }
 
-    public bool TryGet(scoped ReadOnlySpan<byte> key, int hash, out ReadOnlySpan<byte> result)
+    public bool TryGet(scoped ReadOnlySpan<byte> key, ulong hash, out ReadOnlySpan<byte> result)
     {
         var mixed = Mix(hash);
         if (_dict.TryGetValue(BuildKeyTemp(key, mixed), out var value))
@@ -96,11 +96,11 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         return _dict.ContainsKey(BuildKeyTemp(key, shortHash));
     }
 
-    public void Set(scoped ReadOnlySpan<byte> key, int hash, ReadOnlySpan<byte> data) =>
-        Set(key, hash, data, ReadOnlySpan<byte>.Empty);
+    public void Set(scoped ReadOnlySpan<byte> key, ulong hash, ReadOnlySpan<byte> data, byte metadata) =>
+        Set(key, hash, data, ReadOnlySpan<byte>.Empty, metadata);
 
 
-    public void Set(scoped ReadOnlySpan<byte> key, int hash, ReadOnlySpan<byte> data0, ReadOnlySpan<byte> data1)
+    public void Set(scoped ReadOnlySpan<byte> key, ulong hash, ReadOnlySpan<byte> data0, ReadOnlySpan<byte> data1, byte metadata)
     {
         var mixed = Mix(hash);
 
@@ -110,7 +110,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         if (Unsafe.IsNullRef(ref refValue))
         {
             // key, does not exist
-            _dict.Add(BuildKey(key, mixed), BuildValue(data0, data1));
+            _dict.Add(BuildKey(key, mixed), BuildValue(data0, data1, metadata));
             return;
         }
 
@@ -127,14 +127,20 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
                 data0.CopyTo(span);
                 data1.CopyTo(span.Slice(data1.Length));
 
+                if (metadata != refValue.Metadata)
+                {
+                    // requires update
+                    refValue = new ValueSpan(refValue.Pointer, refValue.Length, metadata);
+                }
+
                 return;
             }
         }
 
-        refValue = BuildValue(data0, data1);
+        refValue = BuildValue(data0, data1, metadata);
     }
 
-    public void Remove(ReadOnlySpan<byte> key, int hash)
+    public void Remove(ReadOnlySpan<byte> key, ulong hash)
     {
         if (_dict.Count == 0)
             return;
@@ -145,7 +151,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         _dict.Remove(tempKey);
     }
 
-    public void Destroy(scoped ReadOnlySpan<byte> key, int hash)
+    public void Destroy(scoped ReadOnlySpan<byte> key, ulong hash)
     {
         var mixed = Mix(hash);
         var tempKey = BuildKeyTemp(key, mixed);
@@ -154,7 +160,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         Debug.Assert(Unsafe.IsNullRef(ref entry) == false, "Can be used only to clean the existing entries");
 
         // empty value span produces an empty span
-        entry = new ValueSpan(ValueDestroyedPointer, 0);
+        entry = new ValueSpan(ValueDestroyedPointer, 0, ValueSpan.DefaultMetadata);
     }
 
     public Enumerator GetEnumerator() => new(this);
@@ -190,7 +196,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
             get
             {
                 var (key, value) = _enumerator.Current;
-                return new KeyValue(_dictionary.GetAt(key), key.ShortHash, _dictionary.GetAt(value));
+                return new KeyValue(_dictionary.GetAt(key), key.ShortHash, _dictionary.GetAt(value), value.Metadata);
             }
         }
 
@@ -203,11 +209,14 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
 
             public ushort ShortHash { get; }
 
-            public KeyValue(ReadOnlySpan<byte> key, ushort shortHash, ReadOnlySpan<byte> value)
+            public byte Metadata { get; }
+
+            public KeyValue(ReadOnlySpan<byte> key, ushort shortHash, ReadOnlySpan<byte> value, byte metadata)
             {
                 Key = key;
                 ShortHash = shortHash;
                 Value = value;
+                Metadata = metadata;
             }
         }
     }
@@ -228,16 +237,23 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
 
     private KeySpan BuildKey(ReadOnlySpan<byte> key, ushort hash) => new(hash, Write(key), (ushort)key.Length);
 
-    private ValueSpan BuildValue(ReadOnlySpan<byte> value0, ReadOnlySpan<byte> value1) =>
-        new(Write(value0, value1), (ushort)(value0.Length + value1.Length));
+    private ValueSpan BuildValue(ReadOnlySpan<byte> value0, ReadOnlySpan<byte> value1, byte metadata) =>
+        new(Write(value0, value1), (ushort)(value0.Length + value1.Length), metadata);
 
-    private static ushort Mix(int hash) => unchecked((ushort)((hash >> 16) ^ hash));
+    private static ushort Mix(ulong hash)
+    {
+        unchecked
+        {
+            var mixed = (uint)((hash >> 32) ^ hash);
+            return (ushort)((mixed >> 16) ^ mixed);
+        }
+    }
 
     private ReadOnlySpan<byte> GetAt(KeySpan key)
     {
         return key.Pointer == InlineKeyPointer
             ? KeyBuffer.AsSpan(0, key.Length)
-            : GetAt(new ValueSpan(key.Pointer, key.Length));
+            : GetAt(new ValueSpan(key.Pointer, key.Length, default));
     }
 
     private Span<byte> GetAt(ValueSpan value)
@@ -314,13 +330,17 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
 
     private readonly struct ValueSpan
     {
+        public const byte DefaultMetadata = 0;
+
         public readonly int Pointer;
         public readonly ushort Length;
+        public readonly byte Metadata;
 
-        public ValueSpan(int pointer, ushort length)
+        public ValueSpan(int pointer, ushort length, byte metadata)
         {
             Pointer = pointer;
             Length = length;
+            Metadata = metadata;
         }
 
         public bool IsDestroyed => Pointer == ValueDestroyedPointer;
@@ -346,6 +366,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         }
 
         _pages.Clear();
+        _dict.Clear();
     }
 
     public override string ToString() => $"Count: {_dict.Count}, Memory: {_pages.Count * BufferSize / 1024}kb";

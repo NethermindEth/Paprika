@@ -1,9 +1,12 @@
-﻿using Paprika.Crypto;
+﻿//#define SNAP_SYNC_SUPPORT
+
+using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
 
 namespace Paprika.Chain;
 
+#if SNAP_SYNC_SUPPORT
 public static class SnapSync
 {
     public const int BoundaryValueSize = Keccak.Size + PreambleLength;
@@ -49,3 +52,4 @@ public static class SnapSync
         return path.Append(fillWithZeroes, bytes);
     }
 }
+#endif

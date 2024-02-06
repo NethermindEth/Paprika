@@ -29,10 +29,6 @@ public class Xor8
 
     private static int GetArrayLength(int size) => (int)(Offset + (long)FactorTimes100 * size / 100);
 
-    public Xor8(IReadOnlyCollection<int> keys) : this(new ReadonlyUlong(keys))
-    {
-    }
-
     public Xor8(IReadOnlyCollection<ulong> keys)
     {
         // TODO: remove all array allocations, use ArrayPool<ulong> more and/or buffer pool, potentially combine chunks of memory together
@@ -240,26 +236,4 @@ public class Xor8
             return (uint)(((hash & 0xffffffffL) * (n & 0xffffffffL)) >>> 32);
         }
     }
-}
-
-file class ReadonlyUlong : IReadOnlyCollection<ulong>
-{
-    private readonly IReadOnlyCollection<int> _ints;
-
-    public ReadonlyUlong(IReadOnlyCollection<int> ints)
-    {
-        _ints = ints;
-    }
-
-    public IEnumerator<ulong> GetEnumerator()
-    {
-        foreach (var i in _ints)
-        {
-            yield return unchecked((ulong)i);
-        }
-    }
-
-    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
-
-    public int Count => _ints.Count;
 }

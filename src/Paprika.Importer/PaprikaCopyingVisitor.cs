@@ -83,7 +83,7 @@ public class PaprikaCopyingVisitor : ITreeVisitor<PathContext>, IDisposable
 
         _blockchain = blockchain;
 
-        var options = new BoundedChannelOptions(batchSize * 1000)
+        var options = new BoundedChannelOptions(2_000_000)
         {
             SingleReader = true,
             SingleWriter = false,
@@ -115,7 +115,7 @@ public class PaprikaCopyingVisitor : ITreeVisitor<PathContext>, IDisposable
 
         var batch = new Queue<Item>();
         var finalization = new Queue<Keccak>();
-        const int finalizationDepth = 32;
+        const int finalizationDepth = 4;
 
         while (await reader.WaitToReadAsync())
         {
@@ -211,7 +211,8 @@ public class PaprikaCopyingVisitor : ITreeVisitor<PathContext>, IDisposable
     {
     }
 
-    public void VisitLeaf(in PathContext nodeContext, TrieNode node, TrieVisitContext trieVisitContext, byte[] value = null)
+
+    public void VisitLeaf(in PathContext nodeContext, TrieNode node, TrieVisitContext trieVisitContext, ReadOnlySpan<byte> value)
     {
         var context = nodeContext.Add(node.Key!);
         var path = context.AsNibblePath;
@@ -222,7 +223,9 @@ public class PaprikaCopyingVisitor : ITreeVisitor<PathContext>, IDisposable
             path.RawSpan.CopyTo(account.BytesAsSpan);
 
             _accountsVisitedGauge.Add(1);
-            Add(new Item(account, Rlp.Decode<Nethermind.Core.Account>(value)));
+
+            Rlp.ValueDecoderContext decoderContext = new Rlp.ValueDecoderContext(value);
+            Add(new Item(account, Rlp.Decode<Nethermind.Core.Account>(ref decoderContext)));
         }
         else
         {

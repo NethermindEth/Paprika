@@ -48,12 +48,12 @@ public interface ICommit
     /// <summary>
     /// Sets the value under the given key.
     /// </summary>
-    void Set(in Key key, in ReadOnlySpan<byte> payload);
+    void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type = EntryType.Persistent);
 
     /// <summary>
     /// Sets the value under the given key.
     /// </summary>
-    void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1);
+    void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1, EntryType type = EntryType.Persistent);
 
     /// <summary>
     /// Visits the given <paramref name="type"/> of the changes in the given commit.
