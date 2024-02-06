@@ -108,12 +108,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) => _readOnly.Get(key);
 
-        public void Set(in Key key, in ReadOnlySpan<byte> payload)
+        public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type)
         {
             // NOP
         }
 
-        public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
+        public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1, EntryType type)
         {
             // NOP
         }
@@ -255,7 +255,14 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
 
         // trim the cached rlp from branches
-        return Node.Branch.GetOnlyBranchData(data);
+        var branchOnlyData = Node.Branch.GetOnlyBranchData(data);
+
+        Debug.Assert(key.Path.IsEmpty ||
+                     (key.Path.Length == 64 && key.StoragePath.IsEmpty) ||
+                     branchOnlyData.Length < data.Length,
+            "Only roots in Patricia trees can not memoize RLPs");
+
+        return branchOnlyData;
     }
 
     public Keccak RootHash { get; private set; }
@@ -302,9 +309,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         // As leafs are not stored in the database, hint to lookup again on missing.
         using var owner = ctx.Commit.Get(key);
 
-        if (owner.IsDbQuery && ctx.Budget.ClaimDbWrite())
+        if (ctx.Budget.ShouldCache(owner))
         {
-            ctx.Commit.Set(key, owner.Span);
+            ctx.Commit.Set(key, owner.Span, EntryType.TransientCache);
         }
 
         if (owner.IsEmpty)
@@ -341,7 +348,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private KeccakOrRlp EncodeLeafByPath(scoped in Key key, scoped in ComputeContext ctx, scoped in NibblePath leafPath)
     {
-        var leafTotalPath = key.Path.Append(leafPath, stackalloc byte[key.Path.MaxByteLength + leafPath.MaxByteLength + 1]);
+        var leafTotalPath =
+            key.Path.Append(leafPath, stackalloc byte[key.Path.MaxByteLength + leafPath.MaxByteLength + 1]);
 
         var leafKey = ctx.TrieType == TrieType.State
             ? Key.Account(leafTotalPath)
@@ -350,14 +358,16 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         using var leafData = ctx.Commit.Get(leafKey);
 
+#if SNAP_SYNC_SUPPORT
         if (SnapSync.TryGetBoundaryValue(leafData.Span, out var keccak))
         {
             return keccak;
         }
+#endif
 
-        if (leafData.IsDbQuery && ctx.Budget.ClaimDbWrite())
+        if (ctx.Budget.ShouldCache(leafData))
         {
-            ctx.Commit.Set(leafKey, leafData.Span);
+            ctx.Commit.Set(leafKey, leafData.Span, EntryType.TransientCache);
         }
 
         KeccakOrRlp keccakOrRlp;
@@ -393,7 +403,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         var runInParallel = !ctx.Hint.HasFlag(ComputeHint.DontUseParallel) && key.Path.IsEmpty &&
                             branch.Children.AllSet;
 
-        var memoize = !ctx.Hint.HasFlag(ComputeHint.SkipCachedInformation) && ShouldMemoizeBranchRlp(key.Path);
+        var memoize = !ctx.Hint.HasFlag(ComputeHint.SkipCachedInformation) && ShouldMemoizeBranchRlp(key.Path, ctx.TrieType);
         var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
 
         byte[]? rlpMemoization = null;
@@ -449,9 +459,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                     var childPath = key.Path.AppendNibble(i, childSpan);
 
-                    var value = childPath.Length == NibblePath.KeccakNibbleCount ?
-                        EncodeLeafByPath(Key.Merkle(childPath), ctx, NibblePath.Empty) :
-                        Compute(Key.Merkle(childPath), ctx);
+                    var value = childPath.Length == NibblePath.KeccakNibbleCount
+                        ? EncodeLeafByPath(Key.Merkle(childPath), ctx, NibblePath.Empty)
+                        : Compute(Key.Merkle(childPath), ctx);
 
                     // it's either Keccak or a span. Both are encoded the same ways
                     if (value.DataType == KeccakOrRlp.Type.Keccak)
@@ -563,9 +573,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private static Span<byte> MakeRlpWritable(ReadOnlySpan<byte> previousRlp) =>
         MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(previousRlp), previousRlp.Length);
 
-    private bool ShouldMemoizeBranchRlp(in NibblePath branchPath)
+    private bool ShouldMemoizeBranchRlp(in NibblePath branchPath, TrieType trieType)
     {
-        return _memoizeRlp && branchPath.Length >= 1; // a simple condition to memoize only more nested RLPs
+        // A simple condition to memoize only more nested RLPs for state
+        return _memoizeRlp && (branchPath.Length >= 1 || trieType == TrieType.Storage);
     }
 
     private bool ShouldMemoizeBranchKeccak(in NibblePath branchPath)
@@ -578,11 +589,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private KeccakOrRlp EncodeExtension(scoped in Key key, scoped in Node.Extension ext, scoped in ComputeContext ctx)
     {
-        if (ext.IsBoundaryNode)
-        {
-            return ext.Path.UnsafeAsKeccak;
-        }
-
         Span<byte> span = stackalloc byte[Math.Max(ext.Path.HexEncodedLength, key.Path.MaxByteLength + 1)];
 
         // retrieve the children keccak-or-rlp
@@ -626,10 +632,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) =>
             _commit.Get(Build(key));
 
-        public void Set(in Key key, in ReadOnlySpan<byte> payload) => _commit.Set(Build(key), in payload);
+        public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type) => _commit.Set(Build(key), in payload, type);
 
-        public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
-            => _commit.Set(Build(key), payload0, payload1);
+        public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1, EntryType type)
+            => _commit.Set(Build(key), payload0, payload1, type);
 
         /// <summary>
         /// Builds the <see cref="_keccak"/> aware key, treating the path as the path for the storage.
@@ -657,10 +663,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) =>
                 _commit.Get(_parent.Build(key));
 
-            public void Set(in Key key, in ReadOnlySpan<byte> payload) => _commit.Set(_parent.Build(key), payload);
+            public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type) => _commit.Set(_parent.Build(key), payload, type);
 
-            public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1) =>
-                _commit.Set(_parent.Build(key), payload0, payload1);
+            public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1, EntryType type) =>
+                _commit.Set(_parent.Build(key), payload0, payload1, type);
 
             public void Dispose() => _commit.Dispose();
 
@@ -922,17 +928,26 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private static void MarkPathDirty(in NibblePath path, ICommit commit, CacheBudget budget, TrieType trieType)
     {
+        // Flag forcing the leaf creation, that saves one get of the non-existent value.
+        var createLeaf = false;
+
         Span<byte> span = stackalloc byte[33];
 
         for (var i = 0; i <= path.Length; i++)
         {
             var slice = path.SliceTo(i);
             var key = Key.Merkle(slice);
-
             var leftoverPath = path.SliceFrom(i);
 
-            using var owner = commit.Get(key);
+            // The creation of the leaf is forced, create and return.
+            if (createLeaf)
+            {
+                commit.SetLeaf(key, leftoverPath);
+                return;
+            }
 
+            // Query for the node
+            using var owner = commit.Get(key);
             if (owner.IsEmpty)
             {
                 // No value set now, create one.
@@ -946,6 +961,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             {
                 case Node.Type.Leaf:
                     {
+#if SNAP_SYNC_SUPPORT
                         if (SnapSync.CanBeBoundaryLeaf(leaf))
                         {
                             var concatenated = key.Path.Append(leaf.Path,
@@ -966,15 +982,17 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                                 return;
                             }
                         }
+#endif
 
                         var diffAt = leaf.Path.FindFirstDifferentNibble(leftoverPath);
 
                         if (diffAt == leaf.Path.Length)
                         {
-                            if (owner.IsDbQuery && budget.ClaimDbWrite())
+                            if (budget.ShouldCache(owner))
                             {
-                                commit.SetLeaf(key, leftoverPath);
+                                commit.SetLeaf(key, leftoverPath, EntryType.TransientCache);
                             }
+
                             return;
                         }
 
@@ -1004,13 +1022,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     }
                 case Node.Type.Extension:
                     {
-                        if (ext.IsBoundaryNode)
-                        {
-                            // the boundary node should be overwritten immediately
-                            commit.SetLeaf(key, leftoverPath);
-                            return;
-                        }
-
                         var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
                         if (diffAt == ext.Path.Length)
                         {
@@ -1106,17 +1117,19 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         var nibble = path[i];
                         var rlp = TryClearMemoizedKeccakForBranchChild(commit, leftover, owner, nibble, out var array);
 
+                        createLeaf = !branch.Children[nibble];
                         var children = branch.Children.Set(nibble);
-
-                        var shouldUpdate = !branch.Children[nibble] || branch.HasKeccak;
+                        var shouldUpdate = createLeaf || branch.HasKeccak;
+                        var updated = false;
 
                         if (rlp.IsEmpty)
                         {
                             // Set if the nibble was not set before, or branch has memoized Keccak or it was the db query result.
                             // In the last case, the branch will be overwritten with Keccak but will be kept locally.
-                            if (shouldUpdate || owner.IsDbQuery)
+                            if (shouldUpdate)
                             {
                                 commit.SetBranch(key, children);
+                                updated = true;
                             }
                         }
                         else
@@ -1126,7 +1139,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                                 // Invalidate the branch if something changed or if the RLP is not owned by this commit.
                                 // If RLP is owned, it will be written in place.
                                 commit.SetBranch(key, children, rlp);
+                                updated = true;
                             }
+                        }
+
+                        if (updated == false && budget.ShouldCache(owner))
+                        {
+                            commit.SetBranch(key, children, EntryType.TransientCache);
                         }
 
                         if (array != null)
@@ -1150,7 +1169,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// <summary>
     /// For branch only checks whether rlp is updated in place. If it is, there's no need to write it again.
     /// </summary>
-    private static bool RlpMemoRequiresUpdate(ICommit commit, ReadOnlySpanOwnerWithMetadata<byte> owner) => !owner.IsOwnedBy(commit);
+    private static bool RlpMemoRequiresUpdate(ICommit commit, ReadOnlySpanOwnerWithMetadata<byte> owner) =>
+        !owner.IsOwnedBy(commit);
 
     /// <summary>
     /// Checks if there's a memo for the branch and clears it for the given nibble. 

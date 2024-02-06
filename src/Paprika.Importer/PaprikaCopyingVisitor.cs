@@ -83,7 +83,7 @@ public class PaprikaCopyingVisitor : ITreeVisitor<PathContext>, IDisposable
 
         _blockchain = blockchain;
 
-        var options = new BoundedChannelOptions(batchSize * 1000)
+        var options = new BoundedChannelOptions(2_000_000)
         {
             SingleReader = true,
             SingleWriter = false,
@@ -115,7 +115,7 @@ public class PaprikaCopyingVisitor : ITreeVisitor<PathContext>, IDisposable
 
         var batch = new Queue<Item>();
         var finalization = new Queue<Keccak>();
-        const int finalizationDepth = 32;
+        const int finalizationDepth = 4;
 
         while (await reader.WaitToReadAsync())
         {

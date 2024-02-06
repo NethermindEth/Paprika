@@ -11,7 +11,8 @@ namespace Paprika.Merkle;
 /// </summary>
 public static class CommitExtensions
 {
-    public static void SetLeaf(this ICommit commit, in Key key, in NibblePath leafPath)
+    public static void SetLeaf(this ICommit commit, in Key key, in NibblePath leafPath,
+        EntryType type = EntryType.Persistent)
     {
         if (leafPath.Length == 0)
         {
@@ -20,25 +21,28 @@ public static class CommitExtensions
         }
 
         var leaf = new Node.Leaf(leafPath);
-        commit.Set(key, leaf.WriteTo(stackalloc byte[leaf.MaxByteLength]));
+        commit.Set(key, leaf.WriteTo(stackalloc byte[leaf.MaxByteLength]), type);
     }
 
-    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children)
+    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children,
+        EntryType type = EntryType.Persistent)
     {
         var branch = new Node.Branch(children);
-        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]));
+        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), type);
     }
 
-    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, ReadOnlySpan<byte> rlp)
+    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, ReadOnlySpan<byte> rlp,
+        EntryType type = EntryType.Persistent)
     {
         var branch = new Node.Branch(children);
-        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), rlp);
+        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), rlp, type);
     }
 
-    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, Keccak keccak, ReadOnlySpan<byte> rlp)
+    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, Keccak keccak,
+        ReadOnlySpan<byte> rlp, EntryType type = EntryType.Persistent)
     {
         var branch = new Node.Branch(children, keccak);
-        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), rlp);
+        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), rlp, type);
     }
 
     public static void SetExtension(this ICommit commit, in Key key, in NibblePath path)

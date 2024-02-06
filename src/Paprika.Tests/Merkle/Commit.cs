@@ -96,7 +96,7 @@ public class Commit : ICommit
 
     private static byte[] GetKey(in Key key) => key.WriteTo(stackalloc byte[key.MaxByteLength]).ToArray();
 
-    void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload)
+    void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type)
     {
         var bytes = GetKey(key);
         if (_asserting == false)
@@ -110,7 +110,7 @@ public class Commit : ICommit
         }
     }
 
-    void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
+    void ICommit.Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1, EntryType type)
     {
         ((ICommit)this).Set(key, Concat(payload0, payload1));
     }
@@ -163,12 +163,12 @@ public class Commit : ICommit
                 : _commit.Get(key);
         }
 
-        public void Set(in Key key, in ReadOnlySpan<byte> payload)
+        public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type)
         {
             _data[GetKey(key)] = payload.ToArray();
         }
 
-        public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
+        public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1, EntryType type)
         {
             _data[GetKey(key)] = Concat(payload0, payload1);
         }

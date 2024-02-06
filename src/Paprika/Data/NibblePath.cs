@@ -513,29 +513,23 @@ public readonly ref struct NibblePath
 
     public override int GetHashCode()
     {
-        const int prime = 374761393;
-
         if (Length <= 1)
         {
-            return Length == 0 ? 0 : GetAt(0);
+            // for a single nibble path, make it different from empty.
+            return Length == 0 ? 0 : 1 << GetAt(0);
         }
 
         unchecked
         {
             ref var span = ref _span;
 
-            long hash = 1;
+            int hash = Length << 24;
             var length = Length;
 
             if (_odd == OddBit)
             {
-                // mix in
-                unchecked
-                {
-                    hash *= prime;
-                    hash ^= _span & 0x0F;
-                }
-
+                // mix in first half
+                hash ^= (_span & 0x0F) << 20;
                 span = ref Unsafe.Add(ref span, 1);
                 length -= 1;
             }
@@ -545,8 +539,7 @@ public readonly ref struct NibblePath
                 // mix in
                 unchecked
                 {
-                    hash *= prime;
-                    hash ^= GetAt(length - 1);
+                    hash ^= GetAt(length - 1) << 16;
                 }
 
                 length -= 1;
@@ -556,27 +549,15 @@ public readonly ref struct NibblePath
 
             length /= 2; // make it byte
 
-            // 8 bytes
-            var longLoop = Math.DivRem(length, sizeof(long), out var remainder);
-            for (var i = 0; i < longLoop; i++)
-            {
-                unchecked
-                {
-                    hash *= prime;
-                    hash ^= Unsafe.ReadUnaligned<long>(ref span);
-                    span = ref Unsafe.Add(ref span, sizeof(long));
-                }
-            }
-
             // 4 bytes
-            if (remainder >= sizeof(int))
+            var intLoop = Math.DivRem(length, sizeof(int), out var remainder);
+            for (var i = 0; i < intLoop; i++)
             {
                 unchecked
                 {
-                    hash *= prime;
-                    hash ^= Unsafe.ReadUnaligned<int>(ref span);
+                    var v = Unsafe.ReadUnaligned<int>(ref span);
+                    hash ^= v;
                     span = ref Unsafe.Add(ref span, sizeof(int));
-                    remainder -= sizeof(int);
                 }
             }
 
@@ -585,8 +566,8 @@ public readonly ref struct NibblePath
             {
                 unchecked
                 {
-                    hash *= prime;
-                    hash ^= Unsafe.ReadUnaligned<short>(ref span);
+                    var v = Unsafe.ReadUnaligned<short>(ref span);
+                    hash ^= v;
                     span = ref Unsafe.Add(ref span, sizeof(short));
                     remainder -= sizeof(short);
                 }
@@ -595,14 +576,10 @@ public readonly ref struct NibblePath
             // 1 byte
             if (remainder > 0)
             {
-                unchecked
-                {
-                    hash *= prime;
-                    hash ^= span;
-                }
+                hash ^= span;
             }
 
-            return unchecked((int)((hash >> 32) ^ hash));
+            return hash;
         }
     }
 

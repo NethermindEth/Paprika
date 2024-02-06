@@ -132,15 +132,15 @@ const bool skipStorage = false;
 // root.Accept(storageCapture, store, false, nibbles);
 // File.WriteAllText("storage-big-tree.txt",storageCapture.Payload);
 
-using var preCommit = new ComputeMerkleBehavior(1, 1, false);
+using var preCommit = new ComputeMerkleBehavior(1, 1);
 
 var rootHashActual = Keccak.Zero;
 if (dbExists == false)
 {
     await using (var blockchain =
-                 new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), CacheBudget.Options.None, 100, () => reporter.Observe()))
+                 new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), new CacheBudget.Options(1_000, 8), 50, () => reporter.Observe()))
     {
-        var visitor = new PaprikaCopyingVisitor(blockchain, 5000, skipStorage);
+        var visitor = new PaprikaCopyingVisitor(blockchain, 50000, skipStorage);
         Console.WriteLine("Starting...");
 
         var visit = Task.Run(() =>
@@ -148,8 +148,8 @@ if (dbExists == false)
             trie.Accept(visitor, trie.RootHash, new VisitingOptions
             {
                 ExpectAccounts = true,
-                MaxDegreeOfParallelism = Environment.ProcessorCount,
-                FullScanMemoryBudget = 2L * 1024 * 1024 * 1024
+                MaxDegreeOfParallelism = 6,
+                //FullScanMemoryBudget = 4L * 1024 * 1024 * 1024
             });
 
             visitor.Finish();

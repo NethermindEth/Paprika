@@ -78,8 +78,8 @@ public class RawTests
         var merkle = new ComputeMerkleBehavior();
 
         await using var blockchain = new Blockchain(db, merkle);
-        using var raw = blockchain.StartRaw();
 
+        using var raw = blockchain.StartRaw();
         raw.SetAccount(a, new Account(valueA, valueA));
         raw.Commit();
 
