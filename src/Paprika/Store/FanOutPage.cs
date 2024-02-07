@@ -34,8 +34,10 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
         public Span<DbAddress> Addresses => MemoryMarshal.CreateSpan(ref Address, FanOut);
     }
 
-    public bool TryGet(scoped NibblePath key, IPageResolver batch, out ReadOnlySpan<byte> result)
+    public bool TryGet(scoped NibblePath key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
+        batch.AssertRead(Header);
+
         if (key.Length < ConsumedNibbles)
         {
             result = default;

@@ -54,7 +54,7 @@ abstract class BatchContextBase : IBatchContext
     /// <summary>
     /// Assigns the batch identifier to a given page, marking it writable by this batch.
     /// </summary>
-    protected void AssignBatchId(Page page)
+    public void AssignBatchId(Page page)
     {
         page.Header.BatchId = BatchId;
         page.Header.PaprikaVersion = PageHeader.CurrentVersion;

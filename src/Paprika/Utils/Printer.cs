@@ -77,7 +77,6 @@ public class Printer : IPageVisitor
                 ("BatchId", page.Header.BatchId.ToString()),
                 ("DataPage", page.Data.StateRoot.ToString()),
                 ("NextFreePage", page.Data.NextFreePage.ToString()),
-                ("Abandoned", ListPages(page.Data.AbandonedPages))
             };
 
             _printable.Add(addr.Raw, p);
@@ -89,8 +88,6 @@ public class Printer : IPageVisitor
         var p = new[]
         {
             (Type, "Abandoned"),
-            ("AbandonedAt", page.AbandonedAtBatch.ToString()),
-            ("Pages", ListPages(page.Abandoned)),
             ("Next", page.Next.ToString())
         };
 

@@ -501,16 +501,9 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         private readonly Context _ctx;
 
         /// <summary>
-        /// A pool of pages that are no longer used and can be reused now.
-        /// </summary>
-        private readonly Queue<DbAddress> _unusedPool;
-
-        private bool _noUnusedPages;
-
-        /// <summary>
         /// A pool of pages that are abandoned during this batch.
         /// </summary>
-        private readonly Queue<DbAddress> _abandoned;
+        private readonly List<DbAddress> _abandoned;
 
         /// <summary>
         /// The set of pages written during this batch.
@@ -526,8 +519,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _root = root;
             _reusePagesOlderThanBatchId = reusePagesOlderThanBatchId;
             _ctx = ctx;
-            _unusedPool = ctx.Unused;
-            _abandoned = new Queue<DbAddress>();
+            _abandoned = ctx.Abandoned;
             _written = ctx.Written;
 
             IdCache = ctx.IdCache;
@@ -765,145 +757,21 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         private void MemoizeAbandoned()
         {
-            if (_abandoned.Count == 0 && _unusedPool.Count == 0)
+            if (_abandoned.Count == 0)
             {
                 // nothing to memoize
                 return;
             }
 
-            var abandonedPages = _root.Data.AbandonedPages;
+            var abandoned = CollectionsMarshal.AsSpan(_abandoned);
+            abandoned.Sort((a, b) => a.Raw.CompareTo(b.Raw));
 
-            // The current approach is to squash sets of _abandoned and _unused into one set.
-            // The disadvantage is that the _unused will get their AbandonedAt bumped to the recent one.
-            // This meant that that they will not be reused sooner.
-            // The advantage is that usually, there number of abandoned pages create is lower and
-            // the book keeping is simpler.
-
-            // The pages are put in a linked list, when first -> ... -> last -> NULL
-
-            var newPage = GetNewPage(out var firstAddr, true);
-
-            newPage.Header.PageType = PageType.Abandoned;
-            newPage.Header.PaprikaVersion = 1;
-
-            var first = new AbandonedPage(newPage)
-            {
-                AbandonedAtBatch = BatchId
-            };
-            var last = first;
-
-            // process abandoned
-            while (_abandoned.TryDequeue(out var page))
-            {
-                first = first.EnqueueAbandoned(this, _db.GetAddress(first.AsPage()), page);
-            }
-
-            // process unused
-            while (_unusedPool.TryDequeue(out var page))
-            {
-                first = first.EnqueueAbandoned(this, _db.GetAddress(first.AsPage()), page);
-            }
-
-            // remember the abandoned by either finding an empty slot, or chaining it to the highest number there
-            var nullAddress = abandonedPages.IndexOf(DbAddress.Null);
-            if (nullAddress != -1)
-            {
-                abandonedPages[nullAddress] = GetAddress(first.AsPage());
-            }
-            else
-            {
-                // no empty slot, find the youngest one and chain it at the end of this
-                var youngest = new AbandonedPage(_db.GetAt(abandonedPages[0]));
-                ref var youngestAddr = ref abandonedPages[0];
-
-                foreach (ref var pageAddr in abandonedPages)
-                {
-                    var current = new AbandonedPage(_db.GetAt(pageAddr));
-                    if (current.AbandonedAtBatch > youngest.AbandonedAtBatch)
-                    {
-                        youngest = current;
-                        youngestAddr = pageAddr;
-                    }
-                }
-
-                // the youngest contains the youngest abandoned pages, but it's not younger than this batch.
-                // but... we can't write previously used pages only the current one, so...
-                // link back from this batch to previously decommissioned
-                last.Next = youngestAddr;
-
-                // write the abandoned in the youngestAddr
-                youngestAddr = _db.GetAddress(first.AsPage());
-            }
+            _root.Data.AbandonedList.Register(abandoned, this);
         }
 
         private bool TryGetNoLongerUsedPage(out DbAddress found)
         {
-            if (_noUnusedPages)
-            {
-                found = default;
-                return false;
-            }
-
-            // check whether previous operations allocated the pool of unused pages
-            if (_unusedPool.Count == 0)
-            {
-                _metrics.ReportUnusedPoolFetch();
-
-                var abandonedPages = _root.Data.AbandonedPages;
-
-                // find the page across all the abandoned pages, so that it's the oldest one
-                if (TryFindOldest(abandonedPages, out var oldest, out var oldestAddress))
-                {
-                    // check whether the oldest page qualifies for being the pool
-                    if (oldest.AbandonedAtBatch < _reusePagesOlderThanBatchId)
-                    {
-                        // 1. copy all the pages to the pool
-                        while (oldest.TryDequeueFree(out var addr))
-                        {
-                            _unusedPool.Enqueue(addr);
-                        }
-
-                        // 2. register the oldest page for reuse
-                        RegisterForFutureReuse(oldest.AsPage());
-
-                        // 3. write its next in place of this page so that it's used as the pool
-                        var indexInRoot = abandonedPages.IndexOf(oldestAddress);
-                        abandonedPages[indexInRoot] = oldest.Next;
-                    }
-                    else
-                    {
-                        // there are no matching sets of unused pages
-                        // memoize it so that the follow up won't query over and over again
-                        _noUnusedPages = true;
-                    }
-                }
-            }
-
-            return _unusedPool.TryDequeue(out found);
-        }
-
-        private bool TryFindOldest(Span<DbAddress> abandonedPages, out AbandonedPage oldest,
-            out DbAddress oldestAddress)
-        {
-            AbandonedPage? currentOldest = default;
-            oldestAddress = default;
-
-            foreach (var abandonedPageAddr in abandonedPages)
-            {
-                if (abandonedPageAddr.IsNull == false)
-                {
-                    var current = new AbandonedPage(_db.GetAt(abandonedPageAddr));
-                    uint oldestBatchId = currentOldest?.AbandonedAtBatch ?? uint.MaxValue;
-                    if (current.AbandonedAtBatch < oldestBatchId)
-                    {
-                        currentOldest = current;
-                        oldestAddress = abandonedPageAddr;
-                    }
-                }
-            }
-
-            oldest = currentOldest.GetValueOrDefault();
-            return currentOldest != null;
+            return _root.Data.AbandonedList.TryGet(out found, _reusePagesOlderThanBatchId, this);
         }
 
         public override bool WasWritten(DbAddress addr) => _written.Contains(addr);
@@ -911,7 +779,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         public override void RegisterForFutureReuse(Page page)
         {
             var addr = _db.GetAddress(page);
-            _abandoned.Enqueue(addr);
+            _abandoned.Add(addr);
         }
 
         public override Dictionary<Keccak, uint> IdCache { get; }
@@ -942,8 +810,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         public unsafe Context()
         {
             Page = new Page((byte*)NativeMemory.AlignedAlloc((UIntPtr)Page.PageSize, (UIntPtr)UIntPtr.Size));
-            Abandoned = new Queue<DbAddress>();
-            Unused = new Queue<DbAddress>();
+            Abandoned = new List<DbAddress>();
             Written = new HashSet<DbAddress>();
             IdCache = new Dictionary<Keccak, uint>();
         }
@@ -952,17 +819,15 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public Page Page { get; }
 
-        public Queue<DbAddress> Unused { get; }
-
-        public Queue<DbAddress> Abandoned { get; }
+        public List<DbAddress> Abandoned { get; }
         public HashSet<DbAddress> Written { get; }
 
         public void Clear()
         {
-            Unused.Clear();
             Abandoned.Clear();
             Written.Clear();
             IdCache.Clear();
+            Abandoned.Clear();
 
             // no need to clear, it's always overwritten
             //Page.Clear();

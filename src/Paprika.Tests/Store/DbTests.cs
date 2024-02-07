@@ -14,6 +14,7 @@ public class DbTests
     private const int MB = 1024 * 1024;
     private const int MB16 = 16 * MB;
     private const int MB64 = 64 * MB;
+    private const int MB256 = 256 * MB;
 
     [Test]
     public async Task Simple()
@@ -183,6 +184,67 @@ public class DbTests
             return address;
         }
     }
+
+    [Test]
+    public async Task Spin_large()
+    {
+        var account = Keccak.EmptyTreeHash;
+
+        const int size = MB256;
+        using var db = PagedDb.NativeMemoryDb(size);
+
+        const int batches = 100;
+        const int storageSlots = 20_000;
+        const int storageKeyLength = 32;
+
+        var value = new byte[32];
+        var storageKeys = new byte[storageSlots + storageKeyLength];
+
+        var random = new Random(13);
+        random.NextBytes(storageKeys);
+        random.NextBytes(value);
+
+        var readBatches = new List<IReadOnlyBatch>();
+
+        for (var i = 0; i < batches; i++)
+        {
+            using var batch = db.BeginNextBatch();
+
+            for (var slot = 0; slot < storageSlots; slot++)
+            {
+                batch.SetStorage(account, GetStorageAddress(slot), value);
+            }
+
+            await batch.Commit(CommitOptions.FlushDataAndRoot);
+
+            readBatches.Add(db.BeginReadOnlyBatch());
+        }
+
+        foreach (var read in readBatches)
+        {
+            for (var slot = 0; slot < storageSlots; slot++)
+            {
+                read.AssertStorageValue(account, GetStorageAddress(slot), value);
+            }
+        }
+
+        foreach (var read in readBatches)
+        {
+            read.Dispose();
+        }
+
+        return;
+
+        Keccak GetStorageAddress(int i)
+        {
+            Keccak result = default;
+            storageKeys
+                .AsSpan(i, storageKeyLength)
+                .CopyTo(result.BytesAsSpan);
+            return result;
+        }
+    }
+
 
     private static void AssertPageMetadataAssigned(PagedDb db)
     {
