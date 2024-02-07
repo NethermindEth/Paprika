@@ -48,32 +48,30 @@ long? bestPersistedState = persistedNumberData is null ? null : new RlpStream(pe
 
 ArgumentNullException.ThrowIfNull(bestPersistedState, "Best persisted state not found");
 
-var bestPersisted = blockInfos.Get(bestPersistedState.Value);
-var chainLevel = Rlp.GetStreamDecoder<ChainLevelInfo>()!.Decode(new RlpStream(bestPersisted!));
-var main = chainLevel.BlockInfos[0];
+var trie = new StateTree(store, logs);
 
-var header = headerStore.Get(main.BlockHash);
+var back = 0;
+var blockNumber = bestPersistedState.Value;
 
-var rootHash = header.StateRoot!;
-
-var trie = new StateTree(store, logs)
+do
 {
-    RootHash = rootHash
-};
+    var bestPersisted = blockInfos.Get(blockNumber - back);
+    back++;
 
-//var keccak = new ValueKeccak("0x380c98b03a3f72ee8aa540033b219c0d397dbe2523162db9dd07e6bbb015d50b").ToKeccak();
-var nibs = new byte[0];//Nibbles.FromBytes(keccak.Bytes);
+    var chainLevel = Rlp.GetStreamDecoder<ChainLevelInfo>()!.Decode(new RlpStream(bestPersisted!));
+    var main = chainLevel.BlockInfos[0];
 
-var current = trie.RootRef!;
+    var header = headerStore.Get(main.BlockHash);
 
-var i = 0;
-for (; i < nibs.Length; i++)
-{
-    current.ResolveNode(store);
-    if (current.NodeType == NodeType.Leaf)
-        break;
-    current = current.GetChild(store, (byte)nibs[i])!;
-}
+    var rootHash = header.StateRoot!;
+
+    trie.RootHash = rootHash;
+
+    if (back > 1000)
+    {
+        throw new Exception($"Searched for {back} block back since {blockNumber} and failed to load the root");
+    }
+} while (trie.RootRef.TryResolveNode(store) == false);
 
 var dir = Directory.GetCurrentDirectory();
 var dataPath = Path.Combine(dir, "db");
@@ -203,7 +201,7 @@ await reportingTask;
 
 if (dbExists == false)
 {
-    Console.WriteLine($"Root: {rootHash} was being imported to Paprika in {sw.Elapsed:g} and resulted in {rootHashActual}");
+    Console.WriteLine($"Root: {trie.RootHash} was being imported to Paprika in {sw.Elapsed:g} and resulted in {rootHashActual}");
 }
 
 return;
