@@ -44,32 +44,27 @@ public struct AbandonedList
                 return false;
             }
 
-            for (var i = 0; i < BatchIds.Length; i++)
+            var i = BatchIds.IndexOfAnyInRange<uint>(1, minBatchId - 1);
+
+            if (i > -1 && minBatchId > 2)
             {
-                var id = BatchIds[i];
-                if (0 < id && id < minBatchId)
+                var at = Addresses[i];
+
+                Debug.Assert(at.IsNull == false);
+
+                Current = at;
+                var page = new AbandonedPage(batch.GetAt(at));
+                if (page.Next.IsNull)
                 {
-                    var at = Addresses[i];
+                    // no next, clear the slot
+                    Addresses[i] = default;
+                    BatchIds[i] = default;
 
-                    Debug.Assert(at.IsNull == false);
-
-                    Current = at;
-                    var page = new AbandonedPage(batch.GetAt(at));
-                    if (page.Next.IsNull)
-                    {
-                        // no next, clear the slot
-                        Addresses[i] = default;
-                        BatchIds[i] = default;
-
-                        EntriesCount--;
-                    }
-                    else
-                    {
-                        Addresses[i] = page.Next;
-                    }
-
-                    // Current is found, break
-                    break;
+                    EntriesCount--;
+                }
+                else
+                {
+                    Addresses[i] = page.Next;
                 }
             }
         }
