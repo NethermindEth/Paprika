@@ -1,7 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 using FluentAssertions;
 using NUnit.Framework;
-using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Store;
 
@@ -9,6 +8,35 @@ namespace Paprika.Tests.Store;
 
 public class AbandonedTests : BasePageTests
 {
+    [Test]
+    public void Page_capacity()
+    {
+        const int expected = 2000;
+
+        var addresses = Enumerable.Range(1, expected).Select(i => new DbAddress((uint)i)).ToArray();
+
+        var page = new AbandonedPage(Page.DevOnlyNativeAlloc());
+        page.AsPage().Clear();
+
+        var added = new Stack<DbAddress>();
+
+        foreach (var address in addresses)
+        {
+            if (page.TryPush(address))
+            {
+                added.Push(address);
+            }
+        }
+
+        added.Count.Should().Be(expected);
+
+        while (added.TryPop(out var dequeued))
+        {
+            page.TryPop(out var popped).Should().BeTrue();
+            popped.Should().Be(dequeued);
+        }
+    }
+
     [Test]
     public async Task Reuse_in_limited_environment()
     {

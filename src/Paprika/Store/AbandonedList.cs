@@ -127,7 +127,6 @@ public struct AbandonedList
     public void Register(List<DbAddress> abandoned, IBatchContext batch)
     {
         var head = AbandonedPage.CreateChain(abandoned, batch);
-
         Register(head, batch);
     }
 
