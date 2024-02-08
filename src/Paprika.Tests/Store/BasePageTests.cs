@@ -49,7 +49,6 @@ public abstract class BasePageTests
 
         // for now
         public override bool WasWritten(DbAddress addr) => true;
-
         public override void RegisterForFutureReuse(Page page)
         {
             // NOOP
