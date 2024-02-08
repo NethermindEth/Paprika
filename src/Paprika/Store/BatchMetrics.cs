@@ -9,8 +9,6 @@ class BatchMetrics : IBatchMetrics
     public void ReportPageReused() => PagesReused++;
 
     public void ReportNewPageAllocation() => PagesAllocated++;
-
-    public void ReportUnusedPoolFetch() => UnusedPoolFetch++;
 }
 
 public interface IBatchMetrics
@@ -24,11 +22,6 @@ public interface IBatchMetrics
     /// The number of newly allocated pages.
     /// </summary>
     int PagesAllocated { get; }
-
-    /// <summary>
-    /// The count of unused pool fetches.
-    /// </summary>
-    int UnusedPoolFetch { get; }
 
     /// <summary>
     /// Total pages written during this batch.
