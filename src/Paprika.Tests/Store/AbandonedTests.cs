@@ -56,6 +56,36 @@ public class AbandonedTests : BasePageTests
     }
 
     [Test]
+    public async Task Work_proper_bookkeeping_when_lots_of_reads()
+    {
+        const int repeats = 1_000;
+        const int multiplier = 1 + 1; // data page + abandoned page per commit
+        const int historyDepth = 2;
+
+        var account = Keccak.EmptyTreeHash;
+
+        byte[] value = [13];
+
+        using var db = PagedDb.NativeMemoryDb((multiplier * repeats + historyDepth) * Page.PageSize);
+
+        var reads = new List<IReadOnlyBatch>();
+
+        for (var i = 0; i < repeats; i++)
+        {
+            reads.Add(db.BeginReadOnlyBatch());
+
+            using var block = db.BeginNextBatch();
+            block.SetAccount(account, value);
+            await block.Commit(CommitOptions.FlushDataAndRoot);
+        }
+
+        foreach (var read in reads)
+        {
+            read.Dispose();
+        }
+    }
+
+    [Test]
     [Category(Categories.LongRunning)]
     public async Task Reuse_in_grow_and_shrink()
     {
