@@ -1,38 +1,100 @@
-﻿using FluentAssertions;
+﻿using System.Runtime.InteropServices;
+using FluentAssertions;
 using NUnit.Framework;
+using Paprika.Crypto;
 using Paprika.Store;
 
 namespace Paprika.Tests.Store;
 
 public class AbandonedTests : BasePageTests
 {
-    private const int BatchId = 2;
+    [Test]
+    public void Page_capacity()
+    {
+        const int expected = 2000;
+
+        var addresses = Enumerable.Range(1, expected).Select(i => new DbAddress((uint)i)).ToArray();
+
+        var page = new AbandonedPage(Page.DevOnlyNativeAlloc());
+        page.AsPage().Clear();
+
+        var added = new Stack<DbAddress>();
+
+        foreach (var address in addresses)
+        {
+            if (page.TryPush(address))
+            {
+                added.Push(address);
+            }
+        }
+
+        added.Count.Should().Be(expected);
+
+        while (added.TryPop(out var dequeued))
+        {
+            page.TryPop(out var popped).Should().BeTrue();
+            popped.Should().Be(dequeued);
+        }
+    }
 
     [Test]
-    public void Simple()
+    public async Task Reuse_in_limited_environment()
     {
-        var batch = NewBatch(BatchId);
-        var abandoned = new AbandonedPage(batch.GetNewPage(out var addr, true));
+        const int repeats = 10_000;
+        var account = Keccak.EmptyTreeHash;
 
-        const int fromPage = 13;
-        const int count = 1000;
+        byte[] value = [13];
 
-        var pages = new HashSet<uint>();
+        using var db = PagedDb.NativeMemoryDb(16 * Page.PageSize);
 
-        for (uint i = 0; i < count; i++)
+        for (var i = 0; i < repeats; i++)
         {
-            var page = i + fromPage;
-            pages.Add(page);
-
-            abandoned.EnqueueAbandoned(batch, addr, DbAddress.Page(page));
+            using var block = db.BeginNextBatch();
+            block.SetAccount(account, value);
+            await block.Commit(CommitOptions.FlushDataAndRoot);
         }
+    }
 
-        for (uint i = 0; i < count; i++)
+    [Test]
+    [Category(Categories.LongRunning)]
+    public async Task Reuse_in_grow_and_shrink()
+    {
+        const int repeats = 200_000;
+        const int spikeEvery = 100;
+        const int spikeSize = 1000;
+
+        var account = Keccak.EmptyTreeHash;
+        var spikeAccounts = new Keccak[spikeSize];
+
+        new Random(13).NextBytes(MemoryMarshal.Cast<Keccak, byte>(spikeAccounts.AsSpan()));
+
+        byte[] value = [13];
+
+        using var db = PagedDb.NativeMemoryDb(256 * Page.PageSize);
+
+        for (var i = 0; i < repeats; i++)
         {
-            abandoned.TryDequeueFree(out var page).Should().BeTrue();
-            pages.Remove(page).Should().BeTrue($"Page {page} should have been written first");
-        }
+            using var block = db.BeginNextBatch();
+            block.SetAccount(account, value);
 
-        pages.Should().BeEmpty();
+            if (i % spikeEvery == 0)
+            {
+                // spike set
+                foreach (var spikeAccount in spikeAccounts)
+                {
+                    block.SetAccount(spikeAccount, value);
+                }
+            }
+            else if (i % spikeEvery == 1)
+            {
+                // spike delete
+                foreach (var spikeAccount in spikeAccounts)
+                {
+                    block.SetAccount(spikeAccount, ReadOnlySpan<byte>.Empty);
+                }
+            }
+
+            await block.Commit(CommitOptions.FlushDataAndRoot);
+        }
     }
 }

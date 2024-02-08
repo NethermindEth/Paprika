@@ -316,8 +316,10 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
     }
 
-    public bool TryGet(scoped NibblePath key, IPageResolver batch, out ReadOnlySpan<byte> result)
+    public bool TryGet(scoped NibblePath key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
+        batch.AssertRead(Header);
+
         // read in-page
         var map = Map;
 

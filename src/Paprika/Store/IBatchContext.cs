@@ -1,4 +1,5 @@
-﻿using Paprika.Crypto;
+﻿using System.Diagnostics;
+using Paprika.Crypto;
 
 namespace Paprika.Store;
 
@@ -33,6 +34,11 @@ public interface IBatchContext : IReadOnlyBatchContext
     void RegisterForFutureReuse(Page page);
 
     Dictionary<Keccak, uint> IdCache { get; }
+
+    /// <summary>
+    /// Assigns the batch identifier to a given page, marking it writable by this batch.
+    /// </summary>
+    void AssignBatchId(Page page);
 }
 
 public interface IReadOnlyBatchContext : IPageResolver
@@ -41,6 +47,15 @@ public interface IReadOnlyBatchContext : IPageResolver
     /// Gets the current <see cref="IBatch"/> id.
     /// </summary>
     uint BatchId { get; }
+}
+
+public static class ReadOnlyBatchContextExtensions
+{
+    public static void AssertRead(this IReadOnlyBatchContext batch, in PageHeader header)
+    {
+        if (header.BatchId > batch.BatchId)
+            throw new Exception($"The page that is at batch {header.BatchId} should not be read by a batch with lower batch number {header.BatchId}.");
+    }
 }
 
 /// <summary>

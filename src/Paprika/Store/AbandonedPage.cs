@@ -1,7 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Paprika.Data;
 
 namespace Paprika.Store;
 
@@ -9,70 +8,27 @@ namespace Paprika.Store;
 /// Represents a set of pages abandoned during the batch with the same <see cref="IBatchContext.BatchId"/>
 /// as the page. 
 /// </summary>
-public readonly struct AbandonedPage : IPage
+// TODO: a simple optimization would be to encode addresses with highest bit used as marker for 2 consecutive values. Then Peek/Pop would be easy to implement in-situ. It would increase the density of the page by 2.
+[method: DebuggerStepThrough]
+public readonly struct AbandonedPage(Page page) : IPage
 {
-    private readonly Page _page;
+    private const uint PackedFlag = 0x8000_0000u;
+    private const uint PackedDiff = 1;
 
-    [DebuggerStepThrough]
-    public AbandonedPage(Page page) => _page = page;
+    private ref PageHeader Header => ref page.Header;
+    public uint BatchId => Header.BatchId;
+    public DbAddress Next => Data.Next;
 
-    public ref uint AbandonedAtBatch => ref Data.AbandonedAtBatchId;
-
-    /// <summary>
-    /// The next chunk of pages with the same batch id.
-    /// </summary>
-    public ref DbAddress Next => ref Data.Next;
-
-    private unsafe ref Payload Data => ref Unsafe.AsRef<Payload>(_page.Payload);
-
-    /// <summary>
-    /// Gets a snapshot of what pages are held in here.
-    /// </summary>
-    public ReadOnlySpan<DbAddress> Abandoned => Data.Abandoned;
-
-    /// <summary>
-    /// Enqueues the page to the registry of pages to be freed.
-    /// </summary>
-    public AbandonedPage EnqueueAbandoned(IBatchContext batch, DbAddress thisPageAddress, DbAddress abandoned)
-    {
-        if (Data.TryEnqueueAbandoned(abandoned))
-        {
-            return this;
-        }
-
-        // no more space, needs another next AbandonedPage
-        var newPage = batch.GetNewPage(out var nextAddr, true);
-
-        newPage.Header.PageType = PageType.Abandoned;
-        newPage.Header.PaprikaVersion = PageHeader.CurrentVersion;
-
-        var next = new AbandonedPage(newPage)
-        {
-            AbandonedAtBatch = AbandonedAtBatch
-        };
-
-        next.EnqueueAbandoned(batch, nextAddr, abandoned);
-
-        // chain the new to the current
-        next.Data.Next = thisPageAddress;
-
-        // return next as this is chained via Next field
-        return next;
-    }
-
-    /// <summary>
-    /// Tries to dequeue a free page.
-    /// </summary>
-    public bool TryDequeueFree(out DbAddress page) => Data.TryDequeueFree(out page);
+    private unsafe ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Payload
     {
         private const int Size = Page.PageSize - PageHeader.Size;
 
-        private const int PageAddressesOffset = sizeof(int) + sizeof(uint) + DbAddress.Size;
+        private const int PageAddressesOffset = sizeof(int) + DbAddress.Size;
 
-        private const int MaxCount = (Size - PageAddressesOffset) / DbAddress.Size;
+        public const int MaxCount = (Size - PageAddressesOffset) / DbAddress.Size;
 
         /// <summary>
         /// The count of pages contained in this page.
@@ -80,59 +36,14 @@ public readonly struct AbandonedPage : IPage
         [FieldOffset(0)] public int Count;
 
         /// <summary>
-        /// Provides the id of the batch that pages were abandoned at.
-        /// </summary>
-        /// <remarks>
-        /// It's separate from <see cref="Page.Header.BatchId"/> represents the writability of the page. 
-        /// </remarks>
-        [FieldOffset(sizeof(int))] public uint AbandonedAtBatchId;
-
-        /// <summary>
         /// The address of the next page that contains information about this <see cref="IBatchContext.BatchId"/>
         /// abandoned pages.
         /// </summary>
-        [FieldOffset(sizeof(int) + DbAddress.Size)] public DbAddress Next;
+        [FieldOffset(sizeof(int))] public DbAddress Next;
 
-        [FieldOffset(PageAddressesOffset)] private DbAddress AbandonedPages;
+        [FieldOffset(PageAddressesOffset)] private uint AbandonedPages;
 
-        /// <summary>
-        /// Tries to enqueue an abandoned page, reporting false on page being full.
-        /// </summary>
-        /// <param name="page"></param>
-        /// <returns></returns>
-        public bool TryEnqueueAbandoned(DbAddress page)
-        {
-            if (Count >= MaxCount)
-            {
-                // no more place here
-                return false;
-            }
-
-            // put page in place
-            Unsafe.Add(ref AbandonedPages, Count) = page;
-            Count++;
-            return true;
-        }
-
-        /// <summary>
-        /// Tries to dequeue an available free page.
-        /// </summary>
-        /// <param name="page">The page retrieved.</param>
-        /// <returns>Whether a page was retrieved</returns>
-        public bool TryDequeueFree(out DbAddress page)
-        {
-            if (Count == 0)
-            {
-                page = DbAddress.Null;
-                return false;
-            }
-
-            Count--;
-            page = Unsafe.Add(ref AbandonedPages, Count);
-            return true;
-        }
-
-        public ReadOnlySpan<DbAddress> Abandoned => MemoryMarshal.CreateSpan(ref AbandonedPages, Count);
+        public Span<uint> Abandoned => MemoryMarshal.CreateSpan(ref AbandonedPages, MaxCount);
     }
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver)
@@ -145,5 +56,134 @@ public readonly struct AbandonedPage : IPage
 
             abandoned.Accept(visitor, resolver);
         }
+    }
+
+    public bool TryPeek(out DbAddress addr)
+    {
+        if (Data.Count == 0)
+        {
+            addr = default;
+            return false;
+        }
+
+        var top = Data.Abandoned[Data.Count - 1];
+
+        if ((top & PackedFlag) == PackedFlag)
+        {
+            // Remove the flag and return
+            addr = new DbAddress((top & ~PackedFlag) + PackedDiff);
+            return true;
+        }
+
+        // Not packed, handle
+        addr = new DbAddress(top);
+        return true;
+    }
+
+    public bool TryPop(out DbAddress addr)
+    {
+        if (Data.Count == 0)
+        {
+            addr = default;
+            return false;
+        }
+
+        ref var top = ref Data.Abandoned[Data.Count - 1];
+
+        if ((top & PackedFlag) == PackedFlag)
+        {
+            // Remove packed flag
+            top &= ~PackedFlag;
+
+            // Return next
+            addr = new DbAddress(top + PackedDiff);
+            return true;
+        }
+
+        // Not packed, handle
+        addr = new DbAddress(top);
+        Data.Count--;
+        return true;
+    }
+
+    /// <summary>
+    /// Construct the chain of abandoned pages, allowing the abandoned to growth as they are constructed.
+    /// </summary>
+    public static DbAddress CreateChain(List<DbAddress> abandoned, IBatchContext batch)
+    {
+        var to = 0;
+
+        DbAddress next = default;
+
+        abandoned.Sort((a, b) => a.Raw.CompareTo(b.Raw));
+
+        while (to < abandoned.Count)
+        {
+            // TODO: consider not clearing the page
+            batch.GetNewPage(out var addr, true);
+
+            var page = new AbandonedPage(batch.GetAt(addr));
+            page.Header.PageType = PageType.Abandoned;
+            page.Data.Next = next;
+            page.Data.Count = 0; // initialize
+
+            next = addr;
+
+            while (to < abandoned.Count && page.TryPush(abandoned[to]))
+            {
+                to++;
+            }
+        }
+
+        return next;
+    }
+
+    public bool TryPush(DbAddress address)
+    {
+        Debug.Assert((address.Raw & PackedFlag) == 0u,
+            "Database is over 8TB!");
+
+        ref var count = ref Data.Count;
+
+        if (count == Payload.MaxCount)
+        {
+            return false;
+        }
+
+        if (count == 0)
+        {
+            // Nothing in the page yet, push the first
+            Data.Abandoned[count++] = address;
+        }
+        else
+        {
+            ref var last = ref Data.Abandoned[count - 1];
+
+            // If last is not packed and last is previous to the address added, pack it.
+            if ((last & PackedFlag) == 0 &&
+                last + PackedDiff == address)
+            {
+                last |= PackedFlag;
+            }
+            else
+            {
+                Data.Abandoned[count++] = address;
+            }
+        }
+
+        return true;
+    }
+
+    public void AttachTail(DbAddress tail, IBatchContext batch)
+    {
+        Debug.Assert(page.Header.BatchId == batch.BatchId);
+
+        if (Data.Next.IsNull)
+        {
+            Data.Next = tail;
+            return;
+        }
+
+        new AbandonedPage(batch.GetAt(Data.Next)).AttachTail(tail, batch);
     }
 }

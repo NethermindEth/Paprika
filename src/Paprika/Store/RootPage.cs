@@ -25,13 +25,6 @@ public readonly unsafe struct RootPage(Page root) : IPage
 
         private const int MetadataStart = 4 * DbAddress.Size + sizeof(uint);
 
-        private const int AbandonedPagesStart = MetadataStart + Metadata.Size;
-
-        /// <summary>
-        /// This gives the upper boundary of the number of abandoned pages that can be kept in the list.
-        /// </summary>
-        private const int AbandonedPagesCount = (Size - AbandonedPagesStart) / DbAddress.Size;
-
         /// <summary>
         /// The address of the next free page. This should be used rarely as pages should be reused
         /// with <see cref="AbandonedPage"/>.
@@ -64,13 +57,8 @@ public readonly unsafe struct RootPage(Page root) : IPage
         /// <summary>
         /// The start of the abandoned pages.
         /// </summary>
-        [FieldOffset(AbandonedPagesStart)]
-        private DbAddress AbandonedPage;
-
-        /// <summary>
-        /// Gets the span of the abandoned pages roots.
-        /// </summary>
-        public Span<DbAddress> AbandonedPages => MemoryMarshal.CreateSpan(ref AbandonedPage, AbandonedPagesCount);
+        [FieldOffset(AbandonedList.SpaceForRootPage)]
+        public AbandonedList AbandonedList;
 
         public DbAddress GetNextFreePage()
         {
@@ -88,16 +76,9 @@ public readonly unsafe struct RootPage(Page root) : IPage
             visitor.On(data, Data.StateRoot);
         }
 
-        foreach (var addr in Data.AbandonedPages)
-        {
-            if (addr.IsNull == false)
-            {
-                var abandoned = new AbandonedPage(resolver.GetAt(addr));
-                visitor.On(abandoned, addr);
+        Data.AbandonedList.Accept(visitor, resolver);
 
-                abandoned.Accept(visitor, resolver);
-            }
-        }
+
     }
 }
 
