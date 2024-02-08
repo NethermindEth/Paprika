@@ -763,10 +763,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 return;
             }
 
-            var abandoned = CollectionsMarshal.AsSpan(_abandoned);
-            abandoned.Sort((a, b) => a.Raw.CompareTo(b.Raw));
-
-            _root.Data.AbandonedList.Register(abandoned, this);
+            _root.Data.AbandonedList.Register(_abandoned, this);
         }
 
         private bool TryGetNoLongerUsedPage(out DbAddress found)

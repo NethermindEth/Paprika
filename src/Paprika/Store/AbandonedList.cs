@@ -124,9 +124,10 @@ public struct AbandonedList
         return true;
     }
 
-    public void Register(ReadOnlySpan<DbAddress> abandoned, IBatchContext batch)
+    public void Register(List<DbAddress> abandoned, IBatchContext batch)
     {
         var head = AbandonedPage.CreateChain(abandoned, batch);
+
         Register(head, batch);
     }
 

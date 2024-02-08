@@ -1,7 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Paprika.Merkle;
 
 namespace Paprika.Store;
 
@@ -81,11 +80,19 @@ public readonly struct AbandonedPage(Page page) : IPage
         return true;
     }
 
-    public static DbAddress CreateChain(ReadOnlySpan<DbAddress> abandoned, IBatchContext batch)
+    /// <summary>
+    /// Construct the chain of abandoned pages, allowing the abandoned to growth as they are constructed.
+    /// </summary>
+    /// <param name="abandoned"></param>
+    /// <param name="batch"></param>
+    /// <returns></returns>
+    public static DbAddress CreateChain(List<DbAddress> abandoned, IBatchContext batch)
     {
+        var to = 0;
+
         DbAddress next = default;
 
-        while (abandoned.IsEmpty == false)
+        while (to < abandoned.Count)
         {
             // TODO: consider not clearing the page
             batch.GetNewPage(out var addr, true);
@@ -95,23 +102,30 @@ public readonly struct AbandonedPage(Page page) : IPage
             page.Data.Next = next;
             next = addr;
 
-            if (abandoned.Length > Payload.MaxCount)
-            {
-                page.Data.Count = Payload.MaxCount;
-                abandoned[..Payload.MaxCount].CopyTo(page.Data.Abandoned);
-                abandoned = abandoned[Payload.MaxCount..];
-            }
-            else
-            {
-                // The last chunk
-                page.Data.Count = abandoned.Length;
-                abandoned.CopyTo(page.Data.Abandoned);
+            var length = abandoned.Count - to;
 
-                return next;
+            if (length > Payload.MaxCount)
+            {
+                Append(abandoned, page, to, Payload.MaxCount);
+                to += Payload.MaxCount;
+            }
+            else if (length > 0)
+            {
+                // Append the limited length
+                Append(abandoned, page, to, length);
+                to += length;
             }
         }
 
         return next;
+
+        static void Append(List<DbAddress> abandoned, in AbandonedPage page, int to, int length)
+        {
+            page.Data.Count = length;
+            var chunk = CollectionsMarshal.AsSpan(abandoned)
+                .Slice(to, length);
+            chunk.CopyTo(page.Data.Abandoned);
+        }
     }
 
     public void AttachTail(DbAddress tail, IBatchContext batch)

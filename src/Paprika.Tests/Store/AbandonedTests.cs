@@ -1,110 +1,72 @@
-﻿// using FluentAssertions;
-// using NUnit.Framework;
-// using Paprika.Chain;
-// using Paprika.Crypto;
-// using Paprika.Store;
-//
-// namespace Paprika.Tests.Store;
-//
-// public class AbandonedTests : BasePageTests
-// {
-//     [Test]
-//     public void EmptyList()
-//     {
-//         var list = new AbandonedList();
-//         list.TryGet(out _, 1, null!)
-//             .Should().BeFalse();
-//     }
-//
-//     class BatchContext(uint batchId, PageManager manager) : BatchContextBase(batchId)
-//     {
-//         public override Page GetAt(DbAddress address) => manager.GetAt(address);
-//
-//         public override DbAddress GetAddress(Page page) => manager.GetAddress(page);
-//
-//         public override Page GetNewPage(out DbAddress addr, bool clear) => manager.GetNewPage(out addr, clear);
-//
-//         public override bool WasWritten(DbAddress addr)
-//         {
-//             throw new NotImplementedException();
-//         }
-//
-//         public override void RegisterForFutureReuse(Page page)
-//         {
-//             throw new NotImplementedException();
-//         }
-//
-//         public override Dictionary<Keccak, uint> IdCache => throw new NotImplementedException();
-//     }
-//
-//     class PageManager : IDisposable
-//     {
-//         private readonly BufferPool _pool = new(1024);
-//         
-//         private Page[] _pages = Array.Empty<Page>();
-//         private int _new;
-//         
-//         public Page GetAt(DbAddress address) => _pages[address.Raw];
-//
-//         public DbAddress GetAddress(Page page) => new((uint)_pages.AsSpan().IndexOf(page));
-//
-//         public Page GetNewPage(out DbAddress addr, bool clear)
-//         {
-//             _new++;
-//             if (_new >= _pages.Length)
-//             {
-//                 const int chunk = 32;
-//                 Array.Resize(ref _pages, _pages.Length + chunk);
-//
-//                 for (int i = 0; i < chunk; i++)
-//                 {
-//                     _pages[^(1 + i)] = _pool.Rent(clear);
-//                 }
-//                 
-//             }
-//
-//             addr = new DbAddress((uint)_new);
-//             return _pages[_new];
-//         }
-//
-//         public void Dispose()
-//         {
-//             foreach (var page in _pages)
-//             {
-//                 _pool.Return(page);
-//             }
-//             
-//             _pool.Dispose();
-//         }
-//     }
-//
-//     // private const int BatchId = 2;
-//     //
-//     // [Test]
-//     // public void Simple()
-//     // {
-//     //     var batch = NewBatch(BatchId);
-//     //     var abandoned = new AbandonedPage(batch.GetNewPage(out var addr, true));
-//     //
-//     //     const int fromPage = 13;
-//     //     const int count = 1000;
-//     //
-//     //     var pages = new HashSet<uint>();
-//     //
-//     //     for (uint i = 0; i < count; i++)
-//     //     {
-//     //         var page = i + fromPage;
-//     //         pages.Add(page);
-//     //
-//     //         abandoned.EnqueueAbandoned(batch, addr, DbAddress.Page(page));
-//     //     }
-//     //
-//     //     for (uint i = 0; i < count; i++)
-//     //     {
-//     //         abandoned.TryDequeueFree(out var page).Should().BeTrue();
-//     //         pages.Remove(page).Should().BeTrue($"Page {page} should have been written first");
-//     //     }
-//     //
-//     //     pages.Should().BeEmpty();
-//     // }
-// }
+﻿using System.Runtime.InteropServices;
+using FluentAssertions;
+using NUnit.Framework;
+using Paprika.Chain;
+using Paprika.Crypto;
+using Paprika.Store;
+
+namespace Paprika.Tests.Store;
+
+public class AbandonedTests : BasePageTests
+{
+    [Test]
+    public async Task Reuse_in_limited_environment()
+    {
+        const int repeats = 10_000;
+        var account = Keccak.EmptyTreeHash;
+
+        byte[] value = [13];
+
+        using var db = PagedDb.NativeMemoryDb(16 * Page.PageSize);
+
+        for (var i = 0; i < repeats; i++)
+        {
+            using var block = db.BeginNextBatch();
+            block.SetAccount(account, value);
+            await block.Commit(CommitOptions.FlushDataAndRoot);
+        }
+    }
+
+    [Test]
+    [Category(Categories.LongRunning)]
+    public async Task Reuse_in_grow_and_shrink()
+    {
+        const int repeats = 200_000;
+        const int spikeEvery = 100;
+        const int spikeSize = 1000;
+
+        var account = Keccak.EmptyTreeHash;
+        var spikeAccounts = new Keccak[spikeSize];
+
+        new Random(13).NextBytes(MemoryMarshal.Cast<Keccak, byte>(spikeAccounts.AsSpan()));
+
+        byte[] value = [13];
+
+        using var db = PagedDb.NativeMemoryDb(256 * Page.PageSize);
+
+        for (var i = 0; i < repeats; i++)
+        {
+            using var block = db.BeginNextBatch();
+            block.SetAccount(account, value);
+
+            if (i % spikeEvery == 0)
+            {
+                // spike set
+                foreach (var spikeAccount in spikeAccounts)
+                {
+                    block.SetAccount(spikeAccount, value);
+                }
+            }
+            else if (i % spikeEvery == 1)
+            {
+                // spike delete
+                foreach (var spikeAccount in spikeAccounts)
+                {
+                    block.SetAccount(spikeAccount, ReadOnlySpan<byte>.Empty);
+                }
+            }
+
+            await block.Commit(CommitOptions.FlushDataAndRoot);
+        }
+    }
+}
