@@ -94,6 +94,10 @@ public readonly ref partial struct Key
 
     public bool IsAccountCompressed => ((Type & DataType.CompressedAccount) == DataType.CompressedAccount);
 
+    public bool IsState => Type == DataType.Account ||
+                           (Type == DataType.Merkle && Path.Length < NibblePath.KeccakNibbleCount);
+
+
     [SkipLocalsInit]
     public override int GetHashCode()
     {

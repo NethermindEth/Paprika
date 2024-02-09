@@ -39,6 +39,14 @@ public interface IBatchContext : IReadOnlyBatchContext
     /// Assigns the batch identifier to a given page, marking it writable by this batch.
     /// </summary>
     void AssignBatchId(Page page);
+
+    /// <summary>
+    /// Tries to get the page and if it does not exist, allocates one.
+    /// </summary>
+    /// <param name="addr">The address to check.</param>
+    /// <param name="pageType">The page type to assign.</param>
+    /// <returns>The page either allocated or get.</returns>
+    Page TryGetPageAlloc(ref DbAddress addr, PageType pageType);
 }
 
 public interface IReadOnlyBatchContext : IPageResolver
