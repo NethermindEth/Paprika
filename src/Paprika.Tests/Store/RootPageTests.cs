@@ -11,10 +11,13 @@ public class RootPageTests
     [Test]
     public void Encode_length()
     {
+        const byte packed = 0x04;
         const byte merkle = 0x02;
         const byte odd = 0x01;
+        const byte packedShift = 3;
 
-        var path = NibblePath.Parse("01234567");
+        // Path constructed that nibbles[1] & nibbles[3] are prone to packing them
+        var path = NibblePath.Parse("A1204567");
 
         var n0 = path.GetAt(0);
         var n0Shifted = (byte)(n0 << NibblePath.NibbleShift);
@@ -37,25 +40,30 @@ public class RootPageTests
         Check(path.SliceTo(1), DataType.Account, [(byte)(n0Shifted | odd)]);
         Check(path.SliceTo(1), DataType.StorageCell, [(byte)(n0Shifted | odd)]);
 
-        // length: 2
-        Check(path.SliceTo(2), DataType.Merkle, [(byte)(n0Shifted | n1), merkle]);
-        Check(path.SliceTo(2), DataType.Account, [(byte)(n0Shifted | n1), 0]);
-        Check(path.SliceTo(2), DataType.StorageCell, [(byte)(n0Shifted | n1), 0]);
+        // length: 2, packed
+        var n1Packed = n1 << packedShift | packed;
+        Check(path.SliceTo(2), DataType.Merkle, [(byte)(n0Shifted | n1Packed | merkle)]);
+        Check(path.SliceTo(2), DataType.Account, [(byte)(n0Shifted | n1Packed)]);
+        Check(path.SliceTo(2), DataType.StorageCell, [(byte)(n0Shifted | n1Packed)]);
 
         // length: 3
         Check(path.SliceTo(3), DataType.Merkle, [(byte)(n0Shifted | n1), (byte)(n2Shifted | merkle | odd)]);
         Check(path.SliceTo(3), DataType.Account, [(byte)(n0Shifted | n1), (byte)(n2Shifted | odd)]);
         Check(path.SliceTo(3), DataType.StorageCell, [(byte)(n0Shifted | n1), (byte)(n2Shifted | odd)]);
 
-        // length: 4
-        Check(path.SliceTo(4), DataType.Merkle, [(byte)(n0Shifted | n1), (byte)(n2Shifted | n3), merkle]);
-        Check(path.SliceTo(4), DataType.Account, [(byte)(n0Shifted | n1), (byte)(n2Shifted | n3), 0]);
-        Check(path.SliceTo(4), DataType.StorageCell, [(byte)(n0Shifted | n1), (byte)(n2Shifted | n3), 0]);
+        // length: 4, packed
+        var n3Packed = n3 << packedShift | packed;
+        Check(path.SliceTo(4), DataType.Merkle, [(byte)(n0Shifted | n1), (byte)(n2Shifted | n3Packed | merkle)]);
+        Check(path.SliceTo(4), DataType.Account, [(byte)(n0Shifted | n1), (byte)(n2Shifted | n3Packed)]);
+        Check(path.SliceTo(4), DataType.StorageCell, [(byte)(n0Shifted | n1), (byte)(n2Shifted | n3Packed)]);
 
         // length: 5
-        Check(path.SliceTo(5), DataType.Merkle, [(byte)(n0Shifted | n1), (byte)(n2Shifted | n3), (byte)(n4Shifted | merkle | odd)]);
-        Check(path.SliceTo(5), DataType.Account, [(byte)(n0Shifted | n1), (byte)(n2Shifted | n3), (byte)(n4Shifted | odd)]);
-        Check(path.SliceTo(5), DataType.StorageCell, [(byte)(n0Shifted | n1), (byte)(n2Shifted | n3), (byte)(n4Shifted | odd)]);
+        Check(path.SliceTo(5), DataType.Merkle,
+            [(byte)(n0Shifted | n1), (byte)(n2Shifted | n3), (byte)(n4Shifted | merkle | odd)]);
+        Check(path.SliceTo(5), DataType.Account,
+            [(byte)(n0Shifted | n1), (byte)(n2Shifted | n3), (byte)(n4Shifted | odd)]);
+        Check(path.SliceTo(5), DataType.StorageCell,
+            [(byte)(n0Shifted | n1), (byte)(n2Shifted | n3), (byte)(n4Shifted | odd)]);
 
         return;
 
