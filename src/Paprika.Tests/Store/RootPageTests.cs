@@ -1,5 +1,4 @@
 ﻿using System.Buffers.Binary;
-using System.Numerics;
 using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Crypto;
