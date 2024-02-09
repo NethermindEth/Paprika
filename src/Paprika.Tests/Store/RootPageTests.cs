@@ -1,4 +1,6 @@
-﻿using FluentAssertions;
+﻿using System.Buffers.Binary;
+using System.Numerics;
+using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -77,5 +79,56 @@ public class RootPageTests
                     $"Mismatch, expected was: {expected.AsSpan().ToHexString(false)} while actual {actual.RawSpan.ToHexString(false)}");
             }
         }
+    }
+
+    [TestCase(DataType.Account)]
+    [TestCase(DataType.StorageCell)]
+    public void Encode_fuzzing(DataType type)
+    {
+        const int count = 8;
+
+        Span<byte> span = stackalloc byte[4];
+        Span<byte> nibbles = stackalloc byte[count];
+        Span<byte> working = stackalloc byte[count];
+
+        Dictionary<string, string> hashes = new Dictionary<string, string>();
+
+        for (var i = 0; i < 2000; i++)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(span, i);
+            var path = NibblePath.FromKey(span);
+
+            for (var j = 0; j < count; j++)
+            {
+                nibbles[j] = path.GetAt(j);
+            }
+
+            // nibbles contains all the nibbles
+            var cutoff = nibbles.LastIndexOfAnyExcept((byte)0) + 1;
+            var actualPath = NibblePath.FromRawNibbles(nibbles[..cutoff], working);
+
+            if (actualPath.Length > 0)
+            {
+                // only Merkle can be at the root!
+                Unique(actualPath, type, hashes);
+            }
+
+            Unique(actualPath, DataType.Merkle, hashes);
+        }
+
+        return;
+
+        void Unique(in NibblePath path, DataType type, Dictionary<string, string> hashes)
+        {
+            Span<byte> destination = stackalloc byte[count];
+            var hex = Encode(path, destination, type).RawSpan.ToHexString(false);
+
+            var p = path.ToString();
+            if (hashes.TryAdd(hex, p) == false)
+            {
+                Assert.Fail($"Hex of encoded path {hex} already exists for path {hashes[hex]} and cannot be added for path {p}");
+            }
+        }
+
     }
 }

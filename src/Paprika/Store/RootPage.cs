@@ -169,7 +169,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         if (lastNibble <= maxPacked)
         {
             // We can pack better
-            destination[raw.Length - 1] = (byte)(lastButOneNibble | (lastByte << packedShift) | evenPacked | typeFlag);
+            destination[raw.Length - 1] = (byte)(lastButOneNibble | (lastNibble << packedShift) | evenPacked | typeFlag);
             return NibblePath.FromKey(destination[..raw.Length]);
         }
 
