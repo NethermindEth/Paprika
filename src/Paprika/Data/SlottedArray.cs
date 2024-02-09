@@ -21,10 +21,6 @@ namespace Paprika.Data;
 /// </remarks>
 public readonly ref struct SlottedArray
 {
-    public const int MinSize = AllocationGranularity * 3;
-
-    private const int AllocationGranularity = 8;
-
     private readonly ref Header _header;
     private readonly Span<byte> _data;
     private readonly Span<Slot> _slots;
