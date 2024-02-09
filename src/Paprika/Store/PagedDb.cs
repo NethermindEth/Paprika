@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
+using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store.PageManagers;
@@ -49,10 +50,9 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     private readonly Histogram<int> _commitPageCountNewlyAllocated;
     private readonly MetricsExtensions.IAtomicIntGauge _dbSize;
 
-    public const int StorageKeySize = Keccak.Size + Keccak.Size + 1;
-
-    // pool
+    // pooled objects
     private Context? _ctx;
+    private readonly BufferPool _pooledRoots;
 
     /// <summary>
     /// Initializes the paged db.
@@ -70,6 +70,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         _roots = new RootPage[historyDepth];
         _batchCurrent = null;
         _ctx = new Context();
+        _pooledRoots = new BufferPool(16, true, "PagedDb-Roots");
 
         RootInit();
 
@@ -157,6 +158,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
     public void Dispose()
     {
+        _pooledRoots.Dispose();
         _manager.Dispose();
         _meter.Dispose();
     }
@@ -180,12 +182,11 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
     private ReadOnlyBatch BeginReadOnlyBatch(string name, in RootPage root)
     {
-        var batch = new ReadOnlyBatch(this,
-            root.Header.BatchId,
-            root.Data.StateRoot,
-            root.Data.StorageRoot,
-            root.Data.IdRoot,
-            root.Data.Metadata, name);
+        var copy = new RootPage(_pooledRoots.Rent(false));
+
+        root.CopyTo(copy);
+
+        var batch = new ReadOnlyBatch(this, copy, name);
         _batchesReadOnly.Add(batch);
         return batch;
     }
@@ -294,6 +295,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         lock (_batchLock)
         {
             _batchesReadOnly.Remove(batch);
+            _pooledRoots.Return(batch.Root.AsPage());
         }
     }
 
@@ -349,41 +351,21 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     private void CommitNewRoot() => _lastRoot += 1;
 
 
-    private static bool IsState(in Key key) =>
-        key.Type == DataType.Account ||
-        (key.Type == DataType.Merkle && key.Path.Length < NibblePath.KeccakNibbleCount);
-
-    class ReadOnlyBatch : IReportingReadOnlyBatch, IReadOnlyBatchContext
+    private class ReadOnlyBatch(PagedDb db, RootPage root, string name) : IReportingReadOnlyBatch, IReadOnlyBatchContext
     {
-        private readonly PagedDb _db;
-        private volatile bool _disposed;
+        public RootPage Root => root;
 
-        private readonly DbAddress _stateRootPage;
-        private readonly DbAddress _storageRootPage;
-        private readonly DbAddress _rootIdPage;
-        private readonly string _name;
         private long _reads;
-
-        public ReadOnlyBatch(PagedDb db, uint batchId, DbAddress stateRootPage, DbAddress storageRootPage,
-            DbAddress rootIdPage, Metadata metadata, string name)
-        {
-            _db = db;
-            _stateRootPage = stateRootPage;
-            _storageRootPage = storageRootPage;
-            _rootIdPage = rootIdPage;
-            _name = name;
-            BatchId = batchId;
-            Metadata = metadata;
-        }
+        private volatile bool _disposed;
 
         public void Dispose()
         {
-            _db.ReportRead(Volatile.Read(ref _reads));
+            db.ReportRead(Volatile.Read(ref _reads));
             _disposed = true;
-            _db.DisposeReadOnlyBatch(this);
+            db.DisposeReadOnlyBatch(this);
         }
 
-        public Metadata Metadata { get; }
+        public Metadata Metadata => root.Data.Metadata;
 
         public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
         {
@@ -392,97 +374,27 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             Interlocked.Increment(ref _reads);
 
-            if (IsState(key))
-            {
-                if (_stateRootPage.IsNull)
-                {
-                    result = default;
-                    return false;
-                }
-
-                var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength], key.Type);
-                return new DataPage(GetAt(_stateRootPage)).TryGet(encoded, this, out result);
-            }
-
-            if (_storageRootPage.IsNull || _rootIdPage.IsNull)
-            {
-                result = default;
-                return false;
-            }
-
-            var ids = new FanOutPage(GetAt(_rootIdPage));
-            if (ids.TryGet(key.Path, this, out var id) == false)
-            {
-                result = default;
-                return false;
-            }
-
-            var encodedStorage = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength], key.Type);
-            var path = NibblePath.FromKey(id).Append(encodedStorage, stackalloc byte[StorageKeySize]);
-
-            return new FanOutPage(GetAt(_storageRootPage)).TryGet(path, this, out result);
+            return root.TryGet(key, this, out result);
         }
 
         public void Report(IReporter state, IReporter storage)
         {
-            if (_stateRootPage.IsNull == false)
+            if (root.Data.StateRoot.IsNull == false)
             {
-                new DataPage(GetAt(_stateRootPage)).Report(state, this, 1);
+                new DataPage(GetAt(root.Data.StateRoot)).Report(state, this, 1);
             }
 
-            if (_storageRootPage.IsNull == false)
+            if (root.Data.StorageRoot.IsNull == false)
             {
-                new FanOutPage(GetAt(_storageRootPage)).Report(storage, this, 1);
+                new FanOutPage(GetAt(root.Data.StorageRoot)).Report(storage, this, 1);
             }
         }
 
-        public uint BatchId { get; }
+        public uint BatchId => root.Header.BatchId;
 
-        public Page GetAt(DbAddress address) => _db._manager.GetAt(address);
+        public Page GetAt(DbAddress address) => db._manager.GetAt(address);
 
-        public override string ToString() => $"{nameof(ReadOnlyBatch)}, Name: {_name}, BatchId: {BatchId}";
-    }
-
-    /// <summary>
-    /// Encodes the path in a way that makes it byte-aligned and unique, but also sort:
-    ///
-    /// - empty path is left empty
-    /// - odd-length path is padded with a single nibble with value of 0x01
-    /// - even-length path is padded with a single byte (2 nibbles with value of 0x00)
-    ///
-    /// To ensure that <see cref="DataType.Merkle"/> and <see cref="DataType.Account"/>/<see cref="DataType.StorageCell"/>
-    /// of the same length can coexist, the merkle marker is added as well.
-    /// </summary>
-    private static NibblePath Encode(in NibblePath path, in Span<byte> destination, DataType type)
-    {
-        var typeFlag = (byte)(type & DataType.Merkle);
-
-        const byte oddEnd = 0x01;
-        const byte evenEnd = 0x00;
-
-        Debug.Assert(path.IsOdd == false, "Encoded paths should not be odd. They always start at 0");
-
-        if (path.IsEmpty)
-            return path;
-
-        var raw = path.RawSpan;
-
-        if (path.Length % 2 == 1)
-        {
-            // Odd case
-            raw.CopyTo(destination);
-            ref var last = ref destination[raw.Length - 1];
-            last &= 0xF0;
-            last |= oddEnd;
-            last |= typeFlag;
-
-            return NibblePath.FromKey(destination[..raw.Length]);
-        }
-
-        // Even case
-        raw.CopyTo(destination);
-        destination[raw.Length] = (byte)(evenEnd | typeFlag);
-        return NibblePath.FromKey(destination[..(raw.Length + 1)]);
+        public override string ToString() => $"{nameof(ReadOnlyBatch)}, Name: {name}, BatchId: {BatchId}";
     }
 
     class Batch : BatchContextBase, IBatch
@@ -531,34 +443,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             _db.ReportRead();
 
-            if (IsState(key))
-            {
-                if (_root.Data.StateRoot.IsNull)
-                {
-                    result = default;
-                    return false;
-                }
-
-                var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength], key.Type);
-                return new DataPage(GetAt(_root.Data.StateRoot)).TryGet(encoded, this, out result);
-            }
-
-            if (_root.Data.StorageRoot.IsNull || _root.Data.IdRoot.IsNull)
-            {
-                result = default;
-                return false;
-            }
-
-            var ids = new FanOutPage(GetAt(_root.Data.IdRoot));
-            if (ids.TryGet(key.Path, this, out var id) == false)
-            {
-                result = default;
-                return false;
-            }
-
-            var encodedStorage = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength], key.Type);
-            var path = NibblePath.FromKey(id).Append(encodedStorage, stackalloc byte[StorageKeySize]);
-            return new FanOutPage(GetAt(_root.Data.StorageRoot)).TryGet(path, this, out result);
+            return _root.TryGet(key, this, out result);
         }
 
         public void SetMetadata(uint blockNumber, in Keccak blockHash)
@@ -570,53 +455,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         {
             _db.ReportWrite();
 
-            if (IsState(key))
-            {
-                var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength], key.Type);
-                SetAtRoot<DataPage>(encoded, rawData, ref _root.Data.StateRoot);
-            }
-            else
-            {
-                scoped NibblePath id;
-                Span<byte> idSpan = stackalloc byte[sizeof(uint)];
-
-                if (IdCache.TryGetValue(key.Path.UnsafeAsKeccak, out var cachedId))
-                {
-                    BinaryPrimitives.WriteUInt32LittleEndian(idSpan, cachedId);
-                    id = NibblePath.FromKey(idSpan);
-                }
-                else
-                {
-                    // full extraction of key possible, get it
-                    var ids = new FanOutPage(TryGetPageAlloc(ref _root.Data.IdRoot, PageType.Identity));
-
-                    // try fetch existing first
-                    if (ids.TryGet(key.Path, this, out var existingId) == false)
-                    {
-                        _root.Data.AccountCounter++;
-                        BinaryPrimitives.WriteUInt32LittleEndian(idSpan, _root.Data.AccountCounter);
-
-                        // memoize in cache
-                        IdCache[key.Path.UnsafeAsKeccak] = _root.Data.AccountCounter;
-
-                        // update root
-                        _root.Data.IdRoot = GetAddress(ids.Set(key.Path, idSpan, this));
-
-                        id = NibblePath.FromKey(idSpan);
-                    }
-                    else
-                    {
-                        // memoize in cache
-                        IdCache[key.Path.UnsafeAsKeccak] = BinaryPrimitives.ReadUInt32LittleEndian(existingId);
-                        id = NibblePath.FromKey(existingId);
-                    }
-                }
-
-                var encoded = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength], key.Type);
-                var path = id.Append(encoded, stackalloc byte[StorageKeySize]);
-
-                SetAtRoot<FanOutPage>(path, rawData, ref _root.Data.StorageRoot);
-            }
+            _root.SetRaw(key, this, rawData);
         }
 
         private void SetAtRoot<TPage>(in NibblePath path, in ReadOnlySpan<byte> rawData, ref DbAddress root)
@@ -630,40 +469,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         public void Destroy(in NibblePath account)
         {
             _db.ReportWrite();
-
-            // Get the id page
-            var ids = new FanOutPage(TryGetPageAlloc(ref _root.Data.IdRoot, PageType.Identity));
-
-            // Destroy the Id entry about it
-            _root.Data.IdRoot = GetAddress(ids.Set(account, ReadOnlySpan<byte>.Empty, this));
-
-            // Destroy the account entry
-            SetAtRoot<DataPage>(Encode(account, stackalloc byte[account.MaxByteLength], DataType.Account),
-                ReadOnlySpan<byte>.Empty, ref _root.Data.StateRoot);
-
-            // Remove the cached
-            IdCache.Remove(account.UnsafeAsKeccak);
-
-            // TODO: there' no garbage collection for storage
-            // It should not be hard. Walk down by the mapped path, then remove all the pages underneath.
-        }
-
-        private Page TryGetPageAlloc(ref DbAddress addr, PageType pageType)
-        {
-            CheckDisposed();
-
-            Page page;
-            if (addr.IsNull)
-            {
-                page = GetNewPage(out addr, true);
-                page.Header.PageType = pageType;
-            }
-            else
-            {
-                page = GetAt(addr);
-            }
-
-            return page;
+            _root.Destroy(this, account);
         }
 
         private void CheckDisposed()
@@ -794,6 +600,9 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
+    private static unsafe Page AllocateOnePage() =>
+        new((byte*)NativeMemory.AlignedAlloc(Page.PageSize, (UIntPtr)UIntPtr.Size));
+
     /// <summary>
     /// A reusable context for the write batch.
     /// </summary>
@@ -801,7 +610,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     {
         public unsafe Context()
         {
-            Page = new Page((byte*)NativeMemory.AlignedAlloc(Page.PageSize, (UIntPtr)UIntPtr.Size));
+            Page = new((byte*)NativeMemory.AlignedAlloc(Page.PageSize, (UIntPtr)UIntPtr.Size));
             Abandoned = new List<DbAddress>();
             Written = new HashSet<DbAddress>();
             IdCache = new Dictionary<Keccak, uint>();
