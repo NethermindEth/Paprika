@@ -92,6 +92,9 @@ public enum PageType : byte
     /// </summary>
     Identity = 2,
 
+    /// <summary>
+    /// Represents <see cref="AbandonedPage"/>
+    /// </summary>
     Abandoned = 3,
 
     /// <summary>

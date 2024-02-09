@@ -3,7 +3,6 @@ using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
 using Paprika.Chain;
 using Paprika.Crypto;
-using Paprika.LMDB;
 using Paprika.Merkle;
 using Paprika.Store;
 using Paprika.Tests;

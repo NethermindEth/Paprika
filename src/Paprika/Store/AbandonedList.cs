@@ -9,6 +9,9 @@ namespace Paprika.Store;
 [StructLayout(LayoutKind.Explicit, Size = Size)]
 public struct AbandonedList
 {
+    /// <summary>
+    /// The total amount of data needed for the <see cref="RootPage"/> data.
+    /// </summary>
     public const int SpaceForRootPage = 64;
 
     private const int EntriesStart = DbAddress.Size + sizeof(uint);

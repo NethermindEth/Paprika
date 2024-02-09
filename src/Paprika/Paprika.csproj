@@ -9,7 +9,6 @@
     <ItemGroup>
       <PackageReference Include="HdrHistogram" Version="2.5.0" />
       <PackageReference Include="Nethermind.Numerics.Int256" Version="1.1.0" />
-      <PackageReference Include="Spreads.LMDB" Version="2023.930.421" />
       <PackageReference Include="System.IO.Hashing" Version="8.0.0-preview.4.23259.5" />
     </ItemGroup>
 
