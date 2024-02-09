@@ -185,8 +185,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             root.Data.StateRoot,
             root.Data.StorageRoot,
             root.Data.IdRoot,
-            root.Data.Metadata,
-            root.Data.NextFreePage, name);
+            root.Data.Metadata, name);
         _batchesReadOnly.Add(batch);
         return batch;
     }
@@ -362,19 +361,16 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         private readonly DbAddress _stateRootPage;
         private readonly DbAddress _storageRootPage;
         private readonly DbAddress _rootIdPage;
-        private readonly DbAddress _nextFreePage;
         private readonly string _name;
         private long _reads;
 
         public ReadOnlyBatch(PagedDb db, uint batchId, DbAddress stateRootPage, DbAddress storageRootPage,
-            DbAddress rootIdPage, Metadata metadata,
-            DbAddress nextFreePage, string name)
+            DbAddress rootIdPage, Metadata metadata, string name)
         {
             _db = db;
             _stateRootPage = stateRootPage;
             _storageRootPage = storageRootPage;
             _rootIdPage = rootIdPage;
-            _nextFreePage = nextFreePage;
             _name = name;
             BatchId = batchId;
             Metadata = metadata;
@@ -474,7 +470,6 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         if (path.Length % 2 == 1)
         {
             // Odd case
-
             raw.CopyTo(destination);
             ref var last = ref destination[raw.Length - 1];
             last &= 0xF0;
@@ -806,7 +801,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     {
         public unsafe Context()
         {
-            Page = new Page((byte*)NativeMemory.AlignedAlloc((UIntPtr)Page.PageSize, (UIntPtr)UIntPtr.Size));
+            Page = new Page((byte*)NativeMemory.AlignedAlloc(Page.PageSize, (UIntPtr)UIntPtr.Size));
             Abandoned = new List<DbAddress>();
             Written = new HashSet<DbAddress>();
             IdCache = new Dictionary<Keccak, uint>();

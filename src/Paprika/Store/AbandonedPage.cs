@@ -8,7 +8,10 @@ namespace Paprika.Store;
 /// Represents a set of pages abandoned during the batch with the same <see cref="IBatchContext.BatchId"/>
 /// as the page. 
 /// </summary>
-// TODO: a simple optimization would be to encode addresses with highest bit used as marker for 2 consecutive values. Then Peek/Pop would be easy to implement in-situ. It would increase the density of the page by 2.
+/// <remarks>
+/// The structure uses a packed storage so that consecutive numbers that are different by <see cref="PackedFlag"/>
+/// are written over a single <see cref="uint"/> using a flag <see cref="PackedFlag"/>.
+/// </remarks>
 [method: DebuggerStepThrough]
 public readonly struct AbandonedPage(Page page) : IPage
 {
