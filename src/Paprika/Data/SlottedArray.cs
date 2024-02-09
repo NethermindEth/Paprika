@@ -542,7 +542,7 @@ public readonly ref struct SlottedArray
         var a = Unsafe.ReadUnaligned<ushort>(in key[0]);
         var b = Unsafe.ReadUnaligned<ushort>(in key[^2]);
 
-        // xor first two bytes as ushort with last two bytes as ushort but negated. This allows to short
+        // A really simple hash.
         return (ushort)(a ^ b);
     }
 
