@@ -125,7 +125,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
     /// To ensure that <see cref="DataType.Merkle"/> and <see cref="DataType.Account"/>/<see cref="DataType.StorageCell"/>
     /// of the same length can coexist, the merkle marker is added as well.
     /// </summary>
-    private static NibblePath Encode(in NibblePath path, in Span<byte> destination, DataType type)
+    public static NibblePath Encode(in NibblePath path, in Span<byte> destination, DataType type)
     {
         var typeFlag = (byte)(type & DataType.Merkle);
 
