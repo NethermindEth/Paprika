@@ -115,7 +115,7 @@ public class PaprikaCopyingVisitor : ITreeVisitor<PathContext>, IDisposable
 
         var batch = new Queue<Item>();
         var finalization = new Queue<Keccak>();
-        const int finalizationDepth = 4;
+        const int finalizationDepth = 16;
 
         while (await reader.WaitToReadAsync())
         {
