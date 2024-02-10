@@ -63,6 +63,21 @@ public static class TestExtensions
         return account;
     }
 
+    public static void AssertRawValue(this IReadOnlyBatch read, in Key key, ReadOnlySpan<byte> expected)
+    {
+        if (!read.TryGet(key, out var value))
+        {
+            Assert.Fail($"Missing value for the: {key.ToString()}.");
+        }
+
+        if (value.SequenceEqual(expected) == false)
+        {
+            throw new InvalidOperationException(
+                $"Invalid value for key {key.ToString()}" +
+                $"Expected was '{expected.ToHexString(false)}' while actual '{value.ToHexString(false)}'");
+        }
+    }
+
     public static void AssertStorageValue(this IReadOnlyBatch read, in Keccak key, in Keccak storage,
         ReadOnlySpan<byte> expected)
     {

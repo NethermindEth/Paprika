@@ -1,5 +1,4 @@
-﻿using System.Buffers;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
@@ -18,7 +17,8 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
     private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
 
-    private bool UseThis(in NibblePath key) => key.IsEmpty || Data.Next.IsNull || key.GetAt(0) % 2 == 0;
+    private bool UseThis(in NibblePath key) =>
+        key.IsEmpty || Data.Next.IsNull || key.GetAt(Header.LevelOddity) % 2 == 0;
 
     private (bool, Page) TrySetInSitu(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
@@ -53,21 +53,48 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
         if (useThis)
         {
-            var (success, cowedPage) = TrySetInSitu(key, data, batch);
+            var (success, cowed) = TrySetInSitu(key, data, batch);
             if (success)
             {
-                return cowedPage;
+                return cowed;
             }
 
             // Not enough space, see whether can partition
             if (Data.Next.IsNull)
             {
-                throw new Exception("Partition");
+                // Create next and split
+                var next = new LeafPage(batch.GetNewPage(out Data.Next, true));
+                next.Header.PageType = PageType.Leaf;
+                next.Header.Level = Header.Level;
+
+                foreach (var item in Map.EnumerateAll())
+                {
+                    // Next is already assigned so it's save to check with UseThis
+                    var path = NibblePath.FromKey(item.Key).SliceFrom(Header.LevelOddity);
+                    if (UseThis(path) == false)
+                    {
+                        var (nextSuccess, nextCowed) = next.TrySetInSitu(path, item.RawData, batch);
+
+                        Debug.Assert(nextCowed.Raw == next.AsPage().Raw, "Inserting above should happen in the same batch");
+
+                        if (nextSuccess)
+                        {
+                            Map.Delete(item);
+                        }
+                    }
+                }
+
+                // Retry adding after moving half to next
+                return Set(key, data, batch);
             }
+
+            // Next exist, but it's this page that is filled. Create a data
+            return TransformToDataPage(key, data, batch);
         }
         else
         {
             Debug.Assert(Data.Next.IsNull == false, "The next should exist!");
+
             var next = new LeafPage(batch.GetAt(Data.Next));
             var (success, cowed) = next.TrySetInSitu(key, data, batch);
             if (success)
@@ -76,11 +103,42 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
                 return page;
             }
 
-            throw new Exception("Filled! Split to DataPage!");
+            // No success, transform to the data page
+            return TransformToDataPage(key, data, batch);
+        }
+    }
+
+    private Page TransformToDataPage(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
+    {
+        batch.RegisterForFutureReuse(this.AsPage());
+
+        var dataPage = new DataPage(batch.GetNewPage(out _, true));
+        dataPage.Header.PageType = PageType.Standard;
+        dataPage.Header.Level = Header.Level;
+
+        // Flush all of this page
+        foreach (var item in Map.EnumerateAll())
+        {
+            var path = NibblePath.FromKey(item.Key).SliceFrom(Header.LevelOddity);
+            dataPage = new DataPage(dataPage.Set(path, item.RawData, batch));
         }
 
-        // The page has some of the values flushed down, try to add again.
-        return Set(key, data, batch);
+        // Flush all of the next, if exist
+        if (Data.Next.IsNull == false)
+        {
+            var next = new LeafPage(batch.GetAt(Data.Next));
+
+            foreach (var item in next.Map.EnumerateAll())
+            {
+                var path = NibblePath.FromKey(item.Key).SliceFrom(Header.LevelOddity);
+                dataPage = new DataPage(dataPage.Set(path, item.RawData, batch));
+            }
+
+            batch.RegisterForFutureReuse(next.AsPage());
+        }
+
+        // add the new
+        return dataPage.Set(key, data, batch);
     }
 
     /// <summary>
@@ -122,9 +180,11 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
         var useThis = UseThis(key);
 
+        var raw = key.RawSpan;
+
         return useThis
-            ? Map.TryGet(key.RawSpan, out result)
-            : new LeafPage(batch.GetAt(Data.Next)).TryGet(key, batch, out result);
+            ? Map.TryGet(raw, out result)
+            : new LeafPage(batch.GetAt(Data.Next)).Map.TryGet(raw, out result);
     }
 
     private SlottedArray Map => new(Data.DataSpan);

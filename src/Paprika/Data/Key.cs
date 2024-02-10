@@ -13,6 +13,7 @@ namespace Paprika.Data;
 /// <remarks>
 /// Use factory methods to create one.
 /// </remarks>
+[DebuggerStepThrough]
 public readonly ref partial struct Key
 {
     public readonly NibblePath Path;

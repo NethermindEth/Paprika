@@ -73,6 +73,11 @@ public struct PageHeader
     [FieldOffset(6)] public byte Level;
 
     /// <summary>
+    /// Gets the level oddity.
+    /// </summary>
+    public int LevelOddity => Level % 2;
+
+    /// <summary>
     /// Internal metadata of the given page.
     /// </summary>
     [FieldOffset(7)] public byte Metadata;

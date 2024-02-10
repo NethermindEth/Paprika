@@ -1,8 +1,10 @@
 ﻿using System.Buffers.Binary;
+using System.Diagnostics;
 using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Crypto;
+using Paprika.Data;
 using Paprika.Store;
 using static Paprika.Tests.Values;
 
@@ -243,6 +245,39 @@ public class DbTests
                 .CopyTo(result.BytesAsSpan);
             return result;
         }
+    }
+
+    [Test]
+    public async Task Page_splitting()
+    {
+        const int size = MB16;
+        using var db = PagedDb.NativeMemoryDb(size);
+
+        var value = new byte[3900];
+
+        var random = new Random(13);
+        random.NextBytes(value);
+
+        string[] keys = ["B9", "BB", "BD", "BF"];
+
+        using var batch = db.BeginNextBatch();
+
+        for (int i = 0; i < keys.Length; i++)
+        {
+            batch.SetRaw(K(keys[i]), value);
+
+            for (int j = 0; j <= i; j++)
+            {
+                batch.AssertRawValue(K(keys[j]), value);
+            }
+        }
+
+        await batch.Commit(CommitOptions.FlushDataAndRoot);
+
+        return;
+
+        [DebuggerStepThrough]
+        static Key K(string hex) => Key.Account(NibblePath.Parse(hex));
     }
 
 

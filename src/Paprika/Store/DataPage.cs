@@ -94,7 +94,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             if (key.IsEmpty) // empty keys are left in page
                 continue;
 
-            key = key.SliceFrom(TreeLevelOddity); // for odd levels, slice by 1
+            key = key.SliceFrom(Header.LevelOddity); // for odd levels, slice by 1
             if (key.IsEmpty)
                 continue;
 
@@ -121,16 +121,13 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         return dest;
     }
 
-    private int TreeLevelOddity => Header.Level % 2;
-
-
     private byte FindMostFrequentNibble(SlottedArray map)
     {
         const int count = SlottedArray.BucketCount;
 
         Span<ushort> stats = stackalloc ushort[count];
 
-        if (TreeLevelOddity == 0)
+        if (Header.LevelOddity == 0)
         {
             map.GatherCountStatistics(stats, static span =>
             {
@@ -225,11 +222,9 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
                 var leaf = new LeafPage(child);
                 return leaf.TryGet(key.SliceFrom(1), batch, out result);
             }
-            else
-            {
-                var data = new DataPage(child);
-                return data.TryGet(key.SliceFrom(1), batch, out result);
-            }
+
+            var data = new DataPage(child);
+            return data.TryGet(key.SliceFrom(1), batch, out result);
         }
 
         result = default;
