@@ -125,12 +125,21 @@ public readonly unsafe struct RootPage(Page root) : IPage
     /// To ensure that <see cref="DataType.Merkle"/> and <see cref="DataType.Account"/>/<see cref="DataType.StorageCell"/>
     /// of the same length can coexist, the merkle marker is added as well.
     /// </summary>
-    private static NibblePath Encode(in NibblePath path, in Span<byte> destination, DataType type)
+    public static NibblePath Encode(in NibblePath path, in Span<byte> destination, DataType type)
     {
         var typeFlag = (byte)(type & DataType.Merkle);
 
         const byte oddEnd = 0x01;
         const byte evenEnd = 0x00;
+
+        // 2 lower bits are used, for odd|even and merkle.
+        // We can use 1 more bit for differentiation for even lengths.
+        // This leaves 1 bit to extract potential value. This means that it can compress 2 / 16,
+        // meaning 1/8 of even paths.
+
+        const byte evenPacked = 0x04;
+        const byte packedShift = 3;
+        const byte maxPacked = 1;
 
         Debug.Assert(path.IsOdd == false, "Encoded paths should not be odd. They always start at 0");
 
@@ -153,6 +162,17 @@ public readonly unsafe struct RootPage(Page root) : IPage
 
         // Even case
         raw.CopyTo(destination);
+        var lastByte = raw[^1];
+        var lastNibble = lastByte & NibblePath.NibbleMask;
+        var lastButOneNibble = lastByte & (NibblePath.NibbleMask << NibblePath.NibbleShift);
+
+        if (lastNibble <= maxPacked)
+        {
+            // We can pack better
+            destination[raw.Length - 1] = (byte)(lastButOneNibble | (lastNibble << packedShift) | evenPacked | typeFlag);
+            return NibblePath.FromKey(destination[..raw.Length]);
+        }
+
         destination[raw.Length] = (byte)(evenEnd | typeFlag);
         return NibblePath.FromKey(destination[..(raw.Length + 1)]);
     }
@@ -227,7 +247,8 @@ public readonly unsafe struct RootPage(Page root) : IPage
         // It should not be hard. Walk down by the mapped path, then remove all the pages underneath.
     }
 
-    private static void SetAtRoot<TPage>(IBatchContext batch, in NibblePath path, in ReadOnlySpan<byte> rawData, ref DbAddress root)
+    private static void SetAtRoot<TPage>(IBatchContext batch, in NibblePath path, in ReadOnlySpan<byte> rawData,
+        ref DbAddress root)
         where TPage : struct, IPageWithData<TPage>
     {
         var data = batch.TryGetPageAlloc(ref root, PageType.Standard);

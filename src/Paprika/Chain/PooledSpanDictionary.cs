@@ -401,8 +401,6 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
                         text.WriteLine($"Merkle, Storage [{S(key.Path)}, {key.StoragePath.ToString()}] (updated)");
 
                     break;
-                case DataType.CompressedAccount:
-                    throw new Exception("Should not use compressed accounts");
                 default:
                     throw new ArgumentOutOfRangeException($"The type {key.Type} is not handled");
             }
