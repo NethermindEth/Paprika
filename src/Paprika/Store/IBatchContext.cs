@@ -59,6 +59,7 @@ public interface IReadOnlyBatchContext : IPageResolver
 
 public static class ReadOnlyBatchContextExtensions
 {
+    [Conditional("DEBUG")]
     public static void AssertRead(this IReadOnlyBatchContext batch, in PageHeader header)
     {
         if (header.BatchId > batch.BatchId)
