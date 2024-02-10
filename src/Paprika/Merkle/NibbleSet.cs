@@ -53,6 +53,8 @@ public struct NibbleSet
         }
     }
 
+    public static NibbleSet All => new(Readonly.All);
+
     public int SetCount => BitOperations.PopCount(_value);
     public byte SmallestNibbleSet => (byte)BitOperations.TrailingZeroCount(_value);
 

@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -86,7 +88,8 @@ public static partial class Node
         /// The part ((_header & HighestBit) >> 1)) allows for node types with the highest bit set
         /// <see cref="Type.Leaf"/> to have 7 bits of metadata.
         /// </summary>
-        public byte Metadata => (byte)((((_header & MetadataMask) | ((_header & HighestBit) >> 1)) & _header) >> MetadataMaskShift);
+        public byte Metadata =>
+            (byte)((((_header & MetadataMask) | ((_header & HighestBit) >> 1)) & _header) >> MetadataMaskShift);
 
         public Header(Type nodeType, byte metadata = 0b0000)
         {
@@ -281,11 +284,18 @@ public static partial class Node
     public readonly ref struct Branch
     {
         public int MaxByteLength => Header.Size +
-                                    (HeaderHasAllSet(Header) ? 0 : NibbleSet.MaxByteSize) +
+                                    (Header.Metadata >> ChildSizeShift) +
                                     (HeaderHasKeccak(Header) ? Keccak.Size : 0);
 
         private const byte HeaderMetadataKeccakMask = 0b0000_0001;
+
+        // The following three are set so that they are consecutive and show how many bytes it should occupy
         private const byte HeaderMetadataAllChildrenSetMask = 0b0000_0010;
+        private const byte HeaderMetadataWithoutTwoChildrenSetMask = 0b0000_0100;
+        private const byte HeaderMetadataWithNibbleSet = 0b0000_0110;
+        private const byte HeaderMetadataChildBitsMask = 0b0000_0110;
+
+        private const byte ChildSizeShift = 1;
 
         public readonly Header Header;
         public readonly NibbleSet.Readonly Children;
@@ -307,10 +317,9 @@ public static partial class Node
 
         public Branch(NibbleSet.Readonly children, Keccak keccak)
         {
-            var allSet = children.AllSet ? HeaderMetadataAllChildrenSetMask : 0;
             var hasKeccak = keccak == default ? 0 : HeaderMetadataKeccakMask;
 
-            Header = new Header(Type.Branch, metadata: (byte)(hasKeccak | allSet));
+            Header = new Header(Type.Branch, metadata: (byte)(hasKeccak | BuildMetadata(children)));
 
             Assert(children);
 
@@ -328,12 +337,33 @@ public static partial class Node
 
         public Branch(NibbleSet.Readonly children)
         {
-            Header = new Header(Type.Branch, metadata: (byte)(children.AllSet ? HeaderMetadataAllChildrenSetMask : 0));
+            Header = new Header(Type.Branch, BuildMetadata(children));
 
             Assert(children);
 
             Children = children;
             Keccak = default;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+        private static byte BuildMetadata(NibbleSet.Readonly children)
+        {
+            byte metadata;
+            switch (children.SetCount)
+            {
+                case NibbleSet.NibbleCount:
+                    metadata = HeaderMetadataAllChildrenSetMask;
+                    break;
+                case NibbleSet.NibbleCount - 1:
+                case NibbleSet.NibbleCount - 2:
+                    metadata = HeaderMetadataWithoutTwoChildrenSetMask;
+                    break;
+                default:
+                    metadata = HeaderMetadataWithNibbleSet;
+                    break;
+            }
+
+            return metadata;
         }
 
         private static Header ValidateHeaderKeccak(Header header, bool shouldHaveKeccak)
@@ -353,7 +383,10 @@ public static partial class Node
             (header.Metadata & HeaderMetadataKeccakMask) == HeaderMetadataKeccakMask;
 
         private static bool HeaderHasAllSet(Header header) =>
-            (header.Metadata & HeaderMetadataAllChildrenSetMask) == HeaderMetadataAllChildrenSetMask;
+            (header.Metadata & HeaderMetadataChildBitsMask) == HeaderMetadataAllChildrenSetMask;
+
+        private static bool HeaderUpTo2NibblesNotSet(Header header) =>
+            (header.Metadata & HeaderMetadataChildBitsMask) == HeaderMetadataWithoutTwoChildrenSetMask;
 
         public Span<byte> WriteTo(Span<byte> output)
         {
@@ -365,10 +398,27 @@ public static partial class Node
         {
             var leftover = Header.WriteToWithLeftover(output);
 
-            if (!Children.AllSet)
+            switch (Children.SetCount)
             {
-                // write children only if not all set. All set is encoded in the header
-                leftover = Children.WriteToWithLeftover(leftover);
+                case NibbleSet.NibbleCount:
+                    // All set is encoded in the header
+                    break;
+                case NibbleSet.NibbleCount - 1:
+                case NibbleSet.NibbleCount - 2:
+                    // Use a single byte if only one or 2 nibbles are missing
+                    var raw = ~(uint)Children & 0x0000FFFF;
+
+                    var notSet1 = (byte)BitOperations.TrailingZeroCount(raw);
+                    var notSet2 = 31 - (byte)BitOperations.LeadingZeroCount(raw);
+
+                    leftover[0] = (byte)(notSet1 +
+                                         (notSet2 << NibblePath.NibbleShift));
+
+                    leftover = leftover[1..];
+                    break;
+                default:
+                    leftover = Children.WriteToWithLeftover(leftover);
+                    break;
             }
 
             if (HeaderHasKeccak(Header))
@@ -387,6 +437,16 @@ public static partial class Node
             if (HeaderHasAllSet(header))
             {
                 children = NibbleSet.Readonly.All;
+            }
+            else if (HeaderUpTo2NibblesNotSet(header))
+            {
+                var b = leftover[0];
+                leftover = leftover[1..];
+
+                var builder = NibbleSet.All;
+                builder[(byte)(b >> NibblePath.NibbleShift)] = false;
+                builder[(byte)(b & 0x0F)] = false;
+                children = builder;
             }
             else
             {

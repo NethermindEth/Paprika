@@ -171,6 +171,49 @@ public class NodeTests
         decoded.Equals(branch).Should().BeTrue($"Expected {branch.ToString()}, got {decoded.ToString()}");
     }
 
+    [TestCase(true)]
+    [TestCase(false)]
+    public void Branch_all_but_1_not_set(bool keccak)
+    {
+        var children = NibbleSet.All;
+        children[7] = false;
+
+        var branch = new Node.Branch(children, keccak ? Values.Key0 : default);
+
+        Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
+        var encoded = branch.WriteTo(buffer);
+
+        encoded.Length.Should().Be(2 + (keccak ? Keccak.Size : 0), "Full branch should encode to one byte");
+
+        var leftover = Node.Branch.ReadFrom(encoded, out var decoded);
+
+        leftover.Length.Should().Be(0);
+
+        decoded.Equals(branch).Should().BeTrue($"Expected {branch.ToString()}, got {decoded.ToString()}");
+    }
+
+    [TestCase(true)]
+    [TestCase(false)]
+    public void Branch_all_but_2_not_set(bool keccak)
+    {
+        var children = NibbleSet.All;
+        children[7] = false;
+        children[13] = false;
+
+        var branch = new Node.Branch(children, keccak ? Values.Key0 : default);
+
+        Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
+        var encoded = branch.WriteTo(buffer);
+
+        encoded.Length.Should().Be(2 + (keccak ? Keccak.Size : 0), "Full branch should encode to one byte");
+
+        var leftover = Node.Branch.ReadFrom(encoded, out var decoded);
+
+        leftover.Length.Should().Be(0);
+
+        decoded.Equals(branch).Should().BeTrue($"Expected {branch.ToString()}, got {decoded.ToString()}");
+    }
+
     [Test]
     public void Leaf_properties()
     {
