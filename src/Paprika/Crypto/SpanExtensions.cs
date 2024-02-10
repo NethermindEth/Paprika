@@ -7,6 +7,11 @@ namespace Paprika.Crypto;
 
 public static class SpanExtensions
 {
+    public static string ToHexString(this in Span<byte> span, bool withZeroX)
+    {
+        return ToHexString(span, withZeroX, false, false);
+    }
+
     public static string ToHexString(this in ReadOnlySpan<byte> span, bool withZeroX)
     {
         return ToHexString(span, withZeroX, false, false);

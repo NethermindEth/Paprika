@@ -59,4 +59,20 @@ abstract class BatchContextBase : IBatchContext
         page.Header.BatchId = BatchId;
         page.Header.PaprikaVersion = PageHeader.CurrentVersion;
     }
+
+    public Page TryGetPageAlloc(ref DbAddress addr, PageType pageType)
+    {
+        Page page;
+        if (addr.IsNull)
+        {
+            page = GetNewPage(out addr, true);
+            page.Header.PageType = pageType;
+        }
+        else
+        {
+            page = GetAt(addr);
+        }
+
+        return page;
+    }
 }

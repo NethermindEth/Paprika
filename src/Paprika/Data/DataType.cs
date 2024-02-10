@@ -21,9 +21,4 @@ public enum DataType : byte
     /// [key, 2] The Merkle entry, either with storage or not
     /// </summary>
     Merkle = 2,
-
-    /// <summary>
-    /// The account compressed with the identity tree.
-    /// </summary>
-    CompressedAccount = 4,
 }

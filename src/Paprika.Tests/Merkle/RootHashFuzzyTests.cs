@@ -78,7 +78,7 @@ public class RootHashFuzzyTests
         blockchain.Finalize(rootHash);
         await flush;
 
-        var state = blockchain.StartReadOnly(rootHash);
+        using var state = blockchain.StartReadOnly(rootHash);
         var recalculated = merkle.CalculateStateRootHash(state);
 
         rootHash.Should().Be(generator.RootHashAsKeccak);
