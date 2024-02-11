@@ -173,45 +173,32 @@ public class NodeTests
 
     [TestCase(true)]
     [TestCase(false)]
-    public void Branch_all_but_1_not_set(bool keccak)
+    public void Branch_all_but_1_or_2_not_set(bool keccak)
     {
-        var children = NibbleSet.All;
-        children[7] = false;
+        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+        {
+            for (byte j = 0; j < NibbleSet.NibbleCount; j++)
+            {
+                var children = NibbleSet.All;
 
-        var branch = new Node.Branch(children, keccak ? Values.Key0 : default);
+                children[i] = false;
+                children[j] = false;
 
-        Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
-        var encoded = branch.WriteTo(buffer);
+                var branch = new Node.Branch(children, keccak ? Values.Key0 : default);
 
-        encoded.Length.Should().Be(2 + (keccak ? Keccak.Size : 0), "Full branch should encode to one byte");
+                Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
+                var encoded = branch.WriteTo(buffer);
 
-        var leftover = Node.Branch.ReadFrom(encoded, out var decoded);
+                encoded.Length.Should().Be(2 + (keccak ? Keccak.Size : 0), "Full branch should encode to one byte");
 
-        leftover.Length.Should().Be(0);
+                var leftover = Node.Branch.ReadFrom(encoded, out var decoded);
 
-        decoded.Equals(branch).Should().BeTrue($"Expected {branch.ToString()}, got {decoded.ToString()}");
-    }
+                leftover.Length.Should().Be(0);
 
-    [TestCase(true)]
-    [TestCase(false)]
-    public void Branch_all_but_2_not_set(bool keccak)
-    {
-        var children = NibbleSet.All;
-        children[7] = false;
-        children[13] = false;
+                decoded.Equals(branch).Should().BeTrue($"Expected {branch.ToString()}, got {decoded.ToString()}");
+            }
+        }
 
-        var branch = new Node.Branch(children, keccak ? Values.Key0 : default);
-
-        Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
-        var encoded = branch.WriteTo(buffer);
-
-        encoded.Length.Should().Be(2 + (keccak ? Keccak.Size : 0), "Full branch should encode to one byte");
-
-        var leftover = Node.Branch.ReadFrom(encoded, out var decoded);
-
-        leftover.Length.Should().Be(0);
-
-        decoded.Equals(branch).Should().BeTrue($"Expected {branch.ToString()}, got {decoded.ToString()}");
     }
 
     [Test]
