@@ -258,7 +258,7 @@ public class DbTests
         var random = new Random(13);
         random.NextBytes(value);
 
-        string[] keys = ["B9", "BB", "BD", "BF"];
+        string[] keys = ["B9", "BB", "BD", "BF", "B8", "B6", "B4"];
 
         using var batch = db.BeginNextBatch();
 

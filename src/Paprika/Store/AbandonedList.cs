@@ -78,7 +78,11 @@ public struct AbandonedList
             return false;
         }
 
-        var current = new AbandonedPage(batch.GetAt(Current));
+        var existing = batch.GetAt(Current);
+        Debug.Assert(existing.Header.PageType == PageType.Abandoned,
+            $"The page {Current} treated as abandoned is of type {existing.Header.PageType}. The batch is {batch.BatchId}");
+
+        var current = new AbandonedPage(existing);
         if (current.BatchId != batch.BatchId)
         {
             // The current came from the previous batch.
@@ -95,11 +99,14 @@ public struct AbandonedList
                 current = new AbandonedPage(dest);
 
                 Current = newAt;
-                if (current.TryPop(out _) == false)
+                if (current.TryPop(out var popped) == false)
                 {
                     // We getting what was peeked above.
                     throw new Exception("The page cannot be empty! It was just allocated to!");
                 }
+
+                Debug.Assert(newAt == popped, "The addressed popped should be the address of the copy but it's different");
+
             }
             else
             {

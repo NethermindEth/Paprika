@@ -11,6 +11,9 @@ namespace Paprika.Store;
 [method: DebuggerStepThrough]
 public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
 {
+    private const int Left = 0;
+    private const int Right = 1;
+
     public static BottomPage Wrap(Page page) => new(page);
 
     private ref PageHeader Header => ref page.Header;
@@ -27,9 +30,9 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
         {
             return cowed;
         }
-        
+
         // Not enough space in bottom pages, create a DataPage
-        var next = new DataPage(batch.GetNewPage(out var addr, true));
+        var next = new DataPage(batch.GetNewPage(out _, true));
         next.Header.PageType = PageType.Standard;
         next.Header.Level = Header.Level;
 
@@ -38,18 +41,40 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
 
     private Page CopyAndDestroy(DataPage next, IBatchContext batch)
     {
-        
+        // Copy all
+        foreach (var item in Map.EnumerateAll())
+        {
+            var path = NibblePath.FromKey(item.Key).SliceFrom(Header.LevelOddity);
+            next = new DataPage(next.Set(path, item.RawData, batch));
+        }
+
+        // Register for destruction
+        batch.RegisterForFutureReuse(page);
+
+        // Call for left
+        if (Data.Left.IsNull == false)
+        {
+            next = new DataPage(new BottomPage(batch.GetAt(Data.Left)).CopyAndDestroy(next, batch));
+        }
+
+        if (Data.Right.IsNull == false)
+        {
+            next = new DataPage(new BottomPage(batch.GetAt(Data.Right)).CopyAndDestroy(next, batch));
+        }
+
+        return next.AsPage();
     }
 
     private (bool success, Page cowed) TrySet(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
         if (Header.BatchId != batch.BatchId)
         {
-            // the page is from another batch, meaning, it's readonly. Copy
+            // COW
             var writable = batch.GetWritableCopy(page);
             return new BottomPage(writable).TrySet(key, data, batch);
         }
-        
+
+        // Try in-page write
         if (Map.TrySet(key.RawSpan, data))
         {
             return (true, page);
@@ -60,41 +85,64 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
             return (false, page);
         }
 
-        // Try to set in map, on false try to make some space
+        // No space in this page. We need to push some data down.
+        // First, we'll flush left-wing then right-wing.
+        if (TryWriteAndFlush(key, data, batch, Left))
+        {
+            return (true, page);
+        }
+
+        if (TryWriteAndFlush(key, data, batch, Right))
+        {
+            return (true, page);
+        }
+
+        return (false, page);
+    }
+
+    private bool TryWriteAndFlush(in NibblePath key, ReadOnlySpan<byte> data, IBatchContext batch, int child)
+    {
         while (Map.TrySet(key.RawSpan, data) == false)
         {
-            foreach (var item in Map.EnumerateAll())
+            if (TryFlushChild(batch, child) == false)
             {
-                var path = NibblePath.FromKey(item.Key);
-                var bit = GetBit(path);
-                
-                // Lazily allocate pages only on finding that there's one to flush down
-                var next = bit == 0 ? 
-                    GetOrAllocChild(ref Data.Left, batch) : 
-                    GetOrAllocChild(ref Data.Right, batch);
-
-                var (success, cowed) = next.TrySet(path, item.RawData, batch);
-                
-                // Copy the address, if cowed
-                if (bit == 0)
-                {
-                    Data.Left = batch.GetAddress(cowed);
-                }
-                else
-                {
-                    Data.Right = batch.GetAddress(cowed);
-                }
-                
-                if (success)
-                {
-                    // One item moved, delete it and retry the insert in one more loop
-                    Map.Delete(item);
-                    break;
-                }
+                // The child was unable to accept the flush. Report failure on using this one.
+                return false;
             }
         }
 
-        return (true, page);
+        // The value has been set locally.
+        return true;
+    }
+
+    private bool TryFlushChild(IBatchContext batch, int child)
+    {
+        ref var addr = ref child == Left ? ref Data.Left : ref Data.Right;
+
+        var next = GetOrAllocChild(ref addr, batch);
+
+        foreach (var item in Map.EnumerateAll())
+        {
+            var path = NibblePath.FromKey(item.Key).SliceFrom(Header.LevelOddity);
+            var bit = GetBit(path);
+
+            if (bit != child)
+            {
+                continue;
+            }
+
+            var (success, cowed) = next.TrySet(path, item.RawData, batch);
+            addr = batch.GetAddress(cowed);
+
+            if (success)
+            {
+                // One item moved, delete it and retry the insert in one more loop
+                Map.Delete(item);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -106,9 +154,12 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
     {
         if (!addr.IsNull)
         {
-            return new BottomPage(batch.GetAt(addr));
+            var existing = batch.GetAt(addr);
+            Debug.Assert(existing.Header.PageType == PageType.Bottom);
+
+            return new BottomPage(existing);
         }
-        
+
         var child = new BottomPage(batch.GetNewPage(out addr, true));
         child.Header.PageType = PageType.Bottom;
         child.Header.Level = Header.Level;
@@ -116,13 +167,8 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
         return child;
     }
 
-    /// <summary>
-    /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
-    /// These buckets is used to store up to <see cref="DataSize"/> entries before flushing them down as other pages
-    /// like page split. 
-    /// </summary>
     [StructLayout(LayoutKind.Explicit, Size = Size)]
-    public struct Payload
+    private struct Payload
     {
         private const int Size = Page.PageSize - PageHeader.Size;
 
@@ -134,9 +180,9 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
         private const int DataOffset = DbAddress.Size * 2;
 
         [FieldOffset(0)] public DbAddress Left;
-        
+
         [FieldOffset(DbAddress.Size)] public DbAddress Right;
-        
+
         /// <summary>
         /// The first item of map of frames to allow ref to it.
         /// </summary>
@@ -165,7 +211,7 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
         var bit = GetBit(key);
 
         var next = bit == 0 ? Data.Left : Data.Right;
-        
+
         if (next.IsNull == false)
         {
             return new BottomPage(batch.GetAt(next)).TryGet(key, batch, out result);
@@ -178,19 +224,24 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
     /// Gets the left or right bit.
     /// </summary>
     private int GetBit(in NibblePath key) => (key.GetAt(Header.LevelOddity) >> BottomLevel) & 1;
-    
+
     private SlottedArray Map => new(Data.DataSpan);
 
     public void Report(IReporter reporter, IPageResolver resolver, int level)
     {
         var slotted = new SlottedArray(Data.DataSpan);
 
-        reporter.ReportDataUsage(Header.PageType, level, Data.Next.IsNull ? 0 : 1, slotted.Count,
+        reporter.ReportDataUsage(Header.PageType, level, 0, slotted.Count,
             slotted.CapacityLeft);
 
-        if (Data.Next.IsNull == false)
+        if (Data.Left.IsNull == false)
         {
-            new BottomPage(resolver.GetAt(Data.Next)).Report(reporter, resolver, level);
+            new BottomPage(resolver.GetAt(Data.Left)).Report(reporter, resolver, level);
+        }
+
+        if (Data.Right.IsNull == false)
+        {
+            new BottomPage(resolver.GetAt(Data.Right)).Report(reporter, resolver, level);
         }
     }
 }

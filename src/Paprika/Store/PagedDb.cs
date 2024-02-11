@@ -412,6 +412,10 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         /// </summary>
         private readonly List<DbAddress> _abandoned;
 
+#if DEBUG
+        private readonly HashSet<DbAddress> _check = new();
+#endif
+
         /// <summary>
         /// The set of pages written during this batch.
         /// </summary>
@@ -577,6 +581,12 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         public override void RegisterForFutureReuse(Page page)
         {
             var addr = _db.GetAddress(page);
+
+#if DEBUG
+            Debug.Assert(_check.Add(addr),
+                    $"The page {addr} is getting registered second time as abandoned at batch {BatchId}");
+#endif
+
             _abandoned.Add(addr);
         }
 
