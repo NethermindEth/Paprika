@@ -70,7 +70,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             child = batch.GetNewPage(out var addr, true);
 
             Data.Buckets[nibble] = addr;
-            child.Header.PageType = PageType.Leaf;
+            child.Header.PageType = PageType.Bottom;
             child.Header.Level = (byte)(Header.Level + 1);
         }
         else
@@ -105,9 +105,9 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             if (sliced.IsEmpty)
                 continue;
 
-            if (dest.Header.PageType == PageType.Leaf)
+            if (dest.Header.PageType == PageType.Bottom)
             {
-                dest = new LeafPage(dest).Set(sliced, item.RawData, batch);
+                dest = new BottomPage(dest).Set(sliced, item.RawData, batch);
             }
             else
             {
@@ -217,9 +217,9 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         if (bucket.IsNull == false)
         {
             var child = batch.GetAt(bucket);
-            if (child.Header.PageType == PageType.Leaf)
+            if (child.Header.PageType == PageType.Bottom)
             {
-                var leaf = new LeafPage(child);
+                var leaf = new BottomPage(child);
                 return leaf.TryGet(key.SliceFrom(1), batch, out result);
             }
 
@@ -246,9 +246,9 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             else
             {
                 var resolved = resolver.GetAt(bucket);
-                if (resolved.Header.PageType == PageType.Leaf)
+                if (resolved.Header.PageType == PageType.Bottom)
                 {
-                    new LeafPage(resolved).Report(reporter, resolver, level + 1);
+                    new BottomPage(resolved).Report(reporter, resolver, level + 1);
                 }
                 else
                 {

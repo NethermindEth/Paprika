@@ -105,7 +105,7 @@ public enum PageType : byte
     /// <summary>
     /// The leaf page that represents a part of the page.
     /// </summary>
-    Leaf = 4,
+    Bottom = 4,
 }
 
 /// <summary>
