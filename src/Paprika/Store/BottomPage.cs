@@ -210,7 +210,7 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
             return false;
         }
 
-        var bit = GetBit(key);
+        var bit = GetBit(key.SliceFrom(Header.LevelOddity));
 
         var next = bit == 0 ? Data.Left : Data.Right;
 
@@ -225,7 +225,7 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
     /// <summary>
     /// Gets the left or right bit.
     /// </summary>
-    private int GetBit(in NibblePath key) => (key.GetAt(Header.LevelOddity) >> BottomLevel) & 1;
+    private int GetBit(in NibblePath key) => (key.GetAt(0) >> BottomLevel) & 1;
 
     private SlottedArray Map => new(Data.DataSpan);
 

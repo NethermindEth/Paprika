@@ -250,7 +250,7 @@ public class DbTests
     [TestCase((object)new[] { "B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8" })]
     public async Task Page_splitting_left(string[] keys)
     {
-        const int size = MB16;
+        const int size = MB;
         using var db = PagedDb.NativeMemoryDb(size);
 
         var value = new byte[3900];
