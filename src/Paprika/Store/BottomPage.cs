@@ -31,12 +31,14 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
             return cowed;
         }
 
-        // Not enough space in bottom pages, create a DataPage
+        // Not enough space in bottom pages, create a DataPage and put all existing data there
         var next = new DataPage(batch.GetNewPage(out _, true));
         next.Header.PageType = PageType.Standard;
         next.Header.Level = Header.Level;
+        next = new DataPage(CopyAndDestroy(next, batch));
 
-        return CopyAndDestroy(next, batch);
+        // Now add the new key
+        return next.Set(key, data, batch);
     }
 
     private Page CopyAndDestroy(DataPage next, IBatchContext batch)

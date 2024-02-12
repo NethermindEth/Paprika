@@ -247,8 +247,8 @@ public class DbTests
         }
     }
 
-    [Test]
-    public async Task Page_splitting()
+    [TestCase((object)new[] { "B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8" })]
+    public async Task Page_splitting_left(string[] keys)
     {
         const int size = MB16;
         using var db = PagedDb.NativeMemoryDb(size);
@@ -257,8 +257,6 @@ public class DbTests
 
         var random = new Random(13);
         random.NextBytes(value);
-
-        string[] keys = ["B9", "BB", "BD", "BF", "B8", "B6", "B4"];
 
         using var batch = db.BeginNextBatch();
 

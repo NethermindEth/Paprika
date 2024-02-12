@@ -39,6 +39,7 @@ public readonly ref struct NibblePath
 
     public bool IsEmpty => Length == 0;
 
+    [DebuggerStepThrough]
     public static NibblePath Parse(string hex)
     {
         var nibbles = new byte[(hex.Length + 1) / 2];
