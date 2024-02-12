@@ -374,6 +374,31 @@ public class BlockchainTests
         }
     }
 
+    [Test]
+    public async Task Same_hash_same_block_number()
+    {
+        var value = new Account(1, 1);
+        var start = Keccak.EmptyTreeHash;
+
+        using var db = PagedDb.NativeMemoryDb(1 * Mb, 4);
+
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
+
+        var keccak1A = CommitOnce();
+        var keccak1B = CommitOnce();
+
+        keccak1A.Should().Be(keccak1B);
+
+        blockchain.HasState(keccak1A).Should().BeTrue();
+
+        Keccak CommitOnce()
+        {
+            using var block = blockchain.StartNew(start);
+            block.SetAccount(Key0, value);
+            return block.Commit(1);
+        }
+    }
+
     private static Account GetAccount(int i) => new((UInt256)i, (UInt256)i);
 
     private static Keccak BuildKey(int i)

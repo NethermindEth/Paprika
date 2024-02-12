@@ -203,6 +203,19 @@ public class Blockchain : IAsyncDisposable
 
         lock (_blockLock)
         {
+            if (_blocksByHash.TryGetValue(state.Hash, out var committed))
+            {
+                if (committed.BlockNumber == state.BlockNumber)
+                {
+                    // There is an already existing state at the same block number.
+                    // Just accept it and dispose the added. 
+                    state.MakeDiscardable();
+
+                    state.Dispose();
+                    return;
+                }
+            }
+
             // blocks by number first
             ref var blocks =
                 ref CollectionsMarshal.GetValueRefOrAddDefault(_blocksByNumber, state.BlockNumber, out var exists);
@@ -1008,6 +1021,7 @@ public class Blockchain : IAsyncDisposable
         private readonly PooledSpanDictionary _committed;
 
         private readonly bool _raw;
+        private bool _discarable;
 
         public CommittedBlockState(Xor8 xor, HashSet<Keccak>? destroyed, Blockchain blockchain,
             PooledSpanDictionary committed, Keccak hash, Keccak parentHash,
@@ -1089,7 +1103,7 @@ public class Blockchain : IAsyncDisposable
         {
             _committed.Dispose();
 
-            if (_raw == false)
+            if (_raw == false && _discarable == false)
             {
                 _blockchain.Remove(this);
             }
@@ -1127,8 +1141,12 @@ public class Blockchain : IAsyncDisposable
             base.ToString() + ", " +
             $"{nameof(BlockNumber)}: {BlockNumber}, " +
             $"Committed data: {_committed}, ";
-    }
 
+        public void MakeDiscardable()
+        {
+            _discarable = true;
+        }
+    }
 
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload.
