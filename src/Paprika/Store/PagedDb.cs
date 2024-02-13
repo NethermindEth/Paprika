@@ -408,13 +408,14 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         private readonly Context _ctx;
 
         /// <summary>
-        /// A pool of pages that are abandoned during this batch.
+        /// A pool of pages from the past that are abandoned during this batch.
         /// </summary>
-        private readonly List<DbAddress> _abandoned;
+        private readonly List<DbAddress> _abandonedOld;
 
-#if DEBUG
-        private readonly HashSet<DbAddress> _check = new();
-#endif
+        /// <summary>
+        /// A list of pages that were allocated and abandoned during this batch.
+        /// </summary>
+        private readonly Stack<DbAddress> _abandonedThis;
 
         /// <summary>
         /// The set of pages written during this batch.
@@ -430,7 +431,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _root = root;
             _reusePagesOlderThanBatchId = reusePagesOlderThanBatchId;
             _ctx = ctx;
-            _abandoned = ctx.Abandoned;
+            _abandonedOld = ctx.Abandoned;
+            _abandonedThis = ctx.AbandonedThis;
             _written = ctx.Written;
 
             IdCache = ctx.IdCache;
@@ -562,17 +564,25 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         private void MemoizeAbandoned()
         {
-            if (_abandoned.Count == 0)
+            _abandonedOld.AddRange(_abandonedThis);
+            _abandonedThis.Clear();
+
+            if (_abandonedOld.Count == 0)
             {
                 // nothing to memoize
                 return;
             }
 
-            _root.Data.AbandonedList.Register(_abandoned, this);
+            _root.Data.AbandonedList.Register(_abandonedOld, this);
         }
 
         private bool TryGetNoLongerUsedPage(out DbAddress found)
         {
+            if (_abandonedThis.TryPop(out found))
+            {
+                return true;
+            }
+
             return _root.Data.AbandonedList.TryGet(out found, _reusePagesOlderThanBatchId, this);
         }
 
@@ -582,18 +592,16 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         {
             var addr = _db.GetAddress(page);
 
-            
-            if (addr.Raw == 298 && BatchId == 6)
+            if (page.Header.BatchId == BatchId)
             {
-                Debugger.Break();
+                // The page has been allocated and written during this batch.
+                // Can be reused later on.
+                _abandonedThis.Push(addr);
             }
-            
-#if DEBUG
-            Debug.Assert(_check.Add(addr),
-                    $"The page {addr} is getting registered second time as abandoned at batch {BatchId}");
-#endif
-
-            _abandoned.Add(addr);
+            else
+            {
+                _abandonedOld.Add(addr);
+            }
         }
 
         public override Dictionary<Keccak, uint> IdCache { get; }
@@ -630,6 +638,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             Abandoned = new List<DbAddress>();
             Written = new HashSet<DbAddress>();
             IdCache = new Dictionary<Keccak, uint>();
+            AbandonedThis = new Stack<DbAddress>();
         }
 
         public Dictionary<Keccak, uint> IdCache { get; }
@@ -638,6 +647,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public List<DbAddress> Abandoned { get; }
         public HashSet<DbAddress> Written { get; }
+        public Stack<DbAddress> AbandonedThis { get; }
 
         public void Clear()
         {
@@ -645,7 +655,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             Written.Clear();
             IdCache.Clear();
             Abandoned.Clear();
-
+            AbandonedThis.Clear(); ;
             // no need to clear, it's always overwritten
             //Page.Clear();
         }

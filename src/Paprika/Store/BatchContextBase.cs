@@ -31,11 +31,12 @@ abstract class BatchContextBase : IBatchContext
         if (page.Header.BatchId == BatchId)
             return page;
 
-        RegisterForFutureReuse(page);
-
         var @new = GetNewPage(out _, false);
         page.CopyTo(@new);
         AssignBatchId(@new);
+
+        // Register at the end so that reuse, if any, is ok
+        RegisterForFutureReuse(page);
 
         return @new;
     }

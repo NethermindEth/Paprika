@@ -251,9 +251,9 @@ public class DbTests
     }
 
     [Test]
-    public async Task Page_splitting()
+    public async Task Page_splitting_with_lots_of_bottom()
     {
-        const int size = 4 * MB;
+        const int size = 3 * MB;
 
         using var db = PagedDb.NativeMemoryDb(size);
         using var batch = db.BeginNextBatch();

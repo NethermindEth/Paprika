@@ -32,7 +32,7 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
         }
 
         var toDestroy = new BottomPage(cowed);
-        
+
         // Not enough space in bottom pages, create a DataPage and put all existing data there
         var next = new DataPage(batch.GetNewPage(out _, true));
         next.Header.PageType = PageType.Standard;
@@ -53,9 +53,6 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
             next = new DataPage(next.Set(path, item.RawData, batch));
         }
 
-        // Register for destruction
-        batch.RegisterForFutureReuse(page);
-
         // Call for left
         if (Data.Left.IsNull == false)
         {
@@ -66,6 +63,9 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
         {
             next = new DataPage(new BottomPage(batch.GetAt(Data.Right)).CopyAndDestroy(next, batch));
         }
+
+        // Register for destruction at the end, otherwise this page would be reused
+        batch.RegisterForFutureReuse(page);
 
         return next.AsPage();
     }
