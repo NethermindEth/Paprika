@@ -11,8 +11,8 @@ namespace Paprika.Store;
 [method: DebuggerStepThrough]
 public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
 {
-    private const int Left = 0;
-    private const int Right = 1;
+    private const int LeftBit = 0;
+    private const int RightBit = 1;
 
     public static BottomPage Wrap(Page page) => new(page);
 
@@ -46,7 +46,8 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
         // Copy all
         foreach (var item in Map.EnumerateAll())
         {
-            var path = NibblePath.FromKey(item.Key).SliceFrom(Header.LevelOddity);
+            // No truncation here as the DataPage is on the same level as this
+            var path = NibblePath.FromKey(item.Key);
             next = new DataPage(next.Set(path, item.RawData, batch));
         }
 
@@ -89,12 +90,12 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
 
         // No space in this page. We need to push some data down.
         // First, we'll flush left-wing then right-wing.
-        if (TryWriteAndFlush(key, data, batch, Left))
+        if (TryWriteAndFlush(key, data, batch, LeftBit))
         {
             return (true, page);
         }
 
-        if (TryWriteAndFlush(key, data, batch, Right))
+        if (TryWriteAndFlush(key, data, batch, RightBit))
         {
             return (true, page);
         }
@@ -119,7 +120,7 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
 
     private bool TryFlushChild(IBatchContext batch, int child)
     {
-        ref var addr = ref child == Left ? ref Data.Left : ref Data.Right;
+        ref var addr = ref child == LeftBit ? ref Data.Left : ref Data.Right;
 
         var next = GetOrAllocChild(ref addr, batch);
 
@@ -210,7 +211,7 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
             return false;
         }
 
-        var bit = GetBit(key.SliceFrom(Header.LevelOddity));
+        var bit = GetBit(key);
 
         var next = bit == 0 ? Data.Left : Data.Right;
 

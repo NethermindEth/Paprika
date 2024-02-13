@@ -1,5 +1,7 @@
-﻿using System.Buffers.Binary;
+﻿using System;
+using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Linq;
 using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
@@ -247,18 +249,32 @@ public class DbTests
         }
     }
 
-    [TestCase((object)new[] { "B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8" })]
-    public async Task Page_splitting_left(string[] keys)
+    [Test]
+    public async Task Page_splitting()
     {
-        const int size = MB;
+        const int size = 16 * MB;
+
         using var db = PagedDb.NativeMemoryDb(size);
-
-        var value = new byte[3900];
-
-        var random = new Random(13);
-        random.NextBytes(value);
-
         using var batch = db.BeginNextBatch();
+
+        const int count = 256 * 16;
+
+        var keys = Enumerable.Range(0, count).Select(i => i.ToString("X3")).ToArray();
+        var value = new byte[128];
+
+        for (var i = 0; i < keys.Length; i++)
+        {
+            var key = keys[i];
+            BinaryPrimitives.WriteInt32LittleEndian(value, i);
+
+            batch.SetRaw(K(key), value);
+
+            for (int j = 0; j <= i; j++)
+            {
+                BinaryPrimitives.WriteInt32LittleEndian(value, j);
+                batch.AssertRawValue(K(keys[j]), value);
+            }
+        }
 
         for (int i = 0; i < keys.Length; i++)
         {
@@ -271,8 +287,6 @@ public class DbTests
         }
 
         await batch.Commit(CommitOptions.FlushDataAndRoot);
-
-        return;
 
         [DebuggerStepThrough]
         static Key K(string hex) => Key.Account(NibblePath.Parse(hex));

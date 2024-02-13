@@ -1,4 +1,6 @@
-﻿using System.Buffers.Binary;
+﻿using System;
+using System.Buffers.Binary;
+using System.Threading.Tasks;
 using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Chain;
