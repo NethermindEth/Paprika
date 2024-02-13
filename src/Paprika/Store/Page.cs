@@ -21,6 +21,8 @@ public interface IPageWithData<TPage> : IPage
 {
     static abstract TPage Wrap(Page page);
 
+    bool TryGet(scoped NibblePath key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result);
+
     Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch);
 }
 
@@ -76,31 +78,6 @@ public struct PageHeader
     /// Internal metadata of the given page.
     /// </summary>
     [FieldOffset(7)] public byte Metadata;
-}
-
-public enum PageType : byte
-{
-    None = 0,
-
-    /// <summary>
-    /// A standard Paprika page with a fan-out of 16.
-    /// </summary>
-    Standard = 1,
-
-    /// <summary>
-    /// A page that is a Standard page but holds the account identity mappin.
-    /// </summary>
-    Identity = 2,
-
-    /// <summary>
-    /// Represents <see cref="AbandonedPage"/>
-    /// </summary>
-    Abandoned = 3,
-
-    /// <summary>
-    /// The leaf page that represents a part of the page.
-    /// </summary>
-    Leaf = 4,
 }
 
 /// <summary>
