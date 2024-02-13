@@ -40,7 +40,8 @@ public class Blockchain : IAsyncDisposable
 
     private readonly IDb _db;
     private readonly IPreCommitBehavior _preCommit;
-    private readonly CacheBudget.Options _options;
+    private readonly CacheBudget.Options _cacheBudgetStateAndStorage;
+    private readonly CacheBudget.Options _cacheBudgetPreCommit;
     private readonly TimeSpan _minFlushDelay;
     private readonly Action? _beforeMetricsDisposed;
     private readonly Task _flusher;
@@ -50,12 +51,14 @@ public class Blockchain : IAsyncDisposable
     private static readonly TimeSpan DefaultFlushDelay = TimeSpan.FromSeconds(1);
 
     public Blockchain(IDb db, IPreCommitBehavior preCommit, TimeSpan? minFlushDelay = null,
-        CacheBudget.Options options = default,
+        CacheBudget.Options cacheBudgetStateAndStorage = default,
+        CacheBudget.Options cacheBudgetPreCommit = default,
         int? finalizationQueueLimit = null, Action? beforeMetricsDisposed = null)
     {
         _db = db;
         _preCommit = preCommit;
-        _options = options;
+        _cacheBudgetStateAndStorage = cacheBudgetStateAndStorage;
+        _cacheBudgetPreCommit = cacheBudgetPreCommit;
         _minFlushDelay = minFlushDelay ?? DefaultFlushDelay;
         _beforeMetricsDisposed = beforeMetricsDisposed;
 
@@ -378,7 +381,7 @@ public class Blockchain : IAsyncDisposable
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload.
     /// </summary>
-    private class BlockState : RefCountingDisposable, IWorldState, ICommit, IProvideDescription
+    private class BlockState : RefCountingDisposable, IWorldState, ICommit, IProvideDescription, IPersistenceStatsProvider
     {
         /// <summary>
         /// A simple bloom filter to assert whether the given key was set in a given block, used to speed up getting the keys.
@@ -413,9 +416,12 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private PooledSpanDictionary _preCommit = null!;
 
-        private readonly CacheBudget _cacheBudget;
+        private readonly CacheBudget _cacheBudgetStorageAndStage;
+        private readonly CacheBudget _cacheBudgetPreCommit;
 
         private Keccak? _hash;
+
+        private int _dbReads;
 
         public BlockState(Keccak parentStateRoot, IReadOnlyBatch batch, CommittedBlockState[] ancestors,
             Blockchain blockchain)
@@ -434,7 +440,8 @@ public class Blockchain : IAsyncDisposable
 
             _hash = ParentHash;
 
-            _cacheBudget = blockchain._options.Build();
+            _cacheBudgetStorageAndStage = blockchain._cacheBudgetStateAndStorage.Build();
+            _cacheBudgetPreCommit = blockchain._cacheBudgetPreCommit.Build();
 
             CreateDictionaries();
         }
@@ -470,10 +477,10 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         public Keccak Commit(uint blockNumber)
         {
-            var total = _blockchain._options.EntriesPerBlock;
+            var total = _blockchain._cacheBudgetStateAndStorage.EntriesPerBlock;
             if (total > 0)
             {
-                var percentage = (double)_cacheBudget.BudgetLeft / total * 100;
+                var percentage = (double)_cacheBudgetStorageAndStage.BudgetLeft / total * 100;
                 _blockchain._transientCacheUsage.Record((int)percentage);
             }
 
@@ -555,7 +562,7 @@ public class Blockchain : IAsyncDisposable
         {
             if (_hash == null)
             {
-                _hash = _blockchain._preCommit.BeforeCommit(this, _cacheBudget);
+                _hash = _blockchain._preCommit.BeforeCommit(this, _cacheBudgetPreCommit);
             }
         }
 
@@ -617,7 +624,7 @@ public class Blockchain : IAsyncDisposable
         /// <exception cref="NotImplementedException"></exception>
         private void TryCache(in Key key, in ReadOnlySpanOwnerWithMetadata<byte> owner, PooledSpanDictionary dict)
         {
-            if (_cacheBudget.ShouldCache(owner))
+            if (_cacheBudgetStorageAndStage.ShouldCache(owner))
             {
                 SetImpl(key, owner.Span, EntryType.TransientCache, dict);
             }
@@ -840,6 +847,9 @@ public class Blockchain : IAsyncDisposable
                 depth++;
             }
 
+            // report db read
+            Interlocked.Increment(ref _dbReads);
+
             if (_batch.TryGet(key, out var span))
             {
                 // return leased batch
@@ -982,6 +992,8 @@ public class Blockchain : IAsyncDisposable
             $"State: {_state}, " +
             $"Storage: {_storage}, " +
             $"PreCommit: {_preCommit}";
+
+        public int DbReads => Volatile.Read(ref _dbReads);
     }
 
     public bool HasState(in Keccak keccak)

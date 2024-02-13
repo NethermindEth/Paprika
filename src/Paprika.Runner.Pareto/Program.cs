@@ -96,7 +96,11 @@ public static class Program
             // add finality and 10 just to make it a bit slower
             var gate = new SingleAsyncGate(FinalizeEvery + 10);
 
-            await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds(5), new CacheBudget.Options(5_000, 8), 1000, reporter.Observe))
+            var cacheBudgetStateAndStorage = new CacheBudget.Options(2_000, 16);
+            var cacheBudgetPreCommit = new CacheBudget.Options(2_000, 16);
+
+            await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds(5),
+                             cacheBudgetStateAndStorage, cacheBudgetPreCommit, 1000, reporter.Observe))
             {
                 blockchain.Flushed += (_, e) => gate.Signal(e.blockNumber);
 
@@ -213,6 +217,8 @@ public static class Program
         const double alpha = 1.5; // Shape parameter
 
         var u = random.NextDouble(); // Uniformly distributed number between 0 and 1
-        return (int)(maxValue * Math.Pow(u, 1.0 / alpha)); // Inverse of the CDF (Cumulative Distribution Function) for Pareto
+        return
+            (int)(maxValue *
+                  Math.Pow(u, 1.0 / alpha)); // Inverse of the CDF (Cumulative Distribution Function) for Pareto
     }
 }
