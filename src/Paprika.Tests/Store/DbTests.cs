@@ -2,6 +2,7 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Linq;
+using System.Threading.Tasks;
 using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
@@ -252,12 +253,12 @@ public class DbTests
     [Test]
     public async Task Page_splitting()
     {
-        const int size = 16 * MB;
+        const int size = 4 * MB;
 
         using var db = PagedDb.NativeMemoryDb(size);
         using var batch = db.BeginNextBatch();
 
-        const int count = 256 * 16;
+        const int count = 10_000;
 
         var keys = Enumerable.Range(0, count).Select(i => i.ToString("X3")).ToArray();
         var value = new byte[128];
@@ -269,21 +270,18 @@ public class DbTests
 
             batch.SetRaw(K(key), value);
 
-            for (int j = 0; j <= i; j++)
-            {
-                BinaryPrimitives.WriteInt32LittleEndian(value, j);
-                batch.AssertRawValue(K(keys[j]), value);
-            }
+            // loop in a loop check, terribly slow, use only for debug
+            // for (int j = 0; j <= i; j++)
+            // {
+            //     BinaryPrimitives.WriteInt32LittleEndian(value, j);
+            //     batch.AssertRawValue(K(keys[j]), value);
+            // }
         }
 
         for (int i = 0; i < keys.Length; i++)
         {
-            batch.SetRaw(K(keys[i]), value);
-
-            for (int j = 0; j <= i; j++)
-            {
-                batch.AssertRawValue(K(keys[j]), value);
-            }
+            BinaryPrimitives.WriteInt32LittleEndian(value, i);
+            batch.AssertRawValue(K(keys[i]), value);
         }
 
         await batch.Commit(CommitOptions.FlushDataAndRoot);

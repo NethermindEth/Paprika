@@ -31,11 +31,13 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
             return cowed;
         }
 
+        var toDestroy = new BottomPage(cowed);
+        
         // Not enough space in bottom pages, create a DataPage and put all existing data there
         var next = new DataPage(batch.GetNewPage(out _, true));
         next.Header.PageType = PageType.Standard;
         next.Header.Level = Header.Level;
-        next = new DataPage(CopyAndDestroy(next, batch));
+        next = new DataPage(toDestroy.CopyAndDestroy(next, batch));
 
         // Now add the new key
         return next.Set(key, data, batch);
@@ -122,8 +124,6 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
     {
         ref var addr = ref child == LeftBit ? ref Data.Left : ref Data.Right;
 
-        var next = GetOrAllocChild(ref addr, batch);
-
         foreach (var item in Map.EnumerateAll())
         {
             var path = NibblePath.FromKey(item.Key).SliceFrom(Header.LevelOddity);
@@ -134,6 +134,7 @@ public readonly unsafe struct BottomPage(Page page) : IPageWithData<BottomPage>
                 continue;
             }
 
+            var next = GetOrAllocChild(ref addr, batch);
             var (success, cowed) = next.TrySet(path, item.RawData, batch);
             addr = batch.GetAddress(cowed);
 

@@ -582,6 +582,12 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         {
             var addr = _db.GetAddress(page);
 
+            
+            if (addr.Raw == 298 && BatchId == 6)
+            {
+                Debugger.Break();
+            }
+            
 #if DEBUG
             Debug.Assert(_check.Add(addr),
                     $"The page {addr} is getting registered second time as abandoned at batch {BatchId}");
