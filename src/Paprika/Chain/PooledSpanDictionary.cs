@@ -258,7 +258,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
 
     private Span<byte> GetAt(ValueSpan value)
     {
-        if (value.Pointer == ValueDestroyedPointer)
+        if (value.Pointer == ValueDestroyedPointer || value.Length == 0)
         {
             return Span<byte>.Empty;
         }

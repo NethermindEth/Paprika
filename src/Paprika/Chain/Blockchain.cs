@@ -40,7 +40,8 @@ public class Blockchain : IAsyncDisposable
 
     private readonly IDb _db;
     private readonly IPreCommitBehavior _preCommit;
-    private readonly CacheBudget.Options _options;
+    private readonly CacheBudget.Options _cacheBudgetStateAndStorage;
+    private readonly CacheBudget.Options _cacheBudgetPreCommit;
     private readonly TimeSpan _minFlushDelay;
     private readonly Action? _beforeMetricsDisposed;
     private readonly Task _flusher;
@@ -50,12 +51,14 @@ public class Blockchain : IAsyncDisposable
     private static readonly TimeSpan DefaultFlushDelay = TimeSpan.FromSeconds(1);
 
     public Blockchain(IDb db, IPreCommitBehavior preCommit, TimeSpan? minFlushDelay = null,
-        CacheBudget.Options options = default,
+        CacheBudget.Options cacheBudgetStateAndStorage = default,
+        CacheBudget.Options cacheBudgetPreCommit = default,
         int? finalizationQueueLimit = null, Action? beforeMetricsDisposed = null)
     {
         _db = db;
         _preCommit = preCommit;
-        _options = options;
+        _cacheBudgetStateAndStorage = cacheBudgetStateAndStorage;
+        _cacheBudgetPreCommit = cacheBudgetPreCommit;
         _minFlushDelay = minFlushDelay ?? DefaultFlushDelay;
         _beforeMetricsDisposed = beforeMetricsDisposed;
 
@@ -140,7 +143,7 @@ public class Blockchain : IAsyncDisposable
                     _flusherBlockApplicationInMs.Record((int)application.ElapsedMilliseconds);
 
                     // commit but no flush here, it's too heavy, the flush will come later
-                    await batch.Commit(CommitOptions.DangerNoFlush);
+                    await batch.Commit(CommitOptions.FlushDataOnly);
 
                     // inform blocks about flushing
                     lock (_blockLock)
@@ -203,6 +206,19 @@ public class Blockchain : IAsyncDisposable
 
         lock (_blockLock)
         {
+            if (_blocksByHash.TryGetValue(state.Hash, out var committed))
+            {
+                if (committed.BlockNumber == state.BlockNumber)
+                {
+                    // There is an already existing state at the same block number.
+                    // Just accept it and dispose the added. 
+                    state.MakeDiscardable();
+
+                    state.Dispose();
+                    return;
+                }
+            }
+
             // blocks by number first
             ref var blocks =
                 ref CollectionsMarshal.GetValueRefOrAddDefault(_blocksByNumber, state.BlockNumber, out var exists);
@@ -365,7 +381,7 @@ public class Blockchain : IAsyncDisposable
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload.
     /// </summary>
-    private class BlockState : RefCountingDisposable, IWorldState, ICommit, IProvideDescription
+    private class BlockState : RefCountingDisposable, IWorldState, ICommit, IProvideDescription, IPersistenceStatsProvider
     {
         /// <summary>
         /// A simple bloom filter to assert whether the given key was set in a given block, used to speed up getting the keys.
@@ -400,9 +416,12 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private PooledSpanDictionary _preCommit = null!;
 
-        private readonly CacheBudget _cacheBudget;
+        private readonly CacheBudget _cacheBudgetStorageAndStage;
+        private readonly CacheBudget _cacheBudgetPreCommit;
 
         private Keccak? _hash;
+
+        private int _dbReads;
 
         public BlockState(Keccak parentStateRoot, IReadOnlyBatch batch, CommittedBlockState[] ancestors,
             Blockchain blockchain)
@@ -421,7 +440,8 @@ public class Blockchain : IAsyncDisposable
 
             _hash = ParentHash;
 
-            _cacheBudget = blockchain._options.Build();
+            _cacheBudgetStorageAndStage = blockchain._cacheBudgetStateAndStorage.Build();
+            _cacheBudgetPreCommit = blockchain._cacheBudgetPreCommit.Build();
 
             CreateDictionaries();
         }
@@ -457,10 +477,10 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         public Keccak Commit(uint blockNumber)
         {
-            var total = _blockchain._options.EntriesPerBlock;
+            var total = _blockchain._cacheBudgetStateAndStorage.EntriesPerBlock;
             if (total > 0)
             {
-                var percentage = (double)_cacheBudget.BudgetLeft / total * 100;
+                var percentage = (double)_cacheBudgetStorageAndStage.BudgetLeft / total * 100;
                 _blockchain._transientCacheUsage.Record((int)percentage);
             }
 
@@ -542,7 +562,7 @@ public class Blockchain : IAsyncDisposable
         {
             if (_hash == null)
             {
-                _hash = _blockchain._preCommit.BeforeCommit(this, _cacheBudget);
+                _hash = _blockchain._preCommit.BeforeCommit(this, _cacheBudgetPreCommit);
             }
         }
 
@@ -604,7 +624,7 @@ public class Blockchain : IAsyncDisposable
         /// <exception cref="NotImplementedException"></exception>
         private void TryCache(in Key key, in ReadOnlySpanOwnerWithMetadata<byte> owner, PooledSpanDictionary dict)
         {
-            if (_cacheBudget.ShouldCache(owner))
+            if (_cacheBudgetStorageAndStage.ShouldCache(owner))
             {
                 SetImpl(key, owner.Span, EntryType.TransientCache, dict);
             }
@@ -827,6 +847,9 @@ public class Blockchain : IAsyncDisposable
                 depth++;
             }
 
+            // report db read
+            Interlocked.Increment(ref _dbReads);
+
             if (_batch.TryGet(key, out var span))
             {
                 // return leased batch
@@ -969,6 +992,8 @@ public class Blockchain : IAsyncDisposable
             $"State: {_state}, " +
             $"Storage: {_storage}, " +
             $"PreCommit: {_preCommit}";
+
+        public int DbReads => Volatile.Read(ref _dbReads);
     }
 
     public bool HasState(in Keccak keccak)
@@ -1008,6 +1033,7 @@ public class Blockchain : IAsyncDisposable
         private readonly PooledSpanDictionary _committed;
 
         private readonly bool _raw;
+        private bool _discarable;
 
         public CommittedBlockState(Xor8 xor, HashSet<Keccak>? destroyed, Blockchain blockchain,
             PooledSpanDictionary committed, Keccak hash, Keccak parentHash,
@@ -1089,7 +1115,7 @@ public class Blockchain : IAsyncDisposable
         {
             _committed.Dispose();
 
-            if (_raw == false)
+            if (_raw == false && _discarable == false)
             {
                 _blockchain.Remove(this);
             }
@@ -1127,8 +1153,12 @@ public class Blockchain : IAsyncDisposable
             base.ToString() + ", " +
             $"{nameof(BlockNumber)}: {BlockNumber}, " +
             $"Committed data: {_committed}, ";
-    }
 
+        public void MakeDiscardable()
+        {
+            _discarable = true;
+        }
+    }
 
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload.

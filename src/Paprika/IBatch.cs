@@ -34,7 +34,8 @@ public enum CommitOptions
     /// Flushes db only once, ensuring that the data are stored properly.
     /// The root is stored ephemerally, waiting for the next commit to be truly stored.
     ///
-    /// This guarantees ATOMIC (from ACID) but not DURABLE.  
+    /// This guarantees ATOMIC (from ACID) but not DURABLE as the last root may not be flushed properly.
+    /// It will be during the next flush.
     /// </summary>
     FlushDataOnly,
 
