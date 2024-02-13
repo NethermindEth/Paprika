@@ -399,6 +399,38 @@ public class BlockchainTests
         }
     }
 
+    [Test]
+    public async Task Respects_commit_cache_budget()
+    {
+        const int commitCacheLimit = 4;
+
+        using var db = PagedDb.NativeMemoryDb(1 * Mb);
+
+        var cacheBudgetPreCommit = new CacheBudget.Options(1, 1);
+
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(), null, CacheBudget.Options.None,
+            cacheBudgetPreCommit, 1, null);
+
+        // Initial commit
+        using var start = blockchain.StartNew(Keccak.EmptyTreeHash);
+        const uint startNumber = 1;
+        start.SetAccount(Keccak.OfAnEmptyString, new Account(startNumber, startNumber));
+        var root = start.Commit(startNumber);
+
+        for (uint i = startNumber + 1; i < commitCacheLimit + 10; i++)
+        {
+            using var block = blockchain.StartNew(root);
+            block.SetAccount(Keccak.OfAnEmptyString, new Account(i, i));
+            root = block.Commit(i);
+
+            (block as IPersistenceStatsProvider).DbReads.Should().BeLessThanOrEqualTo(1,
+                "Because the only read that is required for the Merkle leaf, should be cached transiently");
+
+            // finalize as soon as possible to destroy dependencies
+            blockchain.Finalize(root);
+        }
+    }
+
     private static Account GetAccount(int i) => new((UInt256)i, (UInt256)i);
 
     private static Keccak BuildKey(int i)
