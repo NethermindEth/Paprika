@@ -136,7 +136,7 @@ var rootHashActual = Keccak.Zero;
 if (dbExists == false)
 {
     await using (var blockchain =
-                 new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), new CacheBudget.Options(1_000, 8), 50, () => reporter.Observe()))
+                 new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), new CacheBudget.Options(1_000, 8), new CacheBudget.Options(1_000, 8), 50, () => reporter.Observe()))
     {
         var visitor = new PaprikaCopyingVisitor(blockchain, 50000, skipStorage);
         Console.WriteLine("Starting...");
