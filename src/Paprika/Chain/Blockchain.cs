@@ -381,7 +381,7 @@ public class Blockchain : IAsyncDisposable
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload.
     /// </summary>
-    private class BlockState : RefCountingDisposable, IWorldState, ICommit, IProvideDescription, IPersistenceStatsProvider
+    private class BlockState : RefCountingDisposable, IWorldState, ICommit, IProvideDescription, IStateStats
     {
         /// <summary>
         /// A simple bloom filter to assert whether the given key was set in a given block, used to speed up getting the keys.
@@ -422,6 +422,7 @@ public class Blockchain : IAsyncDisposable
         private Keccak? _hash;
 
         private int _dbReads;
+        private IStateStats _stats1;
 
         public BlockState(Keccak parentStateRoot, IReadOnlyBatch batch, CommittedBlockState[] ancestors,
             Blockchain blockchain)
@@ -546,6 +547,8 @@ public class Blockchain : IAsyncDisposable
 
             CreateDictionaries();
         }
+
+        IStateStats IWorldState.Stats => this;
 
         public uint BlockNumber { get; private set; }
 
@@ -994,6 +997,9 @@ public class Blockchain : IAsyncDisposable
             $"PreCommit: {_preCommit}";
 
         public int DbReads => Volatile.Read(ref _dbReads);
+
+        public IEnumerable<(uint blockNumber, Keccak hash)> Ancestors =>
+            _ancestors.Select(ancestor => (ancestor.BlockNumber, ancestor.Hash));
     }
 
     public bool HasState(in Keccak keccak)

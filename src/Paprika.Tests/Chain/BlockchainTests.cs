@@ -423,7 +423,7 @@ public class BlockchainTests
             block.SetAccount(Keccak.OfAnEmptyString, new Account(i, i));
             root = block.Commit(i);
 
-            (block as IPersistenceStatsProvider).DbReads.Should().BeLessThanOrEqualTo(1,
+            block.Stats.DbReads.Should().BeLessThanOrEqualTo(1,
                 "Because the only read that is required for the Merkle leaf, should be cached transiently");
 
             // finalize as soon as possible to destroy dependencies
