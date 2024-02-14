@@ -423,11 +423,44 @@ public class BlockchainTests
             block.SetAccount(Keccak.OfAnEmptyString, new Account(i, i));
             root = block.Commit(i);
 
-            (block as IPersistenceStatsProvider).DbReads.Should().BeLessThanOrEqualTo(1,
+            block.Stats.DbReads.Should().BeLessThanOrEqualTo(1,
                 "Because the only read that is required for the Merkle leaf, should be cached transiently");
 
             // finalize as soon as possible to destroy dependencies
             blockchain.Finalize(root);
+        }
+    }
+
+    [Test]
+    public async Task Reports_ancestor_blocks()
+    {
+        using var db = PagedDb.NativeMemoryDb(1 * Mb);
+
+        await using var blockchain = new Blockchain(db, new PreCommit(), null, CacheBudget.Options.None,
+            CacheBudget.Options.None, 1);
+
+        // Arrange
+        const uint block1 = 1;
+        var (hash1, _) = BuildBlock(block1, Keccak.EmptyTreeHash);
+
+        const uint block2 = 2;
+        var (hash2, _) = BuildBlock(block2, hash1);
+
+        const uint block3 = 3;
+        var (hash3, last) = BuildBlock(block3, hash2);
+
+        // Assert stats in order
+        last.Stats.Ancestors
+            .Should()
+            .BeEquivalentTo(new[] { (block2, hash2), (block1, hash1) });
+
+        return;
+
+        (Keccak hash, IWorldState state) BuildBlock(uint number, in Keccak parent)
+        {
+            using var block = blockchain.StartNew(parent);
+            block.SetAccount(Keccak.OfAnEmptyString, new Account(number, number));
+            return (block.Commit(number), block);
         }
     }
 
