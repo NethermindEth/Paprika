@@ -36,6 +36,8 @@ public interface IWorldState : IDisposable
     /// Cleans up all the changes in the world state.
     /// </summary>
     void Reset();
+
+    public IStateStats Stats { get; }
 }
 
 public interface IReadOnlyWorldState : IReadOnlyCommit, IDisposable

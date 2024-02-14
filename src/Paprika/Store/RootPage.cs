@@ -27,8 +27,6 @@ public readonly unsafe struct RootPage(Page root) : IPage
     {
         private const int Size = Page.PageSize - PageHeader.Size;
 
-        private const int MetadataStart = 4 * DbAddress.Size + sizeof(uint);
-
         /// <summary>
         /// The address of the next free page. This should be used rarely as pages should be reused
         /// with <see cref="AbandonedPage"/>.
@@ -36,32 +34,45 @@ public readonly unsafe struct RootPage(Page root) : IPage
         [FieldOffset(0)] public DbAddress NextFreePage;
 
         /// <summary>
-        /// The first of the data pages.
-        /// </summary>
-        [FieldOffset(DbAddress.Size)] public DbAddress StateRoot;
-
-        /// <summary>
-        /// The first of the data pages.
-        /// </summary>
-        [FieldOffset(DbAddress.Size * 2)] public DbAddress StorageRoot;
-
-        /// <summary>
-        /// The root of the id pages.
-        /// </summary>
-        [FieldOffset(DbAddress.Size * 3)] public DbAddress IdRoot;
-
-        /// <summary>
         /// The account counter
         /// </summary>
-        [FieldOffset(DbAddress.Size * 4)] public uint AccountCounter;
+        [FieldOffset(DbAddress.Size)] public uint AccountCounter;
 
-        [FieldOffset(MetadataStart)] public Metadata Metadata;
+        /// <summary>
+        /// The first of the data pages.
+        /// </summary>
+        [FieldOffset(DbAddress.Size + sizeof(uint))]
+        public DbAddress StateRoot;
+
+        /// <summary>
+        /// Metadata of this root
+        /// </summary>
+        [FieldOffset(DbAddress.Size * 2 + sizeof(uint))]
+        public Metadata Metadata;
+
+        /// <summary>
+        /// Storage.
+        /// </summary>
+        [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size)]
+        private DbAddress StoragePayload;
+
+        public FanOutList<DataPage, StandardType> Storage => new(MemoryMarshal.CreateSpan(ref StoragePayload, FanOutList.FanOut));
+
+        /// <summary>
+        /// Identifiers
+        /// </summary>
+        [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + FanOutList.Size)]
+        private DbAddress IdsPayload;
+
+        public FanOutList<FanOutPage, IdentityType> Ids => new(MemoryMarshal.CreateSpan(ref IdsPayload, FanOutList.FanOut));
+
+        public const int AbandonedStart =
+            DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + FanOutList.Size * 2;
 
         /// <summary>
         /// The start of the abandoned pages.
         /// </summary>
-        [FieldOffset(AbandonedList.SpaceForRootPage)]
-        public AbandonedList AbandonedList;
+        [FieldOffset(AbandonedStart)] public AbandonedList AbandonedList;
 
         public DbAddress GetNextFreePage()
         {
@@ -96,14 +107,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
             return new DataPage(batch.GetAt(Data.StateRoot)).TryGet(encoded, batch, out result);
         }
 
-        if (Data.StorageRoot.IsNull || Data.IdRoot.IsNull)
-        {
-            result = default;
-            return false;
-        }
-
-        var ids = new FanOutPage(batch.GetAt(Data.IdRoot));
-        if (ids.TryGet(key.Path, batch, out var id) == false)
+        if (Data.Ids.TryGet(key.Path, batch, out var id) == false)
         {
             result = default;
             return false;
@@ -112,7 +116,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         var encodedStorage = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength], key.Type);
         var path = NibblePath.FromKey(id).Append(encodedStorage, stackalloc byte[StorageKeySize]);
 
-        return new FanOutPage(batch.GetAt(Data.StorageRoot)).TryGet(path, batch, out result);
+        return Data.Storage.TryGet(path, batch, out result);
     }
 
     /// <summary>
@@ -169,7 +173,8 @@ public readonly unsafe struct RootPage(Page root) : IPage
         if (lastNibble <= maxPacked)
         {
             // We can pack better
-            destination[raw.Length - 1] = (byte)(lastButOneNibble | (lastNibble << packedShift) | evenPacked | typeFlag);
+            destination[raw.Length - 1] =
+                (byte)(lastButOneNibble | (lastNibble << packedShift) | evenPacked | typeFlag);
             return NibblePath.FromKey(destination[..raw.Length]);
         }
 
@@ -196,11 +201,8 @@ public readonly unsafe struct RootPage(Page root) : IPage
             }
             else
             {
-                // full extraction of key possible, get it
-                var ids = new FanOutPage(batch.TryGetPageAlloc(ref Data.IdRoot, PageType.Identity));
-
                 // try fetch existing first
-                if (ids.TryGet(key.Path, batch, out var existingId) == false)
+                if (Data.Ids.TryGet(key.Path, batch, out var existingId) == false)
                 {
                     Data.AccountCounter++;
                     BinaryPrimitives.WriteUInt32LittleEndian(idSpan, Data.AccountCounter);
@@ -209,7 +211,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
                     batch.IdCache[key.Path.UnsafeAsKeccak] = Data.AccountCounter;
 
                     // update root
-                    Data.IdRoot = batch.GetAddress(ids.Set(key.Path, idSpan, batch));
+                    Data.Ids.Set(key.Path, idSpan, batch);
 
                     id = NibblePath.FromKey(idSpan);
                 }
@@ -224,17 +226,14 @@ public readonly unsafe struct RootPage(Page root) : IPage
             var encoded = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength], key.Type);
             var path = id.Append(encoded, stackalloc byte[StorageKeySize]);
 
-            SetAtRoot<FanOutPage>(batch, path, rawData, ref Data.StorageRoot);
+            Data.Storage.Set(path, rawData, batch);
         }
     }
 
     public void Destroy(IBatchContext batch, in NibblePath account)
     {
-        // Get the id page
-        var ids = new FanOutPage(batch.TryGetPageAlloc(ref Data.IdRoot, PageType.Identity));
-
         // Destroy the Id entry about it
-        Data.IdRoot = batch.GetAddress(ids.Set(account, ReadOnlySpan<byte>.Empty, batch));
+        Data.Ids.Set(account, ReadOnlySpan<byte>.Empty, batch);
 
         // Destroy the account entry
         SetAtRoot<DataPage>(batch, Encode(account, stackalloc byte[account.MaxByteLength], DataType.Account),
@@ -260,7 +259,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
 [StructLayout(LayoutKind.Explicit, Size = Size, Pack = 1)]
 public struct Metadata
 {
-    private const int Size = BlockNumberSize + Keccak.Size;
+    public const int Size = BlockNumberSize + Keccak.Size;
     private const int BlockNumberSize = sizeof(uint);
 
     [FieldOffset(0)] public readonly uint BlockNumber;
