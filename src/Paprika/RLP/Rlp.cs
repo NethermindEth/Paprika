@@ -1,3 +1,5 @@
+using System.Numerics;
+
 using Nethermind.Int256;
 using Paprika.Utils;
 
@@ -52,21 +54,7 @@ public static class Rlp
 
     public static int LengthOfLength(int value)
     {
-        if (value < 1 << 8)
-        {
-            return 1;
-        }
-
-        if (value < 1 << 16)
-        {
-            return 2;
-        }
-
-        if (value < 1 << 24)
-        {
-            return 3;
-        }
-
-        return MaxLengthOfLength;
+        int bits = 32 - BitOperations.LeadingZeroCount((uint)value | 1);
+        return (bits + 7) / 8;
     }
 }
