@@ -25,7 +25,7 @@ jobs:
     steps:
       - name: Cache dotnet
         id: cache-dotnet
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ${{ env.DOTNET_INSTALL_DIR }}
           key: ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}
