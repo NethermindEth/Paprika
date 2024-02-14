@@ -1,4 +1,4 @@
-name: "Paprika Tests"
+name: "Build Importer"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
