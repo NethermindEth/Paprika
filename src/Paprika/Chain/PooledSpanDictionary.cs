@@ -40,7 +40,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         _allowConcurrentReaders ? Unsafe.As<ThreadLocal<byte[]>>(_key).Value! : Unsafe.As<byte[]>(_key);
 
     private const int InlineKeyPointer = -1;
-    private const int ValueDestroyedPointer = -2;
+    private const short ValueDestroyedLength = short.MinValue;
 
     /// <summary>
     /// Initializes a new pooled dictionary instance.
@@ -160,7 +160,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         Debug.Assert(Unsafe.IsNullRef(ref entry) == false, "Can be used only to clean the existing entries");
 
         // empty value span produces an empty span
-        entry = new ValueSpan(ValueDestroyedPointer, 0, ValueSpan.DefaultMetadata);
+        entry = new ValueSpan(0, ValueDestroyedLength, ValueSpan.DefaultMetadata);
     }
 
     public Enumerator GetEnumerator() => new(this);
@@ -238,7 +238,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
     private KeySpan BuildKey(ReadOnlySpan<byte> key, ushort hash) => new(hash, Write(key), (ushort)key.Length);
 
     private ValueSpan BuildValue(ReadOnlySpan<byte> value0, ReadOnlySpan<byte> value1, byte metadata) =>
-        new(Write(value0, value1), (ushort)(value0.Length + value1.Length), metadata);
+        new(Write(value0, value1), (short)(value0.Length + value1.Length), metadata);
 
     private static ushort Mix(ulong hash)
     {
@@ -253,12 +253,12 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
     {
         return key.Pointer == InlineKeyPointer
             ? KeyBuffer.AsSpan(0, key.Length)
-            : GetAt(new ValueSpan(key.Pointer, key.Length, default));
+            : GetAt(new ValueSpan(key.Pointer, (short)key.Length, default));
     }
 
     private Span<byte> GetAt(ValueSpan value)
     {
-        if (value.Pointer == ValueDestroyedPointer || value.Length == 0)
+        if (value.IsDestroyed || value.Length == 0)
         {
             return Span<byte>.Empty;
         }
@@ -332,18 +332,24 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
     {
         public const byte DefaultMetadata = 0;
 
-        public readonly int Pointer;
-        public readonly ushort Length;
-        public readonly byte Metadata;
+        private readonly int _raw;
+        public readonly short Length;
 
-        public ValueSpan(int pointer, ushort length, byte metadata)
+        private const int MetadataBit = 1;
+        private const int MetadataShift = 31;
+
+        public ValueSpan(int pointer, short length, byte metadata)
         {
-            Pointer = pointer;
+            Debug.Assert(metadata <= MetadataBit, $"Metadata should be less or equal to {MetadataBit}");
+
+            _raw = pointer | (metadata << MetadataShift);
             Length = length;
-            Metadata = metadata;
         }
 
-        public bool IsDestroyed => Pointer == ValueDestroyedPointer;
+        public int Pointer => _raw & ~(MetadataBit << MetadataShift);
+        public byte Metadata => (byte)((_raw >> MetadataShift) & MetadataBit);
+
+        public bool IsDestroyed => Length == ValueDestroyedLength;
 
         public override string ToString() => $"{nameof(Pointer)}: {Pointer}, {nameof(Length)}: {Length}";
     }
