@@ -431,6 +431,39 @@ public class BlockchainTests
         }
     }
 
+    [Test]
+    public async Task Reports_ancestor_blocks()
+    {
+        using var db = PagedDb.NativeMemoryDb(1 * Mb);
+
+        await using var blockchain = new Blockchain(db, new PreCommit(), null, CacheBudget.Options.None,
+            CacheBudget.Options.None, 1);
+
+        // Arrange
+        const uint block1 = 1;
+        var (hash1, _) = BuildBlock(block1, Keccak.EmptyTreeHash);
+
+        const uint block2 = 2;
+        var (hash2, _) = BuildBlock(block2, hash1);
+
+        const uint block3 = 3;
+        var (hash3, last) = BuildBlock(block3, hash2);
+
+        // Assert stats in order
+        last.Stats.Ancestors
+            .Should()
+            .BeEquivalentTo(new[] { (block2, hash2), (block1, hash1) });
+
+        return;
+
+        (Keccak hash, IWorldState state) BuildBlock(uint number, in Keccak parent)
+        {
+            using var block = blockchain.StartNew(parent);
+            block.SetAccount(Keccak.OfAnEmptyString, new Account(number, number));
+            return (block.Commit(number), block);
+        }
+    }
+
     private static Account GetAccount(int i) => new((UInt256)i, (UInt256)i);
 
     private static Keccak BuildKey(int i)

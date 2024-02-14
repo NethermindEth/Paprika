@@ -142,8 +142,11 @@ public class Blockchain : IAsyncDisposable
                     application.Stop();
                     _flusherBlockApplicationInMs.Record((int)application.ElapsedMilliseconds);
 
+                    // If there's something in the queue, don't flush. Flush here only where there's nothing to read from the reader.
+                    var level = reader.TryPeek(out _) ? CommitOptions.DangerNoFlush : CommitOptions.FlushDataOnly;
+
                     // commit but no flush here, it's too heavy, the flush will come later
-                    await batch.Commit(CommitOptions.FlushDataOnly);
+                    await batch.Commit(level);
 
                     // inform blocks about flushing
                     lock (_blockLock)
