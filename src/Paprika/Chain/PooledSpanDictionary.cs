@@ -1,5 +1,4 @@
-﻿using System.Data;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -10,60 +9,36 @@ using Paprika.Store;
 namespace Paprika.Chain;
 
 /// <summary>
-/// The pooled span dictionary uses memory from <see cref="BufferPool"/> to store large chunks of memory.
+/// The pooled span dictionary uses memory from <see cref="BufferPool"/> to store large chunks of memory with minimal or no allocations.
 /// </summary>
-/// <remarks>
-/// This component hacks into the dictionary to provide the underlying keys by implementing the custom equality comparer.
-/// It allows to store in the underlying dict just simple entries and not pass the reference in there. To get the reference,
-/// the <see cref="Equals"/> gets the underlying <see cref="Span{Byte}"/> from pages;
-/// </remarks>
-public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySpan>, IDisposable
+public class PooledSpanDictionary : IDisposable
 {
     private const int BufferSize = BufferPool.BufferSize;
+    
     private readonly BufferPool _pool;
     private readonly bool _preserveOldValues;
-    private readonly bool _allowConcurrentReaders;
-    private readonly Dictionary<KeySpan, ValueSpan> _dict;
     private readonly List<Page> _pages = new();
 
     private Page _current;
     private int _position;
 
-    private static readonly int KeyBytesCount =
-        Key.StorageCell(NibblePath.FromKey(Keccak.EmptyTreeHash), Keccak.EmptyTreeHash).MaxByteLength;
-
-    private readonly object _key;
-
-    private static readonly ThreadLocal<byte[]> ConcurrentBuffers = new(() => new byte[KeyBytesCount]);
     private readonly Root _root;
-
-    private byte[] KeyBuffer =>
-        _allowConcurrentReaders ? Unsafe.As<ThreadLocal<byte[]>>(_key).Value! : Unsafe.As<byte[]>(_key);
-
-    private const int InlineKeyPointer = -1;
-    private const short ValueDestroyedLength = short.MinValue;
 
     /// <summary>
     /// Initializes a new pooled dictionary instance.
     /// </summary>
     /// <param name="pool">The pool to take data from and return to.</param>
     /// <param name="preserveOldValues">Whether dictionary should preserve previous values or aggressively reuse memory when possible.</param>
-    /// <param name="allowConcurrentReaders">Whether concurrent readers should be allowed.</param>
     /// <remarks>
     /// Set <paramref name="preserveOldValues"/> to true, if the data written once should not be overwritten.
     /// This allows to hold values returned by the dictionary through multiple operations.
-    ///
+    /// 
     /// This dictionary uses <see cref="ThreadLocal{T}"/> to store keys buffers to allow concurrent readers
     /// </remarks>
-    public PooledSpanDictionary(BufferPool pool, bool preserveOldValues = false, bool allowConcurrentReaders = false)
+    public PooledSpanDictionary(BufferPool pool, bool preserveOldValues = false)
     {
         _pool = pool;
         _preserveOldValues = preserveOldValues;
-        _allowConcurrentReaders = allowConcurrentReaders;
-        _dict = new Dictionary<KeySpan, ValueSpan>(this);
-
-        _key = allowConcurrentReaders ? ConcurrentBuffers : new byte[KeyBytesCount];
-
         _root = new Root(RentNewPage(true));
 
         AllocateNewPage();
@@ -71,13 +46,36 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
 
     public bool TryGet(scoped ReadOnlySpan<byte> key, ulong hash, out ReadOnlySpan<byte> result)
     {
-        const byte preambleBits = 0b1100_0000;
-        const byte byte0 = 0b0011_1111;
-        const byte destroyed = 0b1000_0000;
-        const byte hasNext = 0b0100_0000;
-        
-        var mixed = Mix(hash);
+        var search = TryGetImpl(key, hash);
+        if (search.IsFound)
+        {
+            result = search.Data;
+            return true;
+        }
 
+        result = default;
+        return false;
+    }
+
+    // Preamble
+    private const byte PreambleBits = 0b1100_0000;
+    private const byte DestroyedBit = 0b1000_0000;
+    private const byte MetadataBit = 0b0100_0000;
+    
+    private const byte Byte0Mask = 0b0011_1111;
+
+    // How many bytes are used for preamble + hash leftover
+    private const int PreambleLength = 3;
+
+    private const int AddressLength = 4;
+    
+    private const int KeyLengthLength = 1;
+    private const int ValueLengthLength = 2;
+    
+    
+    private SearchResult TryGetImpl(scoped ReadOnlySpan<byte> key, ulong hash)
+    {
+        var mixed = Mix(hash);
         var (leftover, bucket) = Math.DivRem(mixed, Root.BucketCount);
 
         Debug.Assert(BitOperations.LeadingZeroCount(leftover) >= 10, "First 10 bits should be left unused");
@@ -87,32 +85,93 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         {
             var (pageNo, atPage) = Math.DivRem(address, Page.PageSize);
 
-            // TODO: optimize access, more raw
-            ref var at = ref MemoryMarshal.GetReference(_pages[(int)pageNo].Span.Slice((int)atPage));
+            // TODO: optimize, unsafe ref?
+            var sliced = _pages[(int)pageNo].Span.Slice((int)atPage);
 
-            var header = at & preambleBits;
-            if ((header & destroyed) != destroyed)
+            ref var at = ref sliced[0];
+            
+            var header = sliced[0] & PreambleBits;
+            if ((header & DestroyedBit) != DestroyedBit)
             {
-                // not destroyed, ready to be searched
-                var leftoverStored = (at & byte0) + (Unsafe.Add(ref at, 1) << 8) + (Unsafe.Add(ref at, 2) << 16);
+                // not destroyed, ready to be searched, decode leftover, big endian
+                var leftoverStored = ((sliced[0] & Byte0Mask) << 16) +
+                                     (sliced[1] << 8) +
+                                     sliced[2];
+                
                 if (leftoverStored == leftover)
                 {
-                    throw new Exception("Match! Try to search");
+                    ref var payload = ref Unsafe.Add(ref at, PreambleLength + AddressLength);
+                    
+                    var storedKeyLength = payload;
+                    if (storedKeyLength == key.Length)
+                    {
+                        var storedKey = MemoryMarshal.CreateSpan(ref Unsafe.Add(ref payload, KeyLengthLength), storedKeyLength);
+                        if (storedKey.SequenceEqual(key))
+                        {
+                            ref var data = ref Unsafe.Add(ref payload, KeyLengthLength + storedKeyLength);
+                            return new SearchResult(ref at, ref data);
+                        }
+                    }
                 }
             }
-
-            // Check if has next entry linked, if not return
-            if ((header & hasNext) != hasNext)
-            {
-                break;
-            }
             
-            // Has next entry, decode it
+            // Decode next entry address
+            address = Unsafe.ReadUnaligned<uint>(ref Unsafe.Add(ref at, PreambleLength));
         }
-        
-        result = default;
-        return false;
+
+        return default;
     }
+
+    private readonly ref struct SearchResult
+    {
+        public bool IsFound => !Unsafe.IsNullRef(ref _header);
+
+        private readonly ref byte _header;
+        private readonly ref byte _data;
+
+        public SearchResult(ref byte header, ref byte data)
+        {
+            _data = ref data;
+            _header = ref header;
+        }
+
+        /// <summary>
+        /// The length is encoded as the first byte.
+        /// </summary>
+        public ReadOnlySpan<byte> Data =>
+            MemoryMarshal.CreateSpan(ref Unsafe.Add(ref _data, ValueLengthLength),
+                Unsafe.ReadUnaligned<ushort>(ref _data));
+
+        public bool TryUpdateInSitu(ReadOnlySpan<byte> data0, ReadOnlySpan<byte> data1)
+        {
+            if (IsFound == false)
+                return false;
+
+            var length = data0.Length + data1.Length;
+            if (Unsafe.ReadUnaligned<ushort>(ref _data) >= length)
+            {
+                // There's the place to have it update in place
+                Unsafe.WriteUnaligned(ref _data, (ushort)length);
+                
+                var destination = MemoryMarshal.CreateSpan(ref Unsafe.Add(ref _data, ValueLengthLength), length);
+                data0.CopyTo(destination);
+                if (data1.IsEmpty == false)
+                {
+                    data1.CopyTo(destination[data0.Length..]);
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+
+        public void Destroy()
+        {
+            Debug.Assert(IsFound, "Only found can be destroyed");
+            _header |= DestroyedBit;
+        }
+    } 
 
     public void Set(scoped ReadOnlySpan<byte> key, ulong hash, ReadOnlySpan<byte> data, byte metadata) =>
         Set(key, hash, data, ReadOnlySpan<byte>.Empty, metadata);
@@ -120,65 +179,58 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
 
     public void Set(scoped ReadOnlySpan<byte> key, ulong hash, ReadOnlySpan<byte> data0, ReadOnlySpan<byte> data1, byte metadata)
     {
-        var mixed = Mix(hash);
+        var search = _preserveOldValues == false ? TryGetImpl(key, hash) : default;
 
-        var tempKey = BuildKeyTemp(key, mixed);
-        ref var refValue = ref CollectionsMarshal.GetValueRefOrNullRef(_dict, tempKey);
-
-        if (Unsafe.IsNullRef(ref refValue))
+        if (search.TryUpdateInSitu(data0, data1))
         {
-            // key, does not exist
-            _dict.Add(BuildKey(key, mixed), BuildValue(data0, data1, metadata));
+            // TODO: metadata!
             return;
         }
-
-        if (!_preserveOldValues)
-        {
-            var size = data0.Length + data1.Length;
-
-            // if old values does not need to be preserved, try to reuse memory
-            if (refValue.Length == size)
-            {
-                // data lengths are equal, write in-situ
-                var span = GetAt(refValue);
-
-                data0.CopyTo(span);
-                data1.CopyTo(span.Slice(data1.Length));
-
-                if (metadata != refValue.Metadata)
-                {
-                    // requires update
-                    refValue = new ValueSpan(refValue.Pointer, refValue.Length, metadata);
-                }
-
-                return;
-            }
-        }
-
-        refValue = BuildValue(data0, data1, metadata);
-    }
-
-    public void Remove(ReadOnlySpan<byte> key, ulong hash)
-    {
-        if (_dict.Count == 0)
-            return;
-
+        
         var mixed = Mix(hash);
-        var tempKey = BuildKeyTemp(key, mixed);
+        var (leftover, bucket) = Math.DivRem(mixed, Root.BucketCount);
 
-        _dict.Remove(tempKey);
+        Debug.Assert(BitOperations.LeadingZeroCount(leftover) >= 10, "First 10 bits should be left unused");
+        
+        var root = _root.Buckets[(int)bucket];
+
+        var dataLength = data1.Length + data0.Length;
+        
+        var size = PreambleLength + AddressLength + KeyLengthLength + key.Length + ValueLengthLength + dataLength;
+        Span<byte> destination = Write(size, out var address);
+
+        // Write preamble, big endian
+        destination[0] = (byte)(leftover >> 16);
+        destination[1] = (byte)(leftover >> 8);
+        destination[2] = (byte)(leftover & 0xFF);
+
+        // Write next
+        Unsafe.WriteUnaligned(ref destination[PreambleLength], root);
+        
+        // Key length
+        const int keyStart = PreambleLength + AddressLength; 
+        destination[keyStart] = (byte)key.Length;
+        
+        // Key
+        key.CopyTo(destination.Slice(keyStart + KeyLengthLength));
+        
+        // Value length
+        var valueStart = keyStart + KeyLengthLength + key.Length;
+
+        Unsafe.WriteUnaligned(ref destination[valueStart], (ushort)dataLength);
+        
+        data0.CopyTo(destination[(valueStart + ValueLengthLength)..]);
+        data1.CopyTo(destination[(valueStart + ValueLengthLength + data0.Length)..]);
+
+        _root.Buckets[(int)bucket] = address;
     }
 
     public void Destroy(scoped ReadOnlySpan<byte> key, ulong hash)
     {
-        var mixed = Mix(hash);
-        var tempKey = BuildKeyTemp(key, mixed);
-
-        ref var entry = ref CollectionsMarshal.GetValueRefOrNullRef(_dict, tempKey);
-        Debug.Assert(Unsafe.IsNullRef(ref entry) == false, "Can be used only to clean the existing entries");
-
-        // empty value span produces an empty span
-        entry = new ValueSpan(0, ValueDestroyedLength, ValueSpan.DefaultMetadata);
+        var found = TryGetImpl(key, hash);
+        
+        if (found.IsFound)
+            found.Destroy();
     }
 
     public Enumerator GetEnumerator() => new(this);
@@ -189,36 +241,38 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
     /// </summary>
     public ref struct Enumerator
     {
-        private Dictionary<KeySpan, ValueSpan>.Enumerator _enumerator;
         private readonly PooledSpanDictionary _dictionary;
 
         public Enumerator(PooledSpanDictionary dictionary)
         {
-            _enumerator = dictionary._dict.GetEnumerator();
             _dictionary = dictionary;
         }
 
         public bool MoveNext()
         {
-            bool moved;
-            do
-            {
-                moved = _enumerator.MoveNext();
-            } while (moved && _enumerator.Current.Value.IsDestroyed);
-
-            return moved;
+            return false;
+            // bool moved;
+            // do
+            // {
+            //     moved = _enumerator.MoveNext();
+            // } while (moved && _enumerator.Current.Value.IsDestroyed);
+            //
+            // return moved;
         }
 
         public KeyValue Current
         {
             get
             {
-                var (key, value) = _enumerator.Current;
-                return new KeyValue(_dictionary.GetAt(key), key.ShortHash, _dictionary.GetAt(value), value.Metadata);
+                //var (key, value) = _enumerator.Current;
+                return default;
             }
         }
 
-        public void Dispose() => _enumerator.Dispose();
+        public void Dispose()
+        {
+            // throw new ex
+        }
 
         public readonly ref struct KeyValue
         {
@@ -253,133 +307,26 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         return page;
     }
 
-    private KeySpan BuildKeyTemp(ReadOnlySpan<byte> key, ushort hash)
-    {
-        key.CopyTo(KeyBuffer);
-        return new KeySpan(hash, InlineKeyPointer, (ushort)key.Length);
-    }
-
-    private KeySpan BuildKey(ReadOnlySpan<byte> key, ushort hash) => new(hash, Write(key), (ushort)key.Length);
-
-    private ValueSpan BuildValue(ReadOnlySpan<byte> value0, ReadOnlySpan<byte> value1, byte metadata) =>
-        new(Write(value0, value1), (short)(value0.Length + value1.Length), metadata);
 
     private static uint Mix(ulong hash) => unchecked((uint)((hash >> 32) ^ hash));
 
-    private ReadOnlySpan<byte> GetAt(KeySpan key)
+
+    private Span<byte> Write(int size, out uint addr)
     {
-        return key.Pointer == InlineKeyPointer
-            ? KeyBuffer.AsSpan(0, key.Length)
-            : GetAt(new ValueSpan(key.Pointer, (short)key.Length, default));
-    }
-
-    private Span<byte> GetAt(ValueSpan value)
-    {
-        if (value.IsDestroyed || value.Length == 0)
-        {
-            return Span<byte>.Empty;
-        }
-
-        var pageNo = Math.DivRem(value.Pointer, BufferSize, out var offset);
-        return _pages[pageNo].Span.Slice(offset, value.Length);
-    }
-
-    private int Write(ReadOnlySpan<byte> data)
-    {
-        var size = data.Length;
-
         if (BufferSize - _position < size)
         {
             // not enough memory
             AllocateNewPage();
         }
 
-        data.CopyTo(_current.Span.Slice(_position));
-        var pointer = _position + (_pages.Count - 1) * BufferSize;
+        // allocated before the position is changed
+        var span = _current.Span.Slice(_position, size);
+        
+        addr = (uint)(_position + (_pages.Count - 1) * BufferSize);
         _position += size;
-        return pointer;
+
+        return span;
     }
-
-    private int Write(ReadOnlySpan<byte> data, ReadOnlySpan<byte> data1)
-    {
-        var size = data.Length + data1.Length;
-
-        if (BufferSize - _position < size)
-        {
-            // not enough memory
-            AllocateNewPage();
-        }
-
-        data.CopyTo(_current.Span.Slice(_position));
-        data1.CopyTo(_current.Span.Slice(_position + data.Length));
-        var pointer = _position + (_pages.Count - 1) * BufferSize;
-        _position += size;
-        return pointer;
-    }
-
-    /// <summary>
-    /// Key, packed to 8 bytes.
-    /// </summary>
-    [StructLayout(LayoutKind.Explicit)]
-    public readonly struct KeySpan
-    {
-        public KeySpan(ushort shortHash, int pointer, ushort length)
-        {
-            ShortHash = shortHash;
-            Length = length;
-            Pointer = pointer;
-        }
-
-        [FieldOffset(0)] public readonly ushort ShortHash;
-
-        [FieldOffset(2)] public readonly ushort Length;
-
-        /// <summary>
-        /// Starts at 0, combining the short hash and the length to make hash more unique.
-        /// </summary>
-        [FieldOffset(0)] public readonly int Hash;
-
-        [FieldOffset(4)] public readonly int Pointer;
-
-        public override string ToString() =>
-            $"{nameof(Length)}: {Length}, {nameof(Hash)}: {Hash}, {nameof(Pointer)}: {Pointer}";
-    }
-
-    private readonly struct ValueSpan
-    {
-        public const byte DefaultMetadata = 0;
-
-        private readonly int _raw;
-        public readonly short Length;
-
-        private const int MetadataBit = 1;
-        private const int MetadataShift = 31;
-
-        public ValueSpan(int pointer, short length, byte metadata)
-        {
-            Debug.Assert(metadata <= MetadataBit, $"Metadata should be less or equal to {MetadataBit}");
-
-            _raw = pointer | (metadata << MetadataShift);
-            Length = length;
-        }
-
-        public int Pointer => _raw & ~(MetadataBit << MetadataShift);
-        public byte Metadata => (byte)((_raw >> MetadataShift) & MetadataBit);
-
-        public bool IsDestroyed => Length == ValueDestroyedLength;
-
-        public override string ToString() => $"{nameof(Pointer)}: {Pointer}, {nameof(Length)}: {Length}";
-    }
-
-    bool IEqualityComparer<KeySpan>.Equals(KeySpan x, KeySpan y)
-    {
-        if (x.Hash != y.Hash)
-            return false;
-
-        return GetAt(x).SequenceEqual(GetAt(y));
-    }
-
-    int IEqualityComparer<KeySpan>.GetHashCode(KeySpan obj) => obj.Hash;
 
     public void Dispose()
     {
@@ -389,10 +336,9 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         }
 
         _pages.Clear();
-        _dict.Clear();
     }
 
-    public override string ToString() => $"Count: {_dict.Count}, Memory: {_pages.Count * BufferSize / 1024}kb";
+    public override string ToString() => $"Memory: {_pages.Count * BufferSize / 1024}kb";
 
     public void Describe(TextWriter text, Key.Predicate? predicate = null)
     {

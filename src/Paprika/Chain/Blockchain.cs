@@ -470,7 +470,7 @@ public class Blockchain : IAsyncDisposable
                     dict.Dispose();
                 }
 
-                dict = new PooledSpanDictionary(pool, true, true);
+                dict = new PooledSpanDictionary(pool, true);
             }
         }
 
@@ -529,7 +529,7 @@ public class Blockchain : IAsyncDisposable
 
             // clean no longer used fields
 
-            var data = new PooledSpanDictionary(Pool, false, true);
+            var data = new PooledSpanDictionary(Pool, false);
             Squash(_state, data);
             Squash(_storage, data);
             Squash(_preCommit, data);
@@ -765,7 +765,7 @@ public class Blockchain : IAsyncDisposable
 
             public ChildCommit(BufferPool pool, ICommit parent)
             {
-                _dict = new PooledSpanDictionary(pool, true, false);
+                _dict = new PooledSpanDictionary(pool, true);
                 _pool = pool;
                 _parent = parent;
             }

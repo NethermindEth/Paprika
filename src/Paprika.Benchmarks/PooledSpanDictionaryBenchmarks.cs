@@ -11,7 +11,7 @@ public class PooledSpanDictionaryBenchmarks
     [Benchmark]
     public int Read_write_small()
     {
-        using var dict = new PooledSpanDictionary(_pool, false, true);
+        using var dict = new PooledSpanDictionary(_pool, false);
 
         Span<byte> key = stackalloc byte[2];
 

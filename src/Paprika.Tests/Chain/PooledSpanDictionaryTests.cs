@@ -1,23 +1,19 @@
-﻿using System;
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using FluentAssertions;
 using JetBrains.dotMemoryUnit;
 using NUnit.Framework;
 using Paprika.Chain;
-using Paprika.Store;
 
 namespace Paprika.Tests.Chain;
 
 public class PooledSpanDictionaryTests
 {
-    [TestCase(true, true)]
-    [TestCase(true, false)]
-    [TestCase(false, true)]
-    [TestCase(false, false)]
-    public void Destruction(bool preserveOldValues, bool concurrentReaders)
+    [TestCase(true)]
+    [TestCase(false)]
+    public void Destruction(bool preserveOldValues)
     {
         using var pool = new BufferPool(4);
-        using var dict = new PooledSpanDictionary(pool, preserveOldValues, concurrentReaders);
+        using var dict = new PooledSpanDictionary(pool, preserveOldValues);
 
         Span<byte> key = stackalloc byte[] { 13, 17 };
         Span<byte> value = stackalloc byte[] { 211 };
@@ -33,12 +29,35 @@ public class PooledSpanDictionaryTests
         destroyed.IsEmpty.Should().BeTrue();
     }
 
+    [TestCase(127, TestName = "Value shorter than 255")]
+    [TestCase(256, TestName = "Value longer than 255")]
+    public void Set_get_destroy(int valueLength)
+    {
+        using var pool = new BufferPool(4);
+        using var dict = new PooledSpanDictionary(pool);
+        
+        Span<byte> key = stackalloc byte[] { 13, 17 };
+        Span<byte> value = new byte[valueLength];
+        value.Fill(0x13);
+        
+        const byte metadata = 1;
+        const ulong hash = 859;
+
+        dict.Set(key, hash, value, metadata);
+        
+        dict.TryGet(key, hash, out var result).Should().BeTrue();
+        result.SequenceEqual(value).Should().BeTrue();
+        
+        dict.Destroy(key, hash);
+        dict.TryGet(key, hash, out _).Should().BeFalse();
+    }
+
     [Test]
     public void On_page_boundary()
     {
         // Set two kvp, key0 + data0 + key1 fill first page, data1, will be empty
         using var pool = new BufferPool(4);
-        using var dict = new PooledSpanDictionary(pool, false, false);
+        using var dict = new PooledSpanDictionary(pool, false);
 
         Span<byte> key0 = stackalloc byte[] { 13, 17 };
         const ulong hash0 = 859;
@@ -74,7 +93,7 @@ public class PooledSpanDictionaryTests
 
         for (var i = 0; i < 100; i++)
         {
-            using var dict = new PooledSpanDictionary(pool, false, true);
+            using var dict = new PooledSpanDictionary(pool, false);
 
             for (uint keys = 0; keys < 10_000; keys++)
             {
