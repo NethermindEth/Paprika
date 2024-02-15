@@ -1,8 +1,8 @@
-﻿using System.CodeDom.Compiler;
+﻿using System.Data;
 using System.Diagnostics;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Text;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store;
@@ -35,6 +35,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
     private readonly object _key;
 
     private static readonly ThreadLocal<byte[]> ConcurrentBuffers = new(() => new byte[KeyBytesCount]);
+    private readonly Root _root;
 
     private byte[] KeyBuffer =>
         _allowConcurrentReaders ? Unsafe.As<ThreadLocal<byte[]>>(_key).Value! : Unsafe.As<byte[]>(_key);
@@ -63,37 +64,54 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
 
         _key = allowConcurrentReaders ? ConcurrentBuffers : new byte[KeyBytesCount];
 
+        _root = new Root(RentNewPage(true));
+
         AllocateNewPage();
     }
 
     public bool TryGet(scoped ReadOnlySpan<byte> key, ulong hash, out ReadOnlySpan<byte> result)
     {
+        const byte preambleBits = 0b1100_0000;
+        const byte byte0 = 0b0011_1111;
+        const byte destroyed = 0b1000_0000;
+        const byte hasNext = 0b0100_0000;
+        
         var mixed = Mix(hash);
-        if (_dict.TryGetValue(BuildKeyTemp(key, mixed), out var value))
-        {
-            result = GetAt(value);
-            return true;
-        }
 
+        var (leftover, bucket) = Math.DivRem(mixed, Root.BucketCount);
+
+        Debug.Assert(BitOperations.LeadingZeroCount(leftover) >= 10, "First 10 bits should be left unused");
+        
+        var address = _root.Buckets[(int)bucket];
+        while (address != 0)
+        {
+            var (pageNo, atPage) = Math.DivRem(address, Page.PageSize);
+
+            // TODO: optimize access, more raw
+            ref var at = ref MemoryMarshal.GetReference(_pages[(int)pageNo].Span.Slice((int)atPage));
+
+            var header = at & preambleBits;
+            if ((header & destroyed) != destroyed)
+            {
+                // not destroyed, ready to be searched
+                var leftoverStored = (at & byte0) + (Unsafe.Add(ref at, 1) << 8) + (Unsafe.Add(ref at, 2) << 16);
+                if (leftoverStored == leftover)
+                {
+                    throw new Exception("Match! Try to search");
+                }
+            }
+
+            // Check if has next entry linked, if not return
+            if ((header & hasNext) != hasNext)
+            {
+                break;
+            }
+            
+            // Has next entry, decode it
+        }
+        
         result = default;
         return false;
-    }
-
-    public bool TryGet(scoped ReadOnlySpan<byte> key, ushort shortHash, out ReadOnlySpan<byte> result)
-    {
-        if (_dict.TryGetValue(BuildKeyTemp(key, shortHash), out var value))
-        {
-            result = GetAt(value);
-            return true;
-        }
-
-        result = default;
-        return false;
-    }
-
-    public bool Contains(scoped ReadOnlySpan<byte> key, ushort shortHash)
-    {
-        return _dict.ContainsKey(BuildKeyTemp(key, shortHash));
     }
 
     public void Set(scoped ReadOnlySpan<byte> key, ulong hash, ReadOnlySpan<byte> data, byte metadata) =>
@@ -223,10 +241,16 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
 
     private void AllocateNewPage()
     {
-        var page = _pool.Rent(false);
-        _pages.Add(page);
+        var page = RentNewPage(false);
         _current = page;
         _position = 0;
+    }
+
+    private Page RentNewPage(bool clear)
+    {
+        var page = _pool.Rent(clear);
+        _pages.Add(page);
+        return page;
     }
 
     private KeySpan BuildKeyTemp(ReadOnlySpan<byte> key, ushort hash)
@@ -240,14 +264,7 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
     private ValueSpan BuildValue(ReadOnlySpan<byte> value0, ReadOnlySpan<byte> value1, byte metadata) =>
         new(Write(value0, value1), (short)(value0.Length + value1.Length), metadata);
 
-    private static ushort Mix(ulong hash)
-    {
-        unchecked
-        {
-            var mixed = (uint)((hash >> 32) ^ hash);
-            return (ushort)((mixed >> 16) ^ mixed);
-        }
-    }
+    private static uint Mix(ulong hash) => unchecked((uint)((hash >> 32) ^ hash));
 
     private ReadOnlySpan<byte> GetAt(KeySpan key)
     {
@@ -415,5 +432,13 @@ public class PooledSpanDictionary : IEqualityComparer<PooledSpanDictionary.KeySp
         return;
 
         static string S(in NibblePath full) => full.UnsafeAsKeccak.ToString();
+    }
+
+    private readonly struct Root(Page page)
+    {
+        public const int BucketCount = Page.PageSize / sizeof(uint);
+        public const int BucketMask = BucketCount - 1;
+        
+        public Span<uint> Buckets => MemoryMarshal.Cast<byte, uint>(page.Span);
     }
 }
