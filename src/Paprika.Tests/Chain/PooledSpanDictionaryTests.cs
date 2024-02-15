@@ -25,7 +25,7 @@ public class PooledSpanDictionaryTests
         actual.SequenceEqual(value).Should().BeTrue();
 
         dict.Destroy(key, hash);
-        dict.TryGet(key, hash, out var destroyed).Should().BeTrue();
+        dict.TryGet(key, hash, out var destroyed).Should().BeFalse();
         destroyed.IsEmpty.Should().BeTrue();
     }
 
@@ -77,7 +77,7 @@ public class PooledSpanDictionaryTests
         Span<byte> key1 = stackalloc byte[] { 23, 19 };
         const ulong hash1 = 534;
 
-        var onePage = new byte[BufferPool.BufferSize - key0.Length - key1.Length];
+        var onePage = new byte[BufferPool.BufferSize - key0.Length - key1.Length - PooledSpanDictionary.ItemOverhead * 2];
 
         const byte metadata = 1;
 
@@ -91,7 +91,7 @@ public class PooledSpanDictionaryTests
         value1.SequenceEqual(ReadOnlySpan<byte>.Empty);
     }
 
-    public const int Mb = 1024 * 1024;
+    private const int Mb = 1024 * 1024;
 
     [Test]
     [Category(Categories.LongRunning)]

@@ -57,6 +57,11 @@ public class PooledSpanDictionary : IDisposable
         return false;
     }
 
+    /// <summary>
+    /// The total overhead to write one item.
+    /// </summary>
+    public const int ItemOverhead = PreambleLength + AddressLength + KeyLengthLength + ValueLengthLength;
+    
     // Preamble
     private const byte PreambleBits = 0b1100_0000;
     private const byte DestroyedBit = 0b1000_0000;
