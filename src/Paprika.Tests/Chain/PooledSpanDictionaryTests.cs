@@ -29,9 +29,9 @@ public class PooledSpanDictionaryTests
         destroyed.IsEmpty.Should().BeTrue();
     }
 
-    [TestCase(127, TestName = "Value shorter than 255")]
-    [TestCase(256, TestName = "Value longer than 255")]
-    public void Set_get_destroy(int valueLength)
+    [TestCase(127, 1)]
+    [TestCase(256, 0)]
+    public void Set_get_enumerate_destroy(int valueLength, byte metadata)
     {
         using var pool = new BufferPool(4);
         using var dict = new PooledSpanDictionary(pool);
@@ -40,16 +40,28 @@ public class PooledSpanDictionaryTests
         Span<byte> value = new byte[valueLength];
         value.Fill(0x13);
         
-        const byte metadata = 1;
         const ulong hash = 859;
 
         dict.Set(key, hash, value, metadata);
         
         dict.TryGet(key, hash, out var result).Should().BeTrue();
         result.SequenceEqual(value).Should().BeTrue();
+
+        using var e = dict.GetEnumerator();
+        
+        e.MoveNext().Should().BeTrue();
+        e.Current.Metadata.Should().Be(metadata);
+        e.Current.Hash.Should().Be((uint)hash);
+        e.Current.Key.SequenceEqual(key).Should().BeTrue();
+        e.Current.Value.SequenceEqual(value).Should().BeTrue();
+
+        e.MoveNext().Should().BeFalse();
         
         dict.Destroy(key, hash);
         dict.TryGet(key, hash, out _).Should().BeFalse();
+        
+        using var e2 = dict.GetEnumerator();
+        e2.MoveNext().Should().BeFalse();
     }
 
     [Test]
@@ -103,7 +115,5 @@ public class PooledSpanDictionaryTests
                 dict.TryGet(key, hash, out _);
             }
         }
-
-        dotMemory.Check();
     }
 }
