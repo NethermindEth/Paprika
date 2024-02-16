@@ -40,7 +40,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private readonly int _minimumTreeLevelToMemoizeKeccak;
     private readonly int _memoizeKeccakEvery;
-    private readonly bool _memoizeRlp;
+    private readonly Memoization _memoization;
     private readonly Meter _meter;
     private readonly Histogram<long> _storageProcessing;
     private readonly Histogram<long> _stateProcessing;
@@ -53,11 +53,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// <param name="memoizeKeccakEvery">How often (which lvl mod) should Keccaks be memoized.</param>
     /// <param name="memoizeRlp">For tests purposes only</param>
     public ComputeMerkleBehavior(int minimumTreeLevelToMemoizeKeccak = DefaultMinimumTreeLevelToMemoizeKeccak,
-        int memoizeKeccakEvery = MemoizeKeccakEveryNLevel, bool memoizeRlp = true)
+        int memoizeKeccakEvery = MemoizeKeccakEveryNLevel, Memoization memoization = Memoization.Branch)
     {
         _minimumTreeLevelToMemoizeKeccak = minimumTreeLevelToMemoizeKeccak;
         _memoizeKeccakEvery = memoizeKeccakEvery;
-        _memoizeRlp = memoizeRlp;
+        _memoization = memoization;
 
         _meter = new Meter("Paprika.Merkle");
         _storageProcessing = _meter.CreateHistogram<long>("State processing", "ms",
@@ -576,7 +576,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private bool ShouldMemoizeBranchRlp(in NibblePath branchPath, TrieType trieType)
     {
         // A simple condition to memoize only more nested RLPs for state
-        return _memoizeRlp && (branchPath.Length >= 1 || trieType == TrieType.Storage);
+        return _memoization == Memoization.Branch && (branchPath.Length >= 1 || trieType == TrieType.Storage);
     }
 
     private bool ShouldMemoizeBranchKeccak(in NibblePath branchPath)

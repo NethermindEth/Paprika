@@ -300,7 +300,7 @@ public class DirtyTests
     private void Assert(Commit commit, Action<ICommit> assert)
     {
         const int dontMemoize = int.MaxValue;
-        var merkle = new ComputeMerkleBehavior(dontMemoize, dontMemoize, false);
+        var merkle = new ComputeMerkleBehavior(dontMemoize, dontMemoize, Memoization.None);
 
         // run merkle before
         merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());
