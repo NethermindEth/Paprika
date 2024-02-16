@@ -197,12 +197,15 @@ public class PooledSpanDictionary : IDisposable
     {
         Debug.Assert(metadata <= MaxMetadata, "Metadata size breached");
 
-        var search = _preserveOldValues == false ? TryGetImpl(key, hash) : default;
+        var search = TryGetImpl(key, hash);
 
         if (search.IsFound)
         {
-            if (search.TryUpdateInSitu(data0, data1, metadata))
-                return;
+            if (_preserveOldValues == false)
+            {
+                if (search.TryUpdateInSitu(data0, data1, metadata))
+                    return;    
+            }
 
             // Destroy the search as it should not be visible later and move on with inserting as usual
             search.Destroy();

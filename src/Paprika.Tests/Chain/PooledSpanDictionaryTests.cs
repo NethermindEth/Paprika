@@ -1,5 +1,4 @@
 ﻿using System.Buffers.Binary;
-using System.Diagnostics;
 using FluentAssertions;
 using JetBrains.dotMemoryUnit;
 using NUnit.Framework;
@@ -28,6 +27,44 @@ public class PooledSpanDictionaryTests
         dict.Destroy(key, hash);
         dict.TryGet(key, hash, out var destroyed).Should().BeFalse();
         destroyed.IsEmpty.Should().BeTrue();
+    }
+
+    [Test]
+    public void Update_should_invalidate_previous_even_when_preserving_old_values()
+    {
+        using var pool = new BufferPool(4);
+        using var dict = new PooledSpanDictionary(pool, true);
+
+        Span<byte> key = stackalloc byte[] { 13, 17 };
+        
+        Span<byte> value0 = stackalloc byte[] { 211 };
+        const byte meta0 = 1;
+        
+        Span<byte> value1 = stackalloc byte[] { 23 };
+        const byte meta1 = 0;
+
+        const ulong hash = 859;
+
+        // Set get value 0
+        dict.Set(key, hash, value0, meta0);
+        dict.TryGet(key, hash, out var actual0).Should().BeTrue();
+        actual0.SequenceEqual(value0).Should().BeTrue();
+        
+        // Set get value 1
+        dict.Set(key, hash, value1, meta1);
+        dict.TryGet(key, hash, out var actual1).Should().BeTrue();
+        actual1.SequenceEqual(value1).Should().BeTrue();
+        
+        // value 0 should still be equal as preserves old values
+        actual0.SequenceEqual(value0).Should().BeTrue();
+        
+        using var e = dict.GetEnumerator();
+        
+        e.MoveNext().Should().BeTrue();
+        e.Current.Metadata.Should().Be(meta1);
+        e.Current.Hash.Should().Be((uint)hash);
+        
+        e.MoveNext().Should().BeFalse();
     }
 
     [TestCase(127, 1)]
