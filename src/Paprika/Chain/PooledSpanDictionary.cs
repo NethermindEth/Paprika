@@ -474,10 +474,10 @@ public class PooledSpanDictionary : IDisposable
     private readonly struct Root(Page[] pages)
     {
         /// <summary>
-        /// 8 gives 4kb * 8, 32kb allocated per dictionary.
-        /// This gives 8k buckets which should be sufficient to have a really low ratio of collisions for majority of the blocks.
+        /// 16gives 4kb * 16, 64kb allocated per dictionary.
+        /// This gives 16k buckets which should be sufficient to have a really low ratio of collisions for majority of the blocks.
         /// </summary>
-        public const int PageCount = 8;
+        public const int PageCount = 16;
 
         public static readonly int BucketCountLog2 = BitOperations.Log2(BucketCount);
 
