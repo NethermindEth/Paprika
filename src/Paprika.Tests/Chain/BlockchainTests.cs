@@ -1,6 +1,5 @@
 ﻿using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
-using System.Text;
 using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;

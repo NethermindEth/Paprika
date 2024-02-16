@@ -61,7 +61,7 @@ public class PooledSpanDictionary : IDisposable
     /// The total overhead to write one item.
     /// </summary>
     public const int ItemOverhead = PreambleLength + AddressLength + KeyLengthLength + ValueLengthLength;
-    
+
     // Preamble
     private const byte PreambleBits = 0b1100_0000;
     private const byte DestroyedBit = 0b1000_0000;
@@ -204,10 +204,8 @@ public class PooledSpanDictionary : IDisposable
             if (search.TryUpdateInSitu(data0, data1, metadata))
                 return;
 
-            // Destroy the search as it should not be visible later
+            // Destroy the search as it should not be visible later and move on with inserting as usual
             search.Destroy();
-
-            return;
         }
 
         var mixed = Mix(hash);
@@ -265,54 +263,44 @@ public class PooledSpanDictionary : IDisposable
     public ref struct Enumerator(PooledSpanDictionary dictionary)
     {
         private int _bucket = -1;
-        private uint _address;
+        private uint _address = 0;
         private ref byte _at;
 
         public bool MoveNext()
         {
-            // Try move in this bucket
-            if (_address != 0)
+            while (_bucket < Root.BucketCount)
             {
-                // Not empty address, try to move in bucket
-                _address = Unsafe.ReadUnaligned<uint>(ref Unsafe.Add(ref _at, PreambleLength));
-
-                if (_address != 0)
+                // On empty, scan to the next bucket that is not empty
+                while (_address == 0)
                 {
-                    ref var at = ref dictionary.GetAt(_address);
-                    if ((at & DestroyedBit) == 0)
+                    _bucket++;
+                    if (_bucket == Root.BucketCount)
                     {
-                        // Skip destroyed
-                        _at = ref at;
-                        return true;
+                        return false;
                     }
-                }
-            }
 
-            // The bucket is emptied
-            while (_address == 0)
-            {
-                _bucket++;
-                if (_bucket == Root.BucketCount)
-                {
-                    return false;
+                    _address = dictionary._root.Buckets[_bucket];
                 }
 
-                _address = dictionary._root.Buckets[_bucket];
+                // Scan the bucket till it's not destroyed
                 while (_address != 0)
                 {
+                    // Capture the current, move address to next immediately
                     ref var at = ref dictionary.GetAt(_address);
+                    
+                    // The position is captured in ref at above, move to next
+                    _address = Unsafe.ReadUnaligned<uint>(ref Unsafe.Add(ref at, PreambleLength));
+                    
                     if ((at & DestroyedBit) == 0)
                     {
-                        // Skip destroyed
+                        // Set at the at as it represents an active item
                         _at = ref at;
                         return true;
                     }
-
-                    _address = Unsafe.ReadUnaligned<uint>(ref Unsafe.Add(ref at, PreambleLength));
                 }
             }
 
-            return true;
+            return false;
         }
 
         public KeyValue Current => new(ref _at, (uint)_bucket);

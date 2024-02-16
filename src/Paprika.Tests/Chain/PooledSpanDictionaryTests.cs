@@ -35,20 +35,20 @@ public class PooledSpanDictionaryTests
     {
         using var pool = new BufferPool(4);
         using var dict = new PooledSpanDictionary(pool);
-        
+
         Span<byte> key = stackalloc byte[] { 13, 17 };
         Span<byte> value = new byte[valueLength];
         value.Fill(0x13);
-        
+
         const ulong hash = 859;
 
         dict.Set(key, hash, value, metadata);
-        
+
         dict.TryGet(key, hash, out var result).Should().BeTrue();
         result.SequenceEqual(value).Should().BeTrue();
 
         using var e = dict.GetEnumerator();
-        
+
         e.MoveNext().Should().BeTrue();
         e.Current.Metadata.Should().Be(metadata);
         e.Current.Hash.Should().Be((uint)hash);
@@ -56,12 +56,52 @@ public class PooledSpanDictionaryTests
         e.Current.Value.SequenceEqual(value).Should().BeTrue();
 
         e.MoveNext().Should().BeFalse();
-        
+
         dict.Destroy(key, hash);
         dict.TryGet(key, hash, out _).Should().BeFalse();
-        
+
         using var e2 = dict.GetEnumerator();
         e2.MoveNext().Should().BeFalse();
+    }
+    
+    [Test]
+    public void Update_to_larger_value()
+    {
+        using var pool = new BufferPool(4);
+        using var dict = new PooledSpanDictionary(pool);
+
+        Span<byte> key = stackalloc byte[] { 13, 17 };
+        
+        Span<byte> value0 = new byte[1];
+        value0.Fill(0x13);
+        const byte meta0 = 1;
+        
+        Span<byte> value1 = new byte[13];
+        value1.Fill(0x17);
+        const byte meta1 = 0;
+
+        const ulong hash = 859;
+
+        // Set & Assert value0
+        dict.Set(key, hash, value0, meta0);
+        dict.TryGet(key, hash, out var result).Should().BeTrue();
+        result.SequenceEqual(value0).Should().BeTrue();
+        
+        // Set & Assert value1
+        dict.Set(key, hash, value1, meta1);
+        dict.TryGet(key, hash, out result).Should().BeTrue();
+        result.SequenceEqual(value1).Should().BeTrue();
+
+        // Enumerate
+        using var e = dict.GetEnumerator();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Metadata.Should().Be(meta1);
+        e.Current.Hash.Should().Be((uint)hash);
+        e.Current.Key.SequenceEqual(key).Should().BeTrue();
+        e.Current.Value.SequenceEqual(value1).Should().BeTrue();
+
+        e.MoveNext().Should().BeFalse();
     }
 
     [Test]
@@ -77,7 +117,8 @@ public class PooledSpanDictionaryTests
         Span<byte> key1 = stackalloc byte[] { 23, 19 };
         const ulong hash1 = 534;
 
-        var onePage = new byte[BufferPool.BufferSize - key0.Length - key1.Length - PooledSpanDictionary.ItemOverhead * 2];
+        var onePage =
+            new byte[BufferPool.BufferSize - key0.Length - key1.Length - PooledSpanDictionary.ItemOverhead * 2];
 
         const byte metadata = 1;
 
@@ -95,25 +136,39 @@ public class PooledSpanDictionaryTests
 
     [Test]
     [Category(Categories.LongRunning)]
+    [Category(Categories.Memory)]
     [AssertTraffic(AllocatedSizeInBytes = 1 * Mb)]
     public void Large_spin()
     {
-        // Set two kvp, key0 + data0 + key1 fill first page, data1, will be emptys
+        const uint size = 100_000;
+        
+        // Set two kvp, key0 + data0 + key1 fill first page, data1, will be empty
         using var pool = new BufferPool(128);
 
         byte[] key = new byte[64];
 
-        for (var i = 0; i < 100; i++)
-        {
-            using var dict = new PooledSpanDictionary(pool, false);
+        using var dict = new PooledSpanDictionary(pool, false);
 
-            for (uint keys = 0; keys < 10_000; keys++)
-            {
-                BinaryPrimitives.WriteUInt32LittleEndian(key, keys);
-                var hash = keys;
-                dict.Set(key, hash, key, 0);
-                dict.TryGet(key, hash, out _);
-            }
+        for (uint i = 0; i < size; i++)
+        {
+            Set(i, key);
+            var hash = i;
+            dict.Set(key, hash, key, 0);
+            dict.TryGet(key, hash, out _);
         }
+
+        var count = 0;
+        foreach (var kvp in dict)
+        {
+            kvp.Key.SequenceEqual(kvp.Value).Should().BeTrue();
+            count++;
+        }
+
+        count.Should().Be((int)size);
+
+        return;
+
+        // dotMemory.Check();
+        static void Set(uint i, byte[] key) => BinaryPrimitives.WriteUInt32LittleEndian(key, i);
     }
 }
