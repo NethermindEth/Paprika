@@ -36,10 +36,10 @@ public class PooledSpanDictionaryTests
         using var dict = new PooledSpanDictionary(pool, true);
 
         Span<byte> key = stackalloc byte[] { 13, 17 };
-        
+
         Span<byte> value0 = stackalloc byte[] { 211 };
         const byte meta0 = 1;
-        
+
         Span<byte> value1 = stackalloc byte[] { 23 };
         const byte meta1 = 0;
 
@@ -49,21 +49,21 @@ public class PooledSpanDictionaryTests
         dict.Set(key, hash, value0, meta0);
         dict.TryGet(key, hash, out var actual0).Should().BeTrue();
         actual0.SequenceEqual(value0).Should().BeTrue();
-        
+
         // Set get value 1
         dict.Set(key, hash, value1, meta1);
         dict.TryGet(key, hash, out var actual1).Should().BeTrue();
         actual1.SequenceEqual(value1).Should().BeTrue();
-        
+
         // value 0 should still be equal as preserves old values
         actual0.SequenceEqual(value0).Should().BeTrue();
-        
+
         using var e = dict.GetEnumerator();
-        
+
         e.MoveNext().Should().BeTrue();
         e.Current.Metadata.Should().Be(meta1);
         e.Current.Hash.Should().Be((uint)hash);
-        
+
         e.MoveNext().Should().BeFalse();
     }
 
@@ -101,7 +101,7 @@ public class PooledSpanDictionaryTests
         using var e2 = dict.GetEnumerator();
         e2.MoveNext().Should().BeFalse();
     }
-    
+
     [Test]
     public void Update_to_larger_value()
     {
@@ -109,11 +109,11 @@ public class PooledSpanDictionaryTests
         using var dict = new PooledSpanDictionary(pool);
 
         Span<byte> key = stackalloc byte[] { 13, 17 };
-        
+
         Span<byte> value0 = new byte[1];
         value0.Fill(0x13);
         const byte meta0 = 0;
-        
+
         Span<byte> value1 = new byte[13];
         value1.Fill(0x17);
         const byte meta1 = 1;
@@ -124,7 +124,7 @@ public class PooledSpanDictionaryTests
         dict.Set(key, hash, value0, meta0);
         dict.TryGet(key, hash, out var result).Should().BeTrue();
         result.SequenceEqual(value0).Should().BeTrue();
-        
+
         // Set & Assert value1
         dict.Set(key, hash, value1, meta1);
         dict.TryGet(key, hash, out result).Should().BeTrue();
@@ -141,7 +141,7 @@ public class PooledSpanDictionaryTests
 
         e.MoveNext().Should().BeFalse();
     }
-    
+
     [Test]
     public void On_page_boundary()
     {
@@ -179,7 +179,7 @@ public class PooledSpanDictionaryTests
     public void Large_spin()
     {
         const uint size = 1_000;
-        
+
         // Set two kvp, key0 + data0 + key1 fill first page, data1, will be empty
         using var pool = new BufferPool(128);
 

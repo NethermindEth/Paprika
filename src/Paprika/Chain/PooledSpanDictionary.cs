@@ -204,7 +204,7 @@ public class PooledSpanDictionary : IDisposable
             if (_preserveOldValues == false)
             {
                 if (search.TryUpdateInSitu(data0, data1, metadata))
-                    return;    
+                    return;
             }
 
             // Destroy the search as it should not be visible later and move on with inserting as usual
@@ -290,10 +290,10 @@ public class PooledSpanDictionary : IDisposable
                 {
                     // Capture the current, move address to next immediately
                     ref var at = ref dictionary.GetAt(_address);
-                    
+
                     // The position is captured in ref at above, move to next
                     _address = Unsafe.ReadUnaligned<uint>(ref Unsafe.Add(ref at, PreambleLength));
-                    
+
                     if ((at & DestroyedBit) == 0)
                     {
                         // Set at the at as it represents an active item

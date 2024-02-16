@@ -6,7 +6,7 @@ public static class Categories
     /// Long running tests that should be skipped by CI when running in default settings.
     /// </summary>
     public const string LongRunning = nameof(LongRunning);
-    
+
     /// <summary>
     /// The test asserts the memory using <see cref="JetBrains.dotMemoryUnit"/> capabilities.
     /// </summary>
