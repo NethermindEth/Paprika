@@ -141,6 +141,34 @@ public class PooledSpanDictionaryTests
 
         e.MoveNext().Should().BeFalse();
     }
+    
+    [Test]
+    public void Copy_to()
+    {
+        using var pool = new BufferPool(4);
+        using var dict = new PooledSpanDictionary(pool);
+
+        Span<byte> key = stackalloc byte[] { 13, 17 };
+
+        Span<byte> value0 = new byte[1];
+        value0.Fill(0x13);
+        const byte meta0 = 0;
+
+        const ulong hash = 234578237489760233;
+
+        // Set & Assert value0
+        dict.Set(key, hash, value0, meta0);
+        dict.TryGet(key, hash, out var result).Should().BeTrue();
+        result.SequenceEqual(value0).Should().BeTrue();
+
+        // Copy
+        using var copy = new PooledSpanDictionary(pool);
+        dict.CopyTo(copy);
+        
+        // Assert
+        dict.TryGet(key, hash, out result).Should().BeTrue();
+        result.SequenceEqual(value0).Should().BeTrue();
+    }
 
     [Test]
     public void On_page_boundary()
@@ -194,21 +222,32 @@ public class PooledSpanDictionaryTests
             dict.Set(key, hash, key, GetMetadata(key));
             dict.TryGet(key, hash, out _);
         }
+        
+        // Test original
+        AssertIterate(dict);
 
-        var count = 0;
-        foreach (var kvp in dict)
-        {
-            kvp.Key.SequenceEqual(kvp.Value).Should().BeTrue();
-            kvp.Metadata.Should().Be(GetMetadata(kvp.Key));
-            count++;
-        }
-
-        count.Should().Be((int)size);
-
+        // Copy & test copy
+        using var copy = new PooledSpanDictionary(pool, false);
+        dict.CopyTo(copy);
+        
+        AssertIterate(copy);
         return;
 
         // dotMemory.Check();
         static void Set(uint i, byte[] key) => BinaryPrimitives.WriteUInt32LittleEndian(key, i);
         static byte GetMetadata(ReadOnlySpan<byte> key) => (byte)(key[0] & 1);
+
+        static void AssertIterate(PooledSpanDictionary dict)
+        {
+            var count = 0;
+            foreach (var kvp in dict)
+            {
+                kvp.Key.SequenceEqual(kvp.Value).Should().BeTrue();
+                kvp.Metadata.Should().Be(GetMetadata(kvp.Key));
+                count++;
+            }
+
+            count.Should().Be((int)size);
+        }
     }
 }
