@@ -470,7 +470,7 @@ public class Blockchain : IAsyncDisposable
                     dict.Dispose();
                 }
 
-                dict = new PooledSpanDictionary(pool, true, true);
+                dict = new PooledSpanDictionary(pool, true);
             }
         }
 
@@ -528,11 +528,12 @@ public class Blockchain : IAsyncDisposable
             var xor = new Xor8(_bloom);
 
             // clean no longer used fields
+            var data = new PooledSpanDictionary(Pool, false);
 
-            var data = new PooledSpanDictionary(Pool, false, true);
-            Squash(_state, data);
-            Squash(_storage, data);
-            Squash(_preCommit, data);
+            // use append for faster copies as state and storage won't overwrite each other
+            _state.CopyTo(data, true);
+            _storage.CopyTo(data, true);
+            _preCommit.CopyTo(data);
 
             // Creation acquires the lease
             return new CommittedBlockState(xor, _destroyed, _blockchain, data, hash,
@@ -765,7 +766,7 @@ public class Blockchain : IAsyncDisposable
 
             public ChildCommit(BufferPool pool, ICommit parent)
             {
-                _dict = new PooledSpanDictionary(pool, true, false);
+                _dict = new PooledSpanDictionary(pool, true);
                 _pool = pool;
                 _parent = parent;
             }
@@ -957,9 +958,9 @@ public class Blockchain : IAsyncDisposable
         {
             using var squashed = new PooledSpanDictionary(Pool);
 
-            Squash(_state, squashed);
-            Squash(_storage, squashed);
-            Squash(_preCommit, squashed);
+            _state.CopyTo(squashed);
+            _storage.CopyTo(squashed);
+            _preCommit.CopyTo(squashed);
 
             foreach (var kvp in squashed)
             {
@@ -978,17 +979,6 @@ public class Blockchain : IAsyncDisposable
                     throw new Exception($"Values are different for {key.ToString()}. " +
                                         $"Expected is {expected} while found is {actual}.");
                 }
-            }
-        }
-
-        private static void Squash(PooledSpanDictionary source, PooledSpanDictionary destination)
-        {
-            Span<byte> span = stackalloc byte[128];
-
-            foreach (var kvp in source)
-            {
-                Key.ReadFrom(kvp.Key, out var key);
-                destination.Set(key.WriteTo(span), GetHash(key), kvp.Value, kvp.Metadata);
             }
         }
 
