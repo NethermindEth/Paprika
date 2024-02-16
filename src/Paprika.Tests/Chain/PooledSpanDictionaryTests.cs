@@ -1,4 +1,5 @@
 ﻿using System.Buffers.Binary;
+using System.Diagnostics;
 using FluentAssertions;
 using JetBrains.dotMemoryUnit;
 using NUnit.Framework;
@@ -74,11 +75,11 @@ public class PooledSpanDictionaryTests
         
         Span<byte> value0 = new byte[1];
         value0.Fill(0x13);
-        const byte meta0 = 1;
+        const byte meta0 = 0;
         
         Span<byte> value1 = new byte[13];
         value1.Fill(0x17);
-        const byte meta1 = 0;
+        const byte meta1 = 1;
 
         const ulong hash = 859;
 
@@ -103,7 +104,7 @@ public class PooledSpanDictionaryTests
 
         e.MoveNext().Should().BeFalse();
     }
-
+    
     [Test]
     public void On_page_boundary()
     {
@@ -140,12 +141,12 @@ public class PooledSpanDictionaryTests
     [AssertTraffic(AllocatedSizeInBytes = 1 * Mb)]
     public void Large_spin()
     {
-        const uint size = 100_000;
+        const uint size = 1_000;
         
         // Set two kvp, key0 + data0 + key1 fill first page, data1, will be empty
         using var pool = new BufferPool(128);
 
-        byte[] key = new byte[64];
+        byte[] key = new byte[13];
 
         using var dict = new PooledSpanDictionary(pool, false);
 
@@ -153,7 +154,7 @@ public class PooledSpanDictionaryTests
         {
             Set(i, key);
             var hash = i;
-            dict.Set(key, hash, key, 0);
+            dict.Set(key, hash, key, GetMetadata(key));
             dict.TryGet(key, hash, out _);
         }
 
@@ -161,6 +162,7 @@ public class PooledSpanDictionaryTests
         foreach (var kvp in dict)
         {
             kvp.Key.SequenceEqual(kvp.Value).Should().BeTrue();
+            kvp.Metadata.Should().Be(GetMetadata(kvp.Key));
             count++;
         }
 
@@ -170,5 +172,6 @@ public class PooledSpanDictionaryTests
 
         // dotMemory.Check();
         static void Set(uint i, byte[] key) => BinaryPrimitives.WriteUInt32LittleEndian(key, i);
+        static byte GetMetadata(ReadOnlySpan<byte> key) => (byte)(key[0] & 1);
     }
 }

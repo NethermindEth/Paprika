@@ -342,8 +342,6 @@ public class PooledSpanDictionary : IDisposable
                 }
             }
 
-            public ushort ShortHash { get; }
-
             public uint Hash => ((uint)GetLeftover(ref _b) << Root.BitShiftToUint) | _bucket;
 
             public byte Metadata => (byte)((_b & MetadataBit) >> MetadataShift);
