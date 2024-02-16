@@ -87,7 +87,7 @@ public class PooledSpanDictionary : IDisposable
 
         Debug.Assert(BitOperations.LeadingZeroCount(leftover) >= 10, "First 10 bits should be left unused");
 
-        var address = _root.Buckets[(int)bucket];
+        var address = _root[(int)bucket];
         while (address != 0)
         {
             var (pageNo, atPage) = Math.DivRem(address, Page.PageSize);
@@ -128,11 +128,11 @@ public class PooledSpanDictionary : IDisposable
         return default;
     }
 
-    public void CopyTo(PooledSpanDictionary destination)
+    public void CopyTo(PooledSpanDictionary destination, bool append = false)
     {
         foreach (var kvp in this)
         {
-            destination.SetImpl(kvp.Key, kvp.Hash, kvp.Value, ReadOnlySpan<byte>.Empty, kvp.Metadata);
+            destination.SetImpl(kvp.Key, kvp.Hash, kvp.Value, ReadOnlySpan<byte>.Empty, kvp.Metadata, append);
         }
     }
     
@@ -203,29 +203,32 @@ public class PooledSpanDictionary : IDisposable
 
 
     private void SetImpl(scoped ReadOnlySpan<byte> key, uint mixed, ReadOnlySpan<byte> data0, ReadOnlySpan<byte> data1,
-        byte metadata)
+        byte metadata, bool append = false)
     {
         Debug.Assert(metadata <= MaxMetadata, "Metadata size breached");
 
-        var search = TryGetImpl(key, mixed);
-
-        if (search.IsFound)
+        if (append == false)
         {
-            if (_preserveOldValues == false)
-            {
-                if (search.TryUpdateInSitu(data0, data1, metadata))
-                    return;
-            }
+            var search = TryGetImpl(key, mixed);
 
-            // Destroy the search as it should not be visible later and move on with inserting as usual
-            search.Destroy();
+            if (search.IsFound)
+            {
+                if (_preserveOldValues == false)
+                {
+                    if (search.TryUpdateInSitu(data0, data1, metadata))
+                        return;
+                }
+
+                // Destroy the search as it should not be visible later and move on with inserting as usual
+                search.Destroy();
+            }
         }
 
         var (leftover, bucket) = Math.DivRem(mixed, Root.BucketCount);
 
         Debug.Assert(BitOperations.LeadingZeroCount(leftover) >= 10, "First 10 bits should be left unused");
 
-        var root = _root.Buckets[(int)bucket];
+        var root = _root[(int)bucket];
 
         var dataLength = data1.Length + data0.Length;
 
@@ -255,7 +258,7 @@ public class PooledSpanDictionary : IDisposable
         data0.CopyTo(destination[(valueStart + ValueLengthLength)..]);
         data1.CopyTo(destination[(valueStart + ValueLengthLength + data0.Length)..]);
 
-        _root.Buckets[(int)bucket] = address;
+        _root[(int)bucket] = address;
     }
 
     public void Destroy(scoped ReadOnlySpan<byte> key, ulong hash)
@@ -291,7 +294,7 @@ public class PooledSpanDictionary : IDisposable
                         return false;
                     }
 
-                    _address = dictionary._root.Buckets[_bucket];
+                    _address = dictionary._root[_bucket];
                 }
 
                 // Scan the bucket till it's not destroyed
@@ -466,6 +469,6 @@ public class PooledSpanDictionary : IDisposable
         public const int BucketCountLog2 = 10;
         public const int BucketCount = Page.PageSize / sizeof(uint);
 
-        public Span<uint> Buckets => MemoryMarshal.Cast<byte, uint>(page.Span);
+        public unsafe ref uint this[int bucket] => ref Unsafe.Add(ref Unsafe.AsRef<uint>(page.Raw.ToPointer()), bucket);
     }
 }

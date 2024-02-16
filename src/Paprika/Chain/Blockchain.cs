@@ -530,8 +530,9 @@ public class Blockchain : IAsyncDisposable
             // clean no longer used fields
             var data = new PooledSpanDictionary(Pool, false);
             
-            _state.CopyTo(data);
-            _storage.CopyTo(data);
+            // use append for faster copies as state and storage won't overwrite each other
+            _state.CopyTo(data, true);
+            _storage.CopyTo(data, true);
             _preCommit.CopyTo(data);
 
             // Creation acquires the lease
