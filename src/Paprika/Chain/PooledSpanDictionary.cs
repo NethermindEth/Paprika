@@ -39,7 +39,14 @@ public class PooledSpanDictionary : IDisposable
     {
         _pool = pool;
         _preserveOldValues = preserveOldValues;
-        _root = new Root(RentNewPage(true));
+
+        var pages = new Page[Root.PageCount];
+        for (var i = 0; i < Root.PageCount; i++)
+        {
+            pages[i] = RentNewPage(true);
+        }
+
+        _root = new Root(pages);
 
         AllocateNewPage();
     }
@@ -135,7 +142,7 @@ public class PooledSpanDictionary : IDisposable
             destination.SetImpl(kvp.Key, kvp.Hash, kvp.Value, ReadOnlySpan<byte>.Empty, kvp.Metadata, append);
         }
     }
-    
+
     private static int GetLeftover(ref byte sliced) =>
         ((sliced & Byte0Mask) << 16) +
         (Unsafe.Add(ref sliced, 1) << 8) +
@@ -464,11 +471,27 @@ public class PooledSpanDictionary : IDisposable
         static string S(in NibblePath full) => full.UnsafeAsKeccak.ToString();
     }
 
-    private readonly struct Root(Page page)
+    private readonly struct Root(Page[] pages)
     {
-        public const int BucketCountLog2 = 10;
-        public const int BucketCount = Page.PageSize / sizeof(uint);
+        /// <summary>
+        /// 8 gives 4kb * 8, 32kb allocated per dictionary.
+        /// This gives 8k buckets which should be sufficient to have a really low ratio of collisions for majority of the blocks.
+        /// </summary>
+        public const int PageCount = 8;
 
-        public unsafe ref uint this[int bucket] => ref Unsafe.Add(ref Unsafe.AsRef<uint>(page.Raw.ToPointer()), bucket);
+        public static readonly int BucketCountLog2 = BitOperations.Log2(BucketCount);
+
+        public const int BucketCount = PageCount * BucketsPerPage;
+        private const int BucketsPerPage = Page.PageSize / sizeof(uint);
+
+        public unsafe ref uint this[int bucket]
+        {
+            get
+            {
+                var (page, buck) = Math.DivRem(bucket, BucketsPerPage);
+                var raw = pages[page].Raw;
+                return ref Unsafe.Add(ref Unsafe.AsRef<uint>(raw.ToPointer()), buck);
+            }
+        }
     }
 }
