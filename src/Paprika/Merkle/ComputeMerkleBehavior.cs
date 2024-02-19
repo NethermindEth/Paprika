@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Diagnostics.Metrics;
@@ -51,7 +52,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     /// <param name="minimumTreeLevelToMemoizeKeccak">Minimum lvl of the tree to memoize the Keccak of a branch node.</param>
     /// <param name="memoizeKeccakEvery">How often (which lvl mod) should Keccaks be memoized.</param>
-    /// <param name="memoizeRlp">For tests purposes only</param>
+    /// <param name="memoization">What to memoize, specifically.</param>
     public ComputeMerkleBehavior(int minimumTreeLevelToMemoizeKeccak = DefaultMinimumTreeLevelToMemoizeKeccak,
         int memoizeKeccakEvery = MemoizeKeccakEveryNLevel, Memoization memoization = Memoization.Branch)
     {
@@ -248,9 +249,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         var node = Node.Header.Peek(data).NodeType;
 
-        if (node != Node.Type.Branch)
+        if (node != Node.Type.Branch || _memoization != Memoization.Branch)
         {
-            // extension is not modified
+            // Return data as is, either the node is not a branch or the memoization is not set for branches.
             return data;
         }
 
