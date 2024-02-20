@@ -1,5 +1,4 @@
-﻿using System.Buffers.Binary;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
 using Paprika.Chain;
@@ -28,6 +27,9 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     /// If history depth is set to the max reorg depth, moving to previous block is just a single write transaction moving the root back.
     /// </remarks>
     private const int MinHistoryDepth = 2;
+
+    public const string MeterName = "Paprika.Store.PagedDb";
+    public const string DbSize = "DB Size";
 
     private readonly IPageManager _manager;
     private readonly byte _historyDepth;
@@ -74,8 +76,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         RootInit();
 
-        _meter = new Meter("Paprika.Store.PagedDb");
-        _dbSize = _meter.CreateAtomicObservableGauge("DB Size", "MB", "The size of the database in MB");
+        _meter = new Meter(MeterName);
+        _dbSize = _meter.CreateAtomicObservableGauge(DbSize, "MB", "The size of the database in MB");
 
         _reads = _meter.CreateCounter<long>("Reads", "Reads", "The number of reads db handles");
         _writes = _meter.CreateCounter<long>("Writes", "Writes", "The number of writes db handles");

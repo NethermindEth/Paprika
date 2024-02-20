@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Collections.Concurrent;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Diagnostics.Metrics;
@@ -28,6 +27,12 @@ namespace Paprika.Merkle;
 /// </remarks>
 public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 {
+    internal const string MeterName = "Paprika.Merkle";
+
+    internal const string HistogramStateProcessing = "State processing";
+    internal const string HistogramStorageProcessing = "Storage processing";
+    internal const string TotalMerkle = "Total Merkle";
+
     /// <summary>
     /// The upper boundary of memory needed to write RLP of any Merkle node.
     /// </summary>
@@ -60,12 +65,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         _memoizeKeccakEvery = memoizeKeccakEvery;
         _memoization = memoization;
 
-        _meter = new Meter("Paprika.Merkle");
-        _storageProcessing = _meter.CreateHistogram<long>("State processing", "ms",
+        _meter = new Meter(MeterName);
+
+        _storageProcessing = _meter.CreateHistogram<long>(HistogramStateProcessing, "ms",
             "How long it takes to process state");
-        _stateProcessing = _meter.CreateHistogram<long>("Storage processing", "ms",
+        _stateProcessing = _meter.CreateHistogram<long>(HistogramStorageProcessing, "ms",
             "How long it takes to process storage");
-        _totalMerkle = _meter.CreateHistogram<long>("Total Merkle", "ms",
+        _totalMerkle = _meter.CreateHistogram<long>(TotalMerkle, "ms",
             "How long it takes to process Merkle total");
     }
 
