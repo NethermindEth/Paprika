@@ -1,5 +1,4 @@
-﻿using System.Buffers.Binary;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
 using Paprika.Chain;
@@ -28,6 +27,9 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     /// If history depth is set to the max reorg depth, moving to previous block is just a single write transaction moving the root back.
     /// </remarks>
     private const int MinHistoryDepth = 2;
+
+    public const string MeterName = "Paprika.Store.PagedDb";
+    public const string DbSize = "DB Size";
 
     private readonly IPageManager _manager;
     private readonly byte _historyDepth;
@@ -74,8 +76,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         RootInit();
 
-        _meter = new Meter("Paprika.Store.PagedDb");
-        _dbSize = _meter.CreateAtomicObservableGauge("DB Size", "MB", "The size of the database in MB");
+        _meter = new Meter(MeterName);
+        _dbSize = _meter.CreateAtomicObservableGauge(DbSize, "MB", "The size of the database in MB");
 
         _reads = _meter.CreateCounter<long>("Reads", "Reads", "The number of reads db handles");
         _writes = _meter.CreateCounter<long>("Writes", "Writes", "The number of writes db handles");
@@ -98,8 +100,9 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             new MemoryMappedPageManager(size, historyDepth, directory,
                 flushToDisk ? PersistenceOptions.FlushFile : PersistenceOptions.MMapOnly), historyDepth);
 
-    private void ReportRead(long number = 1) => _reads.Add(number);
-    private void ReportWrite() => _writes.Add(1);
+    private void ReportReads(long number) => _reads.Add(number);
+
+    private void ReportWrites(long number) => _writes.Add(number);
 
     private void ReportCommit(TimeSpan elapsed)
     {
@@ -360,7 +363,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public void Dispose()
         {
-            db.ReportRead(Volatile.Read(ref _reads));
+            db.ReportReads(Volatile.Read(ref _reads));
             _disposed = true;
             db.DisposeReadOnlyBatch(this);
         }
@@ -372,6 +375,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             if (_disposed)
                 throw new ObjectDisposedException("The readonly batch has already been disposed");
 
+            // Need to use interlocked as read batches can be used concurrently
             Interlocked.Increment(ref _reads);
 
             return root.TryGet(key, this, out result);
@@ -438,7 +442,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             if (_disposed)
                 throw new ObjectDisposedException("The readonly batch has already been disposed");
 
-            _db.ReportRead();
+            _metrics.Reads++;
 
             return _root.TryGet(key, this, out result);
         }
@@ -450,22 +454,14 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public void SetRaw(in Key key, ReadOnlySpan<byte> rawData)
         {
-            _db.ReportWrite();
+            _metrics.Writes++;
 
             _root.SetRaw(key, this, rawData);
         }
 
-        private void SetAtRoot<TPage>(in NibblePath path, in ReadOnlySpan<byte> rawData, ref DbAddress root)
-            where TPage : struct, IPageWithData<TPage>
-        {
-            var data = TryGetPageAlloc(ref root, PageType.Standard);
-            var updated = TPage.Wrap(data).Set(path, rawData, this);
-            root = _db.GetAddress(updated);
-        }
-
         public void Destroy(in NibblePath account)
         {
-            _db.ReportWrite();
+            _metrics.Writes++;
             _root.Destroy(this, account);
         }
 
@@ -491,7 +487,11 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             // memoize the abandoned so that it's preserved for future uses
             MemoizeAbandoned();
 
+            // report metrics
             _db.ReportPageCountPerCommit(_written.Count, _metrics.PagesReused, _metrics.PagesAllocated);
+
+            _db.ReportReads(_metrics.Reads);
+            _db.ReportWrites(_metrics.Writes);
 
             await _db._manager.FlushPages(_written, options);
 
@@ -596,9 +596,6 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             }
         }
     }
-
-    private static unsafe Page AllocateOnePage() =>
-        new((byte*)NativeMemory.AlignedAlloc(Page.PageSize, (UIntPtr)UIntPtr.Size));
 
     /// <summary>
     /// A reusable context for the write batch.
