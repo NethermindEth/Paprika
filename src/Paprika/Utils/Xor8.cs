@@ -32,8 +32,6 @@ public class Xor8
     public Xor8(IReadOnlyCollection<ulong> keys)
     {
         // TODO: remove all array allocations, use ArrayPool<ulong> more and/or buffer pool, potentially combine chunks of memory together
-
-
         var size = keys.Count;
         var arrayLength = GetArrayLength(size);
 

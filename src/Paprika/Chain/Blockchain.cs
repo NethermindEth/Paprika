@@ -97,7 +97,8 @@ public class Blockchain : IAsyncDisposable
         _bloomMissedReads = _meter.CreateCounter<long>("Bloom missed reads", "Reads",
             "Number of reads that passed bloom but missed in dictionary");
         _transientCacheUsage =
-            _meter.CreateHistogram<int>("Transient cache usage per commit", "%", "How much used was the transient cache");
+            _meter.CreateHistogram<int>("Transient cache usage per commit", "%",
+                "How much used was the transient cache");
 
         using var batch = _db.BeginReadOnlyBatch();
         _lastFinalized = batch.Metadata.BlockNumber;
@@ -581,7 +582,9 @@ public class Blockchain : IAsyncDisposable
 
             var searched = NibblePath.FromKey(address);
 
-            Destroy(searched, _state);
+            var account = Key.Account(address);
+            _state.Destroy(account.WriteTo(stackalloc byte[account.MaxByteLength]), GetHash(account));
+
             Destroy(searched, _storage);
             Destroy(searched, _preCommit);
 
@@ -598,7 +601,7 @@ public class Blockchain : IAsyncDisposable
                     Key.ReadFrom(kvp.Key, out var key);
                     if (key.Path.Equals(searched))
                     {
-                        dict.Destroy(kvp.Key, GetHash(key));
+                        kvp.Destroy();
                     }
                 }
             }
@@ -844,10 +847,12 @@ public class Blockchain : IAsyncDisposable
 
             ushort depth = 1;
 
+            var destroyedHash = CommittedBlockState.GetDestroyedHash(key);
+
             // walk all the blocks locally
             foreach (var ancestor in _ancestors)
             {
-                owner = ancestor.TryGetLocal(key, keyWritten, bloom, out succeeded);
+                owner = ancestor.TryGetLocal(key, keyWritten, bloom, destroyedHash, out succeeded);
                 if (succeeded)
                     return owner.WithDepth(depth);
 
@@ -1024,6 +1029,11 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private readonly HashSet<Keccak>? _destroyed;
 
+        /// <summary>
+        /// Stores the xor filter of <see cref="_destroyed"/> if any.
+        /// </summary>
+        private readonly Xor8? _destroyedXor;
+
         private readonly Blockchain _blockchain;
 
         /// <summary>
@@ -1040,6 +1050,10 @@ public class Blockchain : IAsyncDisposable
         {
             _xor = xor;
             _destroyed = destroyed;
+            _destroyedXor = _destroyed != null
+                ? new Xor8(new HashSet<ulong>(_destroyed.Select(k => GetDestroyedHash(k))))
+                : null;
+
             _blockchain = blockchain;
             _committed = committed;
             _raw = raw;
@@ -1054,19 +1068,37 @@ public class Blockchain : IAsyncDisposable
 
         public Keccak Hash { get; }
 
+        public const ulong NonDestroyable = 0;
+        public const ulong Destroyable = 1;
+
+        public static ulong GetDestroyedHash(in Key key)
+        {
+            var path = key.Path;
+
+            // Check if the path length qualifies.
+            // The check for destruction is performed only for Account, Storage or Merkle-of-Storage that all have full paths. 
+            if (path.Length != NibblePath.KeccakNibbleCount)
+                return NonDestroyable;
+
+            // Return ulonged hash.
+            return GetDestroyedHash(path.UnsafeAsKeccak);
+        }
+
+        private static ulong GetDestroyedHash(in Keccak keccak) => keccak.GetHashCodeUlong() | Destroyable;
+
         /// <summary>
         /// Tries to get the key only from this block, acquiring no lease as it assumes that the lease is taken.
         /// </summary>
         public ReadOnlySpanOwner<byte> TryGetLocal(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
-            ulong bloom, out bool succeeded)
+            ulong bloom, ulong destroyedHash, out bool succeeded)
         {
-            var mayHave = _xor.MayContain(unchecked((ulong)bloom));
+            var mayHave = _xor.MayContain(bloom);
 
             // check if the change is in the block
             if (!mayHave)
             {
                 // if destroyed, return false as no previous one will contain it
-                if (IsAccountDestroyed(key))
+                if (IsAccountDestroyed(key, destroyedHash))
                 {
                     succeeded = true;
                     return default;
@@ -1088,7 +1120,7 @@ public class Blockchain : IAsyncDisposable
             _blockchain._bloomMissedReads.Add(1);
 
             // if destroyed, return false as no previous one will contain it
-            if (IsAccountDestroyed(key))
+            if (IsAccountDestroyed(key, destroyedHash))
             {
                 succeeded = true;
                 return default;
@@ -1098,16 +1130,12 @@ public class Blockchain : IAsyncDisposable
             return default;
         }
 
-        private bool IsAccountDestroyed(scoped in Key key)
+        private bool IsAccountDestroyed(scoped in Key key, ulong destroyed)
         {
-            if (_destroyed == null)
+            if (_destroyedXor == null || destroyed == NonDestroyable)
                 return false;
 
-            if (key.Path.Length != NibblePath.KeccakNibbleCount)
-                return false;
-
-            // it's either Account, Storage, or Merkle that is a storage
-            return _destroyed.Contains(key.Path.UnsafeAsKeccak);
+            return _destroyedXor.MayContain(destroyed) && _destroyed!.Contains(key.Path.UnsafeAsKeccak);
         }
 
         protected override void CleanUp()
@@ -1229,12 +1257,16 @@ public class Blockchain : IAsyncDisposable
         {
             ushort depth = 1;
 
+            var destroyedHash = CommittedBlockState.GetDestroyedHash(key);
+
             // walk all the blocks locally
             foreach (var ancestor in _ancestors)
             {
-                var owner = ancestor.TryGetLocal(key, keyWritten, bloom, out succeeded);
+                var owner = ancestor.TryGetLocal(key, keyWritten, bloom, destroyedHash, out succeeded);
                 if (succeeded)
-                    return owner.WithDepth(1);
+                    return owner.WithDepth(depth);
+
+                depth++;
             }
 
             if (_batch.TryGet(key, out var span))
