@@ -373,6 +373,11 @@ public class PooledSpanDictionary : IDisposable
                 _bucket = bucket;
                 _b = ref b;
             }
+
+            public void Destroy()
+            {
+                _b |= DestroyedBit;
+            }
         }
     }
 
@@ -483,14 +488,15 @@ public class PooledSpanDictionary : IDisposable
 
         public const int BucketCount = PageCount * BucketsPerPage;
         private const int BucketsPerPage = Page.PageSize / sizeof(uint);
+        private const int InPageMask = BucketsPerPage - 1;
+        private static readonly int PageShift = BitOperations.Log2(BucketsPerPage);
 
         public unsafe ref uint this[int bucket]
         {
             get
             {
-                var (page, buck) = Math.DivRem(bucket, BucketsPerPage);
-                var raw = pages[page].Raw;
-                return ref Unsafe.Add(ref Unsafe.AsRef<uint>(raw.ToPointer()), buck);
+                var raw = pages[bucket >> PageShift].Raw;
+                return ref Unsafe.Add(ref Unsafe.AsRef<uint>(raw.ToPointer()), bucket & InPageMask);
             }
         }
     }

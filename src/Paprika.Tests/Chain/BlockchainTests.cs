@@ -130,6 +130,74 @@ public class BlockchainTests
     }
 
     [Test]
+    [Category(Categories.LongRunning)]
+    public async Task Account_destruction_spin()
+    {
+        using var db = PagedDb.NativeMemoryDb(128 * Mb, 2);
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(1, 1, Memoization.None));
+
+        var parent = Keccak.EmptyTreeHash;
+
+        var finality = new Queue<Keccak>();
+
+        byte[] value = [13];
+        byte[] read = new byte[32];
+
+        const uint spins = 2000;
+        for (uint at = 1; at < spins; at++)
+        {
+            using var block = blockchain.StartNew(parent);
+
+            // 10 deletes per block
+            for (int i = 0; i < 10; i++)
+            {
+                Keccak k = default;
+                BinaryPrimitives.WriteInt32LittleEndian(k.BytesAsSpan, i);
+                block.DestroyAccount(k);
+            }
+
+            // 10 sets of various values
+            for (int sets = 0; sets < 10; sets++)
+            {
+                Keccak k = default;
+                BinaryPrimitives.WriteInt32LittleEndian(k.BytesAsSpan, sets + 1000_000);
+                block.SetAccount(k, new Account(at, at));
+                block.SetStorage(k, Key1, value);
+            }
+
+            // destroy this one
+            block.DestroyAccount(Key0);
+
+            // set account Key2
+            block.SetAccount(Key2, new Account(at, at));
+
+            // read non-existing entries for Key2
+            const int readsPerSpin = 1000;
+            for (var readCount = 0; readCount < readsPerSpin; readCount++)
+            {
+                var unique = at * readsPerSpin + readCount;
+                // read values with unique keys, so that they are not cached
+                Keccak k = default;
+                BinaryPrimitives.WriteInt64LittleEndian(k.BytesAsSpan, unique);
+                block.GetStorage(Key2, k, read);
+            }
+
+            parent = block.Commit(at + 1);
+            finality.Enqueue(parent);
+
+            if (finality.Count > 64)
+            {
+                blockchain.Finalize(finality.Dequeue());
+            }
+        }
+
+        while (finality.TryDequeue(out var finalized))
+        {
+            blockchain.Finalize(finalized);
+        }
+    }
+
+    [Test]
     public async Task Account_destruction_multi_block()
     {
         using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
