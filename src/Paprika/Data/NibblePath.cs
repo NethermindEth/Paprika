@@ -139,24 +139,26 @@ public readonly ref struct NibblePath
         return destination.Slice(0, length);
     }
 
+    public byte RawPreamble => (byte)((_odd & OddBit) | (Length << LengthShift));
+    
     private int WriteImpl(Span<byte> destination)
     {
         var odd = _odd & OddBit;
-        var lenght = GetSpanLength(Length, _odd);
+        var length = GetSpanLength(Length, _odd);
 
         destination[0] = (byte)(odd | (Length << LengthShift));
 
-        MemoryMarshal.CreateSpan(ref _span, lenght).CopyTo(destination.Slice(PreambleLength));
+        MemoryMarshal.CreateSpan(ref _span, length).CopyTo(destination.Slice(PreambleLength));
 
         // clearing the oldest nibble, if needed
         // yes, it can be branch free
         if (((odd + Length) & 1) == 1)
         {
-            ref var oldest = ref destination[lenght];
+            ref var oldest = ref destination[length];
             oldest = (byte)(oldest & 0b1111_0000);
         }
 
-        return lenght + PreambleLength;
+        return length + PreambleLength;
     }
 
     /// <summary>

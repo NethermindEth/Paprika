@@ -34,7 +34,7 @@ public readonly ref struct SlottedArray
         _slots = MemoryMarshal.Cast<byte, Slot>(_data);
     }
 
-    public bool TrySet(in ReadOnlySpan<byte> key, ReadOnlySpan<byte> data, ushort? keyHash = default)
+    public bool TrySet(in NibblePath key, ReadOnlySpan<byte> data, ushort? keyHash = default)
     {
         var hash = keyHash ?? GetHash(key);
 
@@ -88,17 +88,17 @@ public readonly ref struct SlottedArray
 
         if (key.Length <= Slot.MaxSlotLengthKey)
         {
-            slot.KeyLength = key.Length;
+            slot.KeyLength = key.RawPreamble;
             offset = 0;
         }
         else
         {
             slot.KeyLength = Slot.KeyLongerMarker;
-            dest[0] = (byte)key.Length;
+            dest[0] = key.RawPreamble;
             offset = 1;
         }
 
-        key.CopyTo(dest.Slice(offset));
+        key.RawSpan.CopyTo(dest.Slice(offset));
         data.CopyTo(dest.Slice(offset + key.Length));
 
         // commit low and high
@@ -258,10 +258,10 @@ public readonly ref struct SlottedArray
 
     private const int KeyLengthLength = 1;
 
-    private static int GetTotalSpaceRequired(in ReadOnlySpan<byte> key, ReadOnlySpan<byte> data)
+    private static int GetTotalSpaceRequired(in NibblePath key, ReadOnlySpan<byte> data)
     {
-        return (key.Length <= Slot.MaxSlotLengthKey ? 0 : KeyLengthLength) +
-               key.Length + data.Length;
+        return (key.RawPreamble <= Slot.MaxSlotLengthKey ? 0 : KeyLengthLength) +
+               key.RawSpan.Length + data.Length;
     }
 
     /// <summary>
@@ -372,7 +372,7 @@ public readonly ref struct SlottedArray
 
     [OptimizationOpportunity(OptimizationType.CPU,
         "key encoding is delayed but it might be called twice, here + TrySet")]
-    private bool TryGetImpl(scoped in ReadOnlySpan<byte> key, ushort hash, out Span<byte> data, out int slotIndex)
+    private bool TryGetImpl(scoped in NibblePath key, ushort hash, out Span<byte> data, out int slotIndex)
     {
         var to = _header.Low / Slot.Size;
 
@@ -521,25 +521,17 @@ public readonly ref struct SlottedArray
     /// <remarks>
     /// Highly optimized to eliminate bound checks and special cases
     /// </remarks>
-    public static ushort GetHash(ReadOnlySpan<byte> key)
+    public static ushort GetHash(in NibblePath key)
     {
-        // First, special cases for short paths
-        if (key.Length <= 2)
-        {
-            if (key.Length == 2)
-            {
-                return Unsafe.ReadUnaligned<ushort>(in key[0]);
-            }
-
-            return key.Length == 0 ? (ushort)0 : MemoryMarshal.GetReference(key);
-        }
-
-        // At least 3 bytes long, read start and end
-        var a = Unsafe.ReadUnaligned<ushort>(in key[0]);
-        var b = Unsafe.ReadUnaligned<ushort>(in key[^2]);
-
-        // A really simple hash.
-        return (ushort)(a ^ b);
+        const int shift = NibblePath.NibbleShift;
+ 
+        if (key.Length == 0)
+            return 0;
+            
+        return (ushort)(key.GetAt(0) |
+                        (key.GetAt(key.Length / 3) << shift) |
+                        (key.GetAt(key.Length * 2 / 3) << (shift * 2)) |
+                        (key.GetAt(key.Length - 1) << (shift * 3)));
     }
 
     public override string ToString() => $"{nameof(Count)}: {Count}, {nameof(CapacityLeft)}: {CapacityLeft}";
