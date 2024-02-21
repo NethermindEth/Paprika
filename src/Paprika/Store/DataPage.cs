@@ -56,6 +56,13 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
                 return page;
             }
 
+            if (key.IsEmpty)
+            {
+                // there's no lower level, delete in map
+                map.Delete(key.RawSpan);
+                return page;
+            }
+
             var childPageAddress = Data.Buckets[key.FirstNibble];
             if (childPageAddress.IsNull)
             {

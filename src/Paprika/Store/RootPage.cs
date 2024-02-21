@@ -9,8 +9,23 @@ namespace Paprika.Store;
 
 /// <summary>
 /// Root page is a page that contains all the needed metadata from the point of view of the database.
-/// It also includes the blockchain information like block hash or block number
+/// It also includes the blockchain information like block hash or block number.
 /// </summary>
+/// <remarks>
+/// Considerations for page types selected:
+///
+/// State:
+/// <see cref="Payload.StateRoot"/> is <see cref="FanOutPage"/> that splits accounts into 256 buckets.
+/// This makes the updates update more pages, but adds a nice fan out for fast searches.
+/// The caveat is how many entries tree will have. As it's first two levels it 1 + 16 branches with Merkle.
+/// Additionally due to dense <see cref="Encode"/> this may be 2 branches more from the lower level. This should be just fine.
+///
+/// Account ids:
+/// <see cref="Payload.Ids"/> is a <see cref="FanOutList"/> of <see cref="FanOutPage"/>s. This gives 64k buckets on two levels. Searches should search no more than 3 levels of pages.
+///
+/// Storage:
+/// <see cref="Payload.Storage"/> is a <see cref="FanOutList"/> of <see cref="FanOutPage"/>s. This gives 64k buckets on two levels. 
+/// </remarks>
 public readonly unsafe struct RootPage(Page root) : IPage
 {
     private const int StorageKeySize = Keccak.Size + Keccak.Size + 1;
@@ -86,7 +101,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
     {
         if (Data.StateRoot.IsNull == false)
         {
-            var data = new DataPage(resolver.GetAt(Data.StateRoot));
+            var data = new FanOutPage(resolver.GetAt(Data.StateRoot));
             visitor.On(data, Data.StateRoot);
         }
 
@@ -104,7 +119,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
             }
 
             var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength], key.Type);
-            return new DataPage(batch.GetAt(Data.StateRoot)).TryGet(encoded, batch, out result);
+            return new FanOutPage(batch.GetAt(Data.StateRoot)).TryGet(encoded, batch, out result);
         }
 
         if (Data.Ids.TryGet(key.Path, batch, out var id) == false)
@@ -187,7 +202,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         if (key.IsState)
         {
             var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength], key.Type);
-            SetAtRoot<DataPage>(batch, encoded, rawData, ref Data.StateRoot);
+            SetAtRoot<FanOutPage>(batch, encoded, rawData, ref Data.StateRoot);
         }
         else
         {
@@ -236,7 +251,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         Data.Ids.Set(account, ReadOnlySpan<byte>.Empty, batch);
 
         // Destroy the account entry
-        SetAtRoot<DataPage>(batch, Encode(account, stackalloc byte[account.MaxByteLength], DataType.Account),
+        SetAtRoot<FanOutPage>(batch, Encode(account, stackalloc byte[account.MaxByteLength], DataType.Account),
             ReadOnlySpan<byte>.Empty, ref Data.StateRoot);
 
         // Remove the cached
