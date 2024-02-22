@@ -235,7 +235,7 @@ public class PooledSpanDictionaryTests
 
         // dotMemory.Check();
         static void Set(uint i, byte[] key) => BinaryPrimitives.WriteUInt32LittleEndian(key, i);
-        static byte GetMetadata(ReadOnlySpan<byte> key) => (byte)(key[0] & 1);
+        static byte GetMetadata(ReadOnlySpan<byte> key) => (byte)(key[0] & 3);
 
         static void AssertIterate(PooledSpanDictionary dict)
         {
