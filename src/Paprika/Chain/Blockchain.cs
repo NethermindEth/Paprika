@@ -802,11 +802,11 @@ public class Blockchain : IAsyncDisposable
                 {
                     Key.ReadFrom(kvp.Key, out var key);
                     var type = (EntryType)kvp.Metadata;
-                    
+
                     // flush down only volatiles
                     if (type != EntryType.Volatile)
                     {
-                        parent.Set(key, kvp.Value, type);    
+                        parent.Set(key, kvp.Value, type);
                     }
                 }
             }
