@@ -59,7 +59,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// <param name="memoizeKeccakEvery">How often (which lvl mod) should Keccaks be memoized.</param>
     /// <param name="memoization">What to memoize, specifically.</param>
     public ComputeMerkleBehavior(int minimumTreeLevelToMemoizeKeccak = DefaultMinimumTreeLevelToMemoizeKeccak,
-        int memoizeKeccakEvery = MemoizeKeccakEveryNLevel, Memoization memoization = Memoization.Branch)
+        int memoizeKeccakEvery = MemoizeKeccakEveryNLevel, Memoization memoization = Memoization.None)
     {
         _minimumTreeLevelToMemoizeKeccak = minimumTreeLevelToMemoizeKeccak;
         _memoizeKeccakEvery = memoizeKeccakEvery;
