@@ -70,14 +70,14 @@ public class PooledSpanDictionary : IDisposable
     public const int ItemOverhead = PreambleLength + AddressLength + KeyLengthLength + ValueLengthLength;
 
     // Preamble
-    private const byte PreambleBits = 0b1100_0000;
+    private const byte PreambleBits = 0b1110_0000;
     private const byte DestroyedBit = 0b1000_0000;
-    private const byte MetadataBit = 0b0100_0000;
-    private const byte MetadataShift = 6;
+    private const byte MetadataBits = 0b0110_0000;
+    private const byte MetadataShift = 5;
 
-    private const int MaxMetadata = 1;
+    public const int MaxMetadata = MetadataBits >> MetadataShift;
 
-    private const byte Byte0Mask = 0b0011_1111;
+    private const byte Byte0Mask = 0b0001_1111;
 
     // How many bytes are used for preamble + hash leftover
     private const int PreambleLength = 3;
@@ -92,7 +92,7 @@ public class PooledSpanDictionary : IDisposable
     {
         var (leftover, bucket) = Math.DivRem(hash, Root.BucketCount);
 
-        Debug.Assert(BitOperations.LeadingZeroCount(leftover) >= 10, "First 10 bits should be left unused");
+        Debug.Assert(BitOperations.LeadingZeroCount(leftover) >= 11, "First 10 bits should be left unused");
 
         var address = _root[(int)bucket];
         while (address != 0)
@@ -177,7 +177,7 @@ public class PooledSpanDictionary : IDisposable
             if (Unsafe.ReadUnaligned<ushort>(ref _data) >= length)
             {
                 // update metadata bit
-                _header = (byte)((_header & ~MetadataBit) | (metadata * MetadataBit));
+                _header = (byte)((_header & ~MetadataBits) | (metadata << MetadataShift));
 
                 // There's the place to have it update in place
                 Unsafe.WriteUnaligned(ref _data, (ushort)length);
@@ -243,7 +243,7 @@ public class PooledSpanDictionary : IDisposable
         Span<byte> destination = Write(size, out var address);
 
         // Write preamble, big endian
-        destination[0] = (byte)((leftover >> 16) | (uint)(metadata * MetadataBit));
+        destination[0] = (byte)((leftover >> 16) | (uint)(metadata << MetadataShift));
         destination[1] = (byte)(leftover >> 8);
         destination[2] = (byte)(leftover & 0xFF);
 
@@ -366,7 +366,7 @@ public class PooledSpanDictionary : IDisposable
 
             public uint Hash => ((uint)GetLeftover(ref _b) << Root.BucketCountLog2) | _bucket;
 
-            public byte Metadata => (byte)((_b & MetadataBit) >> MetadataShift);
+            public byte Metadata => (byte)((_b & MetadataBits) >> MetadataShift);
 
             public KeyValue(ref byte b, uint bucket)
             {
