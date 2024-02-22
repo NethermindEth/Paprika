@@ -5,18 +5,9 @@ namespace Paprika.Utils;
 
 public static class MetricsExtensions
 {
-    public readonly struct MeasurementScope : IDisposable
+    public readonly struct MeasurementScope(Stopwatch sw, Histogram<long> timer) : IDisposable
     {
-        private readonly Stopwatch _sw;
-        private readonly Histogram<long> _timer;
-
-        public MeasurementScope(Stopwatch sw, Histogram<long> timer)
-        {
-            _sw = sw;
-            _timer = timer;
-        }
-
-        public void Dispose() => _timer.Record(_sw.ElapsedMilliseconds);
+        public void Dispose() => timer.Record(sw.ElapsedMilliseconds);
     }
 
     public static MeasurementScope Measure(this Histogram<long> timer) => new(Stopwatch.StartNew(), timer);
