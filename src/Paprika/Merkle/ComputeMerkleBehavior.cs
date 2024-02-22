@@ -316,9 +316,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         // As leafs are not stored in the database, hint to lookup again on missing.
         using var owner = ctx.Commit.Get(key);
 
-        if (ctx.Budget.ShouldCache(owner))
+        if (ctx.Budget.ShouldCache(owner, out var entryType))
         {
-            ctx.Commit.Set(key, owner.Span, EntryType.TransientCache);
+            ctx.Commit.Set(key, owner.Span, entryType);
         }
 
         if (owner.IsEmpty)
@@ -372,9 +372,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
 #endif
 
-        if (ctx.Budget.ShouldCache(leafData))
+        if (ctx.Budget.ShouldCache(leafData, out var entryType))
         {
-            ctx.Commit.Set(leafKey, leafData.Span, EntryType.TransientCache);
+            ctx.Commit.Set(leafKey, leafData.Span, entryType);
         }
 
         KeccakOrRlp keccakOrRlp;
@@ -995,9 +995,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                         if (diffAt == leaf.Path.Length)
                         {
-                            if (budget.ShouldCache(owner))
+                            if (budget.ShouldCache(owner, out var cacheType))
                             {
-                                commit.SetLeaf(key, leftoverPath, EntryType.TransientCache);
+                                commit.SetLeaf(key, leftoverPath, cacheType);
                             }
 
                             return;
@@ -1150,9 +1150,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             }
                         }
 
-                        if (updated == false && budget.ShouldCache(owner))
+                        if (updated == false && budget.ShouldCache(owner, out var entryType))
                         {
-                            commit.SetBranch(key, children, EntryType.TransientCache);
+                            commit.SetBranch(key, children, entryType);
                         }
 
                         if (array != null)
