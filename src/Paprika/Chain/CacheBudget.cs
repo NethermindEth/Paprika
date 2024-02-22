@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics.Contracts;
+using Paprika.Store;
 using Paprika.Utils;
 
 namespace Paprika.Chain;
@@ -38,5 +39,28 @@ public class CacheBudget
                // first just read, only then use atomic
                Volatile.Read(ref _entriesPerBlock) > 0 &&
                Interlocked.Decrement(ref _entriesPerBlock) >= 0;
+    }
+
+    /// <summary>
+    /// Checks whether the response should be cached.
+    /// Provides the hint how to cache.
+    /// </summary>
+    public bool ShouldCache(in ReadOnlySpanOwnerWithMetadata<byte> owner, out EntryType type)
+    {
+        if (ShouldCache(owner))
+        {
+            type = EntryType.Transient;
+            return true;
+        }
+
+        // Either budget is full or depth was not sufficient. For anything beyond 0, use volatile
+        if (owner.QueryDepth > 0)
+        {
+            type = EntryType.Volatile;
+            return true;
+        }
+
+        type = default;
+        return false;
     }
 }
