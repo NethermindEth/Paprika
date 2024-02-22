@@ -102,7 +102,7 @@ public delegate void CommitAction(in Key key, ReadOnlySpan<byte> value);
 /// Provides the same capability as <see cref="ReadOnlySpanOwner{T}"/> but with the additional metadata.
 /// </summary>
 /// <typeparam name="T"></typeparam>
-public readonly ref struct ReadOnlySpanOwnerWithMetadata<T>
+public readonly ref struct ReadOnlySpanOwnerWithMetadata<T>(ReadOnlySpanOwner<T> owner, ushort queryDepth)
 {
     public const ushort DatabaseQueryDepth = ushort.MaxValue;
 
@@ -113,19 +113,9 @@ public readonly ref struct ReadOnlySpanOwnerWithMetadata<T>
     /// 1-N is for blocks
     /// <see cref="DatabaseQueryDepth"/> is for a query hitting the db transaction. 
     /// </summary>
-    public ushort QueryDepth { get; }
+    public ushort QueryDepth { get; } = queryDepth;
 
-    public bool IsDbQuery => QueryDepth == DatabaseQueryDepth;
-
-    public bool SetAtThisBlock => QueryDepth == 0;
-
-    private readonly ReadOnlySpanOwner<T> _owner;
-
-    public ReadOnlySpanOwnerWithMetadata(ReadOnlySpanOwner<T> owner, ushort queryDepth)
-    {
-        QueryDepth = queryDepth;
-        _owner = owner;
-    }
+    private readonly ReadOnlySpanOwner<T> _owner = owner;
 
     public ReadOnlySpan<T> Span => _owner.Span;
 
@@ -140,6 +130,15 @@ public readonly ref struct ReadOnlySpanOwnerWithMetadata<T>
     /// Answers whether this span is owned and provided by <paramref name="owner"/>.
     /// </summary>
     public bool IsOwnedBy(object owner) => _owner.IsOwnedBy(owner);
+
+    /// <summary>
+    /// Increases the <see cref="QueryDepth"/> of this span owner, reporting it as more nested.
+    /// </summary>
+    public ReadOnlySpanOwnerWithMetadata<T> Nest()
+    {
+        return new ReadOnlySpanOwnerWithMetadata<T>(_owner,
+            QueryDepth == DatabaseQueryDepth ? QueryDepth : (ushort)(QueryDepth + 1));
+    }
 }
 
 public static class ReadOnlySpanOwnerExtensions

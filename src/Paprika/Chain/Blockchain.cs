@@ -636,7 +636,7 @@ public class Blockchain : IAsyncDisposable
         {
             if (_cacheBudgetStorageAndStage.ShouldCache(owner))
             {
-                SetImpl(key, owner.Span, EntryType.TransientCache, dict);
+                SetImpl(key, owner.Span, EntryType.Transient, dict);
             }
         }
 
@@ -761,18 +761,9 @@ public class Blockchain : IAsyncDisposable
 
         public IReadOnlyDictionary<Keccak, int> Stats => _stats!;
 
-        class ChildCommit : RefCountingDisposable, IChildCommit
+        class ChildCommit(BufferPool pool, ICommit parent) : RefCountingDisposable, IChildCommit
         {
-            private readonly PooledSpanDictionary _dict;
-            private readonly BufferPool _pool;
-            private readonly ICommit _parent;
-
-            public ChildCommit(BufferPool pool, ICommit parent)
-            {
-                _dict = new PooledSpanDictionary(pool, true);
-                _pool = pool;
-                _parent = parent;
-            }
+            private readonly PooledSpanDictionary _dict = new(pool, true);
 
             public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
             {
@@ -785,7 +776,8 @@ public class Blockchain : IAsyncDisposable
                     return new ReadOnlySpanOwnerWithMetadata<byte>(new ReadOnlySpanOwner<byte>(result, this), 0);
                 }
 
-                return _parent.Get(key);
+                // Return as nested to show that it's beyond level 0.
+                return parent.Get(key).Nest();
             }
 
             public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type)
@@ -809,11 +801,17 @@ public class Blockchain : IAsyncDisposable
                 foreach (var kvp in _dict)
                 {
                     Key.ReadFrom(kvp.Key, out var key);
-                    _parent.Set(key, kvp.Value, (EntryType)kvp.Metadata);
+                    var type = (EntryType)kvp.Metadata;
+
+                    // flush down only volatiles
+                    if (type != EntryType.Volatile)
+                    {
+                        parent.Set(key, kvp.Value, type);
+                    }
                 }
             }
 
-            public IChildCommit GetChild() => new ChildCommit(_pool, this);
+            public IChildCommit GetChild() => new ChildCommit(pool, this);
 
             public IReadOnlyDictionary<Keccak, int> Stats =>
                 throw new NotImplementedException("Child commits provide no stats");
