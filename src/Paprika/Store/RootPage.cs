@@ -17,9 +17,6 @@ namespace Paprika.Store;
 /// State:
 /// <see cref="Payload.StateRoot"/> is <see cref="FanOutPage"/> that splits accounts into 256 buckets.
 /// This makes the updates update more pages, but adds a nice fan out for fast searches.
-/// The caveat is how many entries tree will have. As it's first two levels it 1 + 16 branches with Merkle.
-/// Additionally due to dense <see cref="Encode"/> this may be 2 branches more from the lower level. This should be just fine.
-///
 /// Account ids:
 /// <see cref="Payload.Ids"/> is a <see cref="FanOutList"/> of <see cref="FanOutPage"/>s. This gives 64k buckets on two levels. Searches should search no more than 3 levels of pages.
 ///
@@ -118,8 +115,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
                 return false;
             }
 
-            var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength], key.Type);
-            return new FanOutPage(batch.GetAt(Data.StateRoot)).TryGet(encoded, batch, out result);
+            return new FanOutPage(batch.GetAt(Data.StateRoot)).TryGet(key.Path, batch, out result);
         }
 
         if (Data.Ids.TryGet(key.Path, batch, out var id) == false)
@@ -128,8 +124,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
             return false;
         }
 
-        var encodedStorage = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength], key.Type);
-        var path = NibblePath.FromKey(id).Append(encodedStorage, stackalloc byte[StorageKeySize]);
+        var path = NibblePath.FromKey(id).Append(key.StoragePath, stackalloc byte[StorageKeySize]);
 
         return Data.Storage.TryGet(path, batch, out result);
     }
@@ -146,63 +141,14 @@ public readonly unsafe struct RootPage(Page root) : IPage
     /// </summary>
     public static NibblePath Encode(in NibblePath path, in Span<byte> destination, DataType type)
     {
-        var typeFlag = (byte)(type & DataType.Merkle);
-
-        const byte oddEnd = 0x01;
-        const byte evenEnd = 0x00;
-
-        // 2 lower bits are used, for odd|even and merkle.
-        // We can use 1 more bit for differentiation for even lengths.
-        // This leaves 1 bit to extract potential value. This means that it can compress 2 / 16,
-        // meaning 1/8 of even paths.
-
-        const byte evenPacked = 0x04;
-        const byte packedShift = 3;
-        const byte maxPacked = 1;
-
-        Debug.Assert(path.IsOdd == false, "Encoded paths should not be odd. They always start at 0");
-
-        if (path.IsEmpty)
-            return path;
-
-        var raw = path.RawSpan;
-
-        if (path.Length % 2 == 1)
-        {
-            // Odd case
-            raw.CopyTo(destination);
-            ref var last = ref destination[raw.Length - 1];
-            last &= 0xF0;
-            last |= oddEnd;
-            last |= typeFlag;
-
-            return NibblePath.FromKey(destination[..raw.Length]);
-        }
-
-        // Even case
-        raw.CopyTo(destination);
-        var lastByte = raw[^1];
-        var lastNibble = lastByte & NibblePath.NibbleMask;
-        var lastButOneNibble = lastByte & (NibblePath.NibbleMask << NibblePath.NibbleShift);
-
-        if (lastNibble <= maxPacked)
-        {
-            // We can pack better
-            destination[raw.Length - 1] =
-                (byte)(lastButOneNibble | (lastNibble << packedShift) | evenPacked | typeFlag);
-            return NibblePath.FromKey(destination[..raw.Length]);
-        }
-
-        destination[raw.Length] = (byte)(evenEnd | typeFlag);
-        return NibblePath.FromKey(destination[..(raw.Length + 1)]);
+        return path;
     }
 
     public void SetRaw(in Key key, IBatchContext batch, ReadOnlySpan<byte> rawData)
     {
         if (key.IsState)
         {
-            var encoded = Encode(key.Path, stackalloc byte[key.Path.MaxByteLength], key.Type);
-            SetAtRoot<FanOutPage>(batch, encoded, rawData, ref Data.StateRoot);
+            SetAtRoot<FanOutPage>(batch, key.Path, rawData, ref Data.StateRoot);
         }
         else
         {
@@ -238,8 +184,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
                 }
             }
 
-            var encoded = Encode(key.StoragePath, stackalloc byte[key.Path.MaxByteLength], key.Type);
-            var path = id.Append(encoded, stackalloc byte[StorageKeySize]);
+            var path = id.Append(key.StoragePath, stackalloc byte[StorageKeySize]);
 
             Data.Storage.Set(path, rawData, batch);
         }
@@ -251,8 +196,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         Data.Ids.Set(account, ReadOnlySpan<byte>.Empty, batch);
 
         // Destroy the account entry
-        SetAtRoot<FanOutPage>(batch, Encode(account, stackalloc byte[account.MaxByteLength], DataType.Account),
-            ReadOnlySpan<byte>.Empty, ref Data.StateRoot);
+        SetAtRoot<FanOutPage>(batch, account, ReadOnlySpan<byte>.Empty, ref Data.StateRoot);
 
         // Remove the cached
         batch.IdCache.Remove(account.UnsafeAsKeccak);

@@ -55,7 +55,7 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
 
         if (IsKeyLocal(key))
         {
-            return new SlottedArray(Data.Data).TryGet(key.RawSpan, out result);
+            return new SlottedArray(Data.Data).TryGet(key, out result);
         }
 
         var index = GetIndex(key);
@@ -83,7 +83,7 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
 
         if (IsKeyLocal(key))
         {
-            if (new SlottedArray(Data.Data).TrySet(key.RawSpan, data) == false)
+            if (new SlottedArray(Data.Data).TrySet(key, data) == false)
             {
                 ThrowNoSpaceInline();
             }
@@ -111,7 +111,7 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
         return page;
     }
 
-    private static bool IsKeyLocal(in NibblePath key) => key.Length <= ConsumedNibbles;
+    private static bool IsKeyLocal(in NibblePath key) => key.Length < ConsumedNibbles;
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void ThrowNoSpaceInline() => throw new Exception("Could not set the data inline");

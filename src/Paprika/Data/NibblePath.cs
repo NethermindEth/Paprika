@@ -75,6 +75,14 @@ public readonly ref struct NibblePath
     }
 
     /// <summary>
+    /// Creates the nibble path from preamble and raw slice
+    /// </summary>
+    public static NibblePath FromRaw(byte preamble, ReadOnlySpan<byte> slice)
+    {
+        return new NibblePath(slice, preamble & OddBit, preamble >> LengthShift);
+    }
+
+    /// <summary>
     /// </summary>
     /// <param name="key"></param>
     /// <param name="nibbleFrom"></param>
@@ -140,7 +148,7 @@ public readonly ref struct NibblePath
     }
 
     public byte RawPreamble => (byte)((_odd & OddBit) | (Length << LengthShift));
-    
+
     private int WriteImpl(Span<byte> destination)
     {
         var odd = _odd & OddBit;
@@ -257,14 +265,9 @@ public readonly ref struct NibblePath
     /// <summary>
     /// Gets the raw underlying span behind the path, removing the odd encoding.
     /// </summary>
-    public ReadOnlySpan<byte> RawSpan
-    {
-        get
-        {
-            var lenght = GetSpanLength(Length, _odd);
-            return MemoryMarshal.CreateSpan(ref _span, lenght);
-        }
-    }
+    public ReadOnlySpan<byte> RawSpan => MemoryMarshal.CreateSpan(ref _span, RawSpanLength);
+
+    public int RawSpanLength => GetSpanLength(Length, _odd);
 
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out NibblePath nibblePath)
     {
