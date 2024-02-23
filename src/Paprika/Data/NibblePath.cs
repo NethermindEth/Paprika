@@ -585,7 +585,7 @@ public readonly ref struct NibblePath
             if (length >= sizeof(short))
             {
                 hash = BitOperations.Crc32C(hash, Unsafe.ReadUnaligned<ushort>(ref span));
-                length -= sizeof(int);
+                length -= sizeof(short);
                 if (length > 0)
                 {
                     // Do final hash as sizeof(long) from end rather than start
