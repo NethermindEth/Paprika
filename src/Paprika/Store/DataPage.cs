@@ -45,14 +45,21 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             // delete locally
             if (LeafCount <= MaxLeafCount)
             {
-                map.Delete(key.RawSpan);
+                map.Delete(key);
                 for (var i = 0; i < MaxLeafCount; i++)
                 {
                     // TODO: consider checking whether the array contains the data first,
                     // only then make it writable as it results in a COW
-                    if (TryGetWritableLeaf(i, batch, out var leaf)) leaf.Delete(key.RawSpan);
+                    if (TryGetWritableLeaf(i, batch, out var leaf)) leaf.Delete(key);
                 }
 
+                return page;
+            }
+
+            if (key.IsEmpty)
+            {
+                // there's no lower level, delete in map
+                map.Delete(key);
                 return page;
             }
 
@@ -60,13 +67,13 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             if (childPageAddress.IsNull)
             {
                 // there's no lower level, delete in map
-                map.Delete(key.RawSpan);
+                map.Delete(key);
                 return page;
             }
         }
 
         // try write in map
-        if (map.TrySet(key.RawSpan, data))
+        if (map.TrySet(key, data))
         {
             return page;
         }
@@ -86,7 +93,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             // move as many as possible to the first leaf and try to re-add
             var anyMoved = map.MoveTo(newest) > 0;
 
-            if (anyMoved && map.TrySet(key.RawSpan, data))
+            if (anyMoved && map.TrySet(key, data))
             {
                 return page;
             }
@@ -99,7 +106,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
                 TryGetWritableLeaf(LeafCount - 1, batch, out newest, true);
 
                 map.MoveTo(newest);
-                if (map.TrySet(key.RawSpan, data))
+                if (map.TrySet(key, data))
                 {
                     return page;
                 }
@@ -130,13 +137,13 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
                 foreach (var item in leafMap.EnumerateAll())
                 {
-                    Set(NibblePath.FromKey(item.Key), item.RawData, batch);
+                    Set(item.Key, item.RawData, batch);
                 }
             }
 
             foreach (var item in new SlottedArray(copy).EnumerateAll())
             {
-                Set(NibblePath.FromKey(item.Key), item.RawData, batch);
+                Set(item.Key, item.RawData, batch);
             }
 
             ArrayPool<byte>.Shared.Return(bytes);
@@ -174,24 +181,18 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         return Set(key, data, batch);
     }
 
-    private DataPage FlushDown(in SlottedArray map, byte nibble, DataPage destination, IBatchContext batch)
+    private static DataPage FlushDown(in SlottedArray map, byte nibble, DataPage destination, IBatchContext batch)
     {
         foreach (var item in map.EnumerateAll())
         {
-            var key = NibblePath.FromKey(item.Key);
+            var key = item.Key;
             if (key.IsEmpty) // empty keys are left in page
-                continue;
-
-            key = key.SliceFrom(TreeLevelOddity); // for odd levels, slice by 1
-            if (key.IsEmpty)
                 continue;
 
             if (key.FirstNibble != nibble)
                 continue;
 
             var sliced = key.SliceFrom(1);
-            if (sliced.IsEmpty)
-                continue;
 
             destination = new DataPage(destination.Set(sliced, item.RawData, batch));
 
@@ -242,31 +243,13 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
     private static SlottedArray GetLeafSlottedArray(Page page) => new(new Span<byte>(page.Payload, Payload.Size));
 
-    private int TreeLevelOddity => Header.Level % 2;
-
-
-    private byte FindMostFrequentNibble(SlottedArray map)
+    private static byte FindMostFrequentNibble(SlottedArray map)
     {
         const int count = SlottedArray.BucketCount;
 
         Span<ushort> stats = stackalloc ushort[count];
 
-        if (TreeLevelOddity == 0)
-        {
-            map.GatherCountStatistics(stats, static span =>
-            {
-                var path = NibblePath.FromKey(span);
-                return path.Length > 0 ? path.FirstNibble : byte.MaxValue;
-            });
-        }
-        else
-        {
-            map.GatherCountStatistics(stats, static span =>
-            {
-                var path = NibblePath.FromKey(span);
-                return path.Length > 1 ? path.GetAt(1) : byte.MaxValue;
-            });
-        }
+        map.GatherCountStatistics(stats);
 
         byte biggestIndex = 0;
         for (byte i = 1; i < count; i++)
@@ -324,7 +307,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         var map = Map;
 
         // try regular map
-        if (map.TryGet(key.RawSpan, out result))
+        if (map.TryGet(key, out result))
         {
             return true;
         }
@@ -335,7 +318,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             for (var i = LeafCount - 1; i >= 0; i--)
             {
                 var leafMap = GetLeafSlottedArray(batch.GetAt(Data.Buckets[i]));
-                if (leafMap.TryGet(key.RawSpan, out result))
+                if (leafMap.TryGet(key, out result))
                     return true;
             }
 

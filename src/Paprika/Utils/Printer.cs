@@ -107,6 +107,11 @@ public class Printer : IPageVisitor
         _printable.Add(addr.Raw, p);
     }
 
+    public void On(FanOutPage page, DbAddress addr)
+    {
+
+    }
+
     public void Print(TextWriter writer)
     {
         var builders = Enumerable.Range(0, PageHeight)
