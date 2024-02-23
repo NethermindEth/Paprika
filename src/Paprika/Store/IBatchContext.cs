@@ -33,8 +33,6 @@ public interface IBatchContext : IReadOnlyBatchContext
     /// </summary>
     void RegisterForFutureReuse(Page page);
 
-    Dictionary<Keccak, uint> IdCache { get; }
-
     /// <summary>
     /// Assigns the batch identifier to a given page, marking it writable by this batch.
     /// </summary>
@@ -55,6 +53,8 @@ public interface IReadOnlyBatchContext : IPageResolver
     /// Gets the current <see cref="IBatch"/> id.
     /// </summary>
     uint BatchId { get; }
+
+    IDictionary<Keccak, uint> IdCache { get; }
 }
 
 public static class ReadOnlyBatchContextExtensions
