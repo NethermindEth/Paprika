@@ -1,5 +1,4 @@
-﻿using System.Runtime.InteropServices;
-using Paprika.Data;
+﻿using Paprika.Data;
 
 namespace Paprika.Store;
 
@@ -71,7 +70,7 @@ public readonly ref struct FanOutList<TPage, TPageType>(Span<DbAddress> addresse
         {
             if (!bucket.IsNull)
             {
-                new DataPage(resolver.GetAt(bucket)).Report(reporter, resolver, level + 1);
+                TPage.Wrap(resolver.GetAt(bucket)).Report(reporter, resolver, level + 1);
             }
         }
     }
