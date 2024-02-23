@@ -185,7 +185,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     /// <param name="commit">The original commit.</param>
     /// <param name="workItems">The work items.</param>
-    private void ScatterGather(ICommit commit, IEnumerable<IWorkItem> workItems)
+    private static void ScatterGather(ICommit commit, IEnumerable<IWorkItem> workItems)
     {
         var children = new ConcurrentQueue<IChildCommit>();
 
@@ -206,8 +206,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
     }
 
-    private static bool ShouldCacheKey(in Key key) => key.Type == DataType.Merkle;
-    private static bool ShouldCacheResult(in ReadOnlySpanOwnerWithMetadata<byte> result) => true;
+    public void OnNewAccountCreated(in Keccak address, ICommit commit)
+    {
+        // Set a transient empty entry for the newly created account.
+        // This simulates an empty storage tree. 
+        // If this account has storage set, it won't try to query the database to get nothing, it will get nothing from here.
+        commit.Set(Key.Merkle(NibblePath.FromKey(address)), ReadOnlySpan<byte>.Empty, EntryType.Transient);
+    }
 
     /// <summary>
     /// Builds works items responsible for building up the storage tries.

@@ -26,6 +26,13 @@ public interface IPreCommitBehavior
     /// <param name="data">The data.</param>
     /// <returns>The data that should be put in place.</returns>
     ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data) => data;
+
+    /// <summary>
+    /// Executed when the new account is created, allowing for some optimizations.
+    /// </summary>
+    void OnNewAccountCreated(in Keccak address, ICommit commit)
+    {
+    }
 }
 
 /// <summary>
