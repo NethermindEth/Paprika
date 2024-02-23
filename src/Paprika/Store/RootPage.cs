@@ -118,10 +118,37 @@ public readonly unsafe struct RootPage(Page root) : IPage
             return new FanOutPage(batch.GetAt(Data.StateRoot)).TryGet(key.Path, batch, out result);
         }
 
-        if (Data.Ids.TryGet(key.Path, batch, out var id) == false)
+        Span<byte> idSpan = stackalloc byte[sizeof(uint)];
+
+        ReadOnlySpan<byte> id;
+        var cache = batch.IdCache;
+        var keccak = key.Path.UnsafeAsKeccak;
+
+        if (cache.TryGetValue(keccak, out var cachedId))
         {
-            result = default;
-            return false;
+            if (cachedId == 0)
+            {
+                result = default;
+                return false;
+            }
+
+            WriteId(idSpan, cachedId);
+            id = idSpan;
+        }
+        else
+        {
+            if (Data.Ids.TryGet(key.Path, batch, out id))
+            {
+                // found, memoize
+                cache[keccak] = ReadId(id);
+            }
+            else
+            {
+                // Not found, for now, not remember misses, remember miss
+                // cache[keccak] = 0;
+                result = default;
+                return false;
+            }
         }
 
         var path = NibblePath.FromKey(id).Append(key.StoragePath, stackalloc byte[StorageKeySize]);
@@ -129,20 +156,9 @@ public readonly unsafe struct RootPage(Page root) : IPage
         return Data.Storage.TryGet(path, batch, out result);
     }
 
-    /// <summary>
-    /// Encodes the path in a way that makes it byte-aligned and unique, but also sort:
-    ///
-    /// - empty path is left empty
-    /// - odd-length path is padded with a single nibble with value of 0x01
-    /// - even-length path is padded with a single byte (2 nibbles with value of 0x00)
-    ///
-    /// To ensure that <see cref="DataType.Merkle"/> and <see cref="DataType.Account"/>/<see cref="DataType.StorageCell"/>
-    /// of the same length can coexist, the merkle marker is added as well.
-    /// </summary>
-    public static NibblePath Encode(in NibblePath path, in Span<byte> destination, DataType type)
-    {
-        return path;
-    }
+    private static uint ReadId(ReadOnlySpan<byte> id) => BinaryPrimitives.ReadUInt32LittleEndian(id);
+    private static void WriteId(Span<byte> idSpan, uint cachedId) => BinaryPrimitives.WriteUInt32LittleEndian(idSpan, cachedId);
+
 
     public void SetRaw(in Key key, IBatchContext batch, ReadOnlySpan<byte> rawData)
     {
@@ -155,9 +171,11 @@ public readonly unsafe struct RootPage(Page root) : IPage
             scoped NibblePath id;
             Span<byte> idSpan = stackalloc byte[sizeof(uint)];
 
-            if (batch.IdCache.TryGetValue(key.Path.UnsafeAsKeccak, out var cachedId))
+            var keccak = key.Path.UnsafeAsKeccak;
+
+            if (batch.IdCache.TryGetValue(keccak, out var cachedId))
             {
-                BinaryPrimitives.WriteUInt32LittleEndian(idSpan, cachedId);
+                WriteId(idSpan, cachedId);
                 id = NibblePath.FromKey(idSpan);
             }
             else
@@ -166,10 +184,10 @@ public readonly unsafe struct RootPage(Page root) : IPage
                 if (Data.Ids.TryGet(key.Path, batch, out var existingId) == false)
                 {
                     Data.AccountCounter++;
-                    BinaryPrimitives.WriteUInt32LittleEndian(idSpan, Data.AccountCounter);
+                    WriteId(idSpan, Data.AccountCounter);
 
                     // memoize in cache
-                    batch.IdCache[key.Path.UnsafeAsKeccak] = Data.AccountCounter;
+                    batch.IdCache[keccak] = Data.AccountCounter;
 
                     // update root
                     Data.Ids.Set(key.Path, idSpan, batch);
@@ -179,13 +197,12 @@ public readonly unsafe struct RootPage(Page root) : IPage
                 else
                 {
                     // memoize in cache
-                    batch.IdCache[key.Path.UnsafeAsKeccak] = BinaryPrimitives.ReadUInt32LittleEndian(existingId);
+                    batch.IdCache[keccak] = ReadId(existingId);
                     id = NibblePath.FromKey(existingId);
                 }
             }
 
             var path = id.Append(key.StoragePath, stackalloc byte[StorageKeySize]);
-
             Data.Storage.Set(path, rawData, batch);
         }
     }
