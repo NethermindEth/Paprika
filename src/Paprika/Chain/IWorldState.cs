@@ -16,7 +16,11 @@ public interface IWorldState : IDisposable
     /// </summary>
     Keccak Hash { get; }
 
-    void SetAccount(in Keccak address, in Account account);
+    /// <summary>
+    /// Sets the account. If the caller is sure that this is a new account,
+    /// pass the <paramref name="newAccountHint"/> to reduce the overhead of the creation.
+    /// </summary>
+    void SetAccount(in Keccak address, in Account account, bool newAccountHint = false);
 
     /// <summary>
     /// Destroys the given account.

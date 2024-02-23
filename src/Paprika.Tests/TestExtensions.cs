@@ -1,4 +1,5 @@
 ﻿using System.Buffers.Binary;
+using System.Security.Cryptography;
 using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Chain;
@@ -181,6 +182,11 @@ public static class TestExtensions
         {
             if (block.blockNumber == blockNumber)
                 tcs.SetResult();
+        };
+
+        chain.FlusherFailure += (_, ex) =>
+        {
+            tcs.SetException(ex);
         };
 
         return tcs.Task;
