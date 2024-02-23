@@ -97,6 +97,18 @@ public class KeyTests
                 NibblePath.FromKey(Keccak.EmptyTreeHash).SliceTo(i)));
         }
 
+        for (var x = 0; x < 16; x++)
+        {
+            var nibbles = NibblePath.Parse("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde" + x.ToString("x").ToLowerInvariant());
+            Unique(Key.Raw(aPath, DataType.Merkle, nibbles));
+
+            nibbles = NibblePath.Parse(x.ToString("x").ToLowerInvariant() + "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde");
+            for (var i = 1; i < 32; i++)
+            {
+                Unique(Key.Raw(aPath, DataType.Merkle, nibbles.SliceTo(i)));
+            }
+        }
+
         // Additional colliding ones
         Unique(Key.Merkle(NibblePath.Parse("DAE3")));
         Unique(Key.Merkle(NibblePath.Parse("251C")));
@@ -118,7 +130,8 @@ public class KeyTests
             if (hashes.TryAdd(hash, hex) == false)
             {
                 var existing = hashes[hash];
-                Assert.Fail($"The hash for {hex} is the same as for {existing}");
+                if (existing != hex)
+                    Assert.Fail($"The hash for {hex} is the same as for {existing}");
             }
         }
     }

@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
 using Paprika.Chain;
@@ -356,6 +357,9 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
     private class ReadOnlyBatch(PagedDb db, RootPage root, string name) : IReportingReadOnlyBatch, IReadOnlyBatchContext
     {
+        private readonly ConcurrentDictionary<Keccak, uint> _idCache = new(Environment.ProcessorCount,
+            RootPage.IdCacheLimit);
+
         public RootPage Root => root;
 
         private long _reads;
@@ -392,6 +396,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         }
 
         public uint BatchId => root.Header.BatchId;
+
+        public IDictionary<Keccak, uint> IdCache => _idCache;
 
         public Page GetAt(DbAddress address) => db._manager.GetAt(address);
 
