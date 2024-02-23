@@ -1,5 +1,7 @@
-﻿using System.Diagnostics;
+using System;
+using System.Diagnostics;
 using System.Globalization;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
@@ -523,13 +525,13 @@ public readonly ref struct NibblePath
         {
             ref var span = ref _span;
 
-            int hash = Length << 24;
-            var length = Length;
+            uint hash = (uint)Length << 24;
+            nuint length = Length;
 
             if (_odd == OddBit)
             {
                 // mix in first half
-                hash ^= (_span & 0x0F) << 20;
+                hash |= (uint)(_span & 0x0F) << 20;
                 span = ref Unsafe.Add(ref span, 1);
                 length -= 1;
             }
@@ -537,11 +539,7 @@ public readonly ref struct NibblePath
             if (length % 2 == 1)
             {
                 // mix in
-                unchecked
-                {
-                    hash ^= GetAt(length - 1) << 16;
-                }
-
+                hash |= (uint)GetAt((int)length - 1) << 16;
                 length -= 1;
             }
 
@@ -549,37 +547,56 @@ public readonly ref struct NibblePath
 
             length /= 2; // make it byte
 
-            // 4 bytes
-            var intLoop = Math.DivRem(length, sizeof(int), out var remainder);
-            for (var i = 0; i < intLoop; i++)
+            // 8 bytes
+            if (length >= sizeof(long))
             {
-                unchecked
+                nuint offset = 0;
+                nuint longLoop = length - sizeof(long);
+                if (longLoop != 0)
                 {
-                    var v = Unsafe.ReadUnaligned<int>(ref span);
-                    hash ^= v;
-                    span = ref Unsafe.Add(ref span, sizeof(int));
+                    do
+                    {
+                        hash = BitOperations.Crc32C(hash, Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref span, offset)));
+                        offset += sizeof(long);
+                    } while (longLoop > offset);
                 }
+
+                // Do final hash as sizeof(long) from end rather than start
+                hash = BitOperations.Crc32C(hash, Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref span, longLoop)));
+
+                return (int)hash;
+            }
+
+            // 4 bytes
+            if (length >= sizeof(int))
+            {
+                hash = BitOperations.Crc32C(hash, Unsafe.ReadUnaligned<uint>(ref span));
+                length -= sizeof(int);
+                if (length > 0)
+                {
+                    // Do final hash as sizeof(long) from end rather than start
+                    hash = BitOperations.Crc32C(hash, Unsafe.ReadUnaligned<uint>(ref Unsafe.Add(ref span, length)));
+                }
+
+                return (int)hash;
             }
 
             // 2 bytes
-            if (remainder >= sizeof(short))
+            if (length >= sizeof(short))
             {
-                unchecked
+                hash = BitOperations.Crc32C(hash, Unsafe.ReadUnaligned<ushort>(ref span));
+                length -= sizeof(int);
+                if (length > 0)
                 {
-                    var v = Unsafe.ReadUnaligned<short>(ref span);
-                    hash ^= v;
-                    span = ref Unsafe.Add(ref span, sizeof(short));
-                    remainder -= sizeof(short);
+                    // Do final hash as sizeof(long) from end rather than start
+                    hash = BitOperations.Crc32C(hash, Unsafe.ReadUnaligned<ushort>(ref Unsafe.Add(ref span, length)));
                 }
+
+                return (int)hash;
             }
 
             // 1 byte
-            if (remainder > 0)
-            {
-                hash ^= span;
-            }
-
-            return hash;
+            return (int)BitOperations.Crc32C(hash, span);
         }
     }
 

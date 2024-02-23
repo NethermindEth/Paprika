@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.IO.Hashing;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using Paprika.Crypto;
 using Paprika.Store;
@@ -99,14 +100,17 @@ public readonly ref partial struct Key
     [SkipLocalsInit]
     public override int GetHashCode()
     {
-        return (int)Type ^ Path.GetHashCode() ^ StoragePath.GetHashCode();
+        return (int)BitOperations.Crc32C((uint)Path.GetHashCode(), (uint)StoragePath.GetHashCode()) + (byte)Type;
     }
 
     [SkipLocalsInit]
     public ulong GetHashCodeULong()
     {
-        return unchecked((ulong)(((long)Path.GetHashCode() << 32) |
-                                 (long)(StoragePath.GetHashCode() ^ (byte)Type)));
+        var pathHash = Path.GetHashCode();
+        var storageHash = StoragePath.GetHashCode();
+
+        ulong hash = BitOperations.Crc32C((uint)pathHash, (uint)storageHash) + (byte)Type;
+        return (((ulong)(uint)pathHash) << 32 | (uint)storageHash) ^ (hash << 32 | hash);
     }
 
     public override string ToString()
