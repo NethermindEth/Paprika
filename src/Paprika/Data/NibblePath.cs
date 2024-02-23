@@ -75,6 +75,14 @@ public readonly ref struct NibblePath
     }
 
     /// <summary>
+    /// Creates the nibble path from preamble and raw slice
+    /// </summary>
+    public static NibblePath FromRaw(byte preamble, ReadOnlySpan<byte> slice)
+    {
+        return new NibblePath(slice, preamble & OddBit, preamble >> LengthShift);
+    }
+
+    /// <summary>
     /// </summary>
     /// <param name="key"></param>
     /// <param name="nibbleFrom"></param>
@@ -139,24 +147,26 @@ public readonly ref struct NibblePath
         return destination.Slice(0, length);
     }
 
+    public byte RawPreamble => (byte)((_odd & OddBit) | (Length << LengthShift));
+
     private int WriteImpl(Span<byte> destination)
     {
         var odd = _odd & OddBit;
-        var lenght = GetSpanLength(Length, _odd);
+        var length = GetSpanLength(Length, _odd);
 
         destination[0] = (byte)(odd | (Length << LengthShift));
 
-        MemoryMarshal.CreateSpan(ref _span, lenght).CopyTo(destination.Slice(PreambleLength));
+        MemoryMarshal.CreateSpan(ref _span, length).CopyTo(destination.Slice(PreambleLength));
 
         // clearing the oldest nibble, if needed
         // yes, it can be branch free
         if (((odd + Length) & 1) == 1)
         {
-            ref var oldest = ref destination[lenght];
+            ref var oldest = ref destination[length];
             oldest = (byte)(oldest & 0b1111_0000);
         }
 
-        return lenght + PreambleLength;
+        return length + PreambleLength;
     }
 
     /// <summary>
@@ -255,14 +265,9 @@ public readonly ref struct NibblePath
     /// <summary>
     /// Gets the raw underlying span behind the path, removing the odd encoding.
     /// </summary>
-    public ReadOnlySpan<byte> RawSpan
-    {
-        get
-        {
-            var lenght = GetSpanLength(Length, _odd);
-            return MemoryMarshal.CreateSpan(ref _span, lenght);
-        }
-    }
+    public ReadOnlySpan<byte> RawSpan => MemoryMarshal.CreateSpan(ref _span, RawSpanLength);
+
+    public int RawSpanLength => GetSpanLength(Length, _odd);
 
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out NibblePath nibblePath)
     {

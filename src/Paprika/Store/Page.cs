@@ -19,6 +19,9 @@ public interface IPage
 public interface IPageWithData<TPage> : IPage
     where TPage : struct, IPageWithData<TPage>
 {
+    /// <summary>
+    /// Wraps the raw page as <typeparamref name="TPage"/>
+    /// </summary>
     static abstract TPage Wrap(Page page);
 
     bool TryGet(scoped NibblePath key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result);

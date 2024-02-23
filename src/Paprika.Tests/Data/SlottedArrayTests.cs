@@ -49,15 +49,15 @@ public class SlottedArrayTests
         using var e = map.EnumerateAll();
 
         e.MoveNext().Should().BeTrue();
-        e.Current.Key.SequenceEqual(key0).Should().BeTrue();
+        e.Current.Key.RawSpan.SequenceEqual(key0).Should().BeTrue();
         e.Current.RawData.SequenceEqual(Data0).Should().BeTrue();
 
         e.MoveNext().Should().BeTrue();
-        e.Current.Key.SequenceEqual(key1).Should().BeTrue();
+        e.Current.Key.RawSpan.SequenceEqual(key1).Should().BeTrue();
         e.Current.RawData.SequenceEqual(Data1).Should().BeTrue();
 
         e.MoveNext().Should().BeTrue();
-        e.Current.Key.SequenceEqual(key2).Should().BeTrue();
+        e.Current.Key.RawSpan.SequenceEqual(key2).Should().BeTrue();
         e.Current.RawData.SequenceEqual(Data2).Should().BeTrue();
 
         e.MoveNext().Should().BeFalse();
@@ -170,19 +170,19 @@ public class SlottedArrayTests
 
         // three bytes
         Unique(stackalloc byte[] { 0xA, 0xD, 0xC });
-        Unique(stackalloc byte[] { 0xA, 0xE, 0xC });
-        Unique(stackalloc byte[] { 0xA, 0xF, 0xC });
+        Unique(stackalloc byte[] { 0xAA, 0xEE, 0xCC });
+        Unique(stackalloc byte[] { 0xAA, 0xFF, 0xCC });
 
         // three bytes
-        Unique(stackalloc byte[] { 0xA, 0xD, 0xC, 0x1 });
-        Unique(stackalloc byte[] { 0xA, 0xE, 0xC, 0x1 });
-        Unique(stackalloc byte[] { 0xA, 0xF, 0xC, 0x1 });
+        Unique(stackalloc byte[] { 0xAA, 0xDD, 0xCC, 0x11 });
+        Unique(stackalloc byte[] { 0xAA, 0xEE, 0xCC, 0x11 });
+        Unique(stackalloc byte[] { 0xAA, 0xFF, 0xCC, 0x11 });
 
         return;
 
         void Unique(in ReadOnlySpan<byte> key)
         {
-            var hash = SlottedArray.GetHash(key);
+            var hash = SlottedArray.GetHash(NibblePath.FromKey(key));
             var hex = key.ToHexString(true);
 
             if (hashes.TryAdd(hash, hex) == false)
@@ -195,24 +195,25 @@ public class SlottedArrayTests
 
 file static class FixedMapTestExtensions
 {
-    public static void SetAssert(this SlottedArray map, in ReadOnlySpan<byte> key, ReadOnlySpan<byte> data, string? because = null)
+    public static void SetAssert(this SlottedArray map, in ReadOnlySpan<byte> key, ReadOnlySpan<byte> data,
+        string? because = null)
     {
-        map.TrySet(key, data).Should().BeTrue(because ?? "TrySet should succeed");
+        map.TrySet(NibblePath.FromKey(key), data).Should().BeTrue(because ?? "TrySet should succeed");
     }
 
     public static void DeleteAssert(this SlottedArray map, in ReadOnlySpan<byte> key)
     {
-        map.Delete(key).Should().BeTrue("Delete should succeed");
+        map.Delete(NibblePath.FromKey(key)).Should().BeTrue("Delete should succeed");
     }
 
     public static void GetAssert(this SlottedArray map, in ReadOnlySpan<byte> key, ReadOnlySpan<byte> expected)
     {
-        map.TryGet(key, out var actual).Should().BeTrue();
+        map.TryGet(NibblePath.FromKey(key), out var actual).Should().BeTrue();
         actual.SequenceEqual(expected).Should().BeTrue("Actual data should equal expected");
     }
 
     public static void GetShouldFail(this SlottedArray map, in ReadOnlySpan<byte> key)
     {
-        map.TryGet(key, out var actual).Should().BeFalse("The key should not exist");
+        map.TryGet(NibblePath.FromKey(key), out var actual).Should().BeFalse("The key should not exist");
     }
 }

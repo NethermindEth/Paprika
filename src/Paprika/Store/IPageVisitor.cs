@@ -7,4 +7,6 @@ public interface IPageVisitor
     void On(AbandonedPage page, DbAddress addr);
 
     void On(DataPage page, DbAddress addr);
+
+    void On(FanOutPage page, DbAddress addr);
 }

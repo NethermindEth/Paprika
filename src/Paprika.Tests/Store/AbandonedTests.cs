@@ -59,7 +59,7 @@ public class AbandonedTests : BasePageTests
     public async Task Work_proper_bookkeeping_when_lots_of_reads()
     {
         const int repeats = 1_000;
-        const int multiplier = 1 + 1; // data page + abandoned page per commit
+        const int multiplier = 2 + 1; // fanout page + data page + abandoned page per commit
         const int historyDepth = 2;
 
         var account = Keccak.EmptyTreeHash;
@@ -100,7 +100,7 @@ public class AbandonedTests : BasePageTests
 
         byte[] value = [13];
 
-        using var db = PagedDb.NativeMemoryDb(256 * Page.PageSize);
+        using var db = PagedDb.NativeMemoryDb(1024 * Page.PageSize);
 
         for (var i = 0; i < repeats; i++)
         {

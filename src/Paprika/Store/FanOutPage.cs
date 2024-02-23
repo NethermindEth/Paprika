@@ -5,6 +5,13 @@ using Paprika.Data;
 
 namespace Paprika.Store;
 
+/// <summary>
+/// The fan out page stores keys shorter than <see cref="ConsumedNibbles"/> in its content,
+/// and delegates other keys lengths to lower layers of the tree.
+///
+/// This is useful to get a good fan out at the higher levels of the tree.
+/// Unfortunately this impacts the caching behavior and may result in more pages being updated.
+/// </summary>
 [method: DebuggerStepThrough]
 public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
 {
@@ -12,14 +19,18 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
 
     private const int ConsumedNibbles = 2;
 
-    public ref PageHeader Header => ref page.Header;
+    private ref PageHeader Header => ref page.Header;
 
     private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Payload
     {
-        private const int Size = FanOut * DbAddress.Size;
+        private const int Size = Page.PageSize - PageHeader.Size;
+
+        private const int FanOutSize = FanOut * DbAddress.Size;
+
+        private const int DataSize = Size - FanOutSize;
 
         /// <summary>
         /// The number of buckets to fan out to.
@@ -32,16 +43,19 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
         [FieldOffset(0)] private DbAddress Address;
 
         public Span<DbAddress> Addresses => MemoryMarshal.CreateSpan(ref Address, FanOut);
+
+        [FieldOffset(FanOutSize)] private byte DataFirst;
+
+        public Span<byte> Data => MemoryMarshal.CreateSpan(ref DataFirst, DataSize);
     }
 
     public bool TryGet(scoped NibblePath key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
         batch.AssertRead(Header);
 
-        if (key.Length < ConsumedNibbles)
+        if (IsKeyLocal(key))
         {
-            result = default;
-            return false;
+            return new SlottedArray(Data.Data).TryGet(key, out result);
         }
 
         var index = GetIndex(key);
@@ -67,6 +81,16 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
             return new FanOutPage(writable).Set(key, data, batch);
         }
 
+        if (IsKeyLocal(key))
+        {
+            if (new SlottedArray(Data.Data).TrySet(key, data) == false)
+            {
+                ThrowNoSpaceInline();
+            }
+
+            return page;
+        }
+
         var index = GetIndex(key);
         var sliced = key.SliceFrom(ConsumedNibbles);
 
@@ -86,6 +110,11 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
         addr = batch.GetAddress(new DataPage(batch.GetAt(addr)).Set(sliced, data, batch));
         return page;
     }
+
+    private static bool IsKeyLocal(in NibblePath key) => key.Length < ConsumedNibbles;
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowNoSpaceInline() => throw new Exception("Could not set the data inline");
 
     public void Report(IReporter reporter, IPageResolver resolver, int level)
     {
