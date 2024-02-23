@@ -193,6 +193,7 @@ public class Blockchain : IAsyncDisposable
         }
         catch (Exception e)
         {
+            FlusherFailure?.Invoke(this, e);
             Console.WriteLine(e);
             throw;
         }
@@ -202,6 +203,11 @@ public class Blockchain : IAsyncDisposable
     /// Announces the last block number that was flushed to disk.
     /// </summary>
     public event EventHandler<(uint blockNumber, Keccak blockHash)> Flushed;
+
+    /// <summary>
+    /// The flusher failed.
+    /// </summary>
+    public event EventHandler<Exception> FlusherFailure;
 
     private void Add(CommittedBlockState state)
     {
@@ -656,18 +662,24 @@ public class Blockchain : IAsyncDisposable
             return result;
         }
 
-        public void SetAccount(in Keccak address, in Account account)
+        public void SetAccount(in Keccak address, in Account account, bool newAccountHint = false)
         {
             var payload = account.WriteTo(stackalloc byte[Account.MaxByteCount]);
-
-            SetAccountRaw(address, payload);
+            SetAccountRaw(address, payload, newAccountHint);
         }
 
-        public void SetAccountRaw(in Keccak address, Span<byte> payload)
+        private void SetAccountRaw(in Keccak address, Span<byte> payload, bool newAccountHint)
         {
             var path = NibblePath.FromKey(address);
             var key = Key.Account(path);
+
             SetImpl(key, payload, EntryType.Persistent, _state);
+
+            if (newAccountHint)
+            {
+                _blockchain._preCommit.OnNewAccountCreated(address, this);
+            }
+
             _stats!.RegisterSetAccount(address);
         }
 

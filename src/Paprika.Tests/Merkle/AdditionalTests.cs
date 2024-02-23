@@ -1,4 +1,5 @@
-﻿using FluentAssertions;
+﻿using System.Buffers.Binary;
+using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
@@ -43,5 +44,71 @@ public class AdditionalTests
         var recalculatedStorage = merkle.CalculateStorageHash(read, Key0);
 
         recalculatedStorage.Should().Be(account.StorageRootHash);
+    }
+
+    [Explicit]
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task Account_creation_hint(bool newHint)
+    {
+        // Create an account with lots of storage slots occupied, then try to create a new account
+        // that has almost the same key to collide in the storage.
+        const int storageCount = 10_000;
+        var random = new Random(17);
+        var value = new byte[] { 13, 17, 23, 29 };
+
+        var parent = Keccak.EmptyTreeHash;
+        uint parentNumber = 1;
+
+        var addr = Keccak.Zero;
+
+        using var db = PagedDb.NativeMemoryDb(256 * 1024 * 1024, 2);
+        var merkle = new ComputeMerkleBehavior(2, 2);
+
+        await using var blockchain = new Blockchain(db, merkle);
+
+        using var block1 = blockchain.StartNew(parent);
+        block1.SetAccount(addr, new Account(1, 1));
+        for (var i = 0; i < storageCount; i++)
+        {
+            block1.SetStorage(addr, random.NextKeccak(), value);
+        }
+
+        parent = block1.Commit(parentNumber);
+        blockchain.Finalize(parent);
+
+        await blockchain.WaitTillFlush(parent);
+
+        var b = blockchain.StartNew(parent);
+
+        const int every = 1000;
+
+        // Create 64k account to collide on the storage as much as possible
+        for (uint i = 1; i <= 60001; i++)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(addr.BytesAsSpan.Slice(28), i);
+
+            b.SetAccount(addr, new Account(1, 1), newHint);
+            b.SetStorage(addr, addr, value);
+
+            if (i % every == 0)
+            {
+                parent = b.Commit(parentNumber + 1);
+                parentNumber++;
+                b.Dispose();
+
+                blockchain.Finalize(parent);
+
+                b = blockchain.StartNew(parent);
+            }
+        }
+
+        // commit final
+        parent = b.Commit(parentNumber + 1);
+        b.Dispose();
+        blockchain.Finalize(parent);
+
+        await blockchain.WaitTillFlush(parent);
+
     }
 }
