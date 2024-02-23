@@ -357,7 +357,9 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
     private class ReadOnlyBatch(PagedDb db, RootPage root, string name) : IReportingReadOnlyBatch, IReadOnlyBatchContext
     {
-        private readonly ConcurrentDictionary<Keccak, uint> _idCache = new();
+        private readonly ConcurrentDictionary<Keccak, uint> _idCache = new(Environment.ProcessorCount,
+            RootPage.IdCacheLimit);
+
         public RootPage Root => root;
 
         private long _reads;

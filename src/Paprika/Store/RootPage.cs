@@ -105,6 +105,11 @@ public readonly unsafe struct RootPage(Page root) : IPage
         Data.AbandonedList.Accept(visitor, resolver);
     }
 
+    /// <summary>
+    /// How many id entries should be cached per readonly batch.
+    /// </summary>
+    public const int IdCacheLimit = 2_000;
+
     public bool TryGet(scoped in Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
         if (key.IsState)
@@ -139,8 +144,10 @@ public readonly unsafe struct RootPage(Page root) : IPage
         {
             if (Data.Ids.TryGet(key.Path, batch, out id))
             {
-                // found, memoize
-                cache[keccak] = ReadId(id);
+                if (cache.Count < IdCacheLimit)
+                {
+                    cache[keccak] = ReadId(id);
+                }
             }
             else
             {
