@@ -22,6 +22,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: write # for sticky-pull-request-comment
+    strategy:
+      matrix:
+        os: [linux, windows]
     steps:
       - name: Cache dotnet
         id: cache-dotnet
@@ -49,18 +52,18 @@ jobs:
       - name: Test
         run: dotnet test src/Paprika.Tests -c ${{ env.BUILD_CONFIG }} --filter TestCategory\!~LongRunning --collect:"XPlat Code Coverage" --results-directory ./coverage
 
-      - name: Build Importer for Linux
-        run:  dotnet build -c Release --runtime linux-x64 src/Paprika.Importer/Paprika.Importer.csproj
+      - name: Build Importer
+        run:  dotnet build -c Release --runtime ${{ matrix.os }}-x64 src/Paprika.Importer/Paprika.Importer.csproj
       
       - uses: actions/upload-artifact@v4
         with:
           # Name of the artifact to upload.
           # Optional. Default is 'artifact'
-          name: Paprika.Importer
+          name: Paprika.Importer.${{ matrix.os }}
       
           # A file, directory or wildcard pattern that describes what to upload
           # Required.
-          path: ./src/Paprika.Importer/bin/Release/net8.0/linux-x64
+          path: ./src/Paprika.Importer/bin/Release/net8.0/${{ matrix.os }}-x64
       
           # The desired behavior if no files are found using the provided path.
           # Available Options:
