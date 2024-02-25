@@ -1,4 +1,4 @@
-﻿using System.CodeDom.Compiler;
+using System.CodeDom.Compiler;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
@@ -393,10 +393,12 @@ public class Blockchain : IAsyncDisposable
     /// </summary>
     private class BlockState : RefCountingDisposable, IWorldState, ICommit, IProvideDescription, IStateStats
     {
+        [ThreadStatic]
+        private static HashSet<ulong>? s_bloomCache;
         /// <summary>
         /// A simple bloom filter to assert whether the given key was set in a given block, used to speed up getting the keys.
         /// </summary>
-        private readonly HashSet<ulong> _bloom;
+        private HashSet<ulong> _bloom;
 
         private readonly Dictionary<Keccak, int>? _stats;
 
@@ -445,7 +447,7 @@ public class Blockchain : IAsyncDisposable
 
             ParentHash = parentStateRoot;
 
-            _bloom = new HashSet<ulong>();
+            _bloom = Interlocked.Exchange(ref s_bloomCache, null) ?? new HashSet<ulong>();
             _destroyed = null;
             _stats = new Dictionary<Keccak, int>();
 
@@ -966,6 +968,21 @@ public class Blockchain : IAsyncDisposable
             foreach (var ancestor in _ancestors)
             {
                 ancestor.Dispose();
+            }
+
+            ReturnCacheToPool();
+
+            void ReturnCacheToPool()
+            {
+                var bloom = _bloom;
+                _bloom = null!;
+                ref var cache = ref s_bloomCache;
+                if (cache is null)
+                {
+                    // Return the cache to be reused
+                    bloom.Clear();
+                    cache = bloom;
+                }
             }
         }
 
