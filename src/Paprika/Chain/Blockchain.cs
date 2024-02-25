@@ -540,15 +540,20 @@ public class Blockchain : IAsyncDisposable
             var data = new PooledSpanDictionary(Pool, false);
 
             // use append for faster copies as state and storage won't overwrite each other
-            _state.CopyTo(data, true);
-            _storage.CopyTo(data, true);
-            _preCommit.CopyTo(data);
+            _state.CopyTo(data, OmitUseOnce, true);
+            _storage.CopyTo(data, OmitUseOnce, true);
+            _preCommit.CopyTo(data, OmitUseOnce);
 
             // Creation acquires the lease
             return new CommittedBlockState(xor, _destroyed, _blockchain, data, hash,
                 ParentHash,
                 blockNumber, raw);
         }
+
+        /// <summary>
+        /// Filters out entries that are of type <see cref="EntryType.UseOnce"/> as they should be used once only.
+        /// </summary>
+        private static bool OmitUseOnce(byte metadata) => metadata != (int)EntryType.UseOnce;
 
         public CommittedBlockState CommitRaw() => CommitImpl(0, true)!;
 
@@ -644,7 +649,7 @@ public class Blockchain : IAsyncDisposable
         {
             if (_cacheBudgetStorageAndStage.ShouldCache(owner))
             {
-                SetImpl(key, owner.Span, EntryType.Transient, dict);
+                SetImpl(key, owner.Span, EntryType.Cached, dict);
             }
         }
 
@@ -818,7 +823,7 @@ public class Blockchain : IAsyncDisposable
                     var type = (EntryType)kvp.Metadata;
 
                     // flush down only volatiles
-                    if (type != EntryType.Volatile)
+                    if (type != EntryType.UseOnce)
                     {
                         parent.Set(key, kvp.Value, type);
                     }
@@ -982,34 +987,6 @@ public class Blockchain : IAsyncDisposable
                     // Return the cache to be reused
                     bloom.Clear();
                     cache = bloom;
-                }
-            }
-        }
-
-        public void Assert(IReadOnlyBatch batch)
-        {
-            using var squashed = new PooledSpanDictionary(Pool);
-
-            _state.CopyTo(squashed);
-            _storage.CopyTo(squashed);
-            _preCommit.CopyTo(squashed);
-
-            foreach (var kvp in squashed)
-            {
-                Key.ReadFrom(kvp.Key, out var key);
-
-                if (!batch.TryGet(key, out var value))
-                {
-                    throw new KeyNotFoundException($"Key {key.ToString()} not found.");
-                }
-
-                if (!value.SequenceEqual(kvp.Value))
-                {
-                    var expected = kvp.Value.ToHexString(false);
-                    var actual = value.ToHexString(false);
-
-                    throw new Exception($"Values are different for {key.ToString()}. " +
-                                        $"Expected is {expected} while found is {actual}.");
                 }
             }
         }
