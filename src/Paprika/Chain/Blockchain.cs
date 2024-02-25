@@ -920,8 +920,9 @@ public class Blockchain : IAsyncDisposable
                 _ => null
             };
 
-            // first always try pre-commit as it may overwrite data
-            if (_preCommit.TryGet(keyWritten, bloom, out var span))
+            // First always try pre-commit as it may overwrite data.
+            // Don't do it for the storage though! StorageCell entries are not modified by pre-commit! It can only read them!
+            if (key.Type != DataType.StorageCell && _preCommit.TryGet(keyWritten, bloom, out var span))
             {
                 // return with owned lease
                 succeeded = true;
