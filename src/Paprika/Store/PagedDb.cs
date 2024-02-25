@@ -385,7 +385,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 {
                     // Return the cache to be reused
                     idCache.Clear();
-                    s_cache = idCache;
+                    cache = idCache;
                 }
             }
         }
