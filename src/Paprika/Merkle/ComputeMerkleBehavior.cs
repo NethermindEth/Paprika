@@ -211,7 +211,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         // Set a transient empty entry for the newly created account.
         // This simulates an empty storage tree. 
         // If this account has storage set, it won't try to query the database to get nothing, it will get nothing from here.
-        commit.Set(Key.Merkle(NibblePath.FromKey(address)), ReadOnlySpan<byte>.Empty, EntryType.Transient);
+        commit.Set(Key.Merkle(NibblePath.FromKey(address)), ReadOnlySpan<byte>.Empty, EntryType.Cached);
     }
 
     /// <summary>

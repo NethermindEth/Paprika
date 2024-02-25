@@ -163,7 +163,7 @@ public class PooledSpanDictionaryTests
 
         // Copy
         using var copy = new PooledSpanDictionary(pool);
-        dict.CopyTo(copy);
+        dict.CopyTo(copy, b => true);
 
         // Assert
         dict.TryGet(key, hash, out result).Should().BeTrue();
@@ -228,7 +228,7 @@ public class PooledSpanDictionaryTests
 
         // Copy & test copy
         using var copy = new PooledSpanDictionary(pool, false);
-        dict.CopyTo(copy);
+        dict.CopyTo(copy, b => true);
 
         AssertIterate(copy);
         return;

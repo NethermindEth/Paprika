@@ -11,12 +11,12 @@ public enum EntryType : byte
     Persistent = 0,
 
     /// <summary>
-    /// An entry representing data that were cached on the behalf of the decision of <see cref="CacheBudget.ShouldCache"/>.
+    /// An entry representing data that were cached on the behalf of the decision of <see cref="CacheBudget"/>.
     /// </summary>
-    Transient = 1,
+    Cached = 1,
 
     /// <summary>
     /// The entry is put only for a short period of computation and should not be considered to be stored in memory beyond this computation.
     /// </summary>
-    Volatile = 2
+    UseOnce = 2
 }

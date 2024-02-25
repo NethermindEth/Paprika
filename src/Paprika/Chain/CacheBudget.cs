@@ -49,14 +49,14 @@ public class CacheBudget
     {
         if (ShouldCache(owner))
         {
-            type = EntryType.Transient;
+            type = EntryType.Cached;
             return true;
         }
 
         // Either budget is full or depth was not sufficient. For anything beyond 0, use volatile
         if (owner.QueryDepth > 0)
         {
-            type = EntryType.Volatile;
+            type = EntryType.UseOnce;
             return true;
         }
 
