@@ -447,7 +447,7 @@ public class Blockchain : IAsyncDisposable
 
             ParentHash = parentStateRoot;
 
-            _bloom = new HashSet<ulong>();
+            _bloom = Interlocked.Exchange(ref s_bloomCache, null) ?? new HashSet<ulong>();
             _destroyed = null;
             _stats = new Dictionary<Keccak, int>();
 
