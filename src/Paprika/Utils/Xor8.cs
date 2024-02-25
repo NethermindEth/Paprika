@@ -29,15 +29,9 @@ public class Xor8
 
     private static int GetArrayLength(int size) => (int)(Offset + (long)FactorTimes100 * size / 100);
 
-    public Xor8(IReadOnlyCollection<int> keys) : this(new ReadonlyUlong(keys))
-    {
-    }
-
     public Xor8(IReadOnlyCollection<ulong> keys)
     {
         // TODO: remove all array allocations, use ArrayPool<ulong> more and/or buffer pool, potentially combine chunks of memory together
-
-
         var size = keys.Count;
         var arrayLength = GetArrayLength(size);
 
@@ -71,9 +65,11 @@ public class Xor8
                         // probably something wrong with the hash function
                         goto MainLoop;
                     }
+
                     t2Count[h]++;
                 }
             }
+
             int[][] alone = new int[Hashes][];
             for (var i = 0; i < Hashes; i++)
             {
@@ -150,7 +146,8 @@ public class Xor8
         } while (reverseOrderPos != size);
 
         _seed = seed;
-        IntPtr fp = Marshal.AllocHGlobal(arrayLength);
+
+        var fp = new byte[arrayLength];
         for (var i = reverseOrderPos - 1; i >= 0; i--)
         {
             var k = reverseOrder[i];
@@ -167,33 +164,35 @@ public class Xor8
                 }
                 else
                 {
-                    xor ^= Marshal.ReadByte(fp, h);
+                    xor ^= fp[h];
                 }
             }
-            Marshal.WriteByte(fp, change, 42);
+
+            fp[change] = (byte)xor;
         }
 
         _fingerprints = new byte[arrayLength];
-        Marshal.Copy(fp, _fingerprints, 0, arrayLength);
+        fp.CopyTo(_fingerprints, 0);
 
         ArrayPool<ulong>.Shared.Return(reverseOrder);
         ArrayPool<byte>.Shared.Return(reverseH);
         ArrayPool<byte>.Shared.Return(t2Count);
         ArrayPool<ulong>.Shared.Return(t2);
-        Marshal.FreeHGlobal(fp);
     }
 
     public bool MayContain(ulong key)
     {
+        ref var fingerprints = ref MemoryMarshal.GetArrayDataReference(_fingerprints);
+
         var hash = Hash.Hash64(key, _seed);
         var f = Fingerprint(hash);
         var r0 = (uint)hash;
         var r1 = (uint)BitOperations.RotateLeft(hash, 21);
         var r2 = (uint)BitOperations.RotateLeft(hash, 42);
-        var h0 = Hash.Reduce(r0, _blockLength);
-        var h1 = Hash.Reduce(r1, _blockLength) + _blockLength;
-        var h2 = Hash.Reduce(r2, _blockLength) + 2 * _blockLength;
-        f ^= _fingerprints[h0] ^ _fingerprints[h1] ^ _fingerprints[h2];
+        var h0 = (int)Hash.Reduce(r0, _blockLength);
+        var h1 = (int)Hash.Reduce(r1, _blockLength) + _blockLength;
+        var h2 = (int)Hash.Reduce(r2, _blockLength) + 2 * _blockLength;
+        f ^= Unsafe.Add(ref fingerprints, h0) ^ Unsafe.Add(ref fingerprints, h1) ^ Unsafe.Add(ref fingerprints, h2);
         return (f & 0xff) == 0;
     }
 
@@ -209,6 +208,7 @@ public class Xor8
 
     private static class Hash
     {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static ulong Hash64(ulong x, ulong seed)
         {
             x += seed;
@@ -234,26 +234,4 @@ public class Xor8
             return (uint)(((hash & 0xffffffffL) * (n & 0xffffffffL)) >>> 32);
         }
     }
-}
-
-file class ReadonlyUlong : IReadOnlyCollection<ulong>
-{
-    private readonly IReadOnlyCollection<int> _ints;
-
-    public ReadonlyUlong(IReadOnlyCollection<int> ints)
-    {
-        _ints = ints;
-    }
-
-    public IEnumerator<ulong> GetEnumerator()
-    {
-        foreach (var i in _ints)
-        {
-            yield return unchecked((ulong)i);
-        }
-    }
-
-    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
-
-    public int Count => _ints.Count;
 }
