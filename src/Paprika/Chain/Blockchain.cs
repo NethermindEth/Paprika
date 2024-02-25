@@ -538,9 +538,9 @@ public class Blockchain : IAsyncDisposable
             var data = new PooledSpanDictionary(Pool, false);
 
             // use append for faster copies as state and storage won't overwrite each other
-            _state.CopyTo(data, OmitVolatile, true);
-            _storage.CopyTo(data, OmitVolatile, true);
-            _preCommit.CopyTo(data, OmitVolatile);
+            _state.CopyTo(data, OmitUseOnce, true);
+            _storage.CopyTo(data, OmitUseOnce, true);
+            _preCommit.CopyTo(data, OmitUseOnce);
 
             // Creation acquires the lease
             return new CommittedBlockState(xor, _destroyed, _blockchain, data, hash,
@@ -549,11 +549,9 @@ public class Blockchain : IAsyncDisposable
         }
 
         /// <summary>
-        /// Filters out entries that are of type <see cref="EntryType.UseOnce"/>.
+        /// Filters out entries that are of type <see cref="EntryType.UseOnce"/> as they should be used once only.
         /// </summary>
-        /// <param name="metadata"></param>
-        /// <returns></returns>
-        private static bool OmitVolatile(byte metadata) => metadata != (int)EntryType.UseOnce;
+        private static bool OmitUseOnce(byte metadata) => metadata != (int)EntryType.UseOnce;
 
         public CommittedBlockState CommitRaw() => CommitImpl(0, true)!;
 
