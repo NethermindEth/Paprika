@@ -147,7 +147,7 @@ public class Xor8
 
         _seed = seed;
 
-        var fp = new byte[arrayLength];
+        IntPtr fp = Marshal.AllocHGlobal(arrayLength);
         for (var i = reverseOrderPos - 1; i >= 0; i--)
         {
             var k = reverseOrder[i];
@@ -164,20 +164,20 @@ public class Xor8
                 }
                 else
                 {
-                    xor ^= fp[h];
+                    xor ^= Marshal.ReadByte(fp, h);
                 }
             }
-
-            fp[change] = (byte)xor;
+            Marshal.WriteByte(fp, change, (byte)xor);
         }
 
         _fingerprints = new byte[arrayLength];
-        fp.CopyTo(_fingerprints, 0);
+        Marshal.Copy(fp, _fingerprints, 0, arrayLength);
 
         ArrayPool<ulong>.Shared.Return(reverseOrder);
         ArrayPool<byte>.Shared.Return(reverseH);
         ArrayPool<byte>.Shared.Return(t2Count);
         ArrayPool<ulong>.Shared.Return(t2);
+        Marshal.FreeHGlobal(fp);
     }
 
     public bool MayContain(ulong key)
