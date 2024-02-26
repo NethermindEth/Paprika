@@ -596,7 +596,10 @@ public class Blockchain : IAsyncDisposable
             var searched = NibblePath.FromKey(address);
 
             var account = Key.Account(address);
-            _state.Destroy(account.WriteTo(stackalloc byte[account.MaxByteLength]), GetHash(account));
+
+            // set account to empty first
+            _state.Set(account.WriteTo(stackalloc byte[account.MaxByteLength]), GetHash(account),
+                ReadOnlySpan<byte>.Empty, (byte)EntryType.Persistent);
 
             Destroy(searched, _storage);
             Destroy(searched, _preCommit);
@@ -605,6 +608,9 @@ public class Blockchain : IAsyncDisposable
 
             _destroyed ??= new HashSet<Keccak>();
             _destroyed.Add(address);
+
+            _blockchain._preCommit.OnAccountDestroyed(address, this);
+
             return;
 
             static void Destroy(NibblePath searched, PooledSpanDictionary dict)
@@ -763,15 +769,6 @@ public class Blockchain : IAsyncDisposable
                 {
                     Key.ReadFrom(kvp.Key, out var key);
                     action(key, kvp.Value);
-                }
-            }
-
-            if (type == TrieType.State && _destroyed != null)
-            {
-                foreach (var destroyed in _destroyed)
-                {
-                    // clean the deletes
-                    action(Key.Account(destroyed), ReadOnlySpan<byte>.Empty);
                 }
             }
         }
