@@ -33,6 +33,13 @@ public interface IPreCommitBehavior
     void OnNewAccountCreated(in Keccak address, ICommit commit)
     {
     }
+
+    /// <summary>
+    /// Executed after the current state & storage is cleared.
+    /// </summary>
+    void OnAccountDestroyed(in Keccak address, ICommit commit)
+    {
+    }
 }
 
 /// <summary>
