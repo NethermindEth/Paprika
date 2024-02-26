@@ -167,7 +167,7 @@ public class Xor8
                     xor ^= fp[h];
                 }
             }
-            fp[change] = (byte)xor; 
+            fp[change] = (byte)xor;
         }
         _fingerprints = new byte[arrayLength];
         Array.Copy(fp, _fingerprints, arrayLength);
