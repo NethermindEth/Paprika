@@ -1,4 +1,4 @@
-﻿using System.CodeDom.Compiler;
+using System.CodeDom.Compiler;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
@@ -393,10 +393,12 @@ public class Blockchain : IAsyncDisposable
     /// </summary>
     private class BlockState : RefCountingDisposable, IWorldState, ICommit, IProvideDescription, IStateStats
     {
+        [ThreadStatic]
+        private static HashSet<ulong>? s_bloomCache;
         /// <summary>
         /// A simple bloom filter to assert whether the given key was set in a given block, used to speed up getting the keys.
         /// </summary>
-        private readonly HashSet<ulong> _bloom;
+        private HashSet<ulong> _bloom;
 
         private readonly Dictionary<Keccak, int>? _stats;
 
@@ -445,7 +447,7 @@ public class Blockchain : IAsyncDisposable
 
             ParentHash = parentStateRoot;
 
-            _bloom = new HashSet<ulong>();
+            _bloom = Interlocked.Exchange(ref s_bloomCache, null) ?? new HashSet<ulong>();
             _destroyed = null;
             _stats = new Dictionary<Keccak, int>();
 
@@ -538,15 +540,20 @@ public class Blockchain : IAsyncDisposable
             var data = new PooledSpanDictionary(Pool, false);
 
             // use append for faster copies as state and storage won't overwrite each other
-            _state.CopyTo(data, true);
-            _storage.CopyTo(data, true);
-            _preCommit.CopyTo(data);
+            _state.CopyTo(data, OmitUseOnce, true);
+            _storage.CopyTo(data, OmitUseOnce, true);
+            _preCommit.CopyTo(data, OmitUseOnce);
 
             // Creation acquires the lease
             return new CommittedBlockState(xor, _destroyed, _blockchain, data, hash,
                 ParentHash,
                 blockNumber, raw);
         }
+
+        /// <summary>
+        /// Filters out entries that are of type <see cref="EntryType.UseOnce"/> as they should be used once only.
+        /// </summary>
+        private static bool OmitUseOnce(byte metadata) => metadata != (int)EntryType.UseOnce;
 
         public CommittedBlockState CommitRaw() => CommitImpl(0, true)!;
 
@@ -589,7 +596,10 @@ public class Blockchain : IAsyncDisposable
             var searched = NibblePath.FromKey(address);
 
             var account = Key.Account(address);
-            _state.Destroy(account.WriteTo(stackalloc byte[account.MaxByteLength]), GetHash(account));
+
+            // set account to empty first
+            _state.Set(account.WriteTo(stackalloc byte[account.MaxByteLength]), GetHash(account),
+                ReadOnlySpan<byte>.Empty, (byte)EntryType.Persistent);
 
             Destroy(searched, _storage);
             Destroy(searched, _preCommit);
@@ -598,6 +608,9 @@ public class Blockchain : IAsyncDisposable
 
             _destroyed ??= new HashSet<Keccak>();
             _destroyed.Add(address);
+
+            _blockchain._preCommit.OnAccountDestroyed(address, this);
+
             return;
 
             static void Destroy(NibblePath searched, PooledSpanDictionary dict)
@@ -642,7 +655,7 @@ public class Blockchain : IAsyncDisposable
         {
             if (_cacheBudgetStorageAndStage.ShouldCache(owner))
             {
-                SetImpl(key, owner.Span, EntryType.Transient, dict);
+                SetImpl(key, owner.Span, EntryType.Cached, dict);
             }
         }
 
@@ -758,15 +771,6 @@ public class Blockchain : IAsyncDisposable
                     action(key, kvp.Value);
                 }
             }
-
-            if (type == TrieType.State && _destroyed != null)
-            {
-                foreach (var destroyed in _destroyed)
-                {
-                    // clean the deletes
-                    action(Key.Account(destroyed), ReadOnlySpan<byte>.Empty);
-                }
-            }
         }
 
         IChildCommit ICommit.GetChild() => new ChildCommit(Pool, this);
@@ -816,7 +820,7 @@ public class Blockchain : IAsyncDisposable
                     var type = (EntryType)kvp.Metadata;
 
                     // flush down only volatiles
-                    if (type != EntryType.Volatile)
+                    if (type != EntryType.UseOnce)
                     {
                         parent.Set(key, kvp.Value, type);
                     }
@@ -913,8 +917,9 @@ public class Blockchain : IAsyncDisposable
                 _ => null
             };
 
-            // first always try pre-commit as it may overwrite data
-            if (_preCommit.TryGet(keyWritten, bloom, out var span))
+            // First always try pre-commit as it may overwrite data.
+            // Don't do it for the storage though! StorageCell entries are not modified by pre-commit! It can only read them!
+            if (key.Type != DataType.StorageCell && _preCommit.TryGet(keyWritten, bloom, out var span))
             {
                 // return with owned lease
                 succeeded = true;
@@ -967,32 +972,19 @@ public class Blockchain : IAsyncDisposable
             {
                 ancestor.Dispose();
             }
-        }
 
-        public void Assert(IReadOnlyBatch batch)
-        {
-            using var squashed = new PooledSpanDictionary(Pool);
+            ReturnCacheToPool();
 
-            _state.CopyTo(squashed);
-            _storage.CopyTo(squashed);
-            _preCommit.CopyTo(squashed);
-
-            foreach (var kvp in squashed)
+            void ReturnCacheToPool()
             {
-                Key.ReadFrom(kvp.Key, out var key);
-
-                if (!batch.TryGet(key, out var value))
+                var bloom = _bloom;
+                _bloom = null!;
+                ref var cache = ref s_bloomCache;
+                if (cache is null)
                 {
-                    throw new KeyNotFoundException($"Key {key.ToString()} not found.");
-                }
-
-                if (!value.SequenceEqual(kvp.Value))
-                {
-                    var expected = kvp.Value.ToHexString(false);
-                    var actual = value.ToHexString(false);
-
-                    throw new Exception($"Values are different for {key.ToString()}. " +
-                                        $"Expected is {expected} while found is {actual}.");
+                    // Return the cache to be reused
+                    bloom.Clear();
+                    cache = bloom;
                 }
             }
         }

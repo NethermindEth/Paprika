@@ -209,9 +209,17 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     public void OnNewAccountCreated(in Keccak address, ICommit commit)
     {
         // Set a transient empty entry for the newly created account.
+        // This simulates an empty storage tree.
+        // If this account has storage set, it won't try to query the database to get nothing, it will get nothing from here.
+        commit.Set(Key.Merkle(NibblePath.FromKey(address)), ReadOnlySpan<byte>.Empty, EntryType.UseOnce);
+    }
+
+    public void OnAccountDestroyed(in Keccak address, ICommit commit)
+    {
+        // Set an empty entry as the storage root for the destroyed account.
         // This simulates an empty storage tree. 
         // If this account has storage set, it won't try to query the database to get nothing, it will get nothing from here.
-        commit.Set(Key.Merkle(NibblePath.FromKey(address)), ReadOnlySpan<byte>.Empty, EntryType.Transient);
+        commit.Set(Key.Merkle(NibblePath.FromKey(address)), ReadOnlySpan<byte>.Empty, EntryType.UseOnce);
     }
 
     /// <summary>

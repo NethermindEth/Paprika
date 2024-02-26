@@ -109,6 +109,66 @@ public class AdditionalTests
         blockchain.Finalize(parent);
 
         await blockchain.WaitTillFlush(parent);
+    }
 
+    [Explicit]
+    [Test(Description = "Testing the hint that precommit can use to remember what was destroyed")]
+    public async Task Accounts_recreation()
+    {
+        const int count = 100;
+        const int spins = 500;
+        const int seed = 17;
+
+        var random = new Random(seed);
+        var value1 = new byte[] { 13, 17, 23, 29 };
+        var value2 = new byte[] { 13, 17, 23, 17 };
+
+        var parent = Keccak.EmptyTreeHash;
+        uint parentNumber = 1;
+
+        using var db = PagedDb.NativeMemoryDb(256 * 1024 * 1024, 2);
+        var merkle = new ComputeMerkleBehavior(2, 2);
+
+        await using var blockchain = new Blockchain(db, merkle);
+
+        using var block1 = blockchain.StartNew(parent);
+        for (var i = 0; i < count; i++)
+        {
+            var keccak = random.NextKeccak();
+
+            block1.SetAccount(keccak, new Account(1, 1));
+            block1.SetStorage(keccak, keccak, value1);
+        }
+
+        parent = block1.Commit(parentNumber);
+        parentNumber++;
+
+        blockchain.Finalize(parent);
+
+        await blockchain.WaitTillFlush(parent);
+
+        // destroy all but one
+        for (uint spin = 0; spin < spins; spin++)
+        {
+            random = new Random(seed);
+            using var block = blockchain.StartNew(parent);
+
+            for (var i = 0; i < count; i++)
+            {
+                var keccak = random.NextKeccak();
+
+                // recreate
+                block.DestroyAccount(keccak);
+                block.SetAccount(keccak, new Account(spin + 2, spin + 2));
+                block.SetStorage(keccak, keccak, value2);
+            }
+
+            parent = block.Commit(parentNumber);
+            parentNumber++;
+
+            blockchain.Finalize(parent);
+        }
+
+        await blockchain.WaitTillFlush(parent);
     }
 }

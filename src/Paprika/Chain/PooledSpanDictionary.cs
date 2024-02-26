@@ -135,11 +135,14 @@ public class PooledSpanDictionary : IDisposable
         return default;
     }
 
-    public void CopyTo(PooledSpanDictionary destination, bool append = false)
+    public void CopyTo(PooledSpanDictionary destination, Predicate<byte> metadataWhere, bool append = false)
     {
         foreach (var kvp in this)
         {
-            destination.SetImpl(kvp.Key, kvp.Hash, kvp.Value, ReadOnlySpan<byte>.Empty, kvp.Metadata, append);
+            if (metadataWhere(kvp.Metadata))
+            {
+                destination.SetImpl(kvp.Key, kvp.Hash, kvp.Value, ReadOnlySpan<byte>.Empty, kvp.Metadata, append);
+            }
         }
     }
 

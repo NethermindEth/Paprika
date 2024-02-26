@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using NonBlocking;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
@@ -357,7 +357,10 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
     private class ReadOnlyBatch(PagedDb db, RootPage root, string name) : IReportingReadOnlyBatch, IReadOnlyBatchContext
     {
-        private readonly ConcurrentDictionary<Keccak, uint> _idCache = new(Environment.ProcessorCount,
+        [ThreadStatic]
+        private static ConcurrentDictionary<Keccak, uint>? s_cache;
+
+        private ConcurrentDictionary<Keccak, uint> _idCache = Interlocked.Exchange(ref s_cache, null) ?? new(Environment.ProcessorCount,
             RootPage.IdCacheLimit);
 
         public RootPage Root => root;
@@ -370,14 +373,28 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             db.ReportReads(Volatile.Read(ref _reads));
             _disposed = true;
             db.DisposeReadOnlyBatch(this);
+
+            ReturnCacheToPool();
+
+            void ReturnCacheToPool()
+            {
+                var idCache = _idCache;
+                _idCache = null!;
+                ref var cache = ref s_cache;
+                if (cache is null)
+                {
+                    // Return the cache to be reused
+                    idCache.Clear();
+                    cache = idCache;
+                }
+            }
         }
 
         public Metadata Metadata => root.Data.Metadata;
 
         public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
         {
-            if (_disposed)
-                throw new ObjectDisposedException("The readonly batch has already been disposed");
+            ObjectDisposedException.ThrowIf(_disposed, this);
 
             // Need to use interlocked as read batches can be used concurrently
             Interlocked.Increment(ref _reads);
@@ -397,7 +414,14 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         public uint BatchId => root.Header.BatchId;
 
-        public IDictionary<Keccak, uint> IdCache => _idCache;
+        public IDictionary<Keccak, uint> IdCache
+        {
+            get
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                return _idCache;
+            }
+        }
 
         public Page GetAt(DbAddress address) => db._manager.GetAt(address);
 
