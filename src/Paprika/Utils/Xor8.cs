@@ -41,6 +41,7 @@ public class Xor8
         var reverseH = ArrayPool<byte>.Shared.Rent(size);
         var t2Count = ArrayPool<byte>.Shared.Rent(arrayLength);
         var t2 = ArrayPool<ulong>.Shared.Rent(arrayLength);
+        var fp = ArrayPool<byte>.Shared.Rent(arrayLength);
 
         int reverseOrderPos;
         ulong seed;
@@ -147,7 +148,6 @@ public class Xor8
 
         _seed = seed;
 
-        var fp = new byte[arrayLength];
         for (var i = reverseOrderPos - 1; i >= 0; i--)
         {
             var k = reverseOrder[i];
@@ -167,17 +167,16 @@ public class Xor8
                     xor ^= fp[h];
                 }
             }
-
             fp[change] = (byte)xor;
         }
-
         _fingerprints = new byte[arrayLength];
-        fp.CopyTo(_fingerprints, 0);
+        Array.Copy(fp, _fingerprints, arrayLength);
 
         ArrayPool<ulong>.Shared.Return(reverseOrder);
         ArrayPool<byte>.Shared.Return(reverseH);
         ArrayPool<byte>.Shared.Return(t2Count);
         ArrayPool<ulong>.Shared.Return(t2);
+        ArrayPool<byte>.Shared.Return(fp);
     }
 
     public bool MayContain(ulong key)
