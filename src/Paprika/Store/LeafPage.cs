@@ -1,7 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Paprika.Chain;
 using Paprika.Data;
 
 namespace Paprika.Store;
@@ -13,6 +12,8 @@ namespace Paprika.Store;
 public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 {
     public static LeafPage Wrap(Page page) => new(page);
+
+    public const int DataSize = DataPage.Payload.Size;
 
     public bool IsNull => page.Raw == UIntPtr.Zero;
 
@@ -65,6 +66,23 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
     public (LeafPage page, bool) TrySet(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
+        var map = Map;
+
+        // Check whether should set in this leaf, make this as simple and as fast as possible starting from simple checks:
+        // 1. if data is empty, it's a delete
+        // 2. if there's a capacity in the map, just write it
+        // 3. if the data is an update and can be put in the map
+
+        var shouldTrySet =
+            data.IsEmpty ||
+            SlottedArray.EstimateNeededCapacity(key, data) <= map.CapacityLeft ||
+            map.HasSpaceToUpdateExisting(key, data);
+
+        if (shouldTrySet == false)
+        {
+            return (new LeafPage(page), false);
+        }
+
         if (Header.BatchId != batch.BatchId)
         {
             // The page is from another batch, meaning, it's readonly. COW

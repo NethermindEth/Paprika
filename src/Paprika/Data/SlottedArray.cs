@@ -21,6 +21,11 @@ namespace Paprika.Data;
 /// </remarks>
 public readonly ref struct SlottedArray
 {
+    /// <summary>
+    /// Provides size of the metadata required to store one slot.
+    /// </summary>
+    public const int OneSlotArrayMinimalSize = Header.Size + Slot.Size;
+
     private readonly ref Header _header;
     private readonly Span<byte> _data;
     private readonly Span<Slot> _slots;
@@ -115,7 +120,11 @@ public readonly ref struct SlottedArray
     /// </summary>
     public int Count => _header.Low / Slot.Size;
 
-    public int CapacityLeft => _data.Length - _header.Taken;
+    /// <summary>
+    /// Returns the capacity of the map.
+    /// It includes slots that were deleted and that can be reclaimed when a defragmentation happens.
+    /// </summary>
+    public int CapacityLeft => _data.Length - _header.Taken + _header.Deleted;
 
     public Enumerator EnumerateAll() =>
         new(this);
@@ -255,6 +264,9 @@ public readonly ref struct SlottedArray
 
     private const int KeyLengthLength = 1;
 
+    public static int EstimateNeededCapacity(in NibblePath key, ReadOnlySpan<byte> data) =>
+        GetTotalSpaceRequired(key, data) + Slot.Size;
+
     private static int GetTotalSpaceRequired(in NibblePath key, ReadOnlySpan<byte> data)
     {
         return (key.RawPreamble <= Slot.MaxSlotPreamble ? 0 : KeyLengthLength) +
@@ -282,7 +294,7 @@ public readonly ref struct SlottedArray
     {
         // mark as deleted first
         _slots[index].IsDeleted = true;
-        _header.Deleted++;
+        _header.Deleted += GetSlotLength(ref _slots[index]);
 
         // always try to compact after delete
         CollectTombstones();
@@ -348,7 +360,7 @@ public readonly ref struct SlottedArray
 
             // cleanup
             _slots[index] = default;
-            _header.Deleted--;
+            _header.Deleted -= GetSlotLength(ref _slots[index]);
 
             // move back by one to see if it's deleted as well
             index--;
@@ -365,6 +377,17 @@ public readonly ref struct SlottedArray
 
         data = default;
         return false;
+    }
+
+    public bool HasSpaceToUpdateExisting(in NibblePath key, in ReadOnlySpan<byte> data)
+    {
+        if (!TryGetImpl(key, GetHash(key), out _, out var index))
+        {
+            return false;
+        }
+
+        var requiredWithoutSlotLength = GetTotalSpaceRequired(key, data);
+        return requiredWithoutSlotLength <= GetSlotLength(ref _slots[index]);
     }
 
     [OptimizationOpportunity(OptimizationType.CPU,
@@ -445,15 +468,17 @@ public readonly ref struct SlottedArray
     /// <summary>
     /// Gets the payload pointed to by the given slot without the length prefix.
     /// </summary>
-    private Span<byte> GetSlotPayload(ref Slot slot)
+    private Span<byte> GetSlotPayload(ref Slot slot) => _data.Slice(slot.ItemAddress, GetSlotLength(ref slot));
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ushort GetSlotLength(ref Slot slot)
     {
         // assert whether the slot has a previous, if not use data.length
         var previousSlotAddress = Unsafe.IsAddressLessThan(ref _slots[0], ref slot)
             ? Unsafe.Add(ref slot, -1).ItemAddress
             : _data.Length;
 
-        var length = previousSlotAddress - slot.ItemAddress;
-        return _data.Slice(slot.ItemAddress, length);
+        return (ushort)(previousSlotAddress - slot.ItemAddress);
     }
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
