@@ -776,6 +776,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                     if (status == DeleteStatus.NodeTypePreserved)
                     {
+                        if (budget.ShouldCache(owner, out var entryType))
+                        {
+                            commit.SetExtension(key, ext.Path, entryType);
+                        }
+
                         // The node has not change its type
                         return DeleteStatus.NodeTypePreserved;
                     }
