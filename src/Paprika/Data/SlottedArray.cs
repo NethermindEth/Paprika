@@ -297,7 +297,7 @@ public readonly ref struct SlottedArray
         slot.IsDeleted = true;
 
         var size = (ushort)(GetSlotLength(ref slot) + Slot.Size);
-        
+
         Debug.Assert(_header.Deleted + size <= _data.Length, "Deleted marker breached size");
 
         _header.Deleted += size;

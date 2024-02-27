@@ -34,7 +34,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             Map.Delete(key);
             return page;
         }
-        
+
         // Try write in map
         if (Map.TrySet(key, data))
         {
