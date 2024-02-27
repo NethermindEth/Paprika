@@ -293,8 +293,14 @@ public readonly ref struct SlottedArray
     private void DeleteImpl(int index)
     {
         // mark as deleted first
-        _slots[index].IsDeleted = true;
-        _header.Deleted += GetSlotLength(ref _slots[index]);
+        ref var slot = ref _slots[index];
+        slot.IsDeleted = true;
+
+        var size = (ushort)(GetSlotLength(ref slot) + Slot.Size);
+        
+        Debug.Assert(_header.Deleted + size <= _data.Length, "Deleted marker breached size");
+
+        _header.Deleted += size;
 
         // always try to compact after delete
         CollectTombstones();
@@ -353,14 +359,19 @@ public readonly ref struct SlottedArray
             // undo writing low
             _header.Low -= Slot.Size;
 
+            ref var slot = ref _slots[index];
+
             // undo writing high
-            var slice = GetSlotPayload(ref _slots[index]);
+            var slice = GetSlotPayload(ref slot);
             var total = slice.Length;
             _header.High = (ushort)(_header.High - total);
 
             // cleanup
-            _slots[index] = default;
-            _header.Deleted -= GetSlotLength(ref _slots[index]);
+            Debug.Assert(_header.Deleted >= total + Slot.Size, "Deleted marker breached size");
+
+            _header.Deleted -= (ushort)(total + Slot.Size);
+
+            slot = default;
 
             // move back by one to see if it's deleted as well
             index--;
