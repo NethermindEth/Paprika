@@ -29,6 +29,8 @@ public interface IPageWithData<TPage> : IPage
     Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch);
 
     void Report(IReporter reporter, IPageResolver resolver, int level);
+
+    void Destroy(IBatchContext batch, in NibblePath account);
 }
 
 /// <summary>

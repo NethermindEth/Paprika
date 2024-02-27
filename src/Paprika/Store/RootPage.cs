@@ -224,8 +224,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         // Remove the cached
         batch.IdCache.Remove(account.UnsafeAsKeccak);
 
-        // TODO: there' no garbage collection for storage
-        // It should not be hard. Walk down by the mapped path, then remove all the pages underneath.
+        Data.Storage.Destroy(Data, batch, account.SliceFrom(2));
     }
 
     private static void SetAtRoot<TPage>(IBatchContext batch, in NibblePath path, in ReadOnlySpan<byte> rawData,

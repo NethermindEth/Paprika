@@ -102,6 +102,24 @@ public readonly unsafe struct StorageFanOutPage<TNext>(Page page) : IPageWithDat
             }
         }
     }
+    public void Destroy(IBatchContext batch, in NibblePath prefix)
+    {
+        // Destroy the Id entry about it
+        Set(prefix, ReadOnlySpan<byte>.Empty, batch);
+
+        // Destroy the account entry
+        // SetAtRoot<FanOutPage>(batch, account, ReadOnlySpan<byte>.Empty, ref Data.StateRoot);
+
+        // Remove the cached
+        batch.IdCache.Remove(prefix.UnsafeAsKeccak);
+        var index = GetIndex(prefix);
+        var addr = Data.Addresses[index];
+        if (addr.IsNull)
+        {
+            // recycleForReuse
+        }
+        TNext.Wrap(batch.GetAt(addr)).Destroy(batch, prefix.SliceFrom(ConsumedNibbles));
+    }
 }
 
 static class StorageFanOutPage
