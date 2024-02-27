@@ -406,7 +406,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         {
             if (root.Data.StateRoot.IsNull == false)
             {
-                new DataPage(GetAt(root.Data.StateRoot)).Report(state, this, 0);
+                new FanOutPage(GetAt(root.Data.StateRoot)).Report(state, this, 0);
             }
 
             root.Data.Storage.Report(storage, this, 0);
