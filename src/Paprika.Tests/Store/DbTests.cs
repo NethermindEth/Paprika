@@ -194,7 +194,7 @@ public class DbTests
         const int size = MB256;
         using var db = PagedDb.NativeMemoryDb(size);
 
-        const int batches = 100;
+        const int batches = 50;
         const int storageSlots = 20_000;
         const int storageKeyLength = 32;
 

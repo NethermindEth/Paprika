@@ -13,8 +13,6 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 {
     public static LeafPage Wrap(Page page) => new(page);
 
-    public const int DataSize = DataPage.Payload.Size;
-
     public bool IsNull => page.Raw == UIntPtr.Zero;
 
     private ref PageHeader Header => ref page.Header;
@@ -36,7 +34,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             Map.Delete(key);
             return page;
         }
-
+        
         // Try write in map
         if (Map.TrySet(key, data))
         {
