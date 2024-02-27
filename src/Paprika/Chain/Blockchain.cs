@@ -792,8 +792,8 @@ public class Blockchain : IAsyncDisposable
                     return new ReadOnlySpanOwnerWithMetadata<byte>(new ReadOnlySpanOwner<byte>(result, this), 0);
                 }
 
-                // Return as nested to show that it's beyond level 0.
-                return parent.Get(key).Nest();
+                // Don't nest, as reaching to parent should be easy.
+                return parent.Get(key);
             }
 
             public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type)

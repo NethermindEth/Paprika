@@ -326,9 +326,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private KeccakOrRlp Compute(scoped in Key key, scoped in ComputeContext ctx)
     {
-        // As leafs are not stored in the database, hint to lookup again on missing.
         using var owner = ctx.Commit.Get(key);
 
+        // The computation might be done for a node that was not traversed and might require a cache
         if (ctx.Budget.ShouldCache(owner, out var entryType))
         {
             ctx.Commit.Set(key, owner.Span, entryType);
@@ -385,6 +385,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
 #endif
 
+        // leaf data might be coming from the db, potentially cache them
         if (ctx.Budget.ShouldCache(leafData, out var entryType))
         {
             ctx.Commit.Set(leafKey, leafData.Span, entryType);
@@ -775,6 +776,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                     if (status == DeleteStatus.NodeTypePreserved)
                     {
+                        if (budget.ShouldCache(owner, out var entryType))
+                        {
+                            commit.SetExtension(key, ext.Path, entryType);
+                        }
+
                         // The node has not change its type
                         return DeleteStatus.NodeTypePreserved;
                     }
@@ -1047,6 +1053,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         {
                             // the path overlaps with what is there, move forward
                             i += ext.Path.Length - 1;
+
+                            if (budget.ShouldCache(owner, out var entryType))
+                            {
+                                commit.SetExtension(key, ext.Path, entryType);
+                            }
+
                             continue;
                         }
 
