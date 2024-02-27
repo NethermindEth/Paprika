@@ -322,7 +322,7 @@ public class BlockchainTests
         blockchain.Finalize(hash);
 
         // Poor man's await on finalization flushed
-        await Task.Delay(500);
+        await blockchain.WaitTillFlush(hash);
 
         using var block2 = blockchain.StartNew(hash);
 
