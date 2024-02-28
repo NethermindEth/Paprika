@@ -30,7 +30,7 @@ public interface IPageWithData<TPage> : IPage
 
     void Report(IReporter reporter, IPageResolver resolver, int level);
 
-    void Destroy(IBatchContext batch, in NibblePath account);
+    void Destroy(IBatchContext batch, in NibblePath prefix);
 }
 
 /// <summary>

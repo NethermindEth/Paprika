@@ -83,7 +83,8 @@ public readonly ref struct FanOutList<TPage, TPageType>(Span<DbAddress> addresse
         // SetAtRoot<FanOutPage>(batch, account, ReadOnlySpan<byte>.Empty, ref Data.StateRoot);
 
         // Remove the cached
-        batch.IdCache.Remove(prefix.UnsafeAsKeccak);
+        // batch.IdCache.Remove(prefix.UnsafeAsKeccak);
+
         var index = GetIndex(prefix);
         var addr = _addresses[index];
 

@@ -284,7 +284,6 @@ public readonly ref struct SlottedArray
             DeleteImpl(index);
             return true;
         }
-
         return false;
     }
 

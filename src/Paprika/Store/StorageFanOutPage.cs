@@ -107,18 +107,31 @@ public readonly unsafe struct StorageFanOutPage<TNext>(Page page) : IPageWithDat
         // Destroy the Id entry about it
         Set(prefix, ReadOnlySpan<byte>.Empty, batch);
 
-        // Destroy the account entry
-        // SetAtRoot<FanOutPage>(batch, account, ReadOnlySpan<byte>.Empty, ref Data.StateRoot);
-
-        // Remove the cached
-        batch.IdCache.Remove(prefix.UnsafeAsKeccak);
-        var index = GetIndex(prefix);
-        var addr = Data.Addresses[index];
-        if (addr.IsNull)
+        var map = new SlottedArray(Data.Data);
+        foreach (var item in map.EnumerateAll())
         {
-            // recycleForReuse
+            if (item.Key.Equals(prefix))
+            {
+                map.Delete(item);
+                var sliced = prefix.SliceFrom(ConsumedNibbles);
+                var index = GetIndex(sliced);
+                ref var addr = ref Data.Addresses[index];
+                Page child;
+                if (addr.IsNull)
+                {
+                    //recycle for reuse
+                    var indexOfPrefix = GetIndex(prefix);
+                    ref var prefixAddr = ref Data.Addresses[indexOfPrefix];
+                    batch.RegisterForFutureReuse(batch.GetAt(prefixAddr));
+                }
+                else
+                {
+                    child = batch.GetAt(addr);
+                    TNext.Wrap(child).Destroy(batch, sliced);
+                }
+
+            }
         }
-        TNext.Wrap(batch.GetAt(addr)).Destroy(batch, prefix.SliceFrom(ConsumedNibbles));
     }
 }
 
