@@ -1,4 +1,5 @@
 ﻿using System.Buffers;
+using System.Data;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -305,6 +306,16 @@ public readonly ref struct SlottedArray
         CollectTombstones();
     }
 
+    public void DeleteByPrefix(in NibblePath key)
+    {
+        foreach (var item in this.EnumerateAll())
+        {
+            if (item.Key.Equals(key))
+            {
+                this.Delete(item);
+            }
+        }
+    }
     private void Deframent()
     {
         // As data were fitting before, the will fit after so all the checks can be skipped
@@ -570,6 +581,7 @@ public readonly ref struct SlottedArray
     }
 
     public override string ToString() => $"{nameof(Count)}: {Count}, {nameof(CapacityLeft)}: {CapacityLeft}";
+
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Header

@@ -108,29 +108,22 @@ public readonly unsafe struct StorageFanOutPage<TNext>(Page page) : IPageWithDat
         Set(prefix, ReadOnlySpan<byte>.Empty, batch);
 
         var map = new SlottedArray(Data.Data);
-        foreach (var item in map.EnumerateAll())
+        map.DeleteByPrefix(prefix);
+        var sliced = prefix.SliceFrom(ConsumedNibbles);
+        var index = GetIndex(sliced);
+        ref var addr = ref Data.Addresses[index];
+        Page child;
+        if (addr.IsNull)
         {
-            if (item.Key.Equals(prefix))
-            {
-                map.Delete(item);
-                var sliced = prefix.SliceFrom(ConsumedNibbles);
-                var index = GetIndex(sliced);
-                ref var addr = ref Data.Addresses[index];
-                Page child;
-                if (addr.IsNull)
-                {
-                    //recycle for reuse
-                    var indexOfPrefix = GetIndex(prefix);
-                    ref var prefixAddr = ref Data.Addresses[indexOfPrefix];
-                    batch.RegisterForFutureReuse(batch.GetAt(prefixAddr));
-                }
-                else
-                {
-                    child = batch.GetAt(addr);
-                    TNext.Wrap(child).Destroy(batch, sliced);
-                }
-
-            }
+            //recycle for reuse
+            var indexOfPrefix = GetIndex(prefix);
+            ref var prefixAddr = ref Data.Addresses[indexOfPrefix];
+            batch.RegisterForFutureReuse(batch.GetAt(prefixAddr));
+        }
+        else
+        {
+            child = batch.GetAt(addr);
+            TNext.Wrap(child).Destroy(batch, sliced);
         }
     }
 }
