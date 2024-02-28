@@ -246,44 +246,6 @@ public class DbTests
         }
     }
 
-    [Test]
-    public async Task Uniform_buckets_spin()
-    {
-        var account = Keccak.EmptyTreeHash;
-
-        const int size = MB16;
-        using var db = PagedDb.NativeMemoryDb(size);
-
-        const int batches = 2_000;
-        const int storageSlots = 256;
-
-        var value = new byte[32];
-
-        var random = new Random(13);
-        random.NextBytes(value);
-
-        for (var i = 0; i < batches; i++)
-        {
-            using var batch = db.BeginNextBatch();
-
-            for (var slot = 0; slot < storageSlots; slot++)
-            {
-                batch.SetStorage(account, GetStorageAddress(slot), value);
-            }
-
-            await batch.Commit(CommitOptions.FlushDataAndRoot);
-        }
-
-        return;
-
-        Keccak GetStorageAddress(int i)
-        {
-            Keccak result = default;
-            BinaryPrimitives.WriteInt32LittleEndian(result.BytesAsSpan, i);
-            return result;
-        }
-    }
-
     private static void AssertPageMetadataAssigned(PagedDb db)
     {
         foreach (var page in db.UnsafeEnumerateNonRoot())

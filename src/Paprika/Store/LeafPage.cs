@@ -117,9 +117,16 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
     private SlottedArray Map => new(Data.DataSpan);
 
+    public int CapacityLeft => Map.CapacityLeft;
+
     public void Report(IReporter reporter, IPageResolver resolver, int level)
     {
         var slotted = new SlottedArray(Data.DataSpan);
         reporter.ReportDataUsage(Header.PageType, level, 0, slotted.Count, slotted.CapacityLeft);
+    }
+
+    public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
+    {
+        using var scope = visitor.On(this, addr);
     }
 }

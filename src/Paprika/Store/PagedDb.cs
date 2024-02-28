@@ -273,8 +273,19 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         foreach (var root in _roots)
         {
-            visitor.On(root, DbAddress.Page(i++));
+            using (visitor.On(root, DbAddress.Page(i++)))
+            {
+                root.Accept(visitor, this);
+            }
+        }
+    }
 
+    public void VisitRoot(IPageVisitor visitor)
+    {
+        var root = Root;
+
+        using (visitor.On(root, GetAddress(Root.AsPage())))
+        {
             root.Accept(visitor, this);
         }
     }

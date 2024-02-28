@@ -162,6 +162,8 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         return flushCount > 0;
     }
 
+    public int CapacityLeft => Map.CapacityLeft;
+
     private static Page FlushDown(in SlottedArray map, byte nibble, Page destination, IBatchContext batch)
     {
         foreach (var item in map.EnumerateAll())
@@ -303,5 +305,25 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
         reporter.ReportDataUsage(Header.PageType, level, BucketCount - emptyBuckets, slotted.Count,
             slotted.CapacityLeft);
+    }
+
+    public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
+    {
+        using (visitor.On(this, addr))
+        {
+            foreach (var bucket in Data.Buckets)
+            {
+                if (bucket.IsNull)
+                {
+                    continue;
+                }
+
+                var child = resolver.GetAt(bucket);
+                if (child.Header.PageType == PageType.Leaf)
+                    new LeafPage(child).Accept(visitor, resolver, bucket);
+                else
+                    new DataPage(child).Accept(visitor, resolver, bucket);
+            }
+        }
     }
 }

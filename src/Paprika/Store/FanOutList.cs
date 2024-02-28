@@ -74,4 +74,15 @@ public readonly ref struct FanOutList<TPage, TPageType>(Span<DbAddress> addresse
             }
         }
     }
+
+    public void Accept(IPageVisitor visitor, IPageResolver resolver)
+    {
+        foreach (var bucket in _addresses)
+        {
+            if (!bucket.IsNull)
+            {
+                TPage.Wrap(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
+            }
+        }
+    }
 }

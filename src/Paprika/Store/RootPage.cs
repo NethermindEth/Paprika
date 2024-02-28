@@ -67,7 +67,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size)]
         private DbAddress StoragePayload;
 
-        public FanOutList<StorageFanOutPage<StorageFanOutPage<StorageFanOutPage<DataPage>>>, StandardType> Storage => new(MemoryMarshal.CreateSpan(ref StoragePayload, FanOutList.FanOut));
+        public FanOutList<StorageFanOutPage<StorageFanOutPage<DataPage>>, StandardType> Storage => new(MemoryMarshal.CreateSpan(ref StoragePayload, FanOutList.FanOut));
 
         /// <summary>
         /// Identifiers
@@ -98,10 +98,12 @@ public readonly unsafe struct RootPage(Page root) : IPage
         if (Data.StateRoot.IsNull == false)
         {
             var data = new FanOutPage(resolver.GetAt(Data.StateRoot));
-            visitor.On(data, Data.StateRoot);
+            using var scope = visitor.On(data, Data.StateRoot);
         }
 
-        Data.AbandonedList.Accept(visitor, resolver);
+        Data.Storage.Accept(visitor, resolver);
+
+        // Data.AbandonedList.Accept(visitor, resolver);
     }
 
     /// <summary>
