@@ -2,7 +2,6 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Paprika.Crypto;
 using Paprika.Store;
 using Paprika.Utils;
 
@@ -19,19 +18,14 @@ namespace Paprika.Data;
 /// It keeps an internal map, now implemented with a not-the-best loop over slots.
 /// With the use of key prefix, it should be small enough and fast enough for now.
 /// </remarks>
-public readonly ref struct SlottedArray
+public readonly ref struct UShortSlottedArray
 {
-    /// <summary>
-    /// Provides size of the metadata required to store one slot.
-    /// </summary>
-    public const int OneSlotArrayMinimalSize = Header.Size + Slot.Size;
-
     private readonly ref Header _header;
     private readonly Span<byte> _data;
     private readonly Span<Slot> _slots;
     private readonly Span<byte> _raw;
 
-    public SlottedArray(Span<byte> buffer)
+    public UShortSlottedArray(Span<byte> buffer)
     {
         _raw = buffer;
         _header = ref Unsafe.As<byte, Header>(ref _raw[0]);
@@ -39,11 +33,9 @@ public readonly ref struct SlottedArray
         _slots = MemoryMarshal.Cast<byte, Slot>(_data);
     }
 
-    public bool TrySet(in NibblePath key, ReadOnlySpan<byte> data, ushort? keyHash = default)
+    public bool TrySet(ushort key, ReadOnlySpan<byte> data)
     {
-        var hash = keyHash ?? GetHash(key);
-
-        if (TryGetImpl(key, hash, out var existingData, out var index))
+        if (TryGetImpl(key, out var existingData, out var index))
         {
             // same size, copy in place
             if (data.Length == existingData.Length)
@@ -57,7 +49,7 @@ public readonly ref struct SlottedArray
         }
 
         // does not exist yet, calculate total memory needed
-        var total = GetTotalSpaceRequired(key, data);
+        var total = GetTotalSpaceRequired(data);
 
         if (_header.Taken + total + Slot.Size > _data.Length)
         {
@@ -82,31 +74,14 @@ public readonly ref struct SlottedArray
         ref var slot = ref _slots[at / Slot.Size];
 
         // write slot
-        slot.Hash = hash;
+        slot.Key = key;
         slot.ItemAddress = (ushort)(_data.Length - _header.High - total);
         slot.IsDeleted = false;
 
         // write item: length_key, key, data
         var dest = _data.Slice(slot.ItemAddress, total);
 
-        int offset;
-
-        if (key.RawPreamble <= Slot.MaxSlotPreamble)
-        {
-            slot.KeyPreamble = key.RawPreamble;
-            offset = 0;
-        }
-        else
-        {
-            slot.KeyPreamble = Slot.PreambleBiggerMarker;
-            dest[0] = key.RawPreamble;
-            offset = 1;
-        }
-
-        var raw = key.RawSpan;
-
-        raw.CopyTo(dest.Slice(offset));
-        data.CopyTo(dest.Slice(offset + raw.Length));
+        data.CopyTo(dest);
 
         // commit low and high
         _header.Low += Slot.Size;
@@ -126,160 +101,17 @@ public readonly ref struct SlottedArray
     /// </summary>
     public int CapacityLeft => _data.Length - _header.Taken + _header.Deleted;
 
-    public Enumerator EnumerateAll() =>
-        new(this);
+    public bool CanAdd(in ReadOnlySpan<byte> data) => CapacityLeft >= Slot.Size + data.Length;
 
-    public ref struct Enumerator
-    {
-        /// <summary>The map being enumerated.</summary>
-        private readonly SlottedArray _map;
-
-        /// <summary>The next index to yield.</summary>
-        private int _index;
-
-        private readonly byte[] _bytes;
-        private Item _current;
-
-        internal Enumerator(SlottedArray map)
-        {
-            _map = map;
-            _index = -1;
-            _bytes = ArrayPool<byte>.Shared.Rent(128);
-        }
-
-        /// <summary>Advances the enumerator to the next element of the span.</summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool MoveNext()
-        {
-            int index = _index + 1;
-            var to = _map.Count;
-
-            ref var slot = ref _map._slots[index];
-
-            while (index < to && slot.IsDeleted) // filter out deleted
-            {
-                // move by 1
-                index += 1;
-                slot = ref Unsafe.Add(ref slot, 1);
-            }
-
-            if (index < to)
-            {
-                _index = index;
-                _current = Build();
-                return true;
-            }
-
-            return false;
-        }
-
-        public Item Current => _current;
-
-        private Item Build()
-        {
-            ref var slot = ref _map._slots[_index];
-            var span = _map.GetSlotPayload(ref slot);
-
-            var shift = slot.KeyPreamble == Slot.PreambleBiggerMarker ? KeyLengthLength : 0;
-            var preamble = slot.KeyPreamble == Slot.PreambleBiggerMarker ? span[0] : slot.KeyPreamble;
-
-            var key = NibblePath.FromRaw(preamble, span.Slice(shift));
-            var data = span.Slice(shift + key.RawSpanLength);
-
-            return new Item(key, data, _index);
-        }
-
-        public void Dispose()
-        {
-            if (_bytes != null)
-                ArrayPool<byte>.Shared.Return(_bytes);
-        }
-
-        public readonly ref struct Item(NibblePath key, ReadOnlySpan<byte> rawData, int index)
-        {
-            public int Index { get; } = index;
-            public NibblePath Key { get; } = key;
-            public ReadOnlySpan<byte> RawData { get; } = rawData;
-        }
-
-        // a shortcut to not allocate, just copy the enumerator
-        public Enumerator GetEnumerator() => this;
-    }
-
-    /// <summary>
-    /// Tries to move as many items as possible from this map to the destination map.
-    /// </summary>
-    /// <remarks>
-    /// Returns how many items were moved.
-    /// </remarks>
-    public int MoveTo(in SlottedArray destination)
-    {
-        var count = 0;
-
-        foreach (var item in EnumerateAll())
-        {
-            // try copy all, even if one is not copyable the other might
-            if (destination.TrySet(item.Key, item.RawData))
-            {
-                count++;
-                Delete(item);
-            }
-        }
-
-        return count;
-    }
-
-    public const int BucketCount = 16;
-
-    /// <summary>
-    /// Gets the aggregated count of entries per nibble.
-    /// </summary>
-    public void GatherCountStatistics(Span<ushort> buckets)
-    {
-        Debug.Assert(buckets.Length == BucketCount);
-
-        var to = _header.Low / Slot.Size;
-        for (var i = 0; i < to; i++)
-        {
-            ref var slot = ref _slots[i];
-
-            // extract only not deleted and these which have at least one nibble
-            if (slot.IsDeleted == false)
-            {
-                var span = GetSlotPayload(ref slot);
-
-                var shift = slot.KeyPreamble == Slot.PreambleBiggerMarker ? KeyLengthLength : 0;
-                var preamble = slot.KeyPreamble == Slot.PreambleBiggerMarker ? span[0] : slot.KeyPreamble;
-
-                // TODO: empty if (preamble == 0 || preamble == 1)
-                var key = NibblePath.FromRaw(preamble, span.Slice(shift));
-
-                if (key.IsEmpty)
-                    continue;
-
-                buckets[key.FirstNibble] += 1;
-            }
-        }
-    }
-
-    private const int KeyLengthLength = 1;
-
-    public static int EstimateNeededCapacity(in NibblePath key, ReadOnlySpan<byte> data) =>
-        GetTotalSpaceRequired(key, data) + Slot.Size;
-
-    private static int GetTotalSpaceRequired(in NibblePath key, ReadOnlySpan<byte> data)
-    {
-        return (key.RawPreamble <= Slot.MaxSlotPreamble ? 0 : KeyLengthLength) +
-               key.RawSpanLength + data.Length;
-    }
+    private static int GetTotalSpaceRequired(ReadOnlySpan<byte> data) => data.Length;
 
     /// <summary>
     /// Warning! This does not set any tombstone so the reader won't be informed about a delete,
     /// just will miss the value.
     /// </summary>
-    public bool Delete(in NibblePath key)
+    public bool Delete(ushort key)
     {
-        if (TryGetImpl(key, GetHash(key), out _, out var index))
+        if (TryGetImpl(key, out _, out var index))
         {
             DeleteImpl(index);
             return true;
@@ -287,8 +119,6 @@ public readonly ref struct SlottedArray
 
         return false;
     }
-
-    public void Delete(in Enumerator.Item item) => DeleteImpl(item.Index);
 
     private void DeleteImpl(int index)
     {
@@ -314,10 +144,10 @@ public readonly ref struct SlottedArray
         var span = array.AsSpan(0, size);
 
         span.Clear();
-        var copy = new SlottedArray(span);
+        var copy = new UShortSlottedArray(span);
         var count = _header.Low / Slot.Size;
 
-        for (int i = 0; i < count; i++)
+        for (var i = 0; i < count; i++)
         {
             var copyFrom = _slots[i];
             if (copyFrom.IsDeleted == false)
@@ -330,9 +160,8 @@ public readonly ref struct SlottedArray
                 var high = (ushort)(copy._data.Length - copy._header.High - fromSpan.Length);
                 fromSpan.CopyTo(copy._data.Slice(high));
 
-                copyTo.Hash = copyFrom.Hash;
+                copyTo.Key = copyFrom.Key;
                 copyTo.ItemAddress = high;
-                copyTo.KeyPreamble = copyFrom.KeyPreamble;
 
                 copy._header.Low += Slot.Size;
                 copy._header.High = (ushort)(copy._header.High + fromSpan.Length);
@@ -378,9 +207,9 @@ public readonly ref struct SlottedArray
         }
     }
 
-    public bool TryGet(in NibblePath key, out ReadOnlySpan<byte> data)
+    public bool TryGet(ushort key, out ReadOnlySpan<byte> data)
     {
-        if (TryGetImpl(key, GetHash(key), out var span, out _))
+        if (TryGetImpl(key, out var span, out _))
         {
             data = span;
             return true;
@@ -390,20 +219,9 @@ public readonly ref struct SlottedArray
         return false;
     }
 
-    public bool HasSpaceToUpdateExisting(in NibblePath key, in ReadOnlySpan<byte> data)
-    {
-        if (!TryGetImpl(key, GetHash(key), out _, out var index))
-        {
-            return false;
-        }
-
-        var requiredWithoutSlotLength = GetTotalSpaceRequired(key, data);
-        return requiredWithoutSlotLength <= GetSlotLength(ref _slots[index]);
-    }
-
     [OptimizationOpportunity(OptimizationType.CPU,
         "key encoding is delayed but it might be called twice, here + TrySet")]
-    private bool TryGetImpl(in NibblePath key, ushort hash, out Span<byte> data, out int slotIndex)
+    private bool TryGetImpl(ushort key, out Span<byte> data, out int slotIndex)
     {
         var to = _header.Low / Slot.Size;
 
@@ -414,7 +232,7 @@ public readonly ref struct SlottedArray
         var span = MemoryMarshal.Cast<Slot, ushort>(_slots.Slice(0, to));
 
         var offset = 0;
-        int index = span.IndexOf(hash);
+        int index = span.IndexOf(key);
 
         if (index == notFound)
         {
@@ -422,8 +240,6 @@ public readonly ref struct SlottedArray
             slotIndex = default;
             return false;
         }
-
-        var preamble = key.RawPreamble;
 
         while (index != notFound)
         {
@@ -437,22 +253,9 @@ public readonly ref struct SlottedArray
                 ref var slot = ref _slots[i];
                 if (slot.IsDeleted == false)
                 {
-                    var actual = GetSlotPayload(ref slot);
-
-                    var shift = slot.KeyPreamble == Slot.PreambleBiggerMarker ? KeyLengthLength : 0;
-                    var actualPreamble = slot.KeyPreamble == Slot.PreambleBiggerMarker ? actual[0] : slot.KeyPreamble;
-
-                    if (actualPreamble == preamble)
-                    {
-                        var actualKey = NibblePath.FromRaw(actualPreamble, actual.Slice(shift));
-
-                        if (actualKey.Equals(key))
-                        {
-                            data = actual.Slice(shift + actualKey.RawSpanLength);
-                            slotIndex = i;
-                            return true;
-                        }
-                    }
+                    data = GetSlotPayload(ref slot);
+                    slotIndex = i;
+                    return true;
                 }
             }
 
@@ -468,7 +271,7 @@ public readonly ref struct SlottedArray
             offset += 1;
 
             // move to next index
-            index = span.IndexOf(hash);
+            index = span.IndexOf(key);
         }
 
         data = default;
@@ -479,15 +282,7 @@ public readonly ref struct SlottedArray
     /// <summary>
     /// Gets the payload pointed to by the given slot without the length prefix.
     /// </summary>
-    private Span<byte> GetSlotPayload(ref Slot slot)
-    {
-        var length = GetSlotLength(ref slot);
-        var addr = slot.ItemAddress;
-
-        Debug.Assert(0 < addr && addr + length <= _data.Length);
-
-        return _data.Slice(addr, length);
-    }
+    private Span<byte> GetSlotPayload(ref Slot slot) => _data.Slice(slot.ItemAddress, GetSlotLength(ref slot));
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ushort GetSlotLength(ref Slot slot)
@@ -528,17 +323,6 @@ public readonly ref struct SlottedArray
             set => Raw = (ushort)((Raw & ~DeletedMask) | (ushort)(value ? DeletedMask : 0));
         }
 
-        private const ushort KeyLengthMask = 0b1110_0000_0000_0000;
-        private const ushort KeyLengthShift = 13;
-        public const int MaxSlotPreamble = 6;
-        public const int PreambleBiggerMarker = 7;
-
-        public byte KeyPreamble
-        {
-            get => (byte)((Raw & KeyLengthMask) >> KeyLengthShift);
-            set => Raw = (ushort)((Raw & ~KeyLengthMask) | (value << KeyLengthShift));
-        }
-
         [FieldOffset(0)] private ushort Raw;
 
         /// <summary>
@@ -547,35 +331,11 @@ public readonly ref struct SlottedArray
         public const int PrefixUshortMask = 1;
 
         /// <summary>
-        /// The memorized result of <see cref="GetHash"/> of this item.
+        /// The key of the item.
         /// </summary>
-        [FieldOffset(2)] public ushort Hash;
+        [FieldOffset(2)] public ushort Key;
 
-        public override string ToString()
-        {
-            return
-                $"{nameof(Hash)}: {Hash}, {nameof(ItemAddress)}: {ItemAddress}";
-        }
-    }
-
-    /// <summary>
-    /// Builds the hash for the key. 
-    /// </summary>
-    /// <remarks>
-    /// Highly optimized to eliminate bound checks and special cases
-    /// </remarks>
-    public static ushort GetHash(in NibblePath key)
-    {
-        const int shift = NibblePath.NibbleShift;
-
-        if (key.Length == 0)
-            return 0;
-
-        // get nibbles at 0, 1/3, 2/3, last
-        return (ushort)(key.GetAt(0) |
-                        (key.GetAt(key.Length / 3) << shift) |
-                        (key.GetAt(key.Length * 2 / 3) << (shift * 2)) |
-                        (key.GetAt(key.Length - 1) << (shift * 3)));
+        public override string ToString() => $"{nameof(Key)}: {Key}, {nameof(ItemAddress)}: {ItemAddress}";
     }
 
     public override string ToString() => $"{nameof(Count)}: {Count}, {nameof(CapacityLeft)}: {CapacityLeft}";

@@ -7,7 +7,7 @@ using Spectre.Console;
 namespace Paprika.Tests.Store;
 
 [Explicit]
-public class Prints
+public class PageStructurePrintingTests
 {
     private const int SmallDb = 256 * Page.PageSize;
     private const int MB = 1024 * 1024;
@@ -21,11 +21,11 @@ public class Prints
     {
         var account = Keccak.EmptyTreeHash;
 
-        const int size = MB16;
+        const int size = MB256;
         using var db = PagedDb.NativeMemoryDb(size);
 
-        const int batches = 100;
-        const int storageSlots = 1024;
+        const int batches = 5;
+        const int storageSlots = 350_000;
 
         var value = new byte[32];
 

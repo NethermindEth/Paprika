@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
@@ -11,6 +12,8 @@ namespace Paprika.Store;
 [method: DebuggerStepThrough]
 public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 {
+    private static readonly byte[] IdPlaceHolder = new byte[2];
+
     public static LeafPage Wrap(Page page) => new(page);
 
     public bool IsNull => page.Raw == UIntPtr.Zero;
@@ -28,21 +31,85 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             return new LeafPage(writable).Set(key, data, batch);
         }
 
-        if (data.IsEmpty)
+        var isDelete = data.IsEmpty;
+
+        if (Map.TryGet(key, out var result))
         {
-            // Deletes are in-situ
+            // The key exists.
+
+            var (bucket, id) = Decode(result);
+            ref var bucketAddr = ref Data.Buckets[bucket];
+            var overflow = new LeafOverflowPage(batch.GetAt(bucketAddr));
+
+            if (isDelete)
+            {
+                // delete from the overflow & delete from map
+                bucketAddr = batch.GetAddress(overflow.Delete(id, batch));
+                Map.Delete(key);
+                return page;
+            }
+
+            // An update
+            var (p, success) = overflow.TryUpdate(id, data, batch);
+            bucketAddr = batch.GetAddress(p);
+
+            if (success)
+            {
+                // page is COWed and already stored in the bucket, return
+                return page;
+            }
+
+            // No place in the bucket, delete the previous and delete in map
+            overflow.Delete(id, batch);
             Map.Delete(key);
-            return page;
+
+            // Fallback to adding
         }
 
-        // Try write in map
-        if (Map.TrySet(key, data))
+        if (Map.CapacityLeft >= SlottedArray.EstimateNeededCapacity(key, IdPlaceHolder))
         {
-            return page;
+            byte b = 0;
+            // has capacity to write the id, search for the bucket
+            foreach (ref var bucket in Data.Buckets)
+            {
+                Page p;
+                if (bucket.IsNull)
+                {
+                    p = batch.GetNewPage(out bucket, true);
+                    p.Header.Level = (byte)(Header.Level + 1);
+                    p.Header.PageType = PageType.LeafOverflow;
+                }
+                else
+                    p = batch.GetAt(bucket);
+
+                var overflow = new LeafOverflowPage(p);
+                if (overflow.CanStore(data))
+                {
+                    var (cowed, id) = overflow.Add(data, batch);
+
+                    var encoded = Encode(b, id, stackalloc byte[2]);
+                    if (!Map.TrySet(key, encoded))
+                    {
+                        throw new Exception("Should have space to put id in after the check above");
+                    }
+
+                    bucket = batch.GetAddress(cowed);
+                    return page;
+                }
+
+                b++;
+            }
         }
 
-        // Register this page for reuse as its data will be copied to the data page.
+        // This page is filled, move everything down
         batch.RegisterForFutureReuse(page);
+        foreach (var bucket in Data.Buckets)
+        {
+            if (bucket.IsNull == false)
+            {
+                batch.RegisterForFutureReuse(batch.GetAt(bucket));
+            }
+        }
 
         // Not enough space, transform into a data page.
         var @new = batch.GetNewPage(out _, true);
@@ -55,14 +122,32 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
         foreach (var item in Map.EnumerateAll())
         {
-            dataPage = new DataPage(dataPage.Set(item.Key, item.RawData, batch));
+            var (bucket, id) = Decode(item.RawData);
+            new LeafOverflowPage(batch.GetAt(Data.Buckets[bucket])).TryGet(id, out var toCopy);
+
+            dataPage = new DataPage(dataPage.Set(item.Key, toCopy, batch));
         }
 
         // Set this value and return data page
         return dataPage.Set(key, data, batch);
     }
 
-    public (LeafPage page, bool) TrySet(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
+    private static (byte bucket, ushort id) Decode(in ReadOnlySpan<byte> data)
+    {
+        Debug.Assert(data.Length == 2);
+
+        var value = BinaryPrimitives.ReadUInt16LittleEndian(data);
+        return ((byte bucket, ushort id))(value & BucketMask, value >> BucketShift);
+    }
+
+    private static ReadOnlySpan<byte> Encode(byte bucket, ushort id, Span<byte> destination)
+    {
+        var encoded = (id << BucketShift) | bucket;
+        BinaryPrimitives.WriteUInt16LittleEndian(destination, (ushort)encoded);
+        return destination[..2];
+    }
+
+    public (Page page, bool) TrySet(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
         var map = Map;
 
@@ -73,12 +158,12 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
         var shouldTrySet =
             data.IsEmpty ||
-            SlottedArray.EstimateNeededCapacity(key, data) <= map.CapacityLeft ||
-            map.HasSpaceToUpdateExisting(key, data);
+            SlottedArray.EstimateNeededCapacity(key, IdPlaceHolder) <= map.CapacityLeft ||
+            map.HasSpaceToUpdateExisting(key, IdPlaceHolder);
 
         if (shouldTrySet == false)
         {
-            return (new LeafPage(page), false);
+            return (page, false);
         }
 
         if (Header.BatchId != batch.BatchId)
@@ -87,32 +172,50 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             // It could be useful to check whether the map will accept the write first, before doing COW,
             // but this would result in a check for each TrySet. This should be implemented in map. 
             var writable = batch.GetWritableCopy(page);
-            return new LeafPage(writable).TrySet(key, data, batch);
+            return (new LeafPage(writable).Set(key, data, batch), true);
         }
 
-        return (new LeafPage(page), Map.TrySet(key, data));
+        return (Set(key, data, batch), true);
     }
+
+    private const int BucketCount = 4;
+    private const int BucketShift = 2;
+    private const int BucketMask = BucketCount - 1;
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Payload
     {
+        private const int BucketSize = DbAddress.Size * BucketCount;
         private const int Size = Page.PageSize - PageHeader.Size;
+        private const int DataSize = Size - BucketSize;
+
+        [FieldOffset(0)] private DbAddress BucketStart;
+        public Span<DbAddress> Buckets => MemoryMarshal.CreateSpan(ref BucketStart, BucketCount);
 
         /// <summary>
         /// The first item of map of frames to allow ref to it.
         /// </summary>
-        [FieldOffset(0)] private byte DataStart;
+        [FieldOffset(BucketSize)] private byte DataStart;
 
         /// <summary>
         /// Writable area.
         /// </summary>
-        public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, Size);
+        public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
     }
 
     public bool TryGet(scoped NibblePath key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
         batch.AssertRead(Header);
-        return Map.TryGet(key, out result);
+
+        if (Map.TryGet(key, out var data) == false)
+        {
+            result = default;
+            return false;
+        }
+
+        var (bucket, id) = Decode(data);
+        var overflow = new LeafOverflowPage(batch.GetAt(Data.Buckets[bucket]));
+        return overflow.TryGet(id, out result);
     }
 
     private SlottedArray Map => new(Data.DataSpan);
@@ -128,5 +231,12 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
     public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
         using var scope = visitor.On(this, addr);
+        foreach (var bucket in Data.Buckets)
+        {
+            if (bucket.IsNull == false)
+            {
+                new LeafOverflowPage(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
+            }
+        }
     }
 }

@@ -23,6 +23,11 @@ public enum PageType : byte
     /// The leaf page that represents a part of the page.
     /// </summary>
     Leaf = 4,
+
+    /// <summary>
+    /// The overflow of the leaf, storing all the data.
+    /// </summary>
+    LeafOverflow = 5,
 }
 
 public interface IPageTypeProvider

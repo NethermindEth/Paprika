@@ -149,8 +149,10 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             var (cow, success) = leaf.TrySet(sliced, item.RawData, batch);
 
             // save cow
-            leaf = cow;
-            Data.Buckets[first] = batch.GetAddress(cow.AsPage());
+            Data.Buckets[first] = batch.GetAddress(cow);
+
+            // flushing down may change the page type but it's quite unlikely
+            leaf = cow.Header.PageType == PageType.Leaf ? new LeafPage(cow) : default;
 
             if (success)
             {

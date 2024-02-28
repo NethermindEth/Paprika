@@ -55,7 +55,7 @@ public class DataPageTests : BasePageTests
                 .BeTrue($"Failed to read value of {j}");
         }
 
-        batch.PageCount.Should().BeLessThan(60);
+        batch.PageCount.Should().BeLessThan(70);
     }
 
     // private static Keccak GetKey(int i)
