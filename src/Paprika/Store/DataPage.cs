@@ -1,5 +1,4 @@
-﻿using System.Buffers;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
@@ -19,6 +18,8 @@ namespace Paprika.Store;
 [method: DebuggerStepThrough]
 public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 {
+    private const int ConsumedNibbles = 1;
+
     public static DataPage Wrap(Page page) => new(page);
 
     private const int BucketCount = 16;
@@ -33,7 +34,6 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         {
             // the page is from another batch, meaning, it's readonly. Copy
             var writable = batch.GetWritableCopy(page);
-
             return new DataPage(writable).Set(key, data, batch);
         }
 
@@ -42,146 +42,127 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
         if (isDelete)
         {
-            // delete locally
-            if (LeafCount <= MaxLeafCount)
+            // If it's a delete and a key is empty or there's no child page, delete in-situ
+            if (key.IsEmpty || Data.Buckets[key.FirstNibble].IsNull)
             {
-                map.Delete(key);
-                for (var i = 0; i < MaxLeafCount; i++)
-                {
-                    // TODO: consider checking whether the array contains the data first,
-                    // only then make it writable as it results in a COW
-                    if (TryGetWritableLeaf(i, batch, out var leaf)) leaf.Delete(key);
-                }
-
-                return page;
-            }
-
-            if (key.IsEmpty)
-            {
-                // there's no lower level, delete in map
-                map.Delete(key);
-                return page;
-            }
-
-            var childPageAddress = Data.Buckets[key.FirstNibble];
-            if (childPageAddress.IsNull)
-            {
-                // there's no lower level, delete in map
+                // Empty key can be deleted only in-situ
                 map.Delete(key);
                 return page;
             }
         }
 
-        // try write in map
+        // Try write in map
         if (map.TrySet(key, data))
         {
             return page;
         }
 
-        // if no Descendants, create first leaf
-        if (LeafCount == 0)
+        // Page is full, flush down
+        if (FlushDownToExistingLeafs(map, batch))
         {
-            TryGetWritableLeaf(0, batch, out var leaf, true);
-            this.LeafCount = 1;
-        }
-
-        if (LeafCount <= MaxLeafCount)
-        {
-            // try get the newest
-            TryGetWritableLeaf(LeafCount - 1, batch, out var newest);
-
-            // move as many as possible to the first leaf and try to re-add
-            var anyMoved = map.MoveTo(newest) > 0;
-
-            if (anyMoved && map.TrySet(key, data))
+            // Flush down succeeded, try to set again
+            if (map.TrySet(key, data))
             {
                 return page;
             }
-
-            this.LeafCount += 1;
-
-            if (LeafCount <= MaxLeafCount)
-            {
-                // still within leafs count
-                TryGetWritableLeaf(LeafCount - 1, batch, out newest, true);
-
-                map.MoveTo(newest);
-                if (map.TrySet(key, data))
-                {
-                    return page;
-                }
-
-                Debug.Fail("Shall never enter here as new entries are copied to the map");
-                return page;
-            }
-
-            // copy leafs and clear the buckets as they will be used by child pages now
-            Span<DbAddress> leafs = stackalloc DbAddress[MaxLeafCount];
-            Data.Buckets.Slice(0, MaxLeafCount).CopyTo(leafs);
-            Data.Buckets.Clear();
-
-            // need to deep copy the page, first memoize the map which has the newest data
-            var bytes = ArrayPool<byte>.Shared.Rent(Data.DataSpan.Length);
-            var copy = bytes.AsSpan(0, Data.DataSpan.Length);
-            Data.DataSpan.CopyTo(copy);
-
-            // clear the map
-            Data.DataSpan.Clear();
-
-            // as oldest go first, iterate in the same direction
-            foreach (var leaf in leafs)
-            {
-                var leafPage = batch.GetAt(leaf);
-                batch.RegisterForFutureReuse(leafPage);
-                var leafMap = GetLeafSlottedArray(leafPage);
-
-                foreach (var item in leafMap.EnumerateAll())
-                {
-                    Set(item.Key, item.RawData, batch);
-                }
-            }
-
-            foreach (var item in new SlottedArray(copy).EnumerateAll())
-            {
-                Set(item.Key, item.RawData, batch);
-            }
-
-            ArrayPool<byte>.Shared.Return(bytes);
-
-            // set the actual data
-            return Set(key, data, batch);
         }
+
+        // None of the existing leafs was able to accept the write. Proceed with a regular flush
 
         // Find most frequent nibble
         var nibble = FindMostFrequentNibble(map);
 
-        // try get the child page
+        // Try get the child page
         ref var address = ref Data.Buckets[nibble];
         Page child;
 
         if (address.IsNull)
         {
-            // create child as the same type as the parent
-            child = batch.GetNewPage(out Data.Buckets[nibble], true);
-            child.Header.PageType = Header.PageType;
+            // Create child as leaf page
+            child = batch.GetNewPage(out address, true);
+            child.Header.PageType = PageType.Leaf;
             child.Header.Level = (byte)(Header.Level + 1);
         }
         else
         {
-            // the child page is not-null, retrieve it
+            // The child page is not-null, retrieve it
             child = batch.GetAt(address);
         }
 
-        var dataPage = new DataPage(child);
+        child = FlushDown(map, nibble, child, batch);
+        address = batch.GetAddress(child);
 
-        dataPage = FlushDown(map, nibble, dataPage, batch);
-        address = batch.GetAddress(dataPage.AsPage());
 
         // The page has some of the values flushed down, try to add again.
         return Set(key, data, batch);
     }
 
-    private static DataPage FlushDown(in SlottedArray map, byte nibble, DataPage destination, IBatchContext batch)
+    /// <summary>
+    /// This method tries to flush down data to existing leafs, it will never create new leafs or transform leafs to data pages.
+    /// </summary>
+    private bool FlushDownToExistingLeafs(in SlottedArray map, IBatchContext batch)
+    {
+        var leafCount = 0;
+        Span<LeafPage> leafs = stackalloc LeafPage[BucketCount];
+
+        for (var i = 0; i < BucketCount; i++)
+        {
+            var addr = Data.Buckets[i];
+            if (addr.IsNull == false)
+            {
+                var child = batch.GetAt(addr);
+                if (child.Header.PageType == PageType.Leaf)
+                {
+                    leafs[i] = new LeafPage(child);
+                    leafCount++;
+                }
+            }
+        }
+
+        if (leafCount == 0)
+        {
+            return false;
+        }
+
+        var flushCount = 0;
+
+        // Try flush down to leafs first
+        foreach (var item in map.EnumerateAll())
+        {
+            var key = item.Key;
+            if (key.IsEmpty)
+            {
+                continue;
+            }
+
+            var first = key.FirstNibble;
+            ref var leaf = ref leafs[first];
+
+            if (leaf.IsNull)
+            {
+                continue;
+            }
+
+            // the key is non-empty and the leaf is not null
+            var sliced = key.SliceFrom(ConsumedNibbles);
+
+            var (cow, success) = leaf.TrySet(sliced, item.RawData, batch);
+
+            // save cow
+            leaf = cow;
+            Data.Buckets[first] = batch.GetAddress(cow.AsPage());
+
+            if (success)
+            {
+                map.Delete(item);
+                flushCount++;
+            }
+        }
+
+        return flushCount > 0;
+    }
+
+    private static Page FlushDown(in SlottedArray map, byte nibble, Page destination, IBatchContext batch)
     {
         foreach (var item in map.EnumerateAll())
         {
@@ -194,54 +175,16 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
             var sliced = key.SliceFrom(1);
 
-            destination = new DataPage(destination.Set(sliced, item.RawData, batch));
+            destination = destination.Header.PageType == PageType.Leaf
+                ? new LeafPage(destination).Set(sliced, item.RawData, batch)
+                : new DataPage(destination).Set(sliced, item.RawData, batch);
 
-            // use the special delete for the item that is much faster than map.Delete(item.Key);
+            // Use the special delete for the item that is much faster than map.Delete(item.Key);
             map.Delete(item);
         }
 
         return destination;
     }
-
-    private ref byte LeafCount => ref Header.Metadata;
-    private const byte MaxLeafCount = 6;
-
-    private bool TryGetWritableLeaf(int index, IBatchContext batch, out SlottedArray leaf,
-        bool allocateOnMissing = false)
-    {
-        ref var addr = ref Data.Buckets[index];
-
-        Page page;
-
-        if (addr.IsNull)
-        {
-            if (!allocateOnMissing)
-            {
-                leaf = default;
-                return false;
-            }
-
-            page = batch.GetNewPage(out addr, true);
-            page.Header.PageType = PageType.Leaf;
-            page.Header.Level = 0;
-        }
-        else
-        {
-            page = batch.GetAt(addr);
-        }
-
-        // ensure writable
-        if (page.Header.BatchId != batch.BatchId)
-        {
-            page = batch.GetWritableCopy(page);
-            addr = batch.GetAddress(page);
-        }
-
-        leaf = GetLeafSlottedArray(page);
-        return true;
-    }
-
-    private static SlottedArray GetLeafSlottedArray(Page page) => new(new Span<byte>(page.Payload, Payload.Size));
 
     private static byte FindMostFrequentNibble(SlottedArray map)
     {
@@ -312,20 +255,6 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             return true;
         }
 
-        if (LeafCount is > 0 and <= MaxLeafCount)
-        {
-            // start with the oldest
-            for (var i = LeafCount - 1; i >= 0; i--)
-            {
-                var leafMap = GetLeafSlottedArray(batch.GetAt(Data.Buckets[i]));
-                if (leafMap.TryGet(key, out result))
-                    return true;
-            }
-
-            result = default;
-            return false;
-        }
-
         if (key.IsEmpty) // empty keys are left in page
         {
             return false;
@@ -337,8 +266,11 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         // non-null page jump, follow it!
         if (bucket.IsNull == false)
         {
-            var child = new DataPage(batch.GetAt(bucket));
-            return child.TryGet(key.SliceFrom(1), batch, out result);
+            var sliced = key.SliceFrom(1);
+            var child = batch.GetAt(bucket);
+            return child.Header.PageType == PageType.Leaf
+                ? new LeafPage(child).TryGet(sliced, batch, out result)
+                : new DataPage(child).TryGet(sliced, batch, out result);
         }
 
         result = default;
@@ -351,45 +283,23 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
     {
         var emptyBuckets = 0;
 
-        if (LeafCount <= MaxLeafCount)
+        foreach (var bucket in Data.Buckets)
         {
-            foreach (var leaf in Data.Buckets.Slice(0, LeafCount))
+            if (bucket.IsNull)
             {
-                var page = resolver.GetAt(leaf);
-                var leafMap = GetLeafSlottedArray(page);
-
-                // foreach (var item in leafMap.EnumerateAll())
-                // {
-                //     //reporter.ReportItem(new StoreKey(item.Key), item.RawData);
-                // }
-
-                reporter.ReportDataUsage(page.Header.PageType, level + 1, 0, leafMap.Count,
-                    leafMap.CapacityLeft);
+                emptyBuckets++;
             }
-
-            emptyBuckets = BucketCount - LeafCount;
-        }
-        else
-        {
-            foreach (var bucket in Data.Buckets)
+            else
             {
-                if (bucket.IsNull)
-                {
-                    emptyBuckets++;
-                }
+                var child = resolver.GetAt(bucket);
+                if (child.Header.PageType == PageType.Leaf)
+                    new LeafPage(child).Report(reporter, resolver, level + 1);
                 else
-                {
-                    new DataPage(resolver.GetAt(bucket)).Report(reporter, resolver, level + 1);
-                }
+                    new DataPage(child).Report(reporter, resolver, level + 1);
             }
         }
 
         var slotted = new SlottedArray(Data.DataSpan);
-
-        // foreach (var item in slotted.EnumerateAll())
-        // {
-        //     // reporter.ReportItem(new StoreKey(item.Key), item.RawData);
-        // }
 
         reporter.ReportDataUsage(Header.PageType, level, BucketCount - emptyBuckets, slotted.Count,
             slotted.CapacityLeft);
