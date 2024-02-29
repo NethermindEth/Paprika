@@ -147,10 +147,10 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         return dataPage.Set(key, data, batch);
     }
 
-    private const int BucketCount = 16;
-    private const int BucketMask = 15;
-    private const int BucketShift = 4;
-    private const int IdLength = 4;
+    private const int BucketCount = 8;
+    private const int BucketMask = 7;
+    private const int BucketShift = 3;
+    private const int IdLength = 12;
 
     private static (byte bucket, ushort id) Decode(in ReadOnlySpan<byte> data)
     {

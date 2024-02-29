@@ -19,7 +19,7 @@ public readonly unsafe struct LeafOverflowPage(Page page)
 
     public (Page, ushort) Add(in ReadOnlySpan<byte> data, IBatchContext batch)
     {
-        if (Map.CanAdd(data) == false || Data.Ids.HasEmptyBits == false)
+        if (Map.CanAdd(data) == false || BitVector.HasEmptyBits(Data.Ids) == false)
         {
             throw new Exception("Cannot store more data!");
         }
@@ -32,7 +32,7 @@ public readonly unsafe struct LeafOverflowPage(Page page)
         }
 
         // get id
-        var id = Data.Ids.FirstNotSet;
+        var id = BitVector.FirstNotSet(Data.Ids);
         if (Map.TrySet(id, data))
         {
             Data.Ids[id] = true;
@@ -45,14 +45,17 @@ public readonly unsafe struct LeafOverflowPage(Page page)
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Payload
     {
-        private const int Size = Page.PageSize - PageHeader.Size - BitVector1024.Size;
+        private const int Size = Page.PageSize - PageHeader.Size - BitVector.Of1024.Size;
 
-        [FieldOffset(0)] public BitVector1024 Ids;
+        /// <summary>
+        /// Page.Size / <see cref="LeafPage.IdLength"/> + <see cref="UShortSlottedArray.Slot.Size"/>
+        /// </summary>
+        [FieldOffset(0)] public BitVector.Of512 Ids;
 
         /// <summary>
         /// The first item of map of frames to allow ref to it.
         /// </summary>
-        [FieldOffset(BitVector1024.Size)] private byte DataStart;
+        [FieldOffset(BitVector.Of1024.Size)] private byte DataStart;
 
         /// <summary>
         /// Writable area.

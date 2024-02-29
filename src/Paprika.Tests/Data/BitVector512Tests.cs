@@ -9,9 +9,9 @@ public class BitVector1024Tests
     [Test]
     public void Set_reset()
     {
-        var v = new BitVector1024();
+        var v = new BitVector.Of1024();
 
-        for (int i = 0; i < BitVector1024.Count; i++)
+        for (int i = 0; i < BitVector.Of1024.Count; i++)
         {
             v[i].Should().BeFalse();
             v[i] = true;
@@ -25,11 +25,11 @@ public class BitVector1024Tests
     [TestCase(1)]
     [TestCase(64)]
     [TestCase(65)]
-    [TestCase(BitVector1024.Count - 1)]
-    [TestCase(BitVector1024.Count)]
+    [TestCase(BitVector.Of1024.Count - 1)]
+    [TestCase(BitVector.Of1024.Count)]
     public void First_not_set(int set)
     {
-        var v = new BitVector1024();
+        var v = new BitVector.Of1024();
 
         for (int i = 0; i < set; i++)
         {
@@ -40,10 +40,10 @@ public class BitVector1024Tests
     }
 
     [TestCase(1, true)]
-    [TestCase(BitVector1024.Count, false)]
+    [TestCase(BitVector.Of1024.Count, false)]
     public void Any_not_set(int set, bool anyNotSet)
     {
-        var v = new BitVector1024();
+        var v = new BitVector.Of1024();
 
         for (int i = 0; i < set; i++)
         {
