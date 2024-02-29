@@ -35,7 +35,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         if (Map.TryGet(key, out var result))
         {
             // The key exists so overflow must as well
-            var id = Decode(result);
+            var (bucket, id) = Decode(result);
             var overflow = new LeafOverflowPage(batch.GetAt(Data.Bucket));
 
             Data.Bucket = batch.GetAddress(overflow.Delete(id, batch));
@@ -69,7 +69,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             {
                 var (cowed, id) = overflow.Add(data, batch);
 
-                var encoded = Encode(id, stackalloc byte[2]);
+                var encoded = Encode(0, id, stackalloc byte[2]);
                 if (!Map.TrySet(key, encoded))
                 {
                     throw new Exception("Should have space to put id in after the check above");
@@ -99,7 +99,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         var copyFrom = new LeafOverflowPage(batch.GetAt(Data.Bucket));
         foreach (var item in Map.EnumerateAll())
         {
-            var id = Decode(item.RawData);
+            var (bucket, id) = Decode(item.RawData);
             if (copyFrom.TryGet(id, out var toCopy) == false)
             {
                 throw new Exception("Failed to find the value");
@@ -112,17 +112,23 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         return dataPage.Set(key, data, batch);
     }
 
-    private static ushort Decode(in ReadOnlySpan<byte> data)
+    private const int BucketCount = 8;
+    private const int BucketMask = 7;
+    private const int BucketShift = 3;
+    
+    
+    private static (byte bucket, ushort id) Decode(in ReadOnlySpan<byte> data)
     {
         Debug.Assert(data.Length == 2);
-
+        
         var value = BinaryPrimitives.ReadUInt16LittleEndian(data);
-        return value;
+        
+        return ((byte)(value & BucketMask), (ushort)(value >> BucketShift));
     }
 
-    private static ReadOnlySpan<byte> Encode(ushort id, Span<byte> destination)
+    private static ReadOnlySpan<byte> Encode(byte bucket, ushort id, Span<byte> destination)
     {
-        BinaryPrimitives.WriteUInt16LittleEndian(destination, id);
+        BinaryPrimitives.WriteUInt16LittleEndian(destination, (ushort)((id << BucketShift) | bucket));
         return destination[..2];
     }
 
@@ -187,7 +193,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             return false;
         }
 
-        var id = Decode(data);
+        var (bucket,id) = Decode(data);
         var overflow = new LeafOverflowPage(batch.GetAt(Data.Bucket));
         return overflow.TryGet(id, out result);
     }
