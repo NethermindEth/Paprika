@@ -12,7 +12,7 @@ namespace Paprika.Store;
 [method: DebuggerStepThrough]
 public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 {
-    private static readonly byte[] IdPlaceHolder = new byte[2];
+    private static readonly byte[] IdPlaceHolder = new byte[IdLength];
 
     public static LeafPage Wrap(Page page) => new(page);
 
@@ -34,11 +34,16 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         // Check if value exists, if it does, delete it
         if (Map.TryGet(key, out var result))
         {
-            // The key exists so overflow must as well
-            var (bucket, id) = Decode(result);
-            var overflow = new LeafOverflowPage(batch.GetAt(Data.Buckets[bucket]));
-
-            Data.Buckets[bucket] = batch.GetAddress(overflow.Delete(id, batch));
+            if (result.Length == IdLength)
+            {
+                // This is the key to the overflow, remove it
+                var (bucket, id) = Decode(result);
+                ref var b = ref Data.Buckets[bucket];
+                var overflow = new LeafOverflowPage(batch.GetAt(b));
+                b = batch.GetAddress(overflow.Delete(id, batch));    
+            }
+            
+            // Remove the mapping
             Map.Delete(key);
         }
 
@@ -51,34 +56,48 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
         if (Map.CapacityLeft >= SlottedArray.EstimateNeededCapacity(key, IdPlaceHolder))
         {
-            ref var bucket = ref Data.Buckets[0];
-
-            // has capacity to write the id, search for the bucket
-            Page p;
-            if (bucket.IsNull)
+            if (data.Length < IdLength)
             {
-                p = batch.GetNewPage(out bucket, true);
-                p.Header.Level = (byte)(Header.Level + 1);
-                p.Header.PageType = PageType.LeafOverflow;
-            }
-            else
-            {
-                p = batch.GetAt(bucket);
-            }
-
-            var overflow = new LeafOverflowPage(p);
-            if (overflow.CanStore(data))
-            {
-                var (cowed, id) = overflow.Add(data, batch);
-
-                var encoded = Encode(0, id, stackalloc byte[2]);
-                if (!Map.TrySet(key, encoded))
+                if (!Map.TrySet(key, data))
                 {
                     throw new Exception("Should have space to put id in after the check above");
                 }
 
-                bucket = batch.GetAddress(cowed);
                 return page;
+            }
+            
+            byte bucketNo = 0;
+            foreach (ref var addr in Data.Buckets)
+            {
+                // has capacity to write the id, search for the bucket
+                Page p;
+                if (addr.IsNull)
+                {
+                    p = batch.GetNewPage(out addr, true);
+                    p.Header.Level = (byte)(Header.Level + 1);
+                    p.Header.PageType = PageType.LeafOverflow;
+                }
+                else
+                {
+                    p = batch.GetAt(addr);
+                }
+
+                var overflow = new LeafOverflowPage(p);
+                if (overflow.CanStore(data))
+                {
+                    var (cowed, id) = overflow.Add(data, batch);
+
+                    var encoded = Encode(bucketNo, id, stackalloc byte[IdLength]);
+                    if (!Map.TrySet(key, encoded))
+                    {
+                        throw new Exception("Should have space to put id in after the check above");
+                    }
+
+                    addr = batch.GetAddress(cowed);
+                    return page;
+                }
+
+                bucketNo++;
             }
         }
 
@@ -103,12 +122,22 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
         foreach (var item in Map.EnumerateAll())
         {
-            var (bucket, id) = Decode(item.RawData);
-            var copyFrom = new LeafOverflowPage(batch.GetAt(Data.Buckets[bucket]));
-
-            if (copyFrom.TryGet(id, out var toCopy) == false)
+            ReadOnlySpan<byte> toCopy;
+            
+            if (item.RawData.Length < IdLength)
             {
-                throw new Exception("Failed to find the value");
+                toCopy = item.RawData;
+            }
+            else
+            {
+                var (bucket, id) = Decode(item.RawData);
+                var copyFrom = new LeafOverflowPage(batch.GetAt(Data.Buckets[bucket]));
+
+            
+                if (copyFrom.TryGet(id, out toCopy) == false)
+                {
+                    throw new Exception("Failed to find the value");
+                }
             }
 
             dataPage = new DataPage(dataPage.Set(item.Key, toCopy, batch));
@@ -118,14 +147,14 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         return dataPage.Set(key, data, batch);
     }
 
-    private const int BucketCount = 8;
-    private const int BucketMask = 7;
-    private const int BucketShift = 3;
-
+    private const int BucketCount = 16;
+    private const int BucketMask = 15;
+    private const int BucketShift = 4;
+    private const int IdLength = 4;
 
     private static (byte bucket, ushort id) Decode(in ReadOnlySpan<byte> data)
     {
-        Debug.Assert(data.Length == 2);
+        Debug.Assert(data.Length == IdLength);
 
         var value = BinaryPrimitives.ReadUInt16LittleEndian(data);
 
@@ -135,7 +164,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
     private static ReadOnlySpan<byte> Encode(byte bucket, ushort id, Span<byte> destination)
     {
         BinaryPrimitives.WriteUInt16LittleEndian(destination, (ushort)((id << BucketShift) | bucket));
-        return destination[..2];
+        return destination[..IdLength];
     }
 
     public (Page page, bool) TrySet(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
@@ -198,6 +227,12 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         {
             result = default;
             return false;
+        }
+
+        if (data.Length < IdLength)
+        {
+            result = data;
+            return true;
         }
 
         var (bucket, id) = Decode(data);

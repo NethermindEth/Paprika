@@ -17,21 +17,6 @@ public readonly unsafe struct LeafOverflowPage(Page page)
 
     public bool CanStore(in ReadOnlySpan<byte> data) => Map.CanAdd(data);
 
-    public (Page, bool) TryUpdate(ushort key, in ReadOnlySpan<byte> data, IBatchContext batch)
-    {
-        Debug.Assert(data.Length > 0, "Deletes should be handled by the delete");
-
-        if (Header.BatchId != batch.BatchId)
-        {
-            // the page is from another batch, meaning, it's readonly. Copy
-            var writable = batch.GetWritableCopy(page);
-            return new LeafOverflowPage(writable).TryUpdate(key, data, batch);
-        }
-
-        // Try write in map
-        return (page, Map.TrySet(key, data));
-    }
-
     public (Page, ushort) Add(in ReadOnlySpan<byte> data, IBatchContext batch)
     {
         if (Map.CanAdd(data) == false || Data.Ids.HasEmptyBits == false)

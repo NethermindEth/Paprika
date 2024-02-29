@@ -18,6 +18,8 @@ public interface IReporter
     void ReportPage(uint ageInBatches, PageType type);
 
     // void ReportItem(in StoreKey key, ReadOnlySpan<byte> rawData);
+
+    void ReportLeafOverflowCount(byte count);
 }
 
 public interface IReporting
@@ -34,9 +36,9 @@ public class StatisticsReporter : IReporter
     public readonly Dictionary<int, long> Sizes = new();
     public readonly Dictionary<int, IntHistogram> SizeHistograms = new();
 
-    public readonly IntHistogram LeafCapacityLeft = new IntHistogram(10000, 5);
-    public readonly IntHistogram LeafOverflowCapacityLeft = new IntHistogram(10000, 5);
-    
+    public readonly IntHistogram LeafCapacityLeft = new(10000, 5);
+    public readonly IntHistogram LeafOverflowCapacityLeft = new(10000, 5);
+    public readonly IntHistogram LeafOverflowCount = new(100, 5);
 
     public readonly IntHistogram PageAge = new(uint.MaxValue, 5);
 
@@ -65,6 +67,11 @@ public class StatisticsReporter : IReporter
         PageAge.RecordValue(ageInBatches);
         var value = PageTypes.GetValueOrDefault(type);
         PageTypes[type] = value + 1;
+    }
+
+    public void ReportLeafOverflowCount(byte count)
+    {
+        LeafOverflowCount.RecordValue(count);
     }
 
     // public void ReportItem(in StoreKey key, ReadOnlySpan<byte> rawData)
