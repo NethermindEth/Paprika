@@ -228,6 +228,8 @@ public readonly ref struct UShortSlottedArray
         // uses vectorized search, treating slots as a Span<ushort>
         // if the found index is odd -> found a slot to be queried
 
+        Debug.Assert(0 <= to && to < _slots.Length);
+        
         const int notFound = -1;
         var span = MemoryMarshal.Cast<Slot, ushort>(_slots.Slice(0, to));
 

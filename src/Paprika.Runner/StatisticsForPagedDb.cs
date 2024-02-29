@@ -41,9 +41,10 @@ public static class StatisticsForPagedDb
     private static Layout BuildReport(StatisticsReporter reporter, string name)
     {
         var up = new Layout("up");
-        var down = new Layout("down");
+        var sizes = new Layout("down");
+        var leafs = new Layout("leafs");
 
-        var layout = new Layout().SplitRows(up, down);
+        var layout = new Layout().SplitRows(up, sizes, leafs);
 
         var general = $"Number of pages: {reporter.PageCount}";
         up.Update(new Panel(general).Header($"General stats for {name}").Expand());
@@ -67,7 +68,17 @@ public static class StatisticsForPagedDb
                 WriteHistogram(capacity));
         }
 
-        down.Update(t.Expand());
+        sizes.Update(t.Expand());
+        
+        var leafsTable = new Table();
+        leafsTable.AddColumn(new TableColumn("Leaf capacity left"));
+        leafsTable.AddColumn(new TableColumn("Leaf->Overflow capacity left"));
+
+        leafsTable.AddRow(
+            WriteHistogram(reporter.LeafCapacityLeft),
+            WriteHistogram(reporter.LeafOverflowCapacityLeft));
+        
+        leafs.Update(leafsTable.Expand());
 
         return layout;
     }

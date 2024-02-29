@@ -31,84 +31,60 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             return new LeafPage(writable).Set(key, data, batch);
         }
 
-        var isDelete = data.IsEmpty;
-
+        // Check if value exists, if it does, delete it
         if (Map.TryGet(key, out var result))
         {
-            // The key exists.
+            // The key exists so overflow must as well
+            var id = Decode(result);
+            var overflow = new LeafOverflowPage(batch.GetAt(Data.Bucket));
 
-            var (bucket, id) = Decode(result);
-            ref var bucketAddr = ref Data.Buckets[bucket];
-            var overflow = new LeafOverflowPage(batch.GetAt(bucketAddr));
-
-            if (isDelete)
-            {
-                // delete from the overflow & delete from map
-                bucketAddr = batch.GetAddress(overflow.Delete(id, batch));
-                Map.Delete(key);
-                return page;
-            }
-
-            // An update
-            var (p, success) = overflow.TryUpdate(id, data, batch);
-            bucketAddr = batch.GetAddress(p);
-
-            if (success)
-            {
-                // page is COWed and already stored in the bucket, return
-                return page;
-            }
-
-            // No place in the bucket, delete the previous and delete in map
-            overflow.Delete(id, batch);
+            Data.Bucket = batch.GetAddress(overflow.Delete(id, batch));
             Map.Delete(key);
+        }
 
-            // Fallback to adding
+        var isDelete = data.IsEmpty;
+        if (isDelete)
+        {
+            // If the operation is a delete, there's nothing more to do as removal was done above
+            return page;
         }
 
         if (Map.CapacityLeft >= SlottedArray.EstimateNeededCapacity(key, IdPlaceHolder))
         {
-            byte b = 0;
             // has capacity to write the id, search for the bucket
-            foreach (ref var bucket in Data.Buckets)
+            Page p;
+            if (Data.Bucket.IsNull)
             {
-                Page p;
-                if (bucket.IsNull)
+                p = batch.GetNewPage(out Data.Bucket, true);
+                p.Header.Level = (byte)(Header.Level + 1);
+                p.Header.PageType = PageType.LeafOverflow;
+            }
+            else
+            {
+                p = batch.GetAt(Data.Bucket);
+            }
+
+            var overflow = new LeafOverflowPage(p);
+            if (overflow.CanStore(data))
+            {
+                var (cowed, id) = overflow.Add(data, batch);
+
+                var encoded = Encode(id, stackalloc byte[2]);
+                if (!Map.TrySet(key, encoded))
                 {
-                    p = batch.GetNewPage(out bucket, true);
-                    p.Header.Level = (byte)(Header.Level + 1);
-                    p.Header.PageType = PageType.LeafOverflow;
-                }
-                else
-                    p = batch.GetAt(bucket);
-
-                var overflow = new LeafOverflowPage(p);
-                if (overflow.CanStore(data))
-                {
-                    var (cowed, id) = overflow.Add(data, batch);
-
-                    var encoded = Encode(b, id, stackalloc byte[2]);
-                    if (!Map.TrySet(key, encoded))
-                    {
-                        throw new Exception("Should have space to put id in after the check above");
-                    }
-
-                    bucket = batch.GetAddress(cowed);
-                    return page;
+                    throw new Exception("Should have space to put id in after the check above");
                 }
 
-                b++;
+                Data.Bucket = batch.GetAddress(cowed);
+                return page;
             }
         }
 
         // This page is filled, move everything down
         batch.RegisterForFutureReuse(page);
-        foreach (var bucket in Data.Buckets)
+        if (Data.Bucket.IsNull == false)
         {
-            if (bucket.IsNull == false)
-            {
-                batch.RegisterForFutureReuse(batch.GetAt(bucket));
-            }
+            batch.RegisterForFutureReuse(batch.GetAt(Data.Bucket));
         }
 
         // Not enough space, transform into a data page.
@@ -120,10 +96,14 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
         var dataPage = new DataPage(@new);
 
+        var copyFrom = new LeafOverflowPage(batch.GetAt(Data.Bucket));
         foreach (var item in Map.EnumerateAll())
         {
-            var (bucket, id) = Decode(item.RawData);
-            new LeafOverflowPage(batch.GetAt(Data.Buckets[bucket])).TryGet(id, out var toCopy);
+            var id = Decode(item.RawData);
+            if (copyFrom.TryGet(id, out var toCopy) == false)
+            {
+                throw new Exception("Failed to find the value");
+            }
 
             dataPage = new DataPage(dataPage.Set(item.Key, toCopy, batch));
         }
@@ -132,18 +112,17 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         return dataPage.Set(key, data, batch);
     }
 
-    private static (byte bucket, ushort id) Decode(in ReadOnlySpan<byte> data)
+    private static ushort Decode(in ReadOnlySpan<byte> data)
     {
         Debug.Assert(data.Length == 2);
 
         var value = BinaryPrimitives.ReadUInt16LittleEndian(data);
-        return ((byte bucket, ushort id))(value & BucketMask, value >> BucketShift);
+        return value;
     }
 
-    private static ReadOnlySpan<byte> Encode(byte bucket, ushort id, Span<byte> destination)
+    private static ReadOnlySpan<byte> Encode(ushort id, Span<byte> destination)
     {
-        var encoded = (id << BucketShift) | bucket;
-        BinaryPrimitives.WriteUInt16LittleEndian(destination, (ushort)encoded);
+        BinaryPrimitives.WriteUInt16LittleEndian(destination, id);
         return destination[..2];
     }
 
@@ -178,19 +157,14 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         return (Set(key, data, batch), true);
     }
 
-    private const int BucketCount = 4;
-    private const int BucketShift = 2;
-    private const int BucketMask = BucketCount - 1;
-
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Payload
     {
-        private const int BucketSize = DbAddress.Size * BucketCount;
+        private const int BucketSize = DbAddress.Size * 1;
         private const int Size = Page.PageSize - PageHeader.Size;
         private const int DataSize = Size - BucketSize;
 
-        [FieldOffset(0)] private DbAddress BucketStart;
-        public Span<DbAddress> Buckets => MemoryMarshal.CreateSpan(ref BucketStart, BucketCount);
+        [FieldOffset(0)] public DbAddress Bucket;
 
         /// <summary>
         /// The first item of map of frames to allow ref to it.
@@ -213,8 +187,8 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             return false;
         }
 
-        var (bucket, id) = Decode(data);
-        var overflow = new LeafOverflowPage(batch.GetAt(Data.Buckets[bucket]));
+        var id = Decode(data);
+        var overflow = new LeafOverflowPage(batch.GetAt(Data.Bucket));
         return overflow.TryGet(id, out result);
     }
 
@@ -226,17 +200,22 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
     {
         var slotted = new SlottedArray(Data.DataSpan);
         reporter.ReportDataUsage(Header.PageType, level, 0, slotted.Count, slotted.CapacityLeft);
+
+        if (Data.Bucket.IsNull == false)
+        {
+            new LeafOverflowPage(resolver.GetAt(Data.Bucket)).Report(reporter, resolver, level + 1);
+        }
     }
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
         using var scope = visitor.On(this, addr);
-        foreach (var bucket in Data.Buckets)
+        
+        var bucket = Data.Bucket;
+        
+        if (bucket.IsNull == false)
         {
-            if (bucket.IsNull == false)
-            {
-                new LeafOverflowPage(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
-            }
+            new LeafOverflowPage(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
         }
     }
 }

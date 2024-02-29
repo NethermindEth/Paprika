@@ -34,6 +34,10 @@ public class StatisticsReporter : IReporter
     public readonly Dictionary<int, long> Sizes = new();
     public readonly Dictionary<int, IntHistogram> SizeHistograms = new();
 
+    public readonly IntHistogram LeafCapacityLeft = new IntHistogram(10000, 5);
+    public readonly IntHistogram LeafOverflowCapacityLeft = new IntHistogram(10000, 5);
+    
+
     public readonly IntHistogram PageAge = new(uint.MaxValue, 5);
 
     public void ReportDataUsage(PageType type, int level, int filledBuckets, int entriesPerPage, int capacityLeft)
@@ -49,6 +53,11 @@ public class StatisticsReporter : IReporter
 
         lvl.Entries.RecordValue(entriesPerPage);
         lvl.CapacityLeft.RecordValue(capacityLeft);
+        
+        if (type == PageType.Leaf)
+            LeafCapacityLeft.RecordValue(capacityLeft);
+        else if (type == PageType.LeafOverflow)
+            LeafOverflowCapacityLeft.RecordValue(capacityLeft);
     }
 
     public void ReportPage(uint ageInBatches, PageType type)

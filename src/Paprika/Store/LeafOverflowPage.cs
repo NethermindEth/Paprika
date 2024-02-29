@@ -101,4 +101,9 @@ public readonly unsafe struct LeafOverflowPage(Page page)
     {
         using var scope = visitor.On(this, addr);
     }
+
+    public void Report(IReporter reporter, IPageResolver resolver, int level)
+    {
+        reporter.ReportDataUsage(Header.PageType, level, 0, Map.Count, Map.CapacityLeft);
+    }
 }

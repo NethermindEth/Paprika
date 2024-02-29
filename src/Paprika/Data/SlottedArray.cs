@@ -273,10 +273,6 @@ public readonly ref struct SlottedArray
                key.RawSpanLength + data.Length;
     }
 
-    /// <summary>
-    /// Warning! This does not set any tombstone so the reader won't be informed about a delete,
-    /// just will miss the value.
-    /// </summary>
     public bool Delete(in NibblePath key)
     {
         if (TryGetImpl(key, GetHash(key), out _, out var index))
@@ -287,7 +283,7 @@ public readonly ref struct SlottedArray
 
         return false;
     }
-
+    
     public void Delete(in Enumerator.Item item) => DeleteImpl(item.Index);
 
     private void DeleteImpl(int index)
