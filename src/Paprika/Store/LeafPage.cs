@@ -36,9 +36,9 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         {
             // The key exists so overflow must as well
             var (bucket, id) = Decode(result);
-            var overflow = new LeafOverflowPage(batch.GetAt(Data.Bucket));
+            var overflow = new LeafOverflowPage(batch.GetAt(Data.Buckets[bucket]));
 
-            Data.Bucket = batch.GetAddress(overflow.Delete(id, batch));
+            Data.Buckets[bucket] = batch.GetAddress(overflow.Delete(id, batch));
             Map.Delete(key);
         }
 
@@ -51,17 +51,19 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
         if (Map.CapacityLeft >= SlottedArray.EstimateNeededCapacity(key, IdPlaceHolder))
         {
+            ref var bucket = ref Data.Buckets[0];
+
             // has capacity to write the id, search for the bucket
             Page p;
-            if (Data.Bucket.IsNull)
+            if (bucket.IsNull)
             {
-                p = batch.GetNewPage(out Data.Bucket, true);
+                p = batch.GetNewPage(out bucket, true);
                 p.Header.Level = (byte)(Header.Level + 1);
                 p.Header.PageType = PageType.LeafOverflow;
             }
             else
             {
-                p = batch.GetAt(Data.Bucket);
+                p = batch.GetAt(bucket);
             }
 
             var overflow = new LeafOverflowPage(p);
@@ -75,16 +77,19 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
                     throw new Exception("Should have space to put id in after the check above");
                 }
 
-                Data.Bucket = batch.GetAddress(cowed);
+                bucket = batch.GetAddress(cowed);
                 return page;
             }
         }
 
-        // This page is filled, move everything down
+        // This page is filled, move everything down. Start by registering for the reuse all the pages.
         batch.RegisterForFutureReuse(page);
-        if (Data.Bucket.IsNull == false)
+        foreach (var b in Data.Buckets)
         {
-            batch.RegisterForFutureReuse(batch.GetAt(Data.Bucket));
+            if (b.IsNull == false)
+            {
+                batch.RegisterForFutureReuse(batch.GetAt(b));
+            }
         }
 
         // Not enough space, transform into a data page.
@@ -96,10 +101,11 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
         var dataPage = new DataPage(@new);
 
-        var copyFrom = new LeafOverflowPage(batch.GetAt(Data.Bucket));
         foreach (var item in Map.EnumerateAll())
         {
             var (bucket, id) = Decode(item.RawData);
+            var copyFrom = new LeafOverflowPage(batch.GetAt(Data.Buckets[bucket]));
+
             if (copyFrom.TryGet(id, out var toCopy) == false)
             {
                 throw new Exception("Failed to find the value");
@@ -115,14 +121,14 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
     private const int BucketCount = 8;
     private const int BucketMask = 7;
     private const int BucketShift = 3;
-    
-    
+
+
     private static (byte bucket, ushort id) Decode(in ReadOnlySpan<byte> data)
     {
         Debug.Assert(data.Length == 2);
-        
+
         var value = BinaryPrimitives.ReadUInt16LittleEndian(data);
-        
+
         return ((byte)(value & BucketMask), (ushort)(value >> BucketShift));
     }
 
@@ -166,11 +172,12 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Payload
     {
-        private const int BucketSize = DbAddress.Size * 1;
+        private const int BucketSize = DbAddress.Size * BucketCount;
         private const int Size = Page.PageSize - PageHeader.Size;
         private const int DataSize = Size - BucketSize;
 
-        [FieldOffset(0)] public DbAddress Bucket;
+        [FieldOffset(0)] private DbAddress BucketStart;
+        public Span<DbAddress> Buckets => MemoryMarshal.CreateSpan(ref BucketStart, BucketCount);
 
         /// <summary>
         /// The first item of map of frames to allow ref to it.
@@ -193,8 +200,8 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             return false;
         }
 
-        var (bucket,id) = Decode(data);
-        var overflow = new LeafOverflowPage(batch.GetAt(Data.Bucket));
+        var (bucket, id) = Decode(data);
+        var overflow = new LeafOverflowPage(batch.GetAt(Data.Buckets[bucket]));
         return overflow.TryGet(id, out result);
     }
 
@@ -207,21 +214,25 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         var slotted = new SlottedArray(Data.DataSpan);
         reporter.ReportDataUsage(Header.PageType, level, 0, slotted.Count, slotted.CapacityLeft);
 
-        if (Data.Bucket.IsNull == false)
+        foreach (var bucket in Data.Buckets)
         {
-            new LeafOverflowPage(resolver.GetAt(Data.Bucket)).Report(reporter, resolver, level + 1);
+            if (bucket.IsNull == false)
+            {
+                new LeafOverflowPage(resolver.GetAt(bucket)).Report(reporter, resolver, level + 1);
+            }
         }
     }
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
         using var scope = visitor.On(this, addr);
-        
-        var bucket = Data.Bucket;
-        
-        if (bucket.IsNull == false)
+
+        foreach (var bucket in Data.Buckets)
         {
-            new LeafOverflowPage(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
+            if (bucket.IsNull == false)
+            {
+                new LeafOverflowPage(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
+            }
         }
     }
 }
