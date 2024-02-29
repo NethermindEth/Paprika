@@ -55,7 +55,7 @@ public class StatisticsReporter : IReporter
 
         lvl.Entries.RecordValue(entriesPerPage);
         lvl.CapacityLeft.RecordValue(capacityLeft);
-        
+
         if (type == PageType.Leaf)
             LeafCapacityLeft.RecordValue(capacityLeft);
         else if (type == PageType.LeafOverflow)

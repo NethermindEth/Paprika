@@ -40,9 +40,9 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
                 var (bucket, id) = Decode(result);
                 ref var b = ref Data.Buckets[bucket];
                 var overflow = new LeafOverflowPage(batch.GetAt(b));
-                b = batch.GetAddress(overflow.Delete(id, batch));    
+                b = batch.GetAddress(overflow.Delete(id, batch));
             }
-            
+
             // Remove the mapping
             Map.Delete(key);
         }
@@ -65,7 +65,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
                 return page;
             }
-            
+
             byte bucketNo = 0;
             foreach (ref var addr in Data.Buckets)
             {
@@ -123,7 +123,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         foreach (var item in Map.EnumerateAll())
         {
             ReadOnlySpan<byte> toCopy;
-            
+
             if (item.RawData.Length < IdLength)
             {
                 toCopy = item.RawData;
@@ -133,7 +133,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
                 var (bucket, id) = Decode(item.RawData);
                 var copyFrom = new LeafOverflowPage(batch.GetAt(Data.Buckets[bucket]));
 
-            
+
                 if (copyFrom.TryGet(id, out toCopy) == false)
                 {
                     throw new Exception("Failed to find the value");

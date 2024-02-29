@@ -30,12 +30,12 @@ public static class BitVector
         }
 
         public ushort FirstNotSet => FirstNotSet(this);
-        
+
         public bool HasEmptyBits => HasEmptyBits(this);
-        
+
         static ushort IBitVector.Count => Count;
     }
-    
+
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     public struct Of512 : IBitVector
     {
@@ -51,9 +51,9 @@ public static class BitVector
         }
 
         public ushort FirstNotSet => FirstNotSet(this);
-        
+
         public bool HasEmptyBits => HasEmptyBits(this);
-        
+
         static ushort IBitVector.Count => Count;
     }
 
@@ -62,27 +62,27 @@ public static class BitVector
     {
         return FirstNotSet(vector) != TBitVector.Count;
     }
-    
+
     public static ushort FirstNotSet<TBitVector>(in TBitVector vector)
         where TBitVector : struct, IBitVector
     {
-            var size = TBitVector.Count / BitsPerByte;
-            const int chunk = sizeof(ulong);
-            var count = size / chunk;
+        var size = TBitVector.Count / BitsPerByte;
+        const int chunk = sizeof(ulong);
+        var count = size / chunk;
 
-            for (var i = 0; i < count; i++)
+        for (var i = 0; i < count; i++)
+        {
+            var skip = i * chunk;
+            ref var b = ref Unsafe.As<TBitVector, byte>(ref Unsafe.AsRef(in vector));
+
+            var v = Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref b, skip));
+            if (BitOperations.PopCount(v) != chunk * BitsPerByte)
             {
-                var skip = i * chunk;
-                ref var b = ref Unsafe.As<TBitVector, byte>(ref Unsafe.AsRef(in vector));
-                
-                var v = Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref b, skip));
-                if (BitOperations.PopCount(v) != chunk * BitsPerByte)
-                {
-                    return (ushort)(skip * BitsPerByte + BitOperations.TrailingZeroCount(~v));
-                }
+                return (ushort)(skip * BitsPerByte + BitOperations.TrailingZeroCount(~v));
             }
+        }
 
-            return TBitVector.Count;
+        return TBitVector.Count;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -92,7 +92,7 @@ public static class BitVector
         var selector = 1 << (bit & Mask);
         return (Unsafe.Add(ref b, at) & selector) == selector;
     }
-    
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Set(ref byte b, int bit, bool value)
     {

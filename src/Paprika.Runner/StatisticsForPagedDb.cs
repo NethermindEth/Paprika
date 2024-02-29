@@ -69,7 +69,7 @@ public static class StatisticsForPagedDb
         }
 
         sizes.Update(t.Expand());
-        
+
         var leafsTable = new Table();
         leafsTable.AddColumn(new TableColumn("Leaf capacity left"));
         leafsTable.AddColumn(new TableColumn("Leaf->Overflow capacity left"));
@@ -79,7 +79,7 @@ public static class StatisticsForPagedDb
             WriteHistogram(reporter.LeafCapacityLeft),
             WriteHistogram(reporter.LeafOverflowCapacityLeft),
             WriteHistogram(reporter.LeafOverflowCount));
-        
+
         leafs.Update(leafsTable.Expand());
 
         return layout;

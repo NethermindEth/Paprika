@@ -283,7 +283,7 @@ public readonly ref struct SlottedArray
 
         return false;
     }
-    
+
     public void Delete(in Enumerator.Item item) => DeleteImpl(item.Index);
 
     private void DeleteImpl(int index)
