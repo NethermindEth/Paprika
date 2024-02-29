@@ -310,7 +310,7 @@ public readonly ref struct SlottedArray
     {
         foreach (var item in this.EnumerateAll())
         {
-            if (item.Key.Equals(key))
+            if (item.Key.StartsWith(key))
             {
                 this.Delete(item);
             }

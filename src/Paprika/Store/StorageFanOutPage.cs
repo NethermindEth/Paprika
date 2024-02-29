@@ -102,29 +102,31 @@ public readonly unsafe struct StorageFanOutPage<TNext>(Page page) : IPageWithDat
             }
         }
     }
-    public void Destroy(IBatchContext batch, in NibblePath prefix)
+    public Page Destroy(IBatchContext batch, in NibblePath prefix)
     {
+        if (Header.BatchId != batch.BatchId)
+        {
+            // the page is from another batch, meaning, it's readonly. Copy
+            var writable = batch.GetWritableCopy(page);
+            return new StorageFanOutPage<TNext>(writable).Set(prefix, ReadOnlySpan<byte>.Empty, batch);
+        }
+
         // Destroy the Id entry about it
-        Set(prefix, ReadOnlySpan<byte>.Empty, batch);
+        // Set(prefix, ReadOnlySpan<byte>.Empty, batch);
 
         var map = new SlottedArray(Data.Data);
         map.DeleteByPrefix(prefix);
-        var sliced = prefix.SliceFrom(ConsumedNibbles);
-        var index = GetIndex(sliced);
+
+        var index = GetIndex(prefix);
         ref var addr = ref Data.Addresses[index];
         Page child;
-        if (addr.IsNull)
-        {
-            //recycle for reuse
-            var indexOfPrefix = GetIndex(prefix);
-            ref var prefixAddr = ref Data.Addresses[indexOfPrefix];
-            batch.RegisterForFutureReuse(batch.GetAt(prefixAddr));
-        }
-        else
+        if (!addr.IsNull)
         {
             child = batch.GetAt(addr);
-            TNext.Wrap(child).Destroy(batch, sliced);
+            var sliced = prefix.SliceFrom(ConsumedNibbles);
+            return TNext.Wrap(child).Destroy(batch, sliced);
         }
+        return new Page(); 
     }
 }
 
