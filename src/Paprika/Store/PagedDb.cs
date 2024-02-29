@@ -406,10 +406,10 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         {
             if (root.Data.StateRoot.IsNull == false)
             {
-                new FanOutPage(GetAt(root.Data.StateRoot)).Report(state, this, 0);
+                new DataPage(GetAt(root.Data.StateRoot)).Report(state, this, 1);
             }
 
-            root.Data.Storage.Report(storage, this, 0);
+            root.Data.Storage.Report(state, this, 1);
         }
 
         public uint BatchId => root.Header.BatchId;
