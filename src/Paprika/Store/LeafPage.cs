@@ -31,6 +31,36 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             return new LeafPage(writable).Set(key, data, batch);
         }
 
+        if (HasAnyOverflowPages == false)
+        {
+            // No overflow, just TrySet in map
+            if (Map.TrySet(key, data))
+            {
+                return page;
+            }
+
+            // prepare to overflow, first mark this page as reusable
+            batch.RegisterForFutureReuse(page);
+
+            // new page that will be copied to, set header properly
+            var copy = new LeafPage(batch.GetNewPage(out _, true))
+            {
+                Header = Header
+            };
+
+            // allocate first overflow
+            AllocOverflow(batch, out copy.Data.Buckets[0]);
+
+            // copy all the entries
+            foreach (var item in Map.EnumerateAll())
+            {
+                copy.Set(item.Key, item.RawData, batch);
+            }
+
+            // delegate the call to the copy
+            return copy.Set(key, data, batch);
+        }
+
         // Check if value exists, if it does, delete it
         if (Map.TryGet(key, out var result))
         {
@@ -70,17 +100,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             foreach (ref var addr in Data.Buckets)
             {
                 // has capacity to write the id, search for the bucket
-                Page p;
-                if (addr.IsNull)
-                {
-                    p = batch.GetNewPage(out addr, true);
-                    p.Header.Level = (byte)(Header.Level + 1);
-                    p.Header.PageType = PageType.LeafOverflow;
-                }
-                else
-                {
-                    p = batch.GetAt(addr);
-                }
+                var p = addr.IsNull ? AllocOverflow(batch, out addr) : batch.GetAt(addr);
 
                 var overflow = new LeafOverflowPage(p);
                 if (overflow.CanStore(data))
@@ -147,9 +167,19 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         return dataPage.Set(key, data, batch);
     }
 
-    private const int BucketCount = 8;
-    private const int BucketMask = 7;
-    private const int BucketShift = 3;
+    private Page AllocOverflow(IBatchContext batch, out DbAddress addr)
+    {
+        var newPage = batch.GetNewPage(out addr, true);
+        newPage.Header.Level = (byte)(Header.Level + 1);
+        newPage.Header.PageType = PageType.LeafOverflow;
+        return newPage;
+    }
+
+    private bool HasAnyOverflowPages => Data.Buckets[0].IsNull == false;
+
+    private const int BucketCount = 4;
+    private const int BucketMask = 3;
+    private const int BucketShift = 2;
     private const int IdLength = 12;
 
     private static (byte bucket, ushort id) Decode(in ReadOnlySpan<byte> data)
@@ -175,11 +205,13 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         // 1. if data is empty, it's a delete
         // 2. if there's a capacity in the map, just write it
         // 3. if the data is an update and can be put in the map
+        // 4. no overflow, which means that it can overflow
 
         var shouldTrySet =
             data.IsEmpty ||
             SlottedArray.EstimateNeededCapacity(key, IdPlaceHolder) <= map.CapacityLeft ||
-            map.HasSpaceToUpdateExisting(key, IdPlaceHolder);
+            map.HasSpaceToUpdateExisting(key, IdPlaceHolder) ||
+            HasAnyOverflowPages == false;
 
         if (shouldTrySet == false)
         {
@@ -229,7 +261,8 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             return false;
         }
 
-        if (data.Length < IdLength)
+        // no overflow, or data under limit
+        if (HasAnyOverflowPages == false || data.Length < IdLength)
         {
             result = data;
             return true;
