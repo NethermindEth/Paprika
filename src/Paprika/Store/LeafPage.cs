@@ -23,7 +23,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
     private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
 
     private const byte IsId = 1;
-    
+
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
         if (Header.BatchId != batch.BatchId)
