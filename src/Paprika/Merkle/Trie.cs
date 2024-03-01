@@ -29,15 +29,65 @@ public class Trie(ICommit commit, BufferPool pool)
 
         if (current.IsUnresolved)
         {
-            // Query for the node
-            using var owner = commit.Get(Key.Merkle(path));
-            if (owner.IsEmpty)
-            {
-                // No value set now, create one.
-                commit.SetLeaf(key, leftoverPath);
-                return;
-            }
+            current = Resolve(path);
+            // Fallback to getting the current
         }
+
+        ref var item = ref GetAt(current);
+        switch (item.Type)
+        {
+            case Node.Type.Leaf:
+                break;
+            case Node.Type.Extension:
+                break;
+            case Node.Type.Branch:
+                break;
+            default:
+                throw new ArgumentOutOfRangeException();
+        }
+    }
+
+    private Addr Resolve(in NibblePath path)
+    {
+        // Node exists but is unresolved, resolve it
+        using var owner = commit.Get(Key.Merkle(path));
+
+        if (owner.IsEmpty)
+        {
+            throw new Exception("Empty node!");
+        }
+
+        Node.ReadFrom(owner.Span, out var type, out var leaf, out var ext, out var branch);
+
+        ref var node = ref Alloc(out var current);
+        switch (type)
+        {
+            case Node.Type.Leaf:
+                node.Type = Node.Type.Leaf;
+                node.Path = leaf.Path;
+                break;
+            case Node.Type.Extension:
+                node.Type = Node.Type.Extension;
+                node.Path = ext.Path;
+                node.ExtensionNext = Addr.Unresolved;
+                break;
+            case Node.Type.Branch:
+                node.Type = Node.Type.Branch;
+                for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+                {
+                    node[i] = branch.Children[i] ? Addr.Unresolved : default;
+                }
+                break;
+            default:
+                throw new ArgumentOutOfRangeException();
+        }
+
+        return current;
+    }
+
+    private ref Item GetAt(Addr addr)
+    {
+        throw new NotImplementedException();
     }
 
     private ref Item Alloc(out Addr unknown)
@@ -47,11 +97,11 @@ public class Trie(ICommit commit, BufferPool pool)
 
     public void Delete(in NibblePath path)
     {
-        
+
     }
-    
+
     [StructLayout(LayoutKind.Explicit, Size = Size)]
-    public struct Item
+    private struct Item
     {
         public const int Size = 64;
         private const int SpanLength = Size - PathOffset;
@@ -70,7 +120,7 @@ public class Trie(ICommit commit, BufferPool pool)
         public Node.Type Type
         {
             get => (Node.Type)(_start >> TypeShift);
-            
+
             // destroy previous content
             set => _start = (byte)value;
         }
@@ -111,7 +161,7 @@ public class Trie(ICommit commit, BufferPool pool)
                 NibblePath.ReadFrom(Span, out var path);
                 return path;
             }
-            
+
             set => value.WriteTo(Span);
         }
 
@@ -124,7 +174,10 @@ public class Trie(ICommit commit, BufferPool pool)
         public uint Value { get; } = value;
         public const uint StartFrom = 2;
 
-        public bool IsNull => value == default;
-        public bool IsUnresolved => value == StartFrom - 1;
+        public bool IsNull => Value == Null.Value;
+        public bool IsUnresolved => Value == Unresolved.Value;
+
+        public static readonly Addr Null = new(0);
+        public static readonly Addr Unresolved = new(StartFrom - 1);
     }
 }
