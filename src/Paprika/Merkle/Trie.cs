@@ -10,7 +10,8 @@ namespace Paprika.Merkle;
 public class Trie(ICommit commit, BufferPool pool)
 {
     private Addr _root = default;
-    private List<Page> _pages = new();
+    private readonly List<Page> _pages = new();
+    private const int ItemsPerPage = Page.PageSize / Item.Size;
 
     public void MarkPathDirty(in NibblePath path)
     {
@@ -87,7 +88,13 @@ public class Trie(ICommit commit, BufferPool pool)
 
     private ref Item GetAt(Addr addr)
     {
-        throw new NotImplementedException();
+        Debug.Assert(addr.Value >= Addr.StartFrom);
+        
+        // TODO: potentially optimize
+        
+        var (page, at) = Math.DivRem((int)addr.Value, ItemsPerPage);
+        var items = MemoryMarshal.Cast<byte, Item>(_pages[page].Span);
+        return ref items[at];
     }
 
     private ref Item Alloc(out Addr unknown)
