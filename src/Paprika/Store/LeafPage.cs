@@ -12,7 +12,7 @@ namespace Paprika.Store;
 [method: DebuggerStepThrough]
 public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 {
-    private static readonly byte[] IdPlaceHolder = new byte[IdLength];
+    private static readonly byte[] IdPlaceHolder = new byte[MaxInPageDataLength];
 
     public static LeafPage Wrap(Page page) => new(page);
 
@@ -22,6 +22,8 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
     private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
 
+    private const byte IsId = 1;
+    
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
         if (Header.BatchId != batch.BatchId)
@@ -62,9 +64,9 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         }
 
         // Check if value exists, if it does, delete it
-        if (Map.TryGet(key, out var result))
+        if (Map.TryGetWithMetadata(key, out var result, out var meta))
         {
-            if (result.Length == IdLength)
+            if (meta == IsId)
             {
                 // This is the key to the overflow, remove it
                 var (bucket, id) = Decode(result);
@@ -86,7 +88,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
         if (Map.CapacityLeft >= SlottedArray.EstimateNeededCapacity(key, IdPlaceHolder))
         {
-            if (data.Length < IdLength)
+            if (data.Length < MaxInPageDataLength)
             {
                 if (!Map.TrySet(key, data))
                 {
@@ -107,8 +109,8 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
                 {
                     var (cowed, id) = overflow.Add(data, batch);
 
-                    var encoded = Encode(bucketNo, id, stackalloc byte[IdLength]);
-                    if (!Map.TrySet(key, encoded))
+                    var encoded = Encode(bucketNo, id, stackalloc byte[IdActualLength]);
+                    if (!Map.TrySet(key, encoded, IsId))
                     {
                         throw new Exception("Should have space to put id in after the check above");
                     }
@@ -144,7 +146,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         {
             ReadOnlySpan<byte> toCopy;
 
-            if (item.RawData.Length < IdLength)
+            if (item.Metadata != IsId)
             {
                 toCopy = item.RawData;
             }
@@ -152,7 +154,6 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             {
                 var (bucket, id) = Decode(item.RawData);
                 var copyFrom = new LeafOverflowPage(batch.GetAt(Data.Buckets[bucket]));
-
 
                 if (copyFrom.TryGet(id, out toCopy) == false)
                 {
@@ -180,11 +181,12 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
     private const int BucketCount = 4;
     private const int BucketMask = 3;
     private const int BucketShift = 2;
-    private const int IdLength = 12;
+    private const int MaxInPageDataLength = 12;
+    private const int IdActualLength = 2;
 
     private static (byte bucket, ushort id) Decode(in ReadOnlySpan<byte> data)
     {
-        Debug.Assert(data.Length == IdLength);
+        Debug.Assert(data.Length == IdActualLength);
 
         var value = BinaryPrimitives.ReadUInt16LittleEndian(data);
 
@@ -194,7 +196,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
     private static ReadOnlySpan<byte> Encode(byte bucket, ushort id, Span<byte> destination)
     {
         BinaryPrimitives.WriteUInt16LittleEndian(destination, (ushort)((id << BucketShift) | bucket));
-        return destination[..IdLength];
+        return destination[..IdActualLength];
     }
 
     public (Page page, bool) TrySet(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
@@ -255,14 +257,14 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
     {
         batch.AssertRead(Header);
 
-        if (Map.TryGet(key, out var data) == false)
+        if (Map.TryGetWithMetadata(key, out var data, out var meta) == false)
         {
             result = default;
             return false;
         }
 
         // no overflow, or data under limit
-        if (HasAnyOverflowPages == false || data.Length < IdLength)
+        if (meta != IsId)
         {
             result = data;
             return true;
