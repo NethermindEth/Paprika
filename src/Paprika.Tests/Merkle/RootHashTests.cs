@@ -6,6 +6,7 @@ using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
+using Paprika.RLP;
 using Paprika.Store;
 
 namespace Paprika.Tests.Merkle;
@@ -205,12 +206,12 @@ public class RootHashTests
     private static readonly Keccak Account =
         NibblePath.Parse("380c98b03a3f72ee8aa540033b219c0d397dbe2523162db9dd07e6bbb015d50b").UnsafeAsKeccak;
 
-    [TestCase(100, "0xd5a06a7f5cd264aeb54f783809beab33aaf015983cbc425b1fb779878131279e")]
-    [TestCase(1000, "0x2096c9367baf7a329f231b03824a980d9f897de39a7c20c05bd79dbc6e351121")]
-    [TestCase(10000, "0x1db15bc352135f4395c1b98251d17dd698d0507001e63dd8543786e446c6e7d1")]
-    [TestCase(19225, "0x75a76f63025d1a44a2c175170360a120a6abb156456c067646292ac25a1c5fe3")]
-    [TestCase(19226, "0x1038152ba60bb21d331b99dde453d73dd42c3b2dddca1e4d22885f7658b56272")]
-    [TestCase(21864, "0xf98d55b3dbfe56766df86feb59737de4b029c1a775f822ee47cf7efcf2765a9c")]
+    [TestCase(100, "0xc02aad17992d617462e6241f8137890dc379f1862553729d350237b533b12a99")]
+    [TestCase(1000, "0xcc30e12dcc03cf3cee89eeb737e77b5756e31ea6f1078af4c63d4714b242fa9d")]
+    [TestCase(10000, "0xc4eb7d1037a0f56bd3919da5dd04ab344e314cb2da7e7532610f1948ed19b668")]
+    [TestCase(19225, "0x91d2350212565e6c33da565f86b4331e1df4b4c29b9f9cac98c522887e3cf872")]
+    [TestCase(19226, "0xc6cf0581d8b57dd63fbd134aab5210d8eb1376a7d58bac063f4a510ab39ed053")]
+    [TestCase(21864, "0xa0970ebbd237c71b4beadc88a05e8939bcc6ccb45b117526d806c962a52ce643")]
     public async Task Sepolia_big_storage_tree(int take, string storageHash)
     {
         using var db = PagedDb.NativeMemoryDb(8 * 1024 * 1024, 2);
@@ -242,7 +243,7 @@ public class RootHashTests
                 var strings = line.Split(":");
                 var storage = NibblePath.Parse(strings[0]);
                 commit.SetStorage(Account, storage.UnsafeAsKeccak,
-                    Convert.FromHexString(strings[1]));
+                    RlpStream.DecodeUInt256(Convert.FromHexString(strings[1])).ToBigEndian());
             }
         }
     }
