@@ -8,6 +8,7 @@ using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.RLP;
 using Paprika.Store;
+using Paprika.Utils;
 
 namespace Paprika.Tests.Merkle;
 
@@ -206,12 +207,12 @@ public class RootHashTests
     private static readonly Keccak Account =
         NibblePath.Parse("380c98b03a3f72ee8aa540033b219c0d397dbe2523162db9dd07e6bbb015d50b").UnsafeAsKeccak;
 
-    [TestCase(100, "0xc02aad17992d617462e6241f8137890dc379f1862553729d350237b533b12a99")]
-    [TestCase(1000, "0xcc30e12dcc03cf3cee89eeb737e77b5756e31ea6f1078af4c63d4714b242fa9d")]
-    [TestCase(10000, "0xc4eb7d1037a0f56bd3919da5dd04ab344e314cb2da7e7532610f1948ed19b668")]
-    [TestCase(19225, "0x91d2350212565e6c33da565f86b4331e1df4b4c29b9f9cac98c522887e3cf872")]
-    [TestCase(19226, "0xc6cf0581d8b57dd63fbd134aab5210d8eb1376a7d58bac063f4a510ab39ed053")]
-    [TestCase(21864, "0xa0970ebbd237c71b4beadc88a05e8939bcc6ccb45b117526d806c962a52ce643")]
+    [TestCase(100, "0xc1821e25735c7ddd27e8db62d14aa72c7a6893648fdb8c7605cb8556b01ed1d7")]
+    [TestCase(1000, "0x32b35d4e915aa263bd3acc4a3c91860dfdc0ae140267aed47515cb67b1f1d7c7")]
+    [TestCase(10000, "0xbf67065a0a2537e58365159ba21858a9c0b23fd14cf59e722231b9f5d938114d")]
+    [TestCase(19225, "0x885ff60fd667ed03e6608df73554b2682e4993e47f75fb1c207b5af5941df790")]
+    [TestCase(19226, "0x3f18d7bbe42ac6ed08871ccbb31a9e321847661ae8440446419295a9fc890619")]
+    [TestCase(21864, "0x38889fa41b2e3e7b8ec2f0c37d7aaf454df1e7a1331094804c5aa7fd4d204f91")]
     public async Task Sepolia_big_storage_tree(int take, string storageHash)
     {
         using var db = PagedDb.NativeMemoryDb(8 * 1024 * 1024, 2);
@@ -243,7 +244,7 @@ public class RootHashTests
                 var strings = line.Split(":");
                 var storage = NibblePath.Parse(strings[0]);
                 commit.SetStorage(Account, storage.UnsafeAsKeccak,
-                    RlpStream.DecodeUInt256(Convert.FromHexString(strings[1])).ToBigEndian());
+                    RlpStream.DecodeUInt256(Convert.FromHexString(strings[1])).ToBigEndian().AsSpan().WithoutLeadingZeros());
             }
         }
     }
