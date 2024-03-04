@@ -32,7 +32,7 @@ public class SlottedArrayTests
     }
 
     [Test]
-    public void Enumerate_all([Values(0,1)] int odd)
+    public void Enumerate_all([Values(0, 1)] int odd)
     {
         Span<byte> span = stackalloc byte[256];
         var map = new SlottedArray(span);
@@ -199,7 +199,7 @@ file static class FixedMapTestExtensions
     {
         map.TrySet(key, data).Should().BeTrue(because ?? "TrySet should succeed");
     }
-    
+
     public static void SetAssert(this SlottedArray map, in ReadOnlySpan<byte> key, ReadOnlySpan<byte> data,
         string? because = null)
     {

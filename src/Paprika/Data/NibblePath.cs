@@ -77,6 +77,24 @@ public readonly ref struct NibblePath
     }
 
     /// <summary>
+    /// Reuses the memory of this nibble path moving it to odd position.
+    /// </summary>
+    public NibblePath UnsafeMakeOdd(int odd)
+    {
+        if (odd == 0)
+            return this;
+
+        Debug.Assert(_odd == 0, "Should not be applied to odd");
+
+        for (int i = Length; i > 0; i--)
+        {
+            UnsafeSetAt(i, 0, GetAt(i - 1));
+        }
+
+        return new NibblePath(ref _span, OddBit, Length);
+    }
+
+    /// <summary>
     /// Creates the nibble path from preamble and raw slice
     /// </summary>
     public static NibblePath FromRaw(byte preamble, ReadOnlySpan<byte> slice)
@@ -282,7 +300,7 @@ public readonly ref struct NibblePath
 
         return source.Slice(PreambleLength + GetSpanLength(length, odd));
     }
-    
+
     public static Span<byte> ReadFrom(Span<byte> source, out NibblePath nibblePath)
     {
         var b = source[0];
@@ -573,7 +591,8 @@ public readonly ref struct NibblePath
                 {
                     do
                     {
-                        hash = BitOperations.Crc32C(hash, Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref span, offset)));
+                        hash = BitOperations.Crc32C(hash,
+                            Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref span, offset)));
                         offset += sizeof(long);
                     } while (longLoop > offset);
                 }
