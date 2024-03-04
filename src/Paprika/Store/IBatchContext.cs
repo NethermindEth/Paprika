@@ -24,6 +24,22 @@ public interface IBatchContext : IReadOnlyBatchContext
     /// <returns></returns>
     Page GetWritableCopy(Page page);
 
+    Page EnsureWritableCopy(ref DbAddress addr)
+    {
+        Debug.Assert(addr.IsNull == false);
+
+        var page = GetAt(addr);
+
+        if (page.Header.BatchId == BatchId)
+        {
+            return page;
+        }
+
+        var cow = GetWritableCopy(page);
+        addr = GetAddress(cow);
+        return cow;
+    }
+
     /// <summary>
     /// Checks whether the page was written during this batch.
     /// </summary>

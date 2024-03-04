@@ -20,11 +20,6 @@ namespace Paprika.Data;
 /// </remarks>
 public readonly ref struct SlottedArray
 {
-    /// <summary>
-    /// Provides size of the metadata required to store one slot.
-    /// </summary>
-    public const int OneSlotArrayMinimalSize = Header.Size + Slot.Size;
-
     private readonly ref Header _header;
     private readonly Span<byte> _data;
     private readonly Span<Slot> _slots;
@@ -38,18 +33,15 @@ public readonly ref struct SlottedArray
         _slots = MemoryMarshal.Cast<byte, Slot>(_data);
     }
 
-    public bool TrySet(in NibblePath key, ReadOnlySpan<byte> data, byte metadata = 0)
+    public bool TrySet(in NibblePath key, ReadOnlySpan<byte> data, ushort? keyHash = default)
     {
-        Debug.Assert(metadata <= Slot.MaxMetadata);
-
-        var hash = GetHash(key);
+        var hash = keyHash ?? GetHash(key);
 
         if (TryGetImpl(key, hash, out var existingData, out var index))
         {
             // same size, copy in place
             if (data.Length == existingData.Length)
             {
-                _slots[index].Metadata = metadata;
                 data.CopyTo(existingData);
                 return true;
             }
@@ -87,7 +79,6 @@ public readonly ref struct SlottedArray
         slot.Hash = hash;
         slot.ItemAddress = (ushort)(_data.Length - _header.High - total);
         slot.IsDeleted = false;
-        slot.Metadata = metadata;
 
         // write item: length_key, key, data
         var dest = _data.Slice(slot.ItemAddress, total);
@@ -123,11 +114,7 @@ public readonly ref struct SlottedArray
     /// </summary>
     public int Count => _header.Low / Slot.Size;
 
-    /// <summary>
-    /// Returns the capacity of the map.
-    /// It includes slots that were deleted and that can be reclaimed when a defragmentation happens.
-    /// </summary>
-    public int CapacityLeft => _data.Length - _header.Taken + _header.Deleted;
+    public int CapacityLeft => _data.Length - _header.Taken;
 
     public Enumerator EnumerateAll() =>
         new(this);
@@ -189,7 +176,7 @@ public readonly ref struct SlottedArray
             var key = NibblePath.FromRaw(preamble, span.Slice(shift));
             var data = span.Slice(shift + key.RawSpanLength);
 
-            return new Item(key, data, _index, slot.Metadata);
+            return new Item(key, data, _index);
         }
 
         public void Dispose()
@@ -198,9 +185,8 @@ public readonly ref struct SlottedArray
                 ArrayPool<byte>.Shared.Return(_bytes);
         }
 
-        public readonly ref struct Item(NibblePath key, ReadOnlySpan<byte> rawData, int index, byte metadata)
+        public readonly ref struct Item(NibblePath key, ReadOnlySpan<byte> rawData, int index)
         {
-            public byte Metadata { get; } = metadata;
             public int Index { get; } = index;
             public NibblePath Key { get; } = key;
             public ReadOnlySpan<byte> RawData { get; } = rawData;
@@ -223,7 +209,7 @@ public readonly ref struct SlottedArray
         foreach (var item in EnumerateAll())
         {
             // try copy all, even if one is not copyable the other might
-            if (destination.TrySet(item.Key, item.RawData, item.Metadata))
+            if (destination.TrySet(item.Key, item.RawData))
             {
                 count++;
                 Delete(item);
@@ -268,15 +254,16 @@ public readonly ref struct SlottedArray
 
     private const int KeyLengthLength = 1;
 
-    public static int EstimateNeededCapacity(in NibblePath key, ReadOnlySpan<byte> data) =>
-        GetTotalSpaceRequired(key, data) + Slot.Size;
-
     private static int GetTotalSpaceRequired(in NibblePath key, ReadOnlySpan<byte> data)
     {
         return (key.RawPreamble <= Slot.MaxSlotPreamble ? 0 : KeyLengthLength) +
                key.RawSpanLength + data.Length;
     }
 
+    /// <summary>
+    /// Warning! This does not set any tombstone so the reader won't be informed about a delete,
+    /// just will miss the value.
+    /// </summary>
     public bool Delete(in NibblePath key)
     {
         if (TryGetImpl(key, GetHash(key), out _, out var index))
@@ -293,14 +280,8 @@ public readonly ref struct SlottedArray
     private void DeleteImpl(int index)
     {
         // mark as deleted first
-        ref var slot = ref _slots[index];
-        slot.IsDeleted = true;
-
-        var size = (ushort)(GetSlotLength(ref slot) + Slot.Size);
-
-        Debug.Assert(_header.Deleted + size <= _data.Length, "Deleted marker breached size");
-
-        _header.Deleted += size;
+        _slots[index].IsDeleted = true;
+        _header.Deleted++;
 
         // always try to compact after delete
         CollectTombstones();
@@ -333,7 +314,6 @@ public readonly ref struct SlottedArray
                 copyTo.Hash = copyFrom.Hash;
                 copyTo.ItemAddress = high;
                 copyTo.KeyPreamble = copyFrom.KeyPreamble;
-                copyTo.Metadata = copyFrom.Metadata;
 
                 copy._header.Low += Slot.Size;
                 copy._header.High = (ushort)(copy._header.High + fromSpan.Length);
@@ -360,19 +340,14 @@ public readonly ref struct SlottedArray
             // undo writing low
             _header.Low -= Slot.Size;
 
-            ref var slot = ref _slots[index];
-
             // undo writing high
-            var slice = GetSlotPayload(ref slot);
+            var slice = GetSlotPayload(ref _slots[index]);
             var total = slice.Length;
             _header.High = (ushort)(_header.High - total);
 
             // cleanup
-            Debug.Assert(_header.Deleted >= total + Slot.Size, "Deleted marker breached size");
-
-            _header.Deleted -= (ushort)(total + Slot.Size);
-
-            slot = default;
+            _slots[index] = default;
+            _header.Deleted--;
 
             // move back by one to see if it's deleted as well
             index--;
@@ -389,33 +364,6 @@ public readonly ref struct SlottedArray
 
         data = default;
         return false;
-    }
-
-
-    public bool HasSpaceToUpdateExisting(in NibblePath key, in ReadOnlySpan<byte> data)
-    {
-        if (!TryGetImpl(key, GetHash(key), out _, out var index))
-        {
-            return false;
-        }
-
-        var requiredWithoutSlotLength = GetTotalSpaceRequired(key, data);
-        return requiredWithoutSlotLength <= GetSlotLength(ref _slots[index]);
-    }
-
-    public bool TryGetWithMetadata(in NibblePath key, out ReadOnlySpan<byte> data, out byte metadata)
-    {
-        if (TryGetImpl(key, GetHash(key), out var span, out var slotIndex))
-        {
-            data = span;
-            metadata = _slots[slotIndex].Metadata;
-            return true;
-        }
-
-        metadata = default;
-        data = default;
-        return false;
-
     }
 
     [OptimizationOpportunity(OptimizationType.CPU,
@@ -498,23 +446,13 @@ public readonly ref struct SlottedArray
     /// </summary>
     private Span<byte> GetSlotPayload(ref Slot slot)
     {
-        var length = GetSlotLength(ref slot);
-        var addr = slot.ItemAddress;
-
-        Debug.Assert(0 < addr && addr + length <= _data.Length);
-
-        return _data.Slice(addr, length);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private ushort GetSlotLength(ref Slot slot)
-    {
         // assert whether the slot has a previous, if not use data.length
         var previousSlotAddress = Unsafe.IsAddressLessThan(ref _slots[0], ref slot)
             ? Unsafe.Add(ref slot, -1).ItemAddress
             : _data.Length;
 
-        return (ushort)(previousSlotAddress - slot.ItemAddress);
+        var length = previousSlotAddress - slot.ItemAddress;
+        return _data.Slice(slot.ItemAddress, length);
     }
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
@@ -545,23 +483,10 @@ public readonly ref struct SlottedArray
             set => Raw = (ushort)((Raw & ~DeletedMask) | (ushort)(value ? DeletedMask : 0));
         }
 
-        public const byte MaxMetadata = 1;
-        private const ushort MetadataMask = 0b0010_0000_0000_0000;
-        private const ushort MetadataShift = 13;
-
-        /// <summary>
-        /// The data type contained in this slot.
-        /// </summary>
-        public byte Metadata
-        {
-            get => (byte)((Raw & MetadataMask) >> MetadataShift);
-            set => Raw = (ushort)((Raw & ~MetadataMask) | value << MetadataShift);
-        }
-
-        private const ushort KeyLengthMask = 0b1100_0000_0000_0000;
-        private const ushort KeyLengthShift = 14;
-        public const int MaxSlotPreamble = 2;
-        public const int PreambleBiggerMarker = 3;
+        private const ushort KeyLengthMask = 0b1110_0000_0000_0000;
+        private const ushort KeyLengthShift = 13;
+        public const int MaxSlotPreamble = 6;
+        public const int PreambleBiggerMarker = 7;
 
         public byte KeyPreamble
         {

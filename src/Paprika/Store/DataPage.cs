@@ -57,18 +57,6 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             return page;
         }
 
-        // Page is full, flush down
-        if (FlushDownToExistingLeafs(map, batch))
-        {
-            // Flush down succeeded, try to set again
-            if (map.TrySet(key, data))
-            {
-                return page;
-            }
-        }
-
-        // None of the existing leafs was able to accept the write. Proceed with a regular flush
-
         // Find most frequent nibble
         var nibble = FindMostFrequentNibble(map);
 
@@ -95,73 +83,6 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
         // The page has some of the values flushed down, try to add again.
         return Set(key, data, batch);
-    }
-
-    /// <summary>
-    /// This method tries to flush down data to existing leafs, it will never create new leafs or transform leafs to data pages.
-    /// </summary>
-    private bool FlushDownToExistingLeafs(in SlottedArray map, IBatchContext batch)
-    {
-        var leafCount = 0;
-        Span<LeafPage> leafs = stackalloc LeafPage[BucketCount];
-
-        for (var i = 0; i < BucketCount; i++)
-        {
-            var addr = Data.Buckets[i];
-            if (addr.IsNull == false)
-            {
-                var child = batch.GetAt(addr);
-                if (child.Header.PageType == PageType.Leaf)
-                {
-                    leafs[i] = new LeafPage(child);
-                    leafCount++;
-                }
-            }
-        }
-
-        if (leafCount == 0)
-        {
-            return false;
-        }
-
-        var flushCount = 0;
-
-        // Try flush down to leafs first
-        foreach (var item in map.EnumerateAll())
-        {
-            var key = item.Key;
-            if (key.IsEmpty)
-            {
-                continue;
-            }
-
-            var first = key.FirstNibble;
-            ref var leaf = ref leafs[first];
-
-            if (leaf.IsNull)
-            {
-                continue;
-            }
-
-            // the key is non-empty and the leaf is not null
-            var sliced = key.SliceFrom(ConsumedNibbles);
-
-            var (cow, success) = leaf.TrySet(sliced, item.RawData, batch);
-
-            // save cow
-            Data.Buckets[first] = batch.GetAddress(cow);
-
-            // flushing down may change the page type but it's quite unlikely
-            leaf = cow.Header.PageType == PageType.Leaf ? new LeafPage(cow) : default;
-
-            if (success)
-            {
-                map.Delete(item);
-                flushCount++;
-            }
-        }
-
-        return flushCount > 0;
     }
 
     public int CapacityLeft => Map.CapacityLeft;
