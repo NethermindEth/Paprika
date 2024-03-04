@@ -34,9 +34,9 @@ public readonly ref struct SlottedArray
         _slots = MemoryMarshal.Cast<byte, Slot>(_data);
     }
 
-    public bool TrySet(in NibblePath key, ReadOnlySpan<byte> data, ushort? keyHash = default)
+    public bool TrySet(in NibblePath key, ReadOnlySpan<byte> data)
     {
-        var hash = keyHash ?? GetHash(key);
+        var hash = GetHash(key);
 
         if (TryGetImpl(key, hash, out var existingData, out var index))
         {
