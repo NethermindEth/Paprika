@@ -282,6 +282,18 @@ public readonly ref struct NibblePath
 
         return source.Slice(PreambleLength + GetSpanLength(length, odd));
     }
+    
+    public static Span<byte> ReadFrom(Span<byte> source, out NibblePath nibblePath)
+    {
+        var b = source[0];
+
+        var odd = OddBit & b;
+        var length = (byte)(b >> LengthShift);
+
+        nibblePath = new NibblePath(source.Slice(PreambleLength), odd, length);
+
+        return source.Slice(PreambleLength + GetSpanLength(length, odd));
+    }
 
     /// <summary>
     /// Reads the first byte of nibble of the path without decoding it fully.
