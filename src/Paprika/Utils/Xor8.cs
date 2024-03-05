@@ -29,7 +29,7 @@ public class Xor8
 
     private static int GetArrayLength(int size) => (int)(Offset + (long)FactorTimes100 * size / 100);
 
-    public Xor8(IReadOnlyCollection<ulong> keys)
+    public Xor8(HashSet<ulong> keys)
     {
         // TODO: remove all array allocations, use ArrayPool<ulong> more and/or buffer pool, potentially combine chunks of memory together
         var size = keys.Count;
@@ -41,7 +41,6 @@ public class Xor8
         var reverseH = ArrayPool<byte>.Shared.Rent(size);
         var t2Count = ArrayPool<byte>.Shared.Rent(arrayLength);
         var t2 = ArrayPool<ulong>.Shared.Rent(arrayLength);
-        var fp = ArrayPool<byte>.Shared.Rent(arrayLength);
 
         int reverseOrderPos;
         ulong seed;
@@ -146,8 +145,13 @@ public class Xor8
             }
         } while (reverseOrderPos != size);
 
-        _seed = seed;
+        ArrayPool<byte>.Shared.Return(t2Count);
+        ArrayPool<ulong>.Shared.Return(t2);
+        t2Count = null;
+        t2 = null;
 
+        _seed = seed;
+        var fp = ArrayPool<byte>.Shared.Rent(arrayLength);
         for (var i = reverseOrderPos - 1; i >= 0; i--)
         {
             var k = reverseOrder[i];
@@ -171,12 +175,10 @@ public class Xor8
         }
         _fingerprints = new byte[arrayLength];
         Array.Copy(fp, _fingerprints, arrayLength);
+        ArrayPool<byte>.Shared.Return(fp);
 
         ArrayPool<ulong>.Shared.Return(reverseOrder);
         ArrayPool<byte>.Shared.Return(reverseH);
-        ArrayPool<byte>.Shared.Return(t2Count);
-        ArrayPool<ulong>.Shared.Return(t2);
-        ArrayPool<byte>.Shared.Return(fp);
     }
 
     public bool MayContain(ulong key)

@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -21,30 +23,72 @@ public static partial class Node
         Branch = 0,
     }
 
-    public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Type nodeType, out Leaf leaf,
-        out Extension extension, out Branch branch)
+    [SkipLocalsInit]
+    public static Type ReadFrom(out Leaf leaf, out Extension extension, ReadOnlySpan<byte> source)
     {
-        leaf = new Leaf();
-        extension = new Extension();
-        branch = new Branch();
+        leaf = default;
+        extension = default;
 
         // TODO: It would be nice to not read the header twice:
         // - Once to get the header
         // - Again to read each Node type
-        Header.ReadFrom(source, out var header);
-        switch (header.NodeType)
+
+        var nodeType = Header.GetTypeFrom(source);
+        switch (nodeType)
         {
             case Type.Leaf:
-                nodeType = Type.Leaf;
+                Leaf.ReadFrom(source, out leaf);
+                break;
+            case Type.Extension:
+                Extension.ReadFrom(source, out extension);
+                break;
+            case Type.Branch:
+                // Do nothing
+                break;
+            default:
+                ThrowUnknownNodeType(nodeType);
+                break;
+        }
+
+        return nodeType;
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowUnknownNodeType(Type nodeType)
+        {
+            throw new ArgumentOutOfRangeException($"Unacceptable extension type {nodeType}");
+        }
+    }
+
+    public static ReadOnlySpan<byte> ReadFrom(out Type nodeType, out Leaf leaf, out Extension extension,
+        out Branch branch, ReadOnlySpan<byte> source)
+    {
+        leaf = default;
+        extension = default;
+        branch = default;
+
+        // TODO: It would be nice to not read the header twice:
+        // - Once to get the header
+        // - Again to read each Node type
+
+        switch (nodeType = Header.GetTypeFrom(source))
+        {
+            case Type.Leaf:
                 return Leaf.ReadFrom(source, out leaf);
             case Type.Extension:
-                nodeType = Type.Extension;
                 return Extension.ReadFrom(source, out extension);
             case Type.Branch:
-                nodeType = Type.Branch;
                 return Branch.ReadFrom(source, out branch);
             default:
-                throw new ArgumentOutOfRangeException($"Could not decode {nameof(Header)}");
+                ThrowUnknownNodeType();
+                return default;
+        }
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowUnknownNodeType()
+        {
+            throw new ArgumentOutOfRangeException($"Could not decode {nameof(Header)}");
         }
     }
 
@@ -115,6 +159,11 @@ public static partial class Node
         {
             header = new Header(source[0]);
             return source.Slice(Size);
+        }
+
+        public static Type GetTypeFrom(ReadOnlySpan<byte> source)
+        {
+            return new Header(source[0]).NodeType;
         }
 
         public static Header Peek(ReadOnlySpan<byte> source) => new(source[0]);
@@ -404,15 +453,6 @@ public static partial class Node
             }
 
             return leftover;
-        }
-
-        /// <summary>
-        /// Skips the branch at source, returning just the leftover.
-        /// </summary>
-        public static ReadOnlySpan<byte> Skip(ReadOnlySpan<byte> source)
-        {
-            Header.ReadFrom(source, out var header);
-            return source.Slice(GetBranchDataLength(header));
         }
 
         /// <summary>
