@@ -1,4 +1,4 @@
-﻿namespace Paprika.Data;
+namespace Paprika.Data;
 
 /// <summary>
 /// Provides shared capabilities to write and read spans.

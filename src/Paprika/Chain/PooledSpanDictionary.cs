@@ -89,7 +89,7 @@ public class PooledSpanDictionary : IDisposable
     private const int KeyLengthLength = 1;
     private const int ValueLengthLength = 2;
 
-    private SearchResult TryGetImpl(uint leftover, uint bucket,scoped ReadOnlySpan<byte> key)
+    private SearchResult TryGetImpl(uint leftover, uint bucket, scoped ReadOnlySpan<byte> key)
     {
         Debug.Assert(BitOperations.LeadingZeroCount(leftover) >= 11, "First 10 bits should be left unused");
 
