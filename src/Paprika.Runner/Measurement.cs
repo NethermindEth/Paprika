@@ -70,40 +70,23 @@ abstract class Measurement : JustInTimeRenderable, IMeasurement
         throw new NotImplementedException($"Not implemented for type {type}");
     }
 
-    private class GaugeMeasurement : Measurement
+    private class GaugeMeasurement(Instrument instrument) : Measurement(instrument)
     {
-        public GaugeMeasurement(Instrument instrument) : base(instrument)
-        {
-        }
-
         protected override long Update(double measurement) => (long)measurement;
     }
 
-    // for now use the last value
-    private class HistogramLastMeasurement : Measurement
+    private class HistogramLastMeasurement(Instrument instrument) : Measurement(instrument)
     {
         protected override long Update(double measurement)
         {
             return (long)measurement;
         }
-
-        public HistogramLastMeasurement(Instrument instrument) : base(instrument)
-        {
-        }
     }
 
-    private class HistogramHdrMeasurement : JustInTimeRenderable, IMeasurement
+    private class HistogramHdrMeasurement(Instrument instrument) : JustInTimeRenderable, IMeasurement
     {
-        private readonly Instrument _instrument;
-        private readonly ConcurrentQueue<long> _measurements;
-        private readonly LongHistogram _histogram;
-
-        public HistogramHdrMeasurement(Instrument instrument)
-        {
-            _instrument = instrument;
-            _measurements = new ConcurrentQueue<long>();
-            _histogram = new LongHistogram(1, 1, int.MaxValue, 4);
-        }
+        private readonly ConcurrentQueue<long> _measurements = new();
+        private readonly LongHistogram _histogram = new(1, 1, int.MaxValue, 4);
 
         protected override IRenderable Build()
         {
@@ -136,17 +119,13 @@ abstract class Measurement : JustInTimeRenderable, IMeasurement
             MarkAsDirty();
         }
 
-        public override string ToString() => $"{nameof(Instrument)}: {_instrument.Name}, Histogram";
+        public override string ToString() => $"{nameof(Instrument)}: {instrument.Name}, Histogram";
     }
 
-    private class CounterMeasurement : Measurement
+    private class CounterMeasurement(Instrument instrument) : Measurement(instrument)
     {
         private long _sum;
 
         protected override long Update(double measurement) => Interlocked.Add(ref _sum, (long)measurement);
-
-        public CounterMeasurement(Instrument instrument) : base(instrument)
-        {
-        }
     }
 }
