@@ -200,11 +200,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
 
         var children = new ConcurrentQueue<IChildCommit>();
-        Parallel.ForEach(workItems,
+        Parallel.For(0, workItems.Length,
             commit.GetChild,
-            (workItem, _, child) =>
+            (i, _, child) =>
             {
-                workItem.DoWork(child);
+                workItems[i].DoWork(child);
                 return child;
             },
             children.Enqueue
