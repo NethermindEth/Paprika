@@ -161,15 +161,10 @@ public sealed class Metrics : IDisposable
             protected override long Update(double measurement) => (long)measurement;
         }
 
-        private class HistogramHdrMeasurement : Measurement
+        private class HistogramHdrMeasurement(Instrument instrument) : Measurement(instrument)
         {
             private const double Percentile = 99;
-            private readonly LongConcurrentHistogram _histogram;
-
-            public HistogramHdrMeasurement(Instrument instrument) : base(instrument)
-            {
-                _histogram = new LongConcurrentHistogram(1, 1, int.MaxValue, 4);
-            }
+            private readonly LongConcurrentHistogram _histogram = new(1, 1, int.MaxValue, 4);
 
             protected override long Update(double measurement)
             {
