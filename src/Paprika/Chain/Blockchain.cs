@@ -1,6 +1,7 @@
 using System.CodeDom.Compiler;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Paprika.Crypto;
@@ -1132,12 +1133,19 @@ public class Blockchain : IAsyncDisposable
             return default;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool IsAccountDestroyed(scoped in Key key, ulong destroyed)
         {
             if (_destroyedXor == null || destroyed == NonDestroyable)
                 return false;
 
-            return _destroyedXor.MayContain(destroyed) && _destroyed!.Contains(key.Path.UnsafeAsKeccak);
+            return CheckDestroyed(in key, destroyed);
+
+            [MethodImpl(MethodImplOptions.NoInlining)]
+            bool CheckDestroyed(in Key key, ulong destroyed)
+            {
+                return _destroyedXor.MayContain(destroyed) && _destroyed!.Contains(key.Path.UnsafeAsKeccak);
+            }
         }
 
         protected override void CleanUp()
