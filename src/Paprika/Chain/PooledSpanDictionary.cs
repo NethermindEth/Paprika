@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
+using System.Net.Sockets;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -53,7 +54,8 @@ public class PooledSpanDictionary : IDisposable
 
     public bool TryGet(scoped ReadOnlySpan<byte> key, ulong hash, out ReadOnlySpan<byte> result)
     {
-        var search = TryGetImpl(key, Mix(hash));
+        var (leftover, bucket) = GetBucketAndLeftover(hash);
+        var search = TryGetImpl(leftover, bucket, key);
         if (search.IsFound)
         {
             result = search.Data;
@@ -87,28 +89,28 @@ public class PooledSpanDictionary : IDisposable
     private const int KeyLengthLength = 1;
     private const int ValueLengthLength = 2;
 
-
-    private SearchResult TryGetImpl(scoped ReadOnlySpan<byte> key, uint hash)
+    private SearchResult TryGetImpl(uint leftover, uint bucket,scoped ReadOnlySpan<byte> key)
     {
-        var (leftover, bucket) = Math.DivRem(hash, Root.BucketCount);
-
         Debug.Assert(BitOperations.LeadingZeroCount(leftover) >= 11, "First 10 bits should be left unused");
 
         var address = _root[(int)bucket];
-        while (address != 0)
+        if (address == 0) return default;
+
+        var pages = CollectionsMarshal.AsSpan(_pages);
+        do
         {
             var (pageNo, atPage) = Math.DivRem(address, Page.PageSize);
 
             // TODO: optimize, unsafe ref?
-            var sliced = _pages[(int)pageNo].Span.Slice((int)atPage);
+            var sliced = pages[(int)pageNo].Span.Slice((int)atPage);
 
-            ref var at = ref sliced[0];
+            ref var at = ref MemoryMarshal.GetReference(sliced);
 
-            var header = sliced[0] & PreambleBits;
-            if ((header & DestroyedBit) != DestroyedBit)
+            var header = at & PreambleBits;
+            if ((header & DestroyedBit) == 0)
             {
                 // not destroyed, ready to be searched, decode leftover, big endian
-                var leftoverStored = GetLeftover(ref sliced[0]);
+                var leftoverStored = GetLeftover(ref at);
 
                 if (leftoverStored == leftover)
                 {
@@ -130,10 +132,15 @@ public class PooledSpanDictionary : IDisposable
 
             // Decode next entry address
             address = Unsafe.ReadUnaligned<uint>(ref Unsafe.Add(ref at, PreambleLength));
-        }
-
+        } while (address != 0);
         return default;
     }
+
+    private static (uint leftover, uint bucket) GetBucketAndLeftover(ulong hash)
+        => Math.DivRem(Mix(hash), Root.BucketCount);
+
+    private static (uint leftover, uint bucket) GetBucketAndLeftover(uint mixed)
+        => Math.DivRem(mixed, Root.BucketCount);
 
     public void CopyTo(PooledSpanDictionary destination, Predicate<byte> metadataWhere, bool append = false)
     {
@@ -167,9 +174,15 @@ public class PooledSpanDictionary : IDisposable
         /// <summary>
         /// The length is encoded as the first byte.
         /// </summary>
-        public ReadOnlySpan<byte> Data =>
-            MemoryMarshal.CreateSpan(ref Unsafe.Add(ref _data, ValueLengthLength),
+        public readonly ReadOnlySpan<byte> Data
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get
+            {
+                return MemoryMarshal.CreateSpan(ref Unsafe.Add(ref _data, ValueLengthLength),
                 Unsafe.ReadUnaligned<ushort>(ref _data));
+            }
+        }
 
         public bool TryUpdateInSitu(ReadOnlySpan<byte> data0, ReadOnlySpan<byte> data1, byte metadata)
         {
@@ -217,9 +230,10 @@ public class PooledSpanDictionary : IDisposable
     {
         Debug.Assert(metadata <= MaxMetadata, "Metadata size breached");
 
+        var (leftover, bucket) = GetBucketAndLeftover(mixed);
         if (append == false)
         {
-            var search = TryGetImpl(key, mixed);
+            var search = TryGetImpl(leftover, bucket, key);
 
             if (search.IsFound)
             {
@@ -233,8 +247,6 @@ public class PooledSpanDictionary : IDisposable
                 search.Destroy();
             }
         }
-
-        var (leftover, bucket) = Math.DivRem(mixed, Root.BucketCount);
 
         Debug.Assert(BitOperations.LeadingZeroCount(leftover) >= 10, "First 10 bits should be left unused");
 
@@ -273,7 +285,8 @@ public class PooledSpanDictionary : IDisposable
 
     public void Destroy(scoped ReadOnlySpan<byte> key, ulong hash)
     {
-        var found = TryGetImpl(key, Mix(hash));
+        var (leftover, bucket) = GetBucketAndLeftover(hash);
+        var found = TryGetImpl(leftover, bucket, key);
 
         if (found.IsFound)
             found.Destroy();
