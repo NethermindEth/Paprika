@@ -185,10 +185,21 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     /// <param name="commit">The original commit.</param>
     /// <param name="workItems">The work items.</param>
-    private static void ScatterGather(ICommit commit, IEnumerable<IWorkItem> workItems)
+    private static void ScatterGather(ICommit commit, BuildStorageTriesItem[] workItems)
     {
-        var children = new ConcurrentQueue<IChildCommit>();
+        if (workItems.Length == 0)
+        {
+            return;
+        }
 
+        if (workItems.Length == 1)
+        {
+            // Direct work on commit as there are no other interfering work items; 
+            workItems[0].DoWork(commit);
+            return;
+        }
+        
+        var children = new ConcurrentQueue<IChildCommit>();
         Parallel.ForEach(workItems,
             commit.GetChild,
             (workItem, _, child) =>
@@ -225,11 +236,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// <summary>
     /// Builds works items responsible for building up the storage tries.
     /// </summary>
-    private IEnumerable<IWorkItem> GetStorageWorkItems(ICommit commit, CacheBudget budget)
+    private BuildStorageTriesItem[] GetStorageWorkItems(ICommit commit, CacheBudget budget)
     {
         return commit.Stats
             .Where(kvp => kvp.Value > 0)
-            .Select(kvp => new BuildStorageTriesItem(this, commit, kvp.Key, budget));
+            .Select(kvp => new BuildStorageTriesItem(this, commit, kvp.Key, budget))
+            .ToArray()            ;
     }
 
     public ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data)
