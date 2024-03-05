@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Chain;
@@ -89,9 +89,9 @@ public class Trie(ICommit commit, BufferPool pool)
     private ref Item GetAt(Addr addr)
     {
         Debug.Assert(addr.Value >= Addr.StartFrom);
-        
+
         // TODO: potentially optimize
-        
+
         var (page, at) = Math.DivRem((int)addr.Value, ItemsPerPage);
         var items = MemoryMarshal.Cast<byte, Item>(_pages[page].Span);
         return ref items[at];
