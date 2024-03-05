@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Chain;
@@ -51,7 +51,7 @@ public class Commit : ICommit
 
             if (k.Type == DataType.Merkle)
             {
-                Node.ReadFrom(value, out var type, out var leaf, out var ext, out var branch);
+                Node.ReadFrom(out var type, out var leaf, out var ext, out var branch, value);
                 switch (type)
                 {
                     case Node.Type.Leaf:

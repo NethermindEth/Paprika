@@ -1,4 +1,4 @@
-﻿using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
 using Paprika.Chain;

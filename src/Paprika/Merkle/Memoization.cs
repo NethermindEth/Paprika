@@ -1,4 +1,4 @@
-﻿using Paprika.Chain;
+using Paprika.Chain;
 
 namespace Paprika.Merkle;
 

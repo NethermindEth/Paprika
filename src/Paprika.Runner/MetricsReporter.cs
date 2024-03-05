@@ -1,4 +1,4 @@
-﻿using System.Diagnostics.Metrics;
+using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
 using Spectre.Console;
 using Spectre.Console.Rendering;

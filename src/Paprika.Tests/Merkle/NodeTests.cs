@@ -264,7 +264,7 @@ public class NodeTests
         Span<byte> buffer = stackalloc byte[leaf.MaxByteLength];
 
         var encoded = leaf.WriteTo(buffer);
-        var leftover = Node.ReadFrom(encoded, out var nodeType, out var actual, out _, out _);
+        var leftover = Node.ReadFrom(out var nodeType, out var actual, out _, out _, encoded);
 
         leftover.Length.Should().Be(0);
         nodeType.Should().Be(Node.Type.Leaf);
@@ -280,7 +280,7 @@ public class NodeTests
         Span<byte> buffer = stackalloc byte[extension.MaxByteLength];
 
         var encoded = extension.WriteTo(buffer);
-        var leftover = Node.ReadFrom(encoded, out var nodeType, out _, out var actual, out _);
+        var leftover = Node.ReadFrom(out var nodeType, out _, out var actual, out _, encoded);
 
         leftover.Length.Should().Be(0);
         nodeType.Should().Be(Node.Type.Extension);
@@ -297,7 +297,7 @@ public class NodeTests
         Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
 
         var encoded = branch.WriteTo(buffer);
-        var leftover = Node.ReadFrom(encoded, out var nodeType, out _, out _, out var actual);
+        var leftover = Node.ReadFrom(out var nodeType, out _, out _, out var actual, encoded);
 
         leftover.Length.Should().Be(0);
         nodeType.Should().Be(Node.Type.Branch);
@@ -321,9 +321,9 @@ public class NodeTests
         writeLeftover = extension.WriteToWithLeftover(writeLeftover);
         _ = branch.WriteToWithLeftover(writeLeftover);
 
-        var readLeftover = Node.ReadFrom(buffer, out _, out var actualLeaf, out _, out _);
-        readLeftover = Node.ReadFrom(readLeftover, out _, out _, out var actualExtension, out _);
-        _ = Node.ReadFrom(readLeftover, out _, out _, out _, out var actualBranch);
+        var readLeftover = Node.ReadFrom(out _, out var actualLeaf, out _, out _, buffer);
+        readLeftover = Node.ReadFrom(out _, out _, out var actualExtension, out _, readLeftover);
+        _ = Node.ReadFrom(out _, out _, out _, out var actualBranch, readLeftover);
 
         actualLeaf.Equals(leaf).Should().BeTrue();
         actualExtension.Equals(extension).Should().BeTrue();

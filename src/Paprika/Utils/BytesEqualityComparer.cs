@@ -1,4 +1,4 @@
-﻿namespace Paprika.Utils;
+namespace Paprika.Utils;
 
 public class BytesEqualityComparer : IEqualityComparer<byte[]>
 {

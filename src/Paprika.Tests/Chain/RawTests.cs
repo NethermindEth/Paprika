@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Chain;

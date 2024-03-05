@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store;

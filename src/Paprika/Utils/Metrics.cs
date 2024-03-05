@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using System.Net.Mime;
 using System.Reflection;
