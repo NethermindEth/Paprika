@@ -1,4 +1,4 @@
-﻿using Paprika.Data;
+using Paprika.Data;
 using Paprika.Store;
 using Paprika.Utils;
 

@@ -1,4 +1,4 @@
-﻿namespace Paprika.Data;
+namespace Paprika.Data;
 
 /// <summary>
 /// Gets a nibble from the key.

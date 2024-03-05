@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Paprika.Crypto;
 
 namespace Paprika.Store;

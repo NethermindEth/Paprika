@@ -1,4 +1,4 @@
-﻿using Nethermind.Int256;
+using Nethermind.Int256;
 
 namespace Paprika.Data;
 

@@ -1,4 +1,4 @@
-﻿namespace Paprika.Data;
+namespace Paprika.Data;
 
 /// <summary>
 /// Represents the type of data stored in the <see cref="SlottedArray"/>.

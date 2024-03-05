@@ -1,4 +1,4 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
 using BenchmarkDotNet.Attributes;
 using Paprika.Data;
 using Paprika.Store;

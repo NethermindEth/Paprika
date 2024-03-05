@@ -1,4 +1,4 @@
-﻿namespace Paprika.Utils;
+namespace Paprika.Utils;
 
 /// <summary>
 /// Provides a component that can be disposed multiple times and runs <see cref="CleanUp"/> only on the last dispose. 

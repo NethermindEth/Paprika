@@ -1,4 +1,4 @@
-﻿namespace Paprika.Utils;
+namespace Paprika.Utils;
 
 /// <summary>
 /// Provides a <see cref="ReadOnlySpan{T}"/> under ownership.
