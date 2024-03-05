@@ -46,6 +46,8 @@ public class Trie(ICommit commit, BufferPool pool)
             default:
                 throw new ArgumentOutOfRangeException();
         }
+
+        return current;
     }
 
     private Addr Resolve(in NibblePath path)
@@ -58,22 +60,20 @@ public class Trie(ICommit commit, BufferPool pool)
             throw new Exception("Empty node!");
         }
 
-        Node.ReadFrom(owner.Span, out var type, out var leaf, out var ext, out var branch);
+        var type = Node.ReadFrom(out var leaf, out var ext, out var branch, owner.Span);
 
         ref var node = ref Alloc(out var current);
+        node.Type = type;
         switch (type)
         {
             case Node.Type.Leaf:
-                node.Type = Node.Type.Leaf;
                 node.Path = leaf.Path;
                 break;
             case Node.Type.Extension:
-                node.Type = Node.Type.Extension;
                 node.Path = ext.Path;
                 node.ExtensionNext = Addr.Unresolved;
                 break;
             case Node.Type.Branch:
-                node.Type = Node.Type.Branch;
                 for (byte i = 0; i < NibbleSet.NibbleCount; i++)
                 {
                     node[i] = branch.Children[i] ? Addr.Unresolved : default;
