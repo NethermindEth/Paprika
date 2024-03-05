@@ -198,7 +198,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             workItems[0].DoWork(commit);
             return;
         }
-        
+
         var children = new ConcurrentQueue<IChildCommit>();
         Parallel.ForEach(workItems,
             commit.GetChild,
@@ -241,7 +241,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         return commit.Stats
             .Where(kvp => kvp.Value > 0)
             .Select(kvp => new BuildStorageTriesItem(this, commit, kvp.Key, budget))
-            .ToArray()            ;
+            .ToArray();
     }
 
     public ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data)
@@ -1302,7 +1302,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             _prefixed = new PrefixingCommit(commit);
             _prefixed.SetPrefix(_account);
             _parent.Visit(OnStorage, TrieType.Storage);
-            
+
             CalculateStorageRoots(commit);
         }
 
