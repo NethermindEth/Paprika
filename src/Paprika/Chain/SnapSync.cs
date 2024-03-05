@@ -1,4 +1,4 @@
-﻿//#define SNAP_SYNC_SUPPORT
+//#define SNAP_SYNC_SUPPORT
 
 using Paprika.Crypto;
 using Paprika.Data;
