@@ -12,8 +12,6 @@ using static Paprika.Tests.Values;
 
 namespace Paprika.Tests.Chain;
 
-// As there's the metrics test
-[Parallelizable(ParallelScope.None)]
 public class BlockchainTests
 {
     private const int Mb = 1024 * 1024;
