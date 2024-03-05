@@ -185,24 +185,39 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     /// <param name="commit">The original commit.</param>
     /// <param name="workItems">The work items.</param>
-    private static void ScatterGather(ICommit commit, IEnumerable<IWorkItem> workItems)
+    private static void ScatterGather(ICommit commit, BuildStorageTriesItem[] workItems)
     {
-        var children = new ConcurrentQueue<IChildCommit>();
-
-        Parallel.ForEach(workItems,
-            commit.GetChild,
-            (workItem, _, child) =>
-            {
-                workItem.DoWork(child);
-                return child;
-            },
-            children.Enqueue
-        );
-
-        while (children.TryDequeue(out var child))
+        if (workItems.Length == 0)
         {
+            return;
+        }
+        else if (workItems.Length == 1)
+        {
+            var child = commit.GetChild();
+            workItems[0].DoWork(child);
             child.Commit();
             child.Dispose();
+            return;
+        }
+        else
+        {
+            var children = new ConcurrentQueue<IChildCommit>();
+
+            Parallel.For(0, workItems.Length,
+                commit.GetChild,
+                (i, _, child) =>
+                {
+                    workItems[i].DoWork(child);
+                    return child;
+                },
+                children.Enqueue
+            );
+
+            while (children.TryDequeue(out var child))
+            {
+                child.Commit();
+                child.Dispose();
+            }
         }
     }
 
@@ -225,12 +240,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// <summary>
     /// Builds works items responsible for building up the storage tries.
     /// </summary>
-    private IEnumerable<IWorkItem> GetStorageWorkItems(ICommit commit, CacheBudget budget)
+    private BuildStorageTriesItem[] GetStorageWorkItems(ICommit commit, CacheBudget budget)
     {
         var sum = commit.Stats.Sum(pair => pair.Value);
 
-        // make 2 more batches than CPU count to allow some balancing
-        var batchBudget = sum / (Environment.ProcessorCount * 2);
+        // make 16 more batches than CPU count to allow some balancing,
+        // so tasks remain for cpus that finish earlier
+        var batchBudget = Math.Max(1, sum / (Environment.ProcessorCount * 16));
 
         var list = new List<HashSet<Keccak>>();
         var current = new HashSet<Keccak>();
@@ -238,9 +254,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         foreach (var (key, count) in commit.Stats)
         {
-            if (count > 0)
+            if (count > 0 && current.Add(key))
             {
-                current.Add(key);
                 currentSize += count;
 
                 if (currentSize > batchBudget)
