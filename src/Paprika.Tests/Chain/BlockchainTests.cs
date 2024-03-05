@@ -12,6 +12,8 @@ using static Paprika.Tests.Values;
 
 namespace Paprika.Tests.Chain;
 
+// As there's the metrics test
+[Parallelizable(ParallelScope.None)]
 public class BlockchainTests
 {
     private const int Mb = 1024 * 1024;
@@ -65,6 +67,7 @@ public class BlockchainTests
     }
 
     [Test]
+    [Explicit("Non parallel")]
     public async Task Delays_reporting_metrics()
     {
         using var listener = new MeterListener();
@@ -105,7 +108,10 @@ public class BlockchainTests
         block.Dispose();
         allow.Reset();
 
-        void Notify() => allow.IsSet.Should().BeTrue();
+        void Notify()
+        {
+            allow.IsSet.Should().BeTrue();
+        }
     }
 
     [Test(Description =

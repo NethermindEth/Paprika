@@ -227,35 +227,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     private IEnumerable<IWorkItem> GetStorageWorkItems(ICommit commit, CacheBudget budget)
     {
-        var sum = commit.Stats.Sum(pair => pair.Value);
-
-        // make 2 more batches than CPU count to allow some balancing
-        var batchBudget = sum / (Environment.ProcessorCount * 2);
-
-        var list = new List<HashSet<Keccak>>();
-        var current = new HashSet<Keccak>();
-        var currentSize = 0;
-
-        foreach (var (key, count) in commit.Stats)
-        {
-            if (count > 0)
-            {
-                current.Add(key);
-                currentSize += count;
-
-                if (currentSize > batchBudget)
-                {
-                    list.Add(current);
-                    currentSize = 0;
-                    current = new HashSet<Keccak>();
-                }
-            }
-        }
-
-        if (current.Count > 0)
-            list.Add(current);
-
-        return list.Select(set => new BuildStorageTriesItem(this, commit, set, budget)).ToArray();
+        return commit.Stats
+            .Where(kvp => kvp.Value > 0)
+            .Select(kvp => new BuildStorageTriesItem(this, commit, [kvp.Key], budget));
     }
 
     public ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data)
