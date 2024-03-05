@@ -7,17 +7,17 @@ namespace Paprika.Utils;
 /// </summary>
 public static class DelayedMetrics
 {
-    private interface IAtomicIncrement<T>
+    public interface IAtomicIncrement<T>
     {
         T Add(ref T dest, T delta);
     }
 
-    private struct LongIncrement : IAtomicIncrement<long>
+    public struct LongIncrement : IAtomicIncrement<long>
     {
         public long Add(ref long dest, long delta) => Interlocked.Add(ref dest, delta);
     }
 
-    private struct IntIncrement : IAtomicIncrement<int>
+    public struct IntIncrement : IAtomicIncrement<int>
     {
         public int Add(ref int dest, int delta) => Interlocked.Add(ref dest, delta);
     }
@@ -25,23 +25,14 @@ public static class DelayedMetrics
     /// <summary>
     /// Returns the delayed reporting counter, that reports back to the original counter on the disposal.
     /// </summary>
-    public static ICounter<int> Delay(this Counter<int> counter) => new DelayedCounter<int, IntIncrement>(counter);
+    public static DelayedCounter<int, IntIncrement> Delay(this Counter<int> counter) => new(counter);
 
     /// <summary>
     /// Returns the delayed reporting counter, that reports back to the original counter on the disposal.
     /// </summary>
-    public static ICounter<long> Delay(this Counter<long> counter) => new DelayedCounter<long, LongIncrement>(counter);
+    public static DelayedCounter<long, LongIncrement> Delay(this Counter<long> counter) => new(counter);
 
-    /// <summary>
-    /// A <see cref="Counter{T}"/> like object that sums up all the deltas and reports back on disposal.
-    /// </summary>
-    public interface ICounter<in T> : IDisposable
-        where T : struct
-    {
-        void Add(T delta);
-    }
-
-    private sealed class DelayedCounter<T, TAtomic>(Counter<T>? counter) : ICounter<T>
+    public sealed class DelayedCounter<T, TAtomic>(Counter<T>? counter)
         where T : struct
             where TAtomic : struct, IAtomicIncrement<T>
     {

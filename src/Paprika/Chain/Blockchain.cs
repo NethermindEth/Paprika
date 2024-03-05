@@ -429,7 +429,7 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private PooledSpanDictionary _preCommit = null!;
 
-        private readonly DelayedMetrics.ICounter<long> _xorMissed;
+        private readonly DelayedMetrics.DelayedCounter<long, DelayedMetrics.LongIncrement> _xorMissed;
         private readonly CacheBudget _cacheBudgetStorageAndStage;
         private readonly CacheBudget _cacheBudgetPreCommit;
 
@@ -1049,8 +1049,8 @@ public class Blockchain : IAsyncDisposable
         private readonly PooledSpanDictionary _committed;
 
         private readonly bool _raw;
-        private bool _discarable;
-        private readonly DelayedMetrics.ICounter<long> _xorMissed;
+        private bool _discardable;
+        private readonly DelayedMetrics.DelayedCounter<long, DelayedMetrics.LongIncrement> _xorMissed;
 
         public CommittedBlockState(Xor8 xor, HashSet<Keccak>? destroyed, Blockchain blockchain,
             PooledSpanDictionary committed, Keccak hash, Keccak parentHash,
@@ -1160,7 +1160,7 @@ public class Blockchain : IAsyncDisposable
             _xorMissed.Dispose();
             _committed.Dispose();
 
-            if (_raw == false && _discarable == false)
+            if (_raw == false && _discardable == false)
             {
                 _blockchain.Remove(this);
             }
@@ -1201,7 +1201,7 @@ public class Blockchain : IAsyncDisposable
 
         public void MakeDiscardable()
         {
-            _discarable = true;
+            _discardable = true;
         }
     }
 
