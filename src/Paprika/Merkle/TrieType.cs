@@ -1,4 +1,4 @@
-﻿namespace Paprika.Merkle;
+namespace Paprika.Merkle;
 
 public enum TrieType
 {

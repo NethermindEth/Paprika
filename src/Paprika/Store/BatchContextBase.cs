@@ -1,4 +1,4 @@
-﻿using Paprika.Crypto;
+using Paprika.Crypto;
 
 namespace Paprika.Store;
 

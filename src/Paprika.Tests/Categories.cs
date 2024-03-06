@@ -1,4 +1,4 @@
-﻿namespace Paprika.Tests;
+namespace Paprika.Tests;
 
 public static class Categories
 {

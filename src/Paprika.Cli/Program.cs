@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Paprika.Chain;
 using Paprika.Merkle;
 using Paprika.Store;

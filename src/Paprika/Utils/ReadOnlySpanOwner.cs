@@ -1,4 +1,4 @@
-﻿namespace Paprika.Utils;
+namespace Paprika.Utils;
 
 /// <summary>
 /// Provides a <see cref="ReadOnlySpan{T}"/> under ownership.
@@ -14,8 +14,5 @@ public readonly ref struct ReadOnlySpanOwner<T>(ReadOnlySpan<T> span, IDisposabl
     /// </summary>
     public void Dispose() => owner?.Dispose();
 
-    /// <summary>
-    /// Answers whether this span is owned and provided by <paramref name="owner1"/>.
-    /// </summary>
-    public bool IsOwnedBy(object owner1) => ReferenceEquals(owner1, owner);
+    public bool IsOwnedBy(object potentialOwner) => ReferenceEquals(potentialOwner, owner);
 }

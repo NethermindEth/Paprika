@@ -1,4 +1,4 @@
-﻿using System.Collections.Specialized;
+using System.Collections.Specialized;
 using System.Runtime.CompilerServices;
 using Paprika.Store;
 

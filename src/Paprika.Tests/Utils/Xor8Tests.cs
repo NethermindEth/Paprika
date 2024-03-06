@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Utils;
@@ -10,7 +10,7 @@ public class Xor8Tests
     [TestCase(10000)]
     public void Empty(int count)
     {
-        var filter = new Xor8(Array.Empty<ulong>());
+        var filter = new Xor8(Array.Empty<ulong>().ToHashSet());
 
         const double falsePositiveRatio = 0.1;
         var found = 0;
@@ -33,7 +33,7 @@ public class Xor8Tests
         var keys = new ulong[count];
         TestContext.CurrentContext.Random.NextBytes(MemoryMarshal.Cast<ulong, byte>(keys));
 
-        var filter = new Xor8(keys);
+        var filter = new Xor8(keys.ToHashSet());
 
         foreach (var key in keys)
         {

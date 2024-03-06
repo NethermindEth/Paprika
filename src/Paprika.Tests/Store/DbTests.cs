@@ -1,4 +1,4 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
 using FluentAssertions;
 using Nethermind.Int256;
 using NUnit.Framework;
