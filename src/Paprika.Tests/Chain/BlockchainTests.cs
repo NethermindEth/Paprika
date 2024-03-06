@@ -65,6 +65,7 @@ public class BlockchainTests
     }
 
     [Test]
+    [Explicit("Non parallel")]
     public async Task Delays_reporting_metrics()
     {
         using var listener = new MeterListener();
@@ -105,7 +106,10 @@ public class BlockchainTests
         block.Dispose();
         allow.Reset();
 
-        void Notify() => allow.IsSet.Should().BeTrue();
+        void Notify()
+        {
+            allow.IsSet.Should().BeTrue();
+        }
     }
 
     [Test(Description =

@@ -185,15 +185,26 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     /// <param name="commit">The original commit.</param>
     /// <param name="workItems">The work items.</param>
-    private static void ScatterGather(ICommit commit, IEnumerable<IWorkItem> workItems)
+    private static void ScatterGather(ICommit commit, BuildStorageTriesItem[] workItems)
     {
-        var children = new ConcurrentQueue<IChildCommit>();
+        if (workItems.Length == 0)
+        {
+            return;
+        }
 
-        Parallel.ForEach(workItems,
+        if (workItems.Length == 1)
+        {
+            // Direct work on commit as there are no other interfering work items; 
+            workItems[0].DoWork(commit);
+            return;
+        }
+
+        var children = new ConcurrentQueue<IChildCommit>();
+        Parallel.For(0, workItems.Length,
             commit.GetChild,
-            (workItem, _, child) =>
+            (i, _, child) =>
             {
-                workItem.DoWork(child);
+                workItems[i].DoWork(child);
                 return child;
             },
             children.Enqueue
@@ -225,37 +236,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// <summary>
     /// Builds works items responsible for building up the storage tries.
     /// </summary>
-    private IEnumerable<IWorkItem> GetStorageWorkItems(ICommit commit, CacheBudget budget)
+    private BuildStorageTriesItem[] GetStorageWorkItems(ICommit commit, CacheBudget budget)
     {
-        var sum = commit.Stats.Sum(pair => pair.Value);
-
-        // make 2 more batches than CPU count to allow some balancing
-        var batchBudget = sum / (Environment.ProcessorCount * 2);
-
-        var list = new List<HashSet<Keccak>>();
-        var current = new HashSet<Keccak>();
-        var currentSize = 0;
-
-        foreach (var (key, count) in commit.Stats)
-        {
-            if (count > 0)
-            {
-                current.Add(key);
-                currentSize += count;
-
-                if (currentSize > batchBudget)
-                {
-                    list.Add(current);
-                    currentSize = 0;
-                    current = new HashSet<Keccak>();
-                }
-            }
-        }
-
-        if (current.Count > 0)
-            list.Add(current);
-
-        return list.Select(set => new BuildStorageTriesItem(this, commit, set, budget)).ToArray();
+        return commit.Stats
+            .Where(kvp => kvp.Value > 0)
+            .Select(kvp => new BuildStorageTriesItem(this, commit, kvp.Key, budget))
+            .ToArray();
     }
 
     public ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data)
@@ -1297,16 +1283,16 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     {
         private readonly ComputeMerkleBehavior _behavior;
         private readonly ICommit _parent;
-        private readonly HashSet<Keccak> _accounts;
+        private readonly Keccak _account;
         private readonly CacheBudget _budget;
         private PrefixingCommit? _prefixed;
 
-        public BuildStorageTriesItem(ComputeMerkleBehavior behavior, ICommit parent, HashSet<Keccak> accounts,
+        public BuildStorageTriesItem(ComputeMerkleBehavior behavior, ICommit parent, Keccak account,
             CacheBudget budget)
         {
             _behavior = behavior;
             _parent = parent;
-            _accounts = accounts;
+            _account = account;
             _budget = budget;
             _prefixed = null;
         }
@@ -1314,7 +1300,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         public void DoWork(ICommit commit)
         {
             _prefixed = new PrefixingCommit(commit);
+            _prefixed.SetPrefix(_account);
             _parent.Visit(OnStorage, TrieType.Storage);
+
             CalculateStorageRoots(commit);
         }
 
@@ -1323,20 +1311,18 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             Debug.Assert(key.Type == DataType.StorageCell);
 
             var keccak = key.Path.UnsafeAsKeccak;
-            if (_accounts.Contains(keccak) == false)
+            if (_account != keccak)
             {
                 return;
             }
 
-            _prefixed!.SetPrefix(keccak);
-
             if (value.IsEmpty)
             {
-                Delete(in key.StoragePath, 0, _prefixed, _budget);
+                Delete(in key.StoragePath, 0, _prefixed!, _budget);
             }
             else
             {
-                MarkPathDirty(in key.StoragePath, _prefixed, _budget, TrieType.Storage);
+                MarkPathDirty(in key.StoragePath, _prefixed!, _budget, TrieType.Storage);
             }
         }
 
@@ -1347,37 +1333,32 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
             Span<byte> accountSpan = stackalloc byte[Account.MaxByteCount];
 
-            foreach (var accountAddress in _accounts)
+            // compute new storage root hash
+            var keccakOrRlp = _behavior.Compute(Key.Merkle(NibblePath.Empty),
+                new(_prefixed!, TrieType.Storage, hint, _budget));
+            var storageRoot = new Keccak(keccakOrRlp.Span);
+
+            // Read the existing account from the commit, without the prefix as accounts are not prefixed
+            var key = Key.Account(_account);
+            using var accountOwner = commit.Get(key);
+
+            if (accountOwner.IsEmpty == false)
             {
-                _prefixed.SetPrefix(accountAddress);
+                Account.ReadFrom(accountOwner.Span, out var account);
 
-                // compute new storage root hash
-                var keccakOrRlp = _behavior.Compute(Key.Merkle(NibblePath.Empty),
-                    new(_prefixed, TrieType.Storage, hint, _budget));
-                var storageRoot = new Keccak(keccakOrRlp.Span);
+                // update it
+                account = account.WithChangedStorageRoot(storageRoot);
 
-                // read the existing account
-                var key = Key.Account(accountAddress);
-                using var accountOwner = commit.Get(key);
-
-                if (accountOwner.IsEmpty == false)
-                {
-                    Account.ReadFrom(accountOwner.Span, out var account);
-
-                    // update it
-                    account = account.WithChangedStorageRoot(storageRoot);
-
-                    // set it
-                    commit.Set(key, account.WriteTo(accountSpan));
-                }
-                else
-                {
-                    //see: https://sepolia.etherscan.io/tx/0xb3790025b59b7e31d6d8249e8962234217e0b5b02e47ecb2942b8c4d0f4a3cfe
-                    // Contract is created and destroyed, then its values are destroyed
-                    // The storage root should be empty, otherwise, it's wrong
-                    Debug.Assert(storageRoot == Keccak.EmptyTreeHash,
-                        $"Non-existent account with hash of {accountAddress.ToString()} should have the storage root empty");
-                }
+                // set it in 
+                commit.Set(key, account.WriteTo(accountSpan));
+            }
+            else
+            {
+                //see: https://sepolia.etherscan.io/tx/0xb3790025b59b7e31d6d8249e8962234217e0b5b02e47ecb2942b8c4d0f4a3cfe
+                // Contract is created and destroyed, then its values are destroyed
+                // The storage root should be empty, otherwise, it's wrong
+                Debug.Assert(storageRoot == Keccak.EmptyTreeHash,
+                    $"Non-existent account with hash of {_account.ToString()} should have the storage root empty");
             }
         }
     }
