@@ -1,6 +1,7 @@
 using System.CodeDom.Compiler;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Paprika.Crypto;
@@ -428,6 +429,7 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private PooledSpanDictionary _preCommit = null!;
 
+        private readonly DelayedMetrics.DelayedCounter<long, DelayedMetrics.LongIncrement> _xorMissed;
         private readonly CacheBudget _cacheBudgetStorageAndStage;
         private readonly CacheBudget _cacheBudgetPreCommit;
 
@@ -455,6 +457,8 @@ public class Blockchain : IAsyncDisposable
 
             _cacheBudgetStorageAndStage = blockchain._cacheBudgetStateAndStorage.Build();
             _cacheBudgetPreCommit = blockchain._cacheBudgetPreCommit.Build();
+
+            _xorMissed = _blockchain._bloomMissedReads.Delay();
 
             CreateDictionaries();
         }
@@ -935,7 +939,7 @@ public class Blockchain : IAsyncDisposable
                 return new ReadOnlySpanOwner<byte>(span, this);
             }
 
-            _blockchain._bloomMissedReads.Add(1);
+            _xorMissed.Add(1);
 
             // if destroyed, return false as no previous one will contain it
             if (IsAccountDestroyed(key))
@@ -966,6 +970,7 @@ public class Blockchain : IAsyncDisposable
             _storage.Dispose();
             _preCommit.Dispose();
             _batch.Dispose();
+            _xorMissed.Dispose();
 
             // release all the ancestors
             foreach (var ancestor in _ancestors)
@@ -1044,7 +1049,8 @@ public class Blockchain : IAsyncDisposable
         private readonly PooledSpanDictionary _committed;
 
         private readonly bool _raw;
-        private bool _discarable;
+        private bool _discardable;
+        private readonly DelayedMetrics.DelayedCounter<long, DelayedMetrics.LongIncrement> _xorMissed;
 
         public CommittedBlockState(Xor8 xor, HashSet<Keccak>? destroyed, Blockchain blockchain,
             PooledSpanDictionary committed, Keccak hash, Keccak parentHash,
@@ -1062,6 +1068,8 @@ public class Blockchain : IAsyncDisposable
             Hash = hash;
             ParentHash = parentHash;
             BlockNumber = blockNumber;
+
+            _xorMissed = _blockchain._bloomMissedReads.Delay();
         }
 
         public Keccak ParentHash { get; }
@@ -1119,7 +1127,7 @@ public class Blockchain : IAsyncDisposable
                 return new ReadOnlySpanOwner<byte>(span, this);
             }
 
-            _blockchain._bloomMissedReads.Add(1);
+            _xorMissed.Add(1);
 
             // if destroyed, return false as no previous one will contain it
             if (IsAccountDestroyed(key, destroyedHash))
@@ -1132,19 +1140,27 @@ public class Blockchain : IAsyncDisposable
             return default;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool IsAccountDestroyed(scoped in Key key, ulong destroyed)
         {
             if (_destroyedXor == null || destroyed == NonDestroyable)
                 return false;
 
-            return _destroyedXor.MayContain(destroyed) && _destroyed!.Contains(key.Path.UnsafeAsKeccak);
+            return CheckDestroyed(in key, destroyed);
+
+            [MethodImpl(MethodImplOptions.NoInlining)]
+            bool CheckDestroyed(in Key key, ulong destroyed)
+            {
+                return _destroyedXor.MayContain(destroyed) && _destroyed!.Contains(key.Path.UnsafeAsKeccak);
+            }
         }
 
         protected override void CleanUp()
         {
+            _xorMissed.Dispose();
             _committed.Dispose();
 
-            if (_raw == false && _discarable == false)
+            if (_raw == false && _discardable == false)
             {
                 _blockchain.Remove(this);
             }
@@ -1185,7 +1201,7 @@ public class Blockchain : IAsyncDisposable
 
         public void MakeDiscardable()
         {
-            _discarable = true;
+            _discardable = true;
         }
     }
 

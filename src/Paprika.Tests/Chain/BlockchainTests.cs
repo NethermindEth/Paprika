@@ -1,4 +1,5 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
+using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
 using Nethermind.Int256;
@@ -61,6 +62,54 @@ public class BlockchainTests
         using var block3A = blockchain.StartNew(keccak2A);
 
         block3A.GetAccount(Key0).Should().Be(account1A);
+    }
+
+    [Test]
+    [Explicit("Non parallel")]
+    public async Task Delays_reporting_metrics()
+    {
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, l) => { l.EnableMeasurementEvents(instrument, instrument); };
+        listener.MeasurementsCompleted = (instrument, l) => { listener.DisableMeasurementEvents(instrument); };
+
+        const int spins = 1000;
+
+        var allow = new ManualResetEventSlim(false);
+
+        listener.Start();
+
+        listener.SetMeasurementEventCallback<double>((i, m, l, c) => Notify());
+        listener.SetMeasurementEventCallback<float>((i, m, l, c) => Notify());
+        listener.SetMeasurementEventCallback<long>((i, m, l, c) => Notify());
+        listener.SetMeasurementEventCallback<int>((i, m, l, c) => Notify());
+        listener.SetMeasurementEventCallback<short>((i, m, l, c) => Notify());
+        listener.SetMeasurementEventCallback<byte>((i, m, l, c) => Notify());
+        listener.SetMeasurementEventCallback<decimal>((i, m, l, c) => Notify());
+
+        using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
+
+        allow.Set();
+        await using var blockchain = new Blockchain(db, new PreCommit());
+        allow.Reset();
+
+        var block = blockchain.StartNew(Keccak.EmptyTreeHash);
+        block.SetAccount(Key0, new Account(1, 1));
+
+        for (var i = 0; i < spins; i++)
+        {
+            Keccak k = default;
+            BinaryPrimitives.WriteInt32LittleEndian(k.BytesAsSpan, i);
+            block.GetAccount(k).Should().Be(new Account(0, 0));
+        }
+
+        allow.Set();
+        block.Dispose();
+        allow.Reset();
+
+        void Notify()
+        {
+            allow.IsSet.Should().BeTrue();
+        }
     }
 
     [Test(Description =

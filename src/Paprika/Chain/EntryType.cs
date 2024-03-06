@@ -1,4 +1,4 @@
-﻿namespace Paprika.Chain;
+namespace Paprika.Chain;
 
 /// <summary>
 /// Used as metadata to differentiate between entries stored in blocks. 

@@ -1,4 +1,4 @@
-﻿namespace Paprika.Runner.Pareto;
+namespace Paprika.Runner.Pareto;
 
 public sealed class SingleAsyncGate
 {

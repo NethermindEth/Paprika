@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using HdrHistogram;
 using Paprika.Store;
 using Spectre.Console;

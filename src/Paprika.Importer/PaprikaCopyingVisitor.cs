@@ -1,4 +1,4 @@
-﻿using System.Diagnostics.Metrics;
+using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Nethermind.Core.Crypto;
