@@ -30,6 +30,18 @@ public interface IWorldState : IDisposable
     void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value);
 
     /// <summary>
+    /// Tries to prefetch some data for the <see cref="IPreCommitBehavior"/>. 
+    /// </summary>
+    /// <param name="address">The hash of the address that the storage is written to</param>
+    /// <param name="storage">The storage slot that might be written to.</param>
+    /// <returns>Whether follow-up prefetches should be issued by the caller.</returns>
+    /// <remarks>
+    /// This operation can and should be called from another thread in parallel to other operations in a preparation of calling <see cref="Commit"/>.
+    /// Once <see cref="Commit"/> is called, no more prefetching is possible.
+    /// </remarks>
+    bool TryPrefetchForPreCommit(in Keccak address, in Keccak storage);
+
+    /// <summary>
     /// Commits the block to the chain allowing to build upon it.
     /// Also runs the <see cref="IPreCommitBehavior"/> that the blockchain was configured with.
     /// </summary>

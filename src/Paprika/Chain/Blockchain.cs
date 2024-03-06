@@ -396,6 +396,7 @@ public class Blockchain : IAsyncDisposable
     {
         [ThreadStatic]
         private static HashSet<ulong>? s_bloomCache;
+
         /// <summary>
         /// A simple bloom filter to assert whether the given key was set in a given block, used to speed up getting the keys.
         /// </summary>
@@ -428,6 +429,14 @@ public class Blockchain : IAsyncDisposable
         /// It's both storage & state as it's metadata for the pre-commit behavior.
         /// </summary>
         private PooledSpanDictionary _preCommit = null!;
+
+        /// <summary>
+        /// The dictionary used for the prefetching for <see cref="IPreCommitBehavior"/>.
+        /// </summary>
+        private volatile object? _preCommitPrefetch;
+
+        private static readonly object PreCommitPrefetchDone = new();
+        private readonly object _preCommitPrefetchLock = new();
 
         private readonly DelayedMetrics.DelayedCounter<long, DelayedMetrics.LongIncrement> _xorMissed;
         private readonly CacheBudget _cacheBudgetStorageAndStage;
@@ -469,28 +478,68 @@ public class Blockchain : IAsyncDisposable
             CreateDict(ref _storage, Pool);
             CreateDict(ref _preCommit, Pool);
             return;
+        }
 
-            // as pre-commit can use parallelism, make the pooled dictionaries concurrent friendly:
-            // 1. make the dictionary preserve once written values, which means that it can repeatedly read and set without worrying of ordering operations
-            // 2. set dictionary so that it allows concurrent readers
-            static void CreateDict(ref PooledSpanDictionary dict, BufferPool pool)
+        // as pre-commit can use parallelism, make the pooled dictionaries concurrent friendly:
+        // 1. make the dictionary preserve once written values, which means that it can repeatedly read and set without worrying of ordering operations
+        // 2. set dictionary so that it allows concurrent readers
+        private static void CreateDict(ref PooledSpanDictionary dict, BufferPool pool)
+        {
+            // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
+            // ReSharper disable once UseNullPropagation
+            if (dict != null)
             {
-                // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
-                // ReSharper disable once UseNullPropagation
-                if (dict != null)
-                {
-                    // dispose previous
-                    dict.Dispose();
-                }
-
-                dict = new PooledSpanDictionary(pool, true);
+                // dispose previous
+                dict.Dispose();
             }
+
+            dict = new PooledSpanDictionary(pool, true);
         }
 
         public Keccak ParentHash { get; }
 
+        public bool TryPrefetchForPreCommit(in Keccak address, in Keccak storage)
+        {
+            var behavior = _blockchain._preCommit;
+            if (behavior.CanPrefetch == false)
+            {
+                return false;
+            }
+
+            // ReSharper disable once InconsistentlySynchronizedField
+            if (ReferenceEquals(_preCommitPrefetch, PreCommitPrefetchDone))
+            {
+                return false;
+            }
+
+            lock (_preCommitPrefetchLock)
+            {
+                if (ReferenceEquals(_preCommitPrefetch, PreCommitPrefetchDone))
+                {
+                    // Prefetching ended, return
+                    return false;
+                }
+
+                PooledSpanDictionary prefetch = null!;
+
+                if (_preCommitPrefetch == null)
+                {
+                    // Prefetching not started, start
+                    CreateDict(ref prefetch, Pool);
+                    _preCommitPrefetch = prefetch;
+                }
+                else
+                {
+                    prefetch = (PooledSpanDictionary)_preCommitPrefetch;
+                }
+
+                behavior.Prefetch(address, storage, prefetch, _cacheBudgetPreCommit);
+                return true;
+            }
+        }
+
         /// <summary>
-        /// Commits the block to the block chain.
+        /// Commits the block to the blockchain.
         /// </summary>
         public Keccak Commit(uint blockNumber)
         {
@@ -500,6 +549,18 @@ public class Blockchain : IAsyncDisposable
                 var percentage = (double)_cacheBudgetStorageAndStage.BudgetLeft / total * 100;
                 _blockchain._transientCacheUsage.Record((int)percentage);
             }
+
+            PooledSpanDictionary? prefetched;
+
+            // Apply and end prefetching
+            lock (_preCommitPrefetchLock)
+            {
+                prefetched = _preCommitPrefetch as PooledSpanDictionary;
+                _preCommitPrefetch = PreCommitPrefetchDone;
+            }
+
+            prefetched?.CopyTo(_preCommit, b => true);
+            prefetched?.Dispose();
 
             var committed = CommitImpl(blockNumber, false);
 
@@ -969,6 +1030,7 @@ public class Blockchain : IAsyncDisposable
             _state.Dispose();
             _storage.Dispose();
             _preCommit.Dispose();
+            _preCommitPrefetch.Dispose();
             _batch.Dispose();
             _xorMissed.Dispose();
 

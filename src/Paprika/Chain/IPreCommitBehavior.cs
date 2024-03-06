@@ -40,6 +40,19 @@ public interface IPreCommitBehavior
     void OnAccountDestroyed(in Keccak address, ICommit commit)
     {
     }
+
+    /// <summary>
+    /// Whether the pre-commit can prefetch data.
+    /// </summary>
+    bool CanPrefetch => false;
+
+    /// <summary>
+    /// Executed the prefetch for <paramref name="address"/> and <paramref name="storage"/>
+    /// to <paramref name="prefetch"/> dictionary.
+    /// </summary>
+    void Prefetch(in Keccak address, in Keccak storage, PooledSpanDictionary prefetch, CacheBudget budget)
+    {
+    }
 }
 
 /// <summary>

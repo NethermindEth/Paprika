@@ -75,32 +75,73 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             "How long it takes to process Merkle total");
     }
 
+    public bool CanPrefetch => true;
+
     /// <summary>
-    /// Calculates state root hash, passing through all the account and storage tries and building a new value
-    /// that is not based on any earlier calculation. It's time consuming.
+    /// Executed the prefetch for <paramref name="address"/> and <paramref name="storage"/>
+    /// to <paramref name="prefetch"/> dictionary.
     /// </summary>
-    public Keccak CalculateStateRootHash(IReadOnlyWorldState commit)
+    public void Prefetch(in Keccak address, in Keccak storage, PooledSpanDictionary prefetch, CacheBudget budget)
     {
-        const ComputeHint hint = ComputeHint.ForceStorageRootHashRecalculation | ComputeHint.SkipCachedInformation;
-        var wrapper = new CommitWrapper(commit, true);
+        Span<byte> span = stackalloc byte[33];
 
-        var root = Key.Merkle(NibblePath.Empty);
-        var value = Compute(in root,
-            new ComputeContext(wrapper, TrieType.State, hint, CacheBudget.Options.None.Build()));
-        return new Keccak(value.Span);
-    }
+        var accountPath = NibblePath.FromKey(address);
+        var storagePath = NibblePath.FromKey(storage);
 
-    public Keccak CalculateStorageHash(IReadOnlyWorldState commit, in Keccak account, NibblePath storagePath = default)
-    {
-        const ComputeHint hint = ComputeHint.DontUseParallel | ComputeHint.SkipCachedInformation;
-        var prefixed = new PrefixingCommit(new CommitWrapper(commit));
-        prefixed.SetPrefix(account);
+        for (var i = 0; i <= storagePath.Length; i++)
+        {
+            var slice = storagePath.SliceTo(i);
+            var key = Key.Raw(accountPath, DataType.Merkle, slice);
+            var leftoverPath = path.SliceFrom(i);
 
-        var root = Key.Merkle(storagePath);
-        var value = Compute(in root,
-            new ComputeContext(prefixed, TrieType.Storage, hint, CacheBudget.Options.None.Build()));
-        return new Keccak(value.Span);
-    }
+            // The creation of the leaf is forced, create and return.
+            if (createLeaf)
+            {
+                commit.SetLeaf(key, leftoverPath);
+                return;
+            }
+
+            // Query for the node
+            using var owner = commit.Get(key);
+            if (owner.IsEmpty)
+            {
+                // No value set now, create one.
+                commit.SetLeaf(key, leftoverPath);
+                return;
+            }
+
+            // read the existing one
+            var leftover = Node.ReadFrom(out var type, out var leaf, out var ext, out var branch, owner.Span);
+            switch (type)
+            {
+            }
+
+            /// <summary>
+            /// Calculates state root hash, passing through all the account and storage tries and building a new value
+            /// that is not based on any earlier calculation. It's time consuming.
+            /// </summary>
+            public Keccak CalculateStateRootHash(IReadOnlyWorldState commit)
+            {
+                const ComputeHint hint = ComputeHint.ForceStorageRootHashRecalculation | ComputeHint.SkipCachedInformation;
+                var wrapper = new CommitWrapper(commit, true);
+
+                var root = Key.Merkle(NibblePath.Empty);
+                var value = Compute(in root,
+                    new ComputeContext(wrapper, TrieType.State, hint, CacheBudget.Options.None.Build()));
+                return new Keccak(value.Span);
+            }
+
+            public Keccak CalculateStorageHash(IReadOnlyWorldState commit, in Keccak account, NibblePath storagePath = default)
+            {
+                const ComputeHint hint = ComputeHint.DontUseParallel | ComputeHint.SkipCachedInformation;
+                var prefixed = new PrefixingCommit(new CommitWrapper(commit));
+                prefixed.SetPrefix(account);
+
+                var root = Key.Merkle(storagePath);
+                var value = Compute(in root,
+                    new ComputeContext(prefixed, TrieType.Storage, hint, CacheBudget.Options.None.Build()));
+                return new Keccak(value.Span);
+            }
 
     class CommitWrapper : IChildCommit
     {
@@ -908,7 +949,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     {
         return pathLength == NibblePath.KeccakNibbleCount;
     }
-
 
     /// <summary>
     /// Transforms the extension either to a <see cref="Node.Type.Leaf"/> or to a longer <see cref="Node.Type.Extension"/>.
