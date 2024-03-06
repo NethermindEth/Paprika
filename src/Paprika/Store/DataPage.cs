@@ -42,7 +42,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
         if (isDelete)
         {
-            // If it's a delete and a key is empty or there's no child page, delete in-situ
+            // If it's a deletion and a key is empty or there's no child page, delete in-situ
             if (key.IsEmpty || Data.Buckets[key.FirstNibble].IsNull)
             {
                 // Empty key can be deleted only in-situ
@@ -51,7 +51,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             }
         }
 
-        // Try write in map
+        // Try to write in the map
         if (map.TrySet(key, data))
         {
             return page;
@@ -98,7 +98,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             if (key.FirstNibble != nibble)
                 continue;
 
-            var sliced = key.SliceFrom(1);
+            var sliced = key.SliceFrom(ConsumedNibbles);
 
             destination = destination.Header.PageType == PageType.Leaf
                 ? new LeafPage(destination).Set(sliced, item.RawData, batch)

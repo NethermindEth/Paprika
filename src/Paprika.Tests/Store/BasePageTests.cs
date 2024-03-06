@@ -63,13 +63,38 @@ public abstract class BasePageTests
                 .BeTrue("Page should not be registered as reusable before");
         }
 
+        public Page[] FindOlderThan(uint batchId)
+        {
+            var older = _address2Page
+                .Where(kvp => kvp.Value.Header.BatchId < batchId)
+                .Select(kvp => kvp.Value)
+                .ToArray();
+
+            Array.Sort(older, (a, b) => a.Header.BatchId.CompareTo(b.Header.BatchId));
+            return older;
+        }
+
         public override Dictionary<Keccak, uint> IdCache { get; } = new();
 
         public override string ToString() => $"Batch context used {_pageCount} pages to write the data";
 
         public TestBatchContext Next()
         {
-            var next = new TestBatchContext(BatchId + 1, new Stack<DbAddress>(_toReuse));
+            var set = new HashSet<DbAddress>();
+
+            // push these to reuse
+            foreach (var addr in _toReuse)
+            {
+                set.Add(addr).Should().BeTrue();
+            }
+
+            // push reusable leftovers from this 
+            foreach (var addr in _reusable)
+            {
+                set.Add(addr).Should().BeTrue();
+            }
+
+            var next = new TestBatchContext(BatchId + 1, new Stack<DbAddress>(set));
 
             // remember the mapping
             foreach (var (addr, page) in _address2Page)

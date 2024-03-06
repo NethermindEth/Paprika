@@ -33,7 +33,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             return page;
         }
 
-        var count = Data.Buckets.LastIndexOfAnyExcept(DbAddress.Null);
+        var count = Data.Buckets.LastIndexOfAnyExcept(DbAddress.Null) + 1;
         if (count == 0)
         {
             // No overflow, allocate, move all, set in page
