@@ -33,41 +33,39 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             return page;
         }
 
+        // The map is full, try flush to the existing buckets
         var count = Data.Buckets.LastIndexOfAnyExcept(DbAddress.Null) + 1;
+
         if (count == 0)
         {
-            // No overflow, allocate, move all, set in page
-            AllocateAndFlushToBucket(batch, ref Data.Buckets[0]);
-
-            if (Map.TrySet(key, data) == false)
-            {
-                throw new Exception("Impossible. There should be space in this map");
-            }
-
-            return page;
+            // No overflow, create one
+            AllocOverflow(batch, out Data.Buckets[0]);
+            count++;
         }
 
-        // Some overflow pages exist, flush down to existing
+        // Ensure writable copies of overflows are out there
         Span<LeafOverflowPage> overflows = stackalloc LeafOverflowPage[count];
         for (var i = 0; i < count; i++)
         {
             overflows[i] = new LeafOverflowPage(batch.EnsureWritableCopy(ref Data.Buckets[i]));
         }
 
-        // Fill up existing overflow pages
         foreach (var item in Map.EnumerateAll())
         {
+            // Delete the key, from all of them so that duplicates are not there
+            foreach (var overflow in overflows)
+            {
+                overflow.Map.Delete(item.Key);
+            }
+
             var isDelete = item.RawData.Length == 0;
             if (isDelete)
             {
-                foreach (var overflow in overflows)
-                {
-                    overflow.Map.Delete(item.Key);
-                }
-
                 Map.Delete(item);
                 continue;
             }
+
+            // This is not a deletion, need to try to set it
 
             var set = false;
             foreach (var overflow in overflows)
@@ -96,11 +94,10 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         // Allocate a new bucket, and write
         if (count < BucketCount)
         {
-            AllocateAndFlushToBucket(batch, ref Data.Buckets[count]);
-            if (Map.TrySet(key, data))
-            {
-                return page;
-            }
+            AllocOverflow(batch, out Data.Buckets[count]);
+
+            // New bucket added, try to add again
+            return Set(key, data, batch);
         }
 
         // This page is filled, move everything down. Start by registering for the reuse all the pages.
@@ -140,23 +137,6 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         return dataPage.Set(key, data, batch);
     }
 
-    private void AllocateAndFlushToBucket(IBatchContext batch, ref DbAddress bucket)
-    {
-        Debug.Assert(bucket.IsNull);
-
-        var overflow = AllocOverflow(batch, out bucket);
-        foreach (var item in Map.EnumerateAll())
-        {
-            if (!overflow.Map.TrySet(item.Key, item.RawData))
-            {
-                // Was not able to set, break
-                break;
-            }
-
-            Map.Delete(item);
-        }
-    }
-
     private LeafOverflowPage AllocOverflow(IBatchContext batch, out DbAddress addr)
     {
         var newPage = batch.GetNewPage(out addr, true);
@@ -165,7 +145,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         return new LeafOverflowPage(newPage);
     }
 
-    private const int BucketCount = 4;
+    private const int BucketCount = 6;
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Payload
