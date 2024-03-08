@@ -11,6 +11,9 @@ public class SlottedArrayTests
 
     private static ReadOnlySpan<byte> Data2 => new byte[] { 37, 39 };
 
+    private static ReadOnlySpan<byte> Data3 => new byte[] { 31, 41 };
+    private static ReadOnlySpan<byte> Data4 => new byte[] { 23, 24, 25 };
+
     [Test]
     public void Set_Get_Delete_Get_AnotherSet()
     {
@@ -37,18 +40,27 @@ public class SlottedArrayTests
         Span<byte> span = stackalloc byte[256];
         var map = new SlottedArray(span);
 
-        var key0 = Span<byte>.Empty;
+        var key0 = NibblePath.Empty;
         var key1 = NibblePath.FromKey(stackalloc byte[1] { 7 }).SliceFrom(odd);
         var key2 = NibblePath.FromKey(stackalloc byte[2] { 7, 13 }).SliceFrom(odd);
+        var key3 = NibblePath.FromKey(stackalloc byte[3] { 7, 13, 31 }).SliceFrom(odd);
+        var key4 = NibblePath.FromKey(stackalloc byte[4] { 7, 13, 31, 41 }).SliceFrom(odd);
 
         map.SetAssert(key0, Data0);
         map.SetAssert(key1, Data1);
         map.SetAssert(key2, Data2);
+        map.SetAssert(key3, Data3);
+        map.SetAssert(key4, Data4);
+
+        map.GetAssert(key0, Data0);
+        map.GetAssert(key1, Data1);
+        map.GetAssert(key2, Data2);
+        map.GetAssert(key4, Data4);
 
         using var e = map.EnumerateAll();
 
         e.MoveNext().Should().BeTrue();
-        e.Current.Key.RawSpan.SequenceEqual(key0).Should().BeTrue();
+        e.Current.Key.Equals(key0).Should().BeTrue();
         e.Current.RawData.SequenceEqual(Data0).Should().BeTrue();
 
         e.MoveNext().Should().BeTrue();
@@ -58,6 +70,14 @@ public class SlottedArrayTests
         e.MoveNext().Should().BeTrue();
         e.Current.Key.Equals(key2).Should().BeTrue();
         e.Current.RawData.SequenceEqual(Data2).Should().BeTrue();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Equals(key3).Should().BeTrue();
+        e.Current.RawData.SequenceEqual(Data3).Should().BeTrue();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Equals(key4).Should().BeTrue();
+        e.Current.RawData.SequenceEqual(Data4).Should().BeTrue();
 
         e.MoveNext().Should().BeFalse();
     }
@@ -216,6 +236,13 @@ file static class FixedMapTestExtensions
         map.TryGet(NibblePath.FromKey(key), out var actual).Should().BeTrue();
         actual.SequenceEqual(expected).Should().BeTrue("Actual data should equal expected");
     }
+
+    public static void GetAssert(this SlottedArray map, in NibblePath key, ReadOnlySpan<byte> expected)
+    {
+        map.TryGet(key, out var actual).Should().BeTrue();
+        actual.SequenceEqual(expected).Should().BeTrue("Actual data should equal expected");
+    }
+
 
     public static void GetShouldFail(this SlottedArray map, in ReadOnlySpan<byte> key)
     {
