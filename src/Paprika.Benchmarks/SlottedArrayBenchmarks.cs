@@ -7,13 +7,15 @@ namespace Paprika.Benchmarks;
 
 public class SlottedArrayBenchmarks
 {
-    private readonly byte[] _writtenData = new byte[Page.PageSize];
+    private readonly byte[] _writtenLittleEndian = new byte[Page.PageSize];
+    private readonly byte[] _writtenBigEndian = new byte[Page.PageSize];
     private readonly byte[] _writable = new byte[Page.PageSize];
     private readonly int _to;
 
     public SlottedArrayBenchmarks()
     {
-        var map = new SlottedArray(_writtenData);
+        var little = new SlottedArray(_writtenLittleEndian);
+        var big = new SlottedArray(_writtenBigEndian);
 
         Span<byte> key = stackalloc byte[4];
 
@@ -21,7 +23,14 @@ public class SlottedArrayBenchmarks
         while (true)
         {
             BinaryPrimitives.WriteInt32LittleEndian(key, _to);
-            if (map.TrySet(NibblePath.FromKey(key), key) == false)
+            if (little.TrySet(NibblePath.FromKey(key), key) == false)
+            {
+                // filled
+                break;
+            }
+
+            BinaryPrimitives.WriteInt32BigEndian(key, _to);
+            if (big.TrySet(NibblePath.FromKey(key), key) == false)
             {
                 // filled
                 break;
@@ -55,9 +64,9 @@ public class SlottedArrayBenchmarks
     }
 
     [Benchmark]
-    public int Read_existing_keys()
+    public int Read_existing_keys_prefix_different()
     {
-        var map = new SlottedArray(_writtenData);
+        var map = new SlottedArray(_writtenLittleEndian);
         Span<byte> key = stackalloc byte[4];
 
         var result = 0;
@@ -76,9 +85,30 @@ public class SlottedArrayBenchmarks
     }
 
     [Benchmark]
+    public int Read_existing_keys_suffix_different()
+    {
+        var map = new SlottedArray(_writtenBigEndian);
+        Span<byte> key = stackalloc byte[4];
+
+        var result = 0;
+
+        // find all values
+        for (var i = 0; i < _to; i++)
+        {
+            BinaryPrimitives.WriteInt32BigEndian(key, i);
+            if (map.TryGet(NibblePath.FromKey(key), out var data))
+            {
+                result += data.Length;
+            }
+        }
+
+        return result;
+    }
+
+    [Benchmark]
     public int Read_nonexistent_keys()
     {
-        var map = new SlottedArray(_writtenData);
+        var map = new SlottedArray(_writtenLittleEndian);
         Span<byte> key = stackalloc byte[4];
 
         var result = 0;
