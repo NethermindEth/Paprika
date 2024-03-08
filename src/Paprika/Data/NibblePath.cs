@@ -278,6 +278,34 @@ public readonly ref struct NibblePath
         return appended;
     }
 
+    /// <summary>
+    /// Appends the <see cref="other1"/> and then <see cref="other2"/> path using the <paramref name="workingSet"/> as the working memory.
+    /// </summary>
+    public NibblePath Append(scoped in NibblePath other1, scoped in NibblePath other2, Span<byte> workingSet)
+    {
+        if (workingSet.Length <= MaxByteLength)
+        {
+            throw new ArgumentException("Not enough memory to append");
+        }
+
+        // TODO: do a ref comparison with Unsafe, if the same, no need to copy!
+        WriteTo(workingSet);
+
+        var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(Length + other1.Length + other2.Length));
+
+        for (var i = 0; i < other1.Length; i++)
+        {
+            appended.UnsafeSetAt(Length + i, 0, other1[i]);
+        }
+
+        for (var i = 0; i < other2.Length; i++)
+        {
+            appended.UnsafeSetAt(Length + other1.Length + i, 0, other2[i]);
+        }
+
+        return appended;
+    }
+
     public byte FirstNibble => (byte)((_span >> ((1 - _odd) * NibbleShift)) & NibbleMask);
 
     private static int GetSpanLength(byte length, int odd) => (length + 1 + odd) / 2;

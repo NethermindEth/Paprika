@@ -489,7 +489,10 @@ public readonly ref struct SlottedArray
         private const byte KeyEmptyPreamble = 0b000;
         private const byte KeyPreambleOddBit = 0b0001;
         private const byte KeyPreambleLengthShift = 1;
+
         private const byte KeyPreambleMaxEncodedLength = 4;
+        private const byte KeySlice = 2;
+
         private const int HashByteShift = 8;
 
         public bool HasAtLeastOneNibble => KeyPreamble != KeyEmptyPreamble;
@@ -537,7 +540,7 @@ public readonly ref struct SlottedArray
                 preamble = (byte)((length << KeyPreambleLengthShift) | oddBit);
                 trimmed = NibblePath.Empty;
 
-                switch (key.Length)
+                switch (length)
                 {
                     // produce hashes aligned with NibblePath ordering
                     case 0:
@@ -558,11 +561,11 @@ public readonly ref struct SlottedArray
 
             // The path is 4 nibbles or longer
             preamble = (byte)(PreambleWithKeyBytes | oddBit);
-            trimmed = key.SliceFrom(KeyPreambleMaxEncodedLength);
+            trimmed = key.SliceFrom(KeySlice).SliceTo(length - KeyPreambleMaxEncodedLength);
 
             // Extract first 4 nibbles as the hash
             return (ushort)((((key.GetAt(0) << shift) | key.GetAt(1)) << HashByteShift) |
-                            (key.GetAt(2) << shift) | key.GetAt(3));
+                            (key.GetAt(length - 2) << shift) | key.GetAt(length - 1));
         }
 
         public static NibblePath UnPrepareKey(ReadOnlySpan<byte> input, ushort hash, byte preamble, Span<byte> workingSet,
@@ -598,12 +601,15 @@ public readonly ref struct SlottedArray
                     workingSet[1] = (byte)(hash & 0xFF);
                     return NibblePath.FromKey(span).SliceTo(4).UnsafeMakeOdd(odd);
                 default:
-                    data = input;
-                    workingSet[0] = (byte)(hash >> HashByteShift);
-                    workingSet[1] = (byte)(hash & 0xFF);
-                    var prefix = NibblePath.FromKey(span).SliceTo(4).UnsafeMakeOdd(odd);
                     data = NibblePath.ReadFrom(input, out var trimmed);
-                    return prefix.Append(trimmed, workingSet[limit..]);
+
+                    workingSet[0] = (byte)(hash >> HashByteShift);
+                    var prefix = NibblePath.FromKey(span).SliceTo(KeySlice).UnsafeMakeOdd(odd); // moving odd can make move beyond 0th
+
+                    var suffixValue = (byte)(hash & 0xFF);
+                    var suffix = NibblePath.FromKey(MemoryMarshal.CreateSpan(ref suffixValue, 1));
+
+                    return prefix.Append(trimmed, suffix, workingSet[limit..]);
             }
         }
     }
