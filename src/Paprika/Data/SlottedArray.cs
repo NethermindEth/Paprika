@@ -447,6 +447,11 @@ public readonly ref struct SlottedArray
         return _data.Slice(slot.ItemAddress, length);
     }
 
+    /// <summary>
+    /// Exposes <see cref="Slot.PrepareKey"/> for tests only.
+    /// </summary>
+    public static ushort HashForTests(in NibblePath key) => Slot.PrepareKey(key, out _, out _);
+
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Slot
     {

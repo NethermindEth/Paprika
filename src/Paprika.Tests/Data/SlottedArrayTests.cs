@@ -1,5 +1,6 @@
 ﻿using FluentAssertions;
 using NUnit.Framework;
+using Paprika.Crypto;
 using Paprika.Data;
 
 namespace Paprika.Tests.Data;
@@ -166,50 +167,59 @@ public class SlottedArrayTests
             map.GetAssert(key, value);
         }
     }
-    //
-    // [Test]
-    // public void Hashing()
-    // {
-    //     var hashes = new Dictionary<ushort, string>();
-    //
-    //     // empty
-    //     Unique(ReadOnlySpan<byte>.Empty);
-    //
-    //     // single byte
-    //     Unique(stackalloc byte[] { 1 });
-    //     Unique(stackalloc byte[] { 2 });
-    //     Unique(stackalloc byte[] { 16 });
-    //     Unique(stackalloc byte[] { 17 });
-    //
-    //
-    //     // two bytes
-    //     Unique(stackalloc byte[] { 0xA, 0xC });
-    //     Unique(stackalloc byte[] { 0xA, 0xB });
-    //     Unique(stackalloc byte[] { 0xB, 0xC });
-    //
-    //     // three bytes
-    //     Unique(stackalloc byte[] { 0xA, 0xD, 0xC });
-    //     Unique(stackalloc byte[] { 0xAA, 0xEE, 0xCC });
-    //     Unique(stackalloc byte[] { 0xAA, 0xFF, 0xCC });
-    //
-    //     // three bytes
-    //     Unique(stackalloc byte[] { 0xAA, 0xDD, 0xCC, 0x11 });
-    //     Unique(stackalloc byte[] { 0xAA, 0xEE, 0xCC, 0x11 });
-    //     Unique(stackalloc byte[] { 0xAA, 0xFF, 0xCC, 0x11 });
-    //
-    //     return;
-    //
-    //     void Unique(in ReadOnlySpan<byte> key)
-    //     {
-    //         var hash = SlottedArray.PrepareKey(NibblePath.FromKey(key));
-    //         var hex = key.ToHexString(true);
-    //
-    //         if (hashes.TryAdd(hash, hex) == false)
-    //         {
-    //             Assert.Fail($"The hash for {hex} is the same as for {hashes[hash]}");
-    //         }
-    //     }
-    // }
+
+    [Test]
+    public void Hashing()
+    {
+        var hashes = new Dictionary<ushort, string>();
+
+        // empty
+        Unique("");
+
+        // single nibble
+        Unique("A");
+        Unique("B");
+        Unique("C");
+        Unique("7");
+
+        // two nibbles
+        Unique("AC");
+        Unique("AB");
+        Unique("BC");
+
+        // three nibbles
+        Unique("ADC");
+        Unique("AEB");
+        Unique("BEC");
+
+        // four nibbles
+        Unique("ADC1");
+        Unique("AEB1");
+        Unique("BEC1");
+
+        // 5 nibbles, with last changed
+        Unique("AD0C2");
+        Unique("AE0B2");
+        Unique("BE0C2");
+
+        // 6 nibbles, with last changed
+        Unique("AD00C3");
+        Unique("AE00B3");
+        Unique("BE00C3");
+
+        return;
+
+        void Unique(string key)
+        {
+            var path = NibblePath.Parse(key);
+            var hash = SlottedArray.HashForTests(path);
+
+            if (hashes.TryAdd(hash, key) == false)
+            {
+                Assert.Fail($"The hash for {key} is the same as for {hashes[hash]}");
+            }
+        }
+    }
 }
 
 file static class FixedMapTestExtensions
