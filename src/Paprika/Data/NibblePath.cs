@@ -519,7 +519,7 @@ public readonly ref struct NibblePath
     }
     public bool StartsWith(in NibblePath other)
     {
-        return FindFirstDifferentNibble(other) > 0;
+        return FindFirstDifferentNibble(other) == Length;
     }
     public override int GetHashCode()
     {

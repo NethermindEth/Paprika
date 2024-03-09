@@ -108,7 +108,7 @@ public readonly unsafe struct StorageFanOutPage<TNext>(Page page) : IPageWithDat
         {
             // the page is from another batch, meaning, it's readonly. Copy
             var writable = batch.GetWritableCopy(page);
-            return new StorageFanOutPage<TNext>(writable).Set(prefix, ReadOnlySpan<byte>.Empty, batch);
+            return new StorageFanOutPage<TNext>(writable).Destroy(batch, prefix);
         }
 
         // Destroy the Id entry about it
