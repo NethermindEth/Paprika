@@ -1,4 +1,4 @@
-﻿using Paprika.Crypto;
+using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Utils;

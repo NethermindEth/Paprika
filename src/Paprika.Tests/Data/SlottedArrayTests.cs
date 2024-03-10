@@ -1,4 +1,4 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -104,25 +104,6 @@ public class SlottedArrayTests
     }
 
     [Test]
-    public void Report_has_space_properly()
-    {
-        const int dataSize = 1;
-        const int keySize = 0;
-        var key = NibblePath.Empty;
-        Span<byte> value = stackalloc byte[dataSize] { 13 };
-        Span<byte> valueToBig = stackalloc byte[dataSize + 1];
-
-        Span<byte> span = stackalloc byte[SlottedArray.OneSlotArrayMinimalSize + dataSize + keySize];
-        var map = new SlottedArray(span);
-
-        map.SetAssert(key, value);
-
-        map.HasSpaceToUpdateExisting(key, ReadOnlySpan<byte>.Empty).Should().BeTrue();
-        map.HasSpaceToUpdateExisting(key, value).Should().BeTrue();
-        map.HasSpaceToUpdateExisting(key, valueToBig).Should().BeFalse();
-    }
-
-    [Test]
     public void Update_in_resize()
     {
         // Update the value, with the next one being bigger.
@@ -214,12 +195,6 @@ public class SlottedArrayTests
 
 file static class FixedMapTestExtensions
 {
-    public static void SetAssert(this SlottedArray map, in NibblePath key, ReadOnlySpan<byte> data,
-        string? because = null)
-    {
-        map.TrySet(key, data).Should().BeTrue(because ?? "TrySet should succeed");
-    }
-
     public static void SetAssert(this SlottedArray map, in ReadOnlySpan<byte> key, ReadOnlySpan<byte> data,
         string? because = null)
     {

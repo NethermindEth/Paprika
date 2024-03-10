@@ -1,4 +1,4 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
 using FluentAssertions;
 using JetBrains.dotMemoryUnit;
 using NUnit.Framework;

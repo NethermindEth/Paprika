@@ -1,13 +1,18 @@
-﻿using Paprika.Crypto;
+using Paprika.Crypto;
 
 namespace Paprika.Store;
 
 /// <summary>
 /// The base class for all context implementations.
 /// </summary>
-abstract class BatchContextBase(uint batchId) : IBatchContext
+abstract class BatchContextBase : IBatchContext
 {
-    public uint BatchId { get; } = batchId;
+    protected BatchContextBase(uint batchId)
+    {
+        BatchId = batchId;
+    }
+
+    public uint BatchId { get; }
 
     public abstract Page GetAt(DbAddress address);
 

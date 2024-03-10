@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.IO.Hashing;
 using System.Numerics;
 using System.Runtime.CompilerServices;

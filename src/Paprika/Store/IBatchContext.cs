@@ -1,6 +1,5 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using Paprika.Crypto;
-using Paprika.Utils;
 
 namespace Paprika.Store;
 

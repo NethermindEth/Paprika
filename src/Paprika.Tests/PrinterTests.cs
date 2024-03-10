@@ -1,4 +1,4 @@
-﻿using Nethermind.Int256;
+using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Data;
 using Paprika.Store;

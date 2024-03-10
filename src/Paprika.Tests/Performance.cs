@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Chain;

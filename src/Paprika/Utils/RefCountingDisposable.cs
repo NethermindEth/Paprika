@@ -1,4 +1,7 @@
-﻿namespace Paprika.Utils;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+
+namespace Paprika.Utils;
 
 /// <summary>
 /// Provides a component that can be disposed multiple times and runs <see cref="CleanUp"/> only on the last dispose. 
@@ -20,6 +23,13 @@ public abstract class RefCountingDisposable : IDisposable
     public void AcquireLease()
     {
         if (TryAcquireLease() == false)
+        {
+            ThrowCouldNotAcquire();
+        }
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowCouldNotAcquire()
         {
             throw new Exception("The lease cannot be acquired");
         }

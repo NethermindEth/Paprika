@@ -18,6 +18,7 @@ namespace Paprika.Data;
 /// </remarks>
 public readonly ref struct NibblePath
 {
+    public const int MaxLengthValue = byte.MaxValue / 2 + 2;
     public const int NibblePerByte = 2;
     public const int NibbleShift = 8 / NibblePerByte;
     public const int NibbleMask = 15;
@@ -288,17 +289,18 @@ public readonly ref struct NibblePath
     /// </summary>
     public static byte ReadFirstNibble(ReadOnlySpan<byte> source)
     {
-        var b = source[0];
-        var odd = OddBit & b;
+        // Access the second byte first as then the range check is already done on the first.
+        var doubleNibble = (int)source[PreambleLength];
+        var metaData = source[0];
+        var odd = OddBit & metaData;
 
         // inlined: GetShift
-        return (byte)((source[PreambleLength] >> ((1 - odd) * NibbleShift)) & NibbleMask);
+        return (byte)((doubleNibble >> ((1 - odd) * NibbleShift)) & NibbleMask);
     }
 
     public int FindFirstDifferentNibble(in NibblePath other)
     {
         var length = Math.Min(other.Length, Length);
-
         if (length == 0)
         {
             // special case, empty is different at zero
@@ -309,116 +311,72 @@ public readonly ref struct NibblePath
         {
             // The most common case in Trie.
             // As paths will start on the same level, the odd will be encoded same way for them.
-            // This means that an urolled version can be used.
+            // This means that an unrolled version can be used.
+
+            ref var left = ref _span;
+            ref var right = ref other._span;
 
             var position = 0;
-
-            ref var a = ref _span;
-            ref var b = ref other._span;
-
-            var isOdd = (_odd & OddBit) == OddBit;
-
+            var isOdd = (_odd & OddBit) != 0;
             if (isOdd)
             {
-                if ((a & NibbleMask) != (b & NibbleMask))
+                // This means first byte is not a whole byte
+                if ((left & NibbleMask) != (right & NibbleMask))
                 {
+                    // First nibble differs
                     return 0;
                 }
 
-                // move by 1
-                a = ref Unsafe.Add(ref a, 1);
-                b = ref Unsafe.Add(ref b, 1);
+                // Equal so start comparing at next byte
                 position = 1;
             }
 
-            // oddity aligned, move in large jumps
-            // long
-            const int longJump = 8;
-            while (position + longJump * NibblePerByte < length)
+            // Byte length is half of the nibble length
+            var byteLength = length / 2;
+            if (!isOdd && ((length & 1) > 0))
             {
-                var u1 = Unsafe.ReadUnaligned<ulong>(ref a);
-                var u2 = Unsafe.ReadUnaligned<ulong>(ref b);
-
-                if (u1 != u2)
-                {
-                    break;
-                }
-
-                a = ref Unsafe.Add(ref a, longJump);
-                b = ref Unsafe.Add(ref b, longJump);
-
-                position += longJump * NibblePerByte;
+                // If not isOdd, but the length is odd, then we need to add one more byte
+                byteLength += 1;
             }
 
-            // uint as there must be less than 16 nibbles here
-            const int intJump = 4;
-            if (position + intJump * NibblePerByte < length)
+            var leftSpan = MemoryMarshal.CreateReadOnlySpan(ref Unsafe.Add(ref left, position), byteLength);
+            var rightSpan = MemoryMarshal.CreateReadOnlySpan(ref Unsafe.Add(ref right, position), byteLength);
+            var divergence = leftSpan.CommonPrefixLength(rightSpan);
+
+            position += divergence * 2;
+            if (divergence == leftSpan.Length)
             {
-                var u1 = Unsafe.ReadUnaligned<uint>(ref a);
-                var u2 = Unsafe.ReadUnaligned<uint>(ref b);
-
-                if (u1 == u2)
-                {
-                    a = ref Unsafe.Add(ref a, intJump);
-                    b = ref Unsafe.Add(ref b, intJump);
-
-                    position += intJump * NibblePerByte;
-                }
+                // Remove the extra nibble that made it up to a full byte, if added.
+                return Math.Min(length, position);
             }
 
-            // length must be less than 8 nibbles (4 bytes)
-            // scan through
-            const int byteJump = 1;
-            while (position + byteJump * NibblePerByte < length)
+            // Check which nibble is different
+            if ((leftSpan[divergence] & 0xf0) == (rightSpan[divergence] & 0xf0))
             {
-                if (a != b)
-                {
-                    break;
-                }
-
-                a = ref Unsafe.Add(ref a, byteJump);
-                b = ref Unsafe.Add(ref b, byteJump);
-
-                position += byteJump * NibblePerByte;
-            }
-
-            // it might be already processed, when length of 1
-            if (position == length)
-            {
-                return position;
-            }
-
-            // two or one nibbles left
-            if (((a >> NibbleShift) & NibbleMask) != ((b >> NibbleShift) & NibbleMask))
-            {
-                return position;
-            }
-
-            position++;
-            if (position < length)
-            {
-                if ((a & NibbleMask) != (b & NibbleMask))
-                {
-                    return position;
-                }
-
-                position++;
+                // Are equal, so the next nibble is the one that differs
+                return position + 1;
             }
 
             return position;
         }
 
-        // fallback, the slow path version to make the method work in any case
-        int i = 0;
-        for (; i < length; i++)
-        {
-            if (GetAt(i) != other.GetAt(i))
-            {
-                return i;
-            }
-        }
+        return Fallback(in this, in other, length);
 
-        return length;
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static int Fallback(in NibblePath @this, in NibblePath other, int length)
+        {
+            // fallback, the slow path version to make the method work in any case
+            int i = 0;
+            for (; i < length; i++)
+            {
+                if (@this.GetAt(i) != other.GetAt(i))
+                {
+                    return i;
+                }
+            }
+
+            return length;
+        }
     }
 
     const int HexPreambleLength = 1;

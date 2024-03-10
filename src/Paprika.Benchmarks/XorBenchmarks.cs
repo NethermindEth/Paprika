@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using BenchmarkDotNet.Attributes;
 using Paprika.Utils;
 
@@ -18,7 +18,7 @@ public class XorBenchmarks
 
         _keys = new ulong[Size];
         random.NextBytes(MemoryMarshal.Cast<ulong, byte>(_keys));
-        _xor8 = new Xor8(_keys);
+        _xor8 = new Xor8(_keys.ToHashSet());
     }
 
     [Benchmark]

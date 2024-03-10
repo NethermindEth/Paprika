@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using HdrHistogram;
 using Paprika.Data;
 using Paprika.Merkle;

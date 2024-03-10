@@ -1,4 +1,4 @@
-﻿using System.Buffers.Binary;
+using System.Buffers.Binary;
 using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;

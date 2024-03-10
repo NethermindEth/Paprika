@@ -45,10 +45,10 @@ public static class CommitExtensions
         commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), rlp, type);
     }
 
-    public static void SetExtension(this ICommit commit, in Key key, in NibblePath path, EntryType type = EntryType.Persistent)
+    public static void SetExtension(this ICommit commit, in Key key, in NibblePath path)
     {
         var extension = new Node.Extension(path);
-        commit.Set(key, extension.WriteTo(stackalloc byte[extension.MaxByteLength]), type);
+        commit.Set(key, extension.WriteTo(stackalloc byte[extension.MaxByteLength]));
     }
 
     public static void DeleteKey(this ICommit commit, in Key key) => commit.Set(key, ReadOnlySpan<byte>.Empty);
