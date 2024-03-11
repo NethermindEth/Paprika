@@ -5,14 +5,9 @@ namespace Paprika.Store;
 /// <summary>
 /// The base class for all context implementations.
 /// </summary>
-abstract class BatchContextBase : IBatchContext
+abstract class BatchContextBase(uint batchId) : IBatchContext
 {
-    protected BatchContextBase(uint batchId)
-    {
-        BatchId = batchId;
-    }
-
-    public uint BatchId { get; }
+    public uint BatchId { get; } = batchId;
 
     public abstract Page GetAt(DbAddress address);
 

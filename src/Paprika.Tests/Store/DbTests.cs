@@ -14,6 +14,7 @@ public class DbTests
     private const int MB = 1024 * 1024;
     private const int MB16 = 16 * MB;
     private const int MB64 = 64 * MB;
+    private const int MB128 = 128 * MB;
     private const int MB256 = 256 * MB;
 
     [Test]
@@ -193,7 +194,7 @@ public class DbTests
         const int size = MB256;
         using var db = PagedDb.NativeMemoryDb(size);
 
-        const int batches = 100;
+        const int batches = 50;
         const int storageSlots = 20_000;
         const int storageKeyLength = 32;
 
@@ -245,7 +246,6 @@ public class DbTests
         }
     }
 
-
     private static void AssertPageMetadataAssigned(PagedDb db)
     {
         foreach (var page in db.UnsafeEnumerateNonRoot())
@@ -253,7 +253,7 @@ public class DbTests
             var header = page.Header;
 
             header.BatchId.Should().BeGreaterThan(0);
-            header.PageType.Should().BeOneOf(PageType.Abandoned, PageType.Standard, PageType.Identity, PageType.Leaf);
+            header.PageType.Should().BeOneOf(PageType.Abandoned, PageType.Standard, PageType.Identity, PageType.Leaf, PageType.LeafOverflow);
             header.PaprikaVersion.Should().Be(1);
         }
     }

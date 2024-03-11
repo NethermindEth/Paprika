@@ -1,13 +1,10 @@
-using System.Diagnostics;
 using System.Runtime.CompilerServices;
 
 namespace Paprika.Store.PageManagers;
 
-public abstract unsafe class PointerPageManager : IPageManager
+public abstract unsafe class PointerPageManager(long size) : IPageManager
 {
-    public int MaxPage { get; }
-
-    protected PointerPageManager(long size) => MaxPage = (int)(size / Page.PageSize);
+    public int MaxPage { get; } = (int)(size / Page.PageSize);
 
     protected abstract void* Ptr { get; }
 

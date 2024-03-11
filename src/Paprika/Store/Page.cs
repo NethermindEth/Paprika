@@ -29,6 +29,8 @@ public interface IPageWithData<TPage> : IPage
     Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch);
 
     void Report(IReporter reporter, IPageResolver resolver, int level);
+
+    void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr);
 }
 
 /// <summary>
@@ -116,5 +118,5 @@ public readonly unsafe struct Page : IPage, IEquatable<Page>
     public override int GetHashCode() => unchecked((int)(long)_ptr);
 
     public static Page DevOnlyNativeAlloc() =>
-        new((byte*)NativeMemory.AlignedAlloc((UIntPtr)PageSize, (UIntPtr)PageSize));
+        new((byte*)NativeMemory.AlignedAlloc(PageSize, PageSize));
 }

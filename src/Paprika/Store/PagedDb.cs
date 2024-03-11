@@ -273,8 +273,19 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
         foreach (var root in _roots)
         {
-            visitor.On(root, DbAddress.Page(i++));
+            using (visitor.On(root, DbAddress.Page(i++)))
+            {
+                root.Accept(visitor, this);
+            }
+        }
+    }
 
+    public void VisitRoot(IPageVisitor visitor)
+    {
+        var root = Root;
+
+        using (visitor.On(root, GetAddress(Root.AsPage())))
+        {
             root.Accept(visitor, this);
         }
     }
@@ -406,10 +417,10 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         {
             if (root.Data.StateRoot.IsNull == false)
             {
-                new DataPage(GetAt(root.Data.StateRoot)).Report(state, this, 1);
+                new FanOutPage(GetAt(root.Data.StateRoot)).Report(state, this, 0);
             }
 
-            root.Data.Storage.Report(state, this, 1);
+            root.Data.Storage.Report(storage, this, 0);
         }
 
         public uint BatchId => root.Header.BatchId;
