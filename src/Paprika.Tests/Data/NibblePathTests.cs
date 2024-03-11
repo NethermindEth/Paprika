@@ -256,7 +256,7 @@ public class NibblePathTests
     }
 
     [Test]
-    public void PrependNibble_odd()
+    public void Append_nibble_odd()
     {
         const byte first = 0xDC;
         const byte second = 0xBA;
@@ -277,7 +277,7 @@ public class NibblePathTests
     }
 
     [Test]
-    public void PrependNibble_even()
+    public void Append_nibble_even()
     {
         const byte first = 0xDC;
         const byte nibble = 0xE;

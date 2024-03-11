@@ -102,6 +102,19 @@ public readonly unsafe struct StorageFanOutPage<TNext>(Page page) : IPageWithDat
             }
         }
     }
+
+    public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
+    {
+        using var scope = visitor.On(this, addr);
+
+        foreach (var bucket in Data.Addresses)
+        {
+            if (!bucket.IsNull)
+            {
+                TNext.Wrap(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
+            }
+        }
+    }
 }
 
 static class StorageFanOutPage
@@ -131,6 +144,4 @@ static class StorageFanOutPage
 
         public Span<byte> Data => MemoryMarshal.CreateSpan(ref DataFirst, DataSize);
     }
-
 }
-

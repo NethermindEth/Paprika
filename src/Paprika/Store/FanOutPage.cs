@@ -126,4 +126,17 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
             }
         }
     }
+
+    public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
+    {
+        using var scope = visitor.On(this, addr);
+
+        foreach (var bucket in Data.Addresses)
+        {
+            if (!bucket.IsNull)
+            {
+                new DataPage(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
+            }
+        }
+    }
 }

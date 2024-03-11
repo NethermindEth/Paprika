@@ -2,11 +2,16 @@ namespace Paprika.Store;
 
 public interface IPageVisitor
 {
-    void On(RootPage page, DbAddress addr);
+    IDisposable On(RootPage page, DbAddress addr);
 
-    void On(AbandonedPage page, DbAddress addr);
+    IDisposable On(AbandonedPage page, DbAddress addr);
 
-    void On(DataPage page, DbAddress addr);
+    IDisposable On(DataPage page, DbAddress addr);
 
-    void On(FanOutPage page, DbAddress addr);
+    IDisposable On(FanOutPage page, DbAddress addr);
+    IDisposable On(LeafPage page, DbAddress addr);
+    IDisposable On<TNext>(StorageFanOutPage<TNext> page, DbAddress addr)
+        where TNext : struct, IPageWithData<TNext>;
+
+    IDisposable On(LeafOverflowPage page, DbAddress addr);
 }

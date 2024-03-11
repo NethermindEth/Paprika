@@ -12,6 +12,9 @@ public class SlottedArrayTests
 
     private static ReadOnlySpan<byte> Data2 => new byte[] { 37, 39 };
 
+    private static ReadOnlySpan<byte> Data3 => new byte[] { 31, 41 };
+    private static ReadOnlySpan<byte> Data4 => new byte[] { 23, 24, 25 };
+
     [Test]
     public void Set_Get_Delete_Get_AnotherSet()
     {
@@ -33,32 +36,49 @@ public class SlottedArrayTests
     }
 
     [Test]
-    public void Enumerate_all()
+    public void Enumerate_all([Values(0, 1)] int odd)
     {
         Span<byte> span = stackalloc byte[256];
         var map = new SlottedArray(span);
 
-        var key0 = Span<byte>.Empty;
-        Span<byte> key1 = stackalloc byte[1] { 7 };
-        Span<byte> key2 = stackalloc byte[2] { 7, 13 };
+        var key0 = NibblePath.Empty;
+        var key1 = NibblePath.FromKey(stackalloc byte[1] { 7 }).SliceFrom(odd);
+        var key2 = NibblePath.FromKey(stackalloc byte[2] { 7, 13 }).SliceFrom(odd);
+        var key3 = NibblePath.FromKey(stackalloc byte[3] { 7, 13, 31 }).SliceFrom(odd);
+        var key4 = NibblePath.FromKey(stackalloc byte[4] { 7, 13, 31, 41 }).SliceFrom(odd);
 
         map.SetAssert(key0, Data0);
         map.SetAssert(key1, Data1);
         map.SetAssert(key2, Data2);
+        map.SetAssert(key3, Data3);
+        map.SetAssert(key4, Data4);
+
+        map.GetAssert(key0, Data0);
+        map.GetAssert(key1, Data1);
+        map.GetAssert(key2, Data2);
+        map.GetAssert(key4, Data4);
 
         using var e = map.EnumerateAll();
 
         e.MoveNext().Should().BeTrue();
-        e.Current.Key.RawSpan.SequenceEqual(key0).Should().BeTrue();
+        e.Current.Key.Equals(key0).Should().BeTrue();
         e.Current.RawData.SequenceEqual(Data0).Should().BeTrue();
 
         e.MoveNext().Should().BeTrue();
-        e.Current.Key.RawSpan.SequenceEqual(key1).Should().BeTrue();
+        e.Current.Key.Equals(key1).Should().BeTrue();
         e.Current.RawData.SequenceEqual(Data1).Should().BeTrue();
 
         e.MoveNext().Should().BeTrue();
-        e.Current.Key.RawSpan.SequenceEqual(key2).Should().BeTrue();
+        e.Current.Key.Equals(key2).Should().BeTrue();
         e.Current.RawData.SequenceEqual(Data2).Should().BeTrue();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Equals(key3).Should().BeTrue();
+        e.Current.RawData.SequenceEqual(Data3).Should().BeTrue();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Equals(key4).Should().BeTrue();
+        e.Current.RawData.SequenceEqual(Data4).Should().BeTrue();
 
         e.MoveNext().Should().BeFalse();
     }
@@ -154,40 +174,49 @@ public class SlottedArrayTests
         var hashes = new Dictionary<ushort, string>();
 
         // empty
-        Unique(ReadOnlySpan<byte>.Empty);
+        Unique("");
 
-        // single byte
-        Unique(stackalloc byte[] { 1 });
-        Unique(stackalloc byte[] { 2 });
-        Unique(stackalloc byte[] { 16 });
-        Unique(stackalloc byte[] { 17 });
+        // single nibble
+        Unique("A");
+        Unique("B");
+        Unique("C");
+        Unique("7");
 
+        // two nibbles
+        Unique("AC");
+        Unique("AB");
+        Unique("BC");
 
-        // two bytes
-        Unique(stackalloc byte[] { 0xA, 0xC });
-        Unique(stackalloc byte[] { 0xA, 0xB });
-        Unique(stackalloc byte[] { 0xB, 0xC });
+        // three nibbles
+        Unique("ADC");
+        Unique("AEB");
+        Unique("BEC");
 
-        // three bytes
-        Unique(stackalloc byte[] { 0xA, 0xD, 0xC });
-        Unique(stackalloc byte[] { 0xAA, 0xEE, 0xCC });
-        Unique(stackalloc byte[] { 0xAA, 0xFF, 0xCC });
+        // four nibbles
+        Unique("ADC1");
+        Unique("AEB1");
+        Unique("BEC1");
 
-        // three bytes
-        Unique(stackalloc byte[] { 0xAA, 0xDD, 0xCC, 0x11 });
-        Unique(stackalloc byte[] { 0xAA, 0xEE, 0xCC, 0x11 });
-        Unique(stackalloc byte[] { 0xAA, 0xFF, 0xCC, 0x11 });
+        // 5 nibbles, with last changed
+        Unique("AD0C2");
+        Unique("AE0B2");
+        Unique("BE0C2");
+
+        // 6 nibbles, with last changed
+        Unique("AD00C3");
+        Unique("AE00B3");
+        Unique("BE00C3");
 
         return;
 
-        void Unique(in ReadOnlySpan<byte> key)
+        void Unique(string key)
         {
-            var hash = SlottedArray.GetHash(NibblePath.FromKey(key));
-            var hex = key.ToHexString(true);
+            var path = NibblePath.Parse(key);
+            var hash = SlottedArray.HashForTests(path);
 
-            if (hashes.TryAdd(hash, hex) == false)
+            if (hashes.TryAdd(hash, key) == false)
             {
-                Assert.Fail($"The hash for {hex} is the same as for {hashes[hash]}");
+                Assert.Fail($"The hash for {key} is the same as for {hashes[hash]}");
             }
         }
     }
@@ -195,6 +224,12 @@ public class SlottedArrayTests
 
 file static class FixedMapTestExtensions
 {
+    public static void SetAssert(this SlottedArray map, in NibblePath key, ReadOnlySpan<byte> data,
+        string? because = null)
+    {
+        map.TrySet(key, data).Should().BeTrue(because ?? "TrySet should succeed");
+    }
+
     public static void SetAssert(this SlottedArray map, in ReadOnlySpan<byte> key, ReadOnlySpan<byte> data,
         string? because = null)
     {
@@ -211,6 +246,13 @@ file static class FixedMapTestExtensions
         map.TryGet(NibblePath.FromKey(key), out var actual).Should().BeTrue();
         actual.SequenceEqual(expected).Should().BeTrue("Actual data should equal expected");
     }
+
+    public static void GetAssert(this SlottedArray map, in NibblePath key, ReadOnlySpan<byte> expected)
+    {
+        map.TryGet(key, out var actual).Should().BeTrue();
+        actual.SequenceEqual(expected).Should().BeTrue("Actual data should equal expected");
+    }
+
 
     public static void GetShouldFail(this SlottedArray map, in ReadOnlySpan<byte> key)
     {
