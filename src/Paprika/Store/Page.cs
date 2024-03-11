@@ -118,5 +118,5 @@ public readonly unsafe struct Page : IPage, IEquatable<Page>
     public override int GetHashCode() => unchecked((int)(long)_ptr);
 
     public static Page DevOnlyNativeAlloc() =>
-        new((byte*)NativeMemory.AlignedAlloc((UIntPtr)PageSize, (UIntPtr)PageSize));
+        new((byte*)NativeMemory.AlignedAlloc(PageSize, PageSize));
 }

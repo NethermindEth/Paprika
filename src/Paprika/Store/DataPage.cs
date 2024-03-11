@@ -57,6 +57,15 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             return page;
         }
 
+        // No place in map, try flush to leafs first
+        TryFlushToLeafs(map, batch);
+
+        // Try to write again in the map
+        if (map.TrySet(key, data))
+        {
+            return page;
+        }
+
         // Find most frequent nibble
         var nibble = FindMostFrequentNibble(map);
 
@@ -83,6 +92,56 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
         // The page has some of the values flushed down, try to add again.
         return Set(key, data, batch);
+    }
+
+    private void TryFlushToLeafs(in SlottedArray map, IBatchContext batch)
+    {
+        var anyLeafs = false;
+
+        Span<LeafPage> leafs = stackalloc LeafPage[BucketCount];
+        for (var i = 0; i < BucketCount; i++)
+        {
+            var addr = Data.Buckets[i];
+            if (addr.IsNull == false)
+            {
+                var child = batch.GetAt(addr);
+                if (child.Header.PageType == PageType.Leaf)
+                {
+                    leafs[i] = new LeafPage(child);
+                    anyLeafs = true;
+                }
+            }
+        }
+
+        if (anyLeafs == false)
+            return;
+
+        foreach (var item in map.EnumerateAll())
+        {
+            var key = item.Key;
+            if (key.IsEmpty) // empty keys are left in page
+                continue;
+
+            var i = key.FirstNibble;
+            ref var leaf = ref leafs[i];
+            var leafExists = leaf.AsPage().Raw != UIntPtr.Zero;
+
+            if (leafExists)
+            {
+                var (copied, cow) = leaf.TrySet(key.SliceFrom(ConsumedNibbles), item.RawData, batch);
+                if (copied)
+                {
+                    map.Delete(item);
+                }
+
+                // Check if the page requires the update, if yes, update
+                if (!cow.Equals(leaf.AsPage()))
+                {
+                    leaf = new LeafPage(cow);
+                    Data.Buckets[i] = batch.GetAddress(cow);
+                }
+            }
+        }
     }
 
     public int CapacityLeft => Map.CapacityLeft;

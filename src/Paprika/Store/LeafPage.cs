@@ -168,6 +168,19 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
     }
 
+    public (bool success, Page cow) TrySet(in NibblePath key, ReadOnlySpan<byte> data, IBatchContext batch)
+    {
+        if (Header.BatchId != batch.BatchId)
+        {
+            // the page is from another batch, meaning, it's readonly. Copy
+            var writable = batch.GetWritableCopy(page);
+            return new LeafPage(writable).TrySet(key, data, batch);
+        }
+
+        // Try set in-situ and return cowed page
+        return (Map.TrySet(key, data), page);
+    }
+
     public bool TryGet(scoped NibblePath key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
         batch.AssertRead(Header);
