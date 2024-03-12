@@ -84,6 +84,27 @@ public class SlottedArrayTests
     }
 
     [Test]
+    public void Set_Get_Empty()
+    {
+        var key0 = Values.Key0.Span;
+
+        Span<byte> span = stackalloc byte[48];
+        var map = new SlottedArray(span);
+
+        var data = ReadOnlySpan<byte>.Empty;
+
+        map.SetAssert(key0, data);
+        map.GetAssert(key0, data);
+
+        map.DeleteAssert(key0);
+        map.GetShouldFail(key0);
+
+        // should be ready to accept some data again
+        map.SetAssert(key0, data, "Should have memory after previous delete");
+        map.GetAssert(key0, data);
+    }
+
+    [Test]
     public void Defragment_when_no_more_space()
     {
         // by trial and error, found the smallest value that will allow to put these two

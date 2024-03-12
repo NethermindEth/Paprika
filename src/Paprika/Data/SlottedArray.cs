@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 using Paprika.Store;
 using Paprika.Utils;
 
@@ -347,7 +348,7 @@ public readonly ref struct SlottedArray
         var hash = Slot.PrepareKey(key, out byte preamble, out var trimmed);
         if (TryGetImpl(trimmed, hash, preamble, out var span, out _))
         {
-            data = MemoryMarshal.CreateSpan(ref span[0], span.Length);
+            data = span.IsEmpty ? ReadOnlySpan<byte>.Empty : MemoryMarshal.CreateReadOnlySpan(ref span[0], span.Length);
             return true;
         }
 
