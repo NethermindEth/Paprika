@@ -393,9 +393,7 @@ public readonly ref struct SlottedArray
 
                     if (slot.HasKeyBytes)
                     {
-                        var leftover = NibblePath.ReadFrom(actual, out var actualKey);
-
-                        if (actualKey.Equals(key))
+                        if (NibblePath.TryReadFrom(actual, key, out var leftover))
                         {
                             data = leftover;
                             slotIndex = i;

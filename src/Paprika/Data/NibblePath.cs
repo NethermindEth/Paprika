@@ -342,6 +342,18 @@ public readonly ref struct NibblePath
         return source.Slice(PreambleLength + GetSpanLength(length, odd));
     }
 
+    public static bool TryReadFrom(Span<byte> source, in NibblePath expected, out Span<byte> leftover)
+    {
+        if (source[0] != expected.RawPreamble)
+        {
+            leftover = default;
+            return false;
+        }
+
+        leftover = ReadFrom(source, out var actualKey);
+        return actualKey.Equals(expected);
+    }
+
     /// <summary>
     /// Reads the first byte of nibble of the path without decoding it fully.
     /// </summary>
