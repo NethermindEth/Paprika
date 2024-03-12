@@ -1,16 +1,22 @@
 using System.Buffers.Binary;
 using BenchmarkDotNet.Attributes;
+using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store;
 
 namespace Paprika.Benchmarks;
 
+[DisassemblyDiagnoser(maxDepth: 1)]
 public class SlottedArrayBenchmarks
 {
     private readonly byte[] _writtenLittleEndian = new byte[Page.PageSize];
     private readonly byte[] _writtenBigEndian = new byte[Page.PageSize];
     private readonly byte[] _writable = new byte[Page.PageSize];
     private readonly int _to;
+
+    private readonly byte[] _hashCollisions = new byte[Page.PageSize];
+    private readonly int _hashCollisionsLength;
+    private static readonly byte[] HashCollisionValue = new byte[13];
 
     public SlottedArrayBenchmarks()
     {
@@ -19,7 +25,7 @@ public class SlottedArrayBenchmarks
 
         Span<byte> key = stackalloc byte[4];
 
-        // fill 
+        // Big and small endian tests
         while (true)
         {
             BinaryPrimitives.WriteInt32LittleEndian(key, _to);
@@ -37,6 +43,17 @@ public class SlottedArrayBenchmarks
             }
 
             _to++;
+        }
+
+        // Hash collisions tests
+        var zeroes = NibblePath.FromKey(Keccak.Zero);
+        var hashCollisions = new SlottedArray(_hashCollisions);
+
+        _hashCollisionsLength = 0;
+
+        while (hashCollisions.TrySet(zeroes.SliceTo(_hashCollisionsLength), HashCollisionValue))
+        {
+            _hashCollisionsLength++;
         }
     }
 
@@ -124,5 +141,24 @@ public class SlottedArrayBenchmarks
         }
 
         return result;
+    }
+
+    [Benchmark]
+    public int Hash_collisions()
+    {
+        var map = new SlottedArray(_hashCollisions);
+        var zeroes = NibblePath.FromKey(Keccak.Zero);
+
+        var length = 0;
+
+        for (var i = 0; i < _hashCollisionsLength; i++)
+        {
+            if (map.TryGet(zeroes.SliceTo(i), out var value))
+            {
+                length += value.Length;
+            }
+        }
+
+        return length;
     }
 }
