@@ -17,8 +17,4 @@
       <ProjectReference Include="..\Paprika\Paprika.csproj" />
     </ItemGroup>
 
-    <ItemGroup>
-      <Folder Include="BenchmarkDotNet.Artifacts\" />
-    </ItemGroup>
-
 </Project>
