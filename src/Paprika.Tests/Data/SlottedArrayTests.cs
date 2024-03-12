@@ -102,6 +102,14 @@ public class SlottedArrayTests
         // should be ready to accept some data again
         map.SetAssert(key0, data, "Should have memory after previous delete");
         map.GetAssert(key0, data);
+
+        using var e = map.EnumerateAll();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Equals(NibblePath.FromKey(key0));
+        e.Current.RawData.SequenceEqual(data).Should().BeTrue();
+
+        e.MoveNext().Should().BeFalse();
     }
 
     [Test]
