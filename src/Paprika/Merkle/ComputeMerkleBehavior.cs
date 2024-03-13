@@ -1390,15 +1390,59 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         public void PrepareForSetStorage(in Keccak address, in Keccak storage)
         {
-            ref var entry = ref CollectionsMarshal.GetValueRefOrAddDefault(_storages, address, out var exists);
-            if (exists == false)
+            ref var store = ref CollectionsMarshal.GetValueRefOrAddDefault(_storages, address, out var exists);
+            store ??= new PooledSpanDictionary(pool);
+
+            var account = NibblePath.FromKey(address);
+            var path = NibblePath.FromKey(storage);
+
+            Span<byte> span = stackalloc byte[66];
+
+            for (var i = 0; i <= NibblePath.KeccakNibbleCount; i++)
             {
-                entry = new PooledSpanDictionary(pool);
+                var slice = path.SliceTo(i);
+                var key = Key.Raw(account, DataType.Merkle, slice);
+
+                var written = key.WriteTo(span);
+                var hash = Blockchain.GetHash(key);
+
+                if (store.TryGet(written, hash, out _) == false)
+                {
+                    // Entry was not prefetched yet, get it
+                    using var owner = commit.Get(key);
+                    if (owner.IsEmpty)
+                    {
+                        break; // Nothing to do on empty, will be created
+                    }
+
+                    // Decide as would MarkPathAsDirty would
+                    if (cacheBudget.ShouldCache(owner, out var type))
+                    {
+                        store.Set(written, hash, owner.Span, (byte)type);
+                    }
+                }
             }
         }
 
         public void Commit(PooledSpanDictionary preCommit, HashSet<Keccak>? destroyed)
         {
+            // clean destroyed first
+            if (destroyed != null)
+            {
+                foreach (var key in destroyed)
+                {
+                    if (_storages.Remove(key, out var storage))
+                    {
+                        storage.Dispose();
+                    }
+                }
+            }
+
+            foreach (var kvp in _storages)
+            {
+                // Copy everything and use the append mode as this is done at the beginning.
+                kvp.Value.CopyTo(preCommit, b => true, append: true);
+            }
         }
 
         public void Dispose()

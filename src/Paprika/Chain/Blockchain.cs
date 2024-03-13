@@ -462,7 +462,7 @@ public class Blockchain : IAsyncDisposable
 
             CreateDictionaries();
 
-            _prefetcher = _blockchain._preCommit.BuildPrefetcher(this, _cacheBudgetPreCommit);
+            _prefetcher = _blockchain._preCommit.BuildPrefetcher(this, _cacheBudgetPreCommit, Pool);
         }
 
         private void CreateDictionaries()
