@@ -392,7 +392,7 @@ public class Blockchain : IAsyncDisposable
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload.
     /// </summary>
-    private class BlockState : RefCountingDisposable, IWorldState, ICommit, IProvideDescription, IStateStats
+    private class BlockState : RefCountingDisposable, IWorldState, ICommit, IHistoryReader, IProvideDescription, IStateStats
     {
         [ThreadStatic]
         private static HashSet<ulong>? s_bloomCache;
@@ -436,7 +436,7 @@ public class Blockchain : IAsyncDisposable
         private Keccak? _hash;
 
         private int _dbReads;
-        private IStateStats _stats1;
+        private IPrefetcher? _prefetcher;
 
         public BlockState(Keccak parentStateRoot, IReadOnlyBatch batch, CommittedBlockState[] ancestors,
             Blockchain blockchain)
@@ -461,6 +461,8 @@ public class Blockchain : IAsyncDisposable
             _xorMissed = _blockchain._bloomMissedReads.Delay();
 
             CreateDictionaries();
+
+            _prefetcher = _blockchain._preCommit.BuildPrefetcher(this, _cacheBudgetPreCommit);
         }
 
         private void CreateDictionaries()
@@ -489,8 +491,13 @@ public class Blockchain : IAsyncDisposable
 
         public Keccak ParentHash { get; }
 
+        public void PrepareForSetStorage(in Keccak address, in Keccak storage)
+        {
+            _prefetcher?.PrepareForSetStorage(address, storage);
+        }
+
         /// <summary>
-        /// Commits the block to the block chain.
+        /// Commits the block to the blockchain.
         /// </summary>
         public Keccak Commit(uint blockNumber)
         {
@@ -513,6 +520,13 @@ public class Blockchain : IAsyncDisposable
 
         private CommittedBlockState? CommitImpl(uint blockNumber, bool raw)
         {
+            if (_prefetcher != null)
+            {
+                _prefetcher.Commit(_preCommit, _destroyed);
+                _prefetcher.Dispose();
+                _prefetcher = null;
+            }
+
             EnsureHash();
 
             var hash = _hash!.Value;
@@ -853,15 +867,33 @@ public class Blockchain : IAsyncDisposable
         }
 
         /// <summary>
+        /// Similar to <see cref="Get"/> but accessing only historical values
+        /// </summary>
+        /// <param name="key"></param>
+        /// <returns></returns>
+        ReadOnlySpanOwnerWithMetadata<byte> IHistoryReader.Get(scoped in Key key)
+        {
+            var hash = GetHash(key);
+            var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+
+            // This block is skipped as it's just for querying the history.
+            // This block might be modified at the time of the query
+            return TryGet(key, keyWritten, hash, skipThis: true);
+        }
+
+        /// <summary>
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
         private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
-            ulong bloom)
+            ulong bloom, bool skipThis = false)
         {
-            var owner = TryGetLocal(key, keyWritten, bloom, out var succeeded);
-            if (succeeded)
-                return owner.WithDepth(0);
+            if (skipThis == false)
+            {
+                var owner = TryGetLocal(key, keyWritten, bloom, out var succeeded);
+                if (succeeded)
+                    return owner.WithDepth(0);
+            }
 
             ushort depth = 1;
 
@@ -870,7 +902,7 @@ public class Blockchain : IAsyncDisposable
             // walk all the blocks locally
             foreach (var ancestor in _ancestors)
             {
-                owner = ancestor.TryGetLocal(key, keyWritten, bloom, destroyedHash, out succeeded);
+                var owner = ancestor.TryGetLocal(key, keyWritten, bloom, destroyedHash, out var succeeded);
                 if (succeeded)
                     return owner.WithDepth(depth);
 

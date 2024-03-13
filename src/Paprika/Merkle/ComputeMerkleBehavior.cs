@@ -1379,4 +1379,34 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     {
         _meter.Dispose();
     }
+
+    IPrefetcher IPreCommitBehavior.BuildPrefetcher(IHistoryReader commit, CacheBudget cacheBudget, BufferPool pool) =>
+        new Prefetcher(commit, cacheBudget, pool);
+
+
+    private class Prefetcher(IHistoryReader commit, CacheBudget cacheBudget, BufferPool pool) : IPrefetcher
+    {
+        private readonly Dictionary<Keccak, PooledSpanDictionary> _storages = new();
+
+        public void PrepareForSetStorage(in Keccak address, in Keccak storage)
+        {
+            ref var entry = ref CollectionsMarshal.GetValueRefOrAddDefault(_storages, address, out var exists);
+            if (exists == false)
+            {
+                entry = new PooledSpanDictionary(pool);
+            }
+        }
+
+        public void Commit(PooledSpanDictionary preCommit, HashSet<Keccak>? destroyed)
+        {
+        }
+
+        public void Dispose()
+        {
+            foreach (var kvp in _storages)
+            {
+                kvp.Value.Dispose();
+            }
+        }
+    }
 }
