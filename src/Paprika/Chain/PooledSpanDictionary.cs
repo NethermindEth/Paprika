@@ -492,8 +492,18 @@ public class PooledSpanDictionary : IDisposable
         static string S(in NibblePath full) => full.UnsafeAsKeccak.ToString();
     }
 
-    private readonly struct Root(Page[] pages)
+    [StructLayout(LayoutKind.Explicit, Size = Size)]
+    private struct Root
     {
+        /// <summary>
+        /// Sufficient to handle both, 32 and 64 bit system
+        /// </summary>
+        private const int ItemSize = 8;
+        private const int Size = PageCount * ItemSize;
+
+        [FieldOffset(0)]
+        private Page _pages;
+
         /// <summary>
         /// 16gives 4kb * 16, 64kb allocated per dictionary.
         /// This gives 16k buckets which should be sufficient to have a really low ratio of collisions for majority of the blocks.
@@ -501,17 +511,22 @@ public class PooledSpanDictionary : IDisposable
         public const int PageCount = 16;
 
         public static readonly int BucketCountLog2 = BitOperations.Log2(BucketCount);
-
+        private static readonly int PageShift = BitOperations.Log2(BucketsPerPage);
         public const int BucketCount = PageCount * BucketsPerPage;
         private const int BucketsPerPage = Page.PageSize / sizeof(uint);
         private const int InPageMask = BucketsPerPage - 1;
-        private static readonly int PageShift = BitOperations.Log2(BucketsPerPage);
+
+        public Root(Page[] pages)
+        {
+            pages.CopyTo(MemoryMarshal.CreateSpan(ref _pages, PageCount));
+        }
 
         public unsafe ref uint this[int bucket]
         {
             get
             {
-                var raw = pages[bucket >> PageShift].Raw;
+                var shift = bucket >> PageShift;
+                var raw = Unsafe.Add(ref _pages, shift).Raw;
                 return ref Unsafe.Add(ref Unsafe.AsRef<uint>(raw.ToPointer()), bucket & InPageMask);
             }
         }
