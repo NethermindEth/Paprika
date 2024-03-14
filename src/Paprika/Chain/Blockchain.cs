@@ -491,9 +491,9 @@ public class Blockchain : IAsyncDisposable
 
         public Keccak ParentHash { get; }
 
-        public void PrepareForSetStorage(in Keccak address, in Keccak storage)
+        public void PrepareForSetStorage(in StorageCell storageCell)
         {
-            _prefetcher?.PrepareForSetStorage(address, storage);
+            _prefetcher?.PrepareForSetStorage(storageCell);
         }
 
         /// <summary>

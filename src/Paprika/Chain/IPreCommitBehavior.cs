@@ -46,10 +46,10 @@ public interface IPreCommitBehavior
 
 public interface IPrefetcher : IDisposable
 {
-    void PrepareForSetStorage(in Keccak address, in Keccak storage);
+    void PrepareForSetStorage(in StorageCell storageCell);
+
     void Commit(PooledSpanDictionary preCommit, HashSet<Keccak>? destroyed);
 }
-
 
 /// <summary>
 /// Provides the set of changes applied onto <see cref="IWorldState"/>,
