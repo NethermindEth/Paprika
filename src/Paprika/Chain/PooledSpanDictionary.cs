@@ -96,15 +96,12 @@ public class PooledSpanDictionary : IDisposable
         var address = _root[(int)bucket];
         if (address == 0) return default;
 
-        var pages = CollectionsMarshal.AsSpan(_pages);
+        ref var pages = ref MemoryMarshal.GetReference(CollectionsMarshal.AsSpan(_pages));
         do
         {
             var (pageNo, atPage) = Math.DivRem(address, Page.PageSize);
-
-            // TODO: optimize, unsafe ref?
-            var sliced = pages[(int)pageNo].Span.Slice((int)atPage);
-
-            ref var at = ref MemoryMarshal.GetReference(sliced);
+            var page = Unsafe.Add(ref pages, (int)pageNo);
+            ref var at = ref Unsafe.Add(ref page.Ref, (int)atPage);
 
             var header = at & PreambleBits;
             if ((header & DestroyedBit) == 0)
