@@ -109,6 +109,8 @@ public readonly unsafe struct Page : IPage, IEquatable<Page>
 
     public Span<byte> Span => new(_ptr, PageSize);
 
+    public ref byte Ref => ref Unsafe.AsRef<byte>(_ptr);
+
     public ref PageHeader Header => ref Unsafe.AsRef<PageHeader>(_ptr);
 
     public bool Equals(Page other) => _ptr == other._ptr;
