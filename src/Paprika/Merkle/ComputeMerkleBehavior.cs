@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
+using System.Threading.Channels;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -1378,5 +1379,97 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     public void Dispose()
     {
         _meter.Dispose();
+    }
+
+    IPrefetcher IPreCommitBehavior.BuildPrefetcher(IHistoryReader commit, CacheBudget cacheBudget, BufferPool pool) =>
+        new Prefetcher(commit, cacheBudget, pool);
+
+
+    private class Prefetcher(IHistoryReader commit, CacheBudget cacheBudget, BufferPool pool) : IPrefetcher
+    {
+        private const int Capacity = 1000;
+
+        private readonly Channel<StorageCell> _channel = Channel.CreateBounded<StorageCell>(
+            new BoundedChannelOptions(Capacity)
+            {
+                SingleReader = true,
+                FullMode = BoundedChannelFullMode.DropNewest,
+                AllowSynchronousContinuations = false,
+            });
+
+        private readonly Dictionary<Keccak, PooledSpanDictionary> _storages = new();
+
+        public void PrepareForSetStorage(in StorageCell storageCell) => _channel.Writer.TryWrite(storageCell);
+
+        private void Run(in Keccak address, in Keccak storage)
+        {
+            ref var store = ref CollectionsMarshal.GetValueRefOrAddDefault(_storages, address, out _);
+            store ??= new PooledSpanDictionary(pool);
+
+            var account = NibblePath.FromKey(address);
+            var path = NibblePath.FromKey(storage);
+
+            Span<byte> span = stackalloc byte[66];
+
+            for (var i = 0; i <= NibblePath.KeccakNibbleCount; i++)
+            {
+                var slice = path.SliceTo(i);
+                var key = Key.Raw(account, DataType.Merkle, slice);
+
+                var written = key.WriteTo(span);
+                var hash = Blockchain.GetHash(key);
+
+                if (store.TryGet(written, hash, out _))
+                {
+                    continue;
+                }
+
+                // Entry was not prefetched yet, get it
+                using var owner = commit.Get(key);
+                if (owner.IsEmpty)
+                {
+                    break; // Nothing to do on empty, will be created
+                }
+
+                // Decide whether to cache using the budget
+                if (cacheBudget.ShouldCache(owner, out var entryType))
+                {
+                    store.Set(written, hash, owner.Span, (byte)entryType);
+                }
+
+                // TODO: what about children of the branch, should they be prefetched as well?
+                // var leftover = Node.ReadFrom(out var type, out var leaf, out var ext, out var branch, owner.Span);
+                // handling extensions and leafs so that they have their keys properly resolved
+            }
+        }
+
+        public void Commit(PooledSpanDictionary preCommit, HashSet<Keccak>? destroyed)
+        {
+            // clean destroyed first
+            if (destroyed != null)
+            {
+                foreach (var key in destroyed)
+                {
+                    if (_storages.Remove(key, out var storage))
+                    {
+                        storage.Dispose();
+                    }
+                }
+            }
+
+            foreach (var kvp in _storages)
+            {
+                // Copy everything and use the append mode as this is done at the beginning.
+                kvp.Value.CopyTo(preCommit, b => true, append: true);
+            }
+        }
+
+        public void Dispose()
+        {
+            foreach (var kvp in _storages)
+            {
+                kvp.Value.Dispose();
+            }
+        }
     }
 }

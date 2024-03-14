@@ -72,7 +72,7 @@ public readonly ref partial struct Key
     /// <summary>
     /// Writes the span to the destination.
     /// </summary>
-    /// <returns>The leftover.</returns>
+    /// <returns>The actual written.</returns>
     public Span<byte> WriteTo(Span<byte> destination)
     {
         destination[0] = (byte)Type;

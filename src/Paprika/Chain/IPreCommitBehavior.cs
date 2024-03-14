@@ -40,6 +40,15 @@ public interface IPreCommitBehavior
     void OnAccountDestroyed(in Keccak address, ICommit commit)
     {
     }
+
+    IPrefetcher? BuildPrefetcher(IHistoryReader commit, CacheBudget cacheBudget, BufferPool pool) => null;
+}
+
+public interface IPrefetcher : IDisposable
+{
+    void PrepareForSetStorage(in StorageCell storageCell);
+
+    void Commit(PooledSpanDictionary preCommit, HashSet<Keccak>? destroyed);
 }
 
 /// <summary>
@@ -86,6 +95,14 @@ public interface ICommit
     /// Storage writes increase it by 1.
     /// </summary>
     IReadOnlyDictionary<Keccak, int> Stats { get; }
+}
+
+public interface IHistoryReader
+{
+    /// <summary>
+    /// Tries to retrieve the result stored beyond the current commit.
+    /// </summary>
+    public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key);
 }
 
 public interface IReadOnlyCommit

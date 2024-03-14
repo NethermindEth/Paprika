@@ -30,6 +30,14 @@ public interface IWorldState : IDisposable
     void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value);
 
     /// <summary>
+    /// Prepares the world state for the incoming <see cref="SetStorage"/> for the given storage.
+    /// </summary>
+    /// <remarks>
+    /// What it does it effectively delegates the call to <see cref="IPreCommitBehavior.PrepareForSetStorage"/>
+    /// </remarks>
+    void PrepareForSetStorage(in Keccak address, in Keccak storage);
+
+    /// <summary>
     /// Commits the block to the chain allowing to build upon it.
     /// Also runs the <see cref="IPreCommitBehavior"/> that the blockchain was configured with.
     /// </summary>
