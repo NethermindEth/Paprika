@@ -36,7 +36,8 @@ public class Blockchain : IAsyncDisposable
     private readonly Histogram<int> _flusherBlockApplicationInMs;
     private readonly Histogram<int> _flusherFlushInMs;
     private readonly Counter<long> _bloomMissedReads;
-    private readonly Histogram<int> _transientCacheUsage;
+    private readonly Histogram<int> _cacheUsageState;
+    private readonly Histogram<int> _cacheUsagePreCommit;
     private readonly MetricsExtensions.IAtomicIntGauge _flusherQueueCount;
 
     private readonly IDb _db;
@@ -97,9 +98,8 @@ public class Blockchain : IAsyncDisposable
             "The number of the blocks in the flush queue");
         _bloomMissedReads = _meter.CreateCounter<long>("Bloom missed reads", "Reads",
             "Number of reads that passed bloom but missed in dictionary");
-        _transientCacheUsage =
-            _meter.CreateHistogram<int>("Transient cache usage per commit", "%",
-                "How much used was the transient cache");
+        _cacheUsageState = _meter.CreateHistogram<int>("State transient cache usage per commit", "%", "How much used was the transient cache");
+        _cacheUsagePreCommit = _meter.CreateHistogram<int>("PreCommit transient cache usage per commit", "%", "How much used was the transient cache");
 
         using var batch = _db.BeginReadOnlyBatch();
         _lastFinalized = batch.Metadata.BlockNumber;
@@ -494,14 +494,10 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         public Keccak Commit(uint blockNumber)
         {
-            var total = _blockchain._cacheBudgetStateAndStorage.EntriesPerBlock;
-            if (total > 0)
-            {
-                var percentage = (double)_cacheBudgetStorageAndStage.BudgetLeft / total * 100;
-                _blockchain._transientCacheUsage.Record((int)percentage);
-            }
-
             var committed = CommitImpl(blockNumber, false);
+
+            ReportCacheUsage(_blockchain._cacheBudgetStateAndStorage, _cacheBudgetStorageAndStage, _blockchain._cacheUsageState);
+            ReportCacheUsage(_blockchain._cacheBudgetPreCommit, _cacheBudgetPreCommit, _blockchain._cacheUsagePreCommit);
 
             if (committed != null)
             {
@@ -509,6 +505,22 @@ public class Blockchain : IAsyncDisposable
             }
 
             return Hash;
+        }
+
+        /// <summary>
+        /// Reports the given cache usage.
+        /// </summary>
+        private static void ReportCacheUsage(in CacheBudget.Options budget, CacheBudget actual, Histogram<int> reportTo)
+        {
+            var total = budget.EntriesPerBlock;
+            if (total <= 0)
+            {
+                // disabled, nothing to report
+                return;
+            }
+
+            var percentage = (double)actual.BudgetLeft / total * 100;
+            reportTo.Record((int)percentage);
         }
 
         private CommittedBlockState? CommitImpl(uint blockNumber, bool raw)
