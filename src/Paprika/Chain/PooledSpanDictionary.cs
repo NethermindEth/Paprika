@@ -116,9 +116,7 @@ public class PooledSpanDictionary : IDisposable
                     var storedKeyLength = payload;
                     if (storedKeyLength == key.Length)
                     {
-                        var storedKey = MemoryMarshal.CreateSpan(ref Unsafe.Add(ref payload, KeyLengthLength),
-                            storedKeyLength);
-                        if (storedKey.SequenceEqual(key))
+                        if (CompareKeys(ref Unsafe.Add(ref payload, KeyLengthLength), ref MemoryMarshal.GetReference(key), storedKeyLength))
                         {
                             ref var data = ref Unsafe.Add(ref payload, KeyLengthLength + storedKeyLength);
                             return new SearchResult(ref at, ref data);
@@ -131,6 +129,55 @@ public class PooledSpanDictionary : IDisposable
             address = Unsafe.ReadUnaligned<uint>(ref Unsafe.Add(ref at, PreambleLength));
         } while (address != 0);
         return default;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
+    private static bool CompareKeys(ref byte key0, ref byte key1, byte storedKeyLength)
+    {
+        var length = storedKeyLength;
+        ref var a = ref key0;
+        ref var b = ref key1;
+
+        while (length >= sizeof(long))
+        {
+            if (Unsafe.ReadUnaligned<long>(ref a) != Unsafe.ReadUnaligned<long>(ref b))
+            {
+                return false;
+            }
+
+            a = ref Unsafe.Add(ref a, sizeof(long));
+            b = ref Unsafe.Add(ref b, sizeof(long));
+            length -= sizeof(long);
+        }
+
+        // 7 or less
+
+        if (length >= sizeof(int))
+        {
+            if (Unsafe.ReadUnaligned<int>(ref a) != Unsafe.ReadUnaligned<int>(ref b))
+            {
+                return false;
+            }
+
+            a = ref Unsafe.Add(ref a, sizeof(int));
+            b = ref Unsafe.Add(ref b, sizeof(int));
+            length -= sizeof(int);
+        }
+
+        // 3 or less
+        if (length >= sizeof(short))
+        {
+            if (Unsafe.ReadUnaligned<short>(ref a) != Unsafe.ReadUnaligned<short>(ref b))
+            {
+                return false;
+            }
+
+            a = ref Unsafe.Add(ref a, sizeof(short));
+            b = ref Unsafe.Add(ref b, sizeof(short));
+            length -= sizeof(short);
+        }
+
+        return length == 0 || a == b;
     }
 
     private static (uint leftover, uint bucket) GetBucketAndLeftover(ulong hash)
