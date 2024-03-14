@@ -12,7 +12,7 @@ namespace Paprika.Chain;
 /// Remember that db reads use <see cref="ReadOnlySpanOwnerWithMetadata{T}.DatabaseQueryDepth"/>
 /// so that they will always fall into any number.
 /// </summary>
-public class CacheBudget
+public sealed class CacheBudget
 {
     public readonly record struct Options(int EntriesPerBlock, ushort CacheFromDepth)
     {
@@ -25,7 +25,7 @@ public class CacheBudget
     private readonly ushort _depth;
     private int _entriesPerBlock;
 
-    public int BudgetLeft => _entriesPerBlock;
+    public int BudgetLeft => Volatile.Read(ref _entriesPerBlock);
 
     private CacheBudget(int entriesPerBlock, ushort depth)
     {

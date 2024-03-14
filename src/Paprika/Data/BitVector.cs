@@ -12,8 +12,7 @@ public static class BitVector
     }
 
     private const int BitsPerByte = 8;
-    private const int Shift = 3;
-    private const int Mask = 7;
+    private const int Shift = 6;
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     public struct Of1024 : IBitVector
@@ -25,7 +24,7 @@ public static class BitVector
 
         public bool this[int bit]
         {
-            get => Get(ref _start, bit);
+            readonly get => Get(in _start, bit);
             set => Set(ref _start, bit, value);
         }
 
@@ -46,7 +45,7 @@ public static class BitVector
 
         public bool this[int bit]
         {
-            get => Get(ref _start, bit);
+            readonly get => Get(in _start, bit);
             set => Set(ref _start, bit, value);
         }
 
@@ -86,30 +85,28 @@ public static class BitVector
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool Get(ref byte b, int bit)
+    private static bool Get(in byte b, int bit)
     {
-        var at = bit >> Shift;
-        var selector = 1 << (bit & Mask);
-        return (Unsafe.Add(ref b, at) & selector) == selector;
+        var at = (uint)bit >> Shift;
+        var selector = 1L << bit;
+        ref var @byte = ref Unsafe.Add(ref Unsafe.As<byte, long>(ref Unsafe.AsRef(in b)), at);
+        return (@byte & selector) != 0;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Set(ref byte b, int bit, bool value)
     {
-        unchecked
-        {
-            var at = bit >> Shift;
-            var selector = 1 << (bit & Mask);
-            ref var @byte = ref Unsafe.Add(ref b, at);
+        var at = (uint)bit >> Shift;
+        var selector = 1L << bit;
+        ref var @byte = ref Unsafe.Add(ref Unsafe.As<byte, long>(ref b), at);
 
-            if (value)
-            {
-                @byte |= (byte)selector;
-            }
-            else
-            {
-                @byte &= (byte)~selector;
-            }
+        if (value)
+        {
+            @byte |= selector;
+        }
+        else
+        {
+            @byte &= ~selector;
         }
     }
 }
