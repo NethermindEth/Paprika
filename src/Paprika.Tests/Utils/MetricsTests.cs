@@ -20,7 +20,7 @@ public class MetricsTests
 
         using var db = PagedDb.NativeMemoryDb(16 * Mb, 2);
 
-        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(1, 1, Memoization.None));
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(1, 1));
 
         var random = new Random(13);
         var parent = Keccak.EmptyTreeHash;

@@ -51,19 +51,22 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private readonly Histogram<long> _storageProcessing;
     private readonly Histogram<long> _stateProcessing;
     private readonly Histogram<long> _totalMerkle;
+    private readonly ParallelOptions _parallelism;
 
     /// <summary>
     /// Initializes the Merkle.
     /// </summary>
     /// <param name="minimumTreeLevelToMemoizeKeccak">Minimum lvl of the tree to memoize the Keccak of a branch node.</param>
     /// <param name="memoizeKeccakEvery">How often (which lvl mod) should Keccaks be memoized.</param>
+    /// <param name="parallelism"></param>
     /// <param name="memoization">What to memoize, specifically.</param>
     public ComputeMerkleBehavior(int minimumTreeLevelToMemoizeKeccak = DefaultMinimumTreeLevelToMemoizeKeccak,
-        int memoizeKeccakEvery = MemoizeKeccakEveryNLevel, Memoization memoization = Memoization.None)
+        int memoizeKeccakEvery = MemoizeKeccakEveryNLevel, ParallelOptions? parallelism = null, Memoization memoization = Memoization.None)
     {
         _minimumTreeLevelToMemoizeKeccak = minimumTreeLevelToMemoizeKeccak;
         _memoizeKeccakEvery = memoizeKeccakEvery;
         _memoization = memoization;
+        _parallelism = parallelism ?? new ParallelOptions();
 
         _meter = new Meter(MeterName);
 
@@ -85,8 +88,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         var wrapper = new CommitWrapper(commit, true);
 
         var root = Key.Merkle(NibblePath.Empty);
-        var value = Compute(in root,
-            new ComputeContext(wrapper, TrieType.State, hint, CacheBudget.Options.None.Build()));
+        var ctx = new ComputeContext(wrapper, TrieType.State, hint, CacheBudget.Options.None.Build(), _parallelism);
+        var value = Compute(in root, ctx);
         return new Keccak(value.Span);
     }
 
@@ -97,8 +100,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         prefixed.SetPrefix(account);
 
         var root = Key.Merkle(storagePath);
-        var value = Compute(in root,
-            new ComputeContext(prefixed, TrieType.Storage, hint, CacheBudget.Options.None.Build()));
+        var ctx = new ComputeContext(prefixed, TrieType.Storage, hint, CacheBudget.Options.None.Build(), _parallelism);
+        var value = Compute(in root, ctx);
         return new Keccak(value.Span);
     }
 
@@ -161,7 +164,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         using (_storageProcessing.Measure())
         {
-            ScatterGather(commit, GetStorageWorkItems(commit, budget));
+            ScatterGather(commit, GetStorageWorkItems(commit, budget), _parallelism);
         }
 
         using (_stateProcessing.Measure())
@@ -169,7 +172,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             new BuildStateTreeItem(commit, commit.Stats.Keys, budget).DoWork();
 
             var root = Key.Merkle(NibblePath.Empty);
-            var rootKeccak = Compute(root, new ComputeContext(commit, TrieType.State, ComputeHint.None, budget));
+            var context = new ComputeContext(commit, TrieType.State, ComputeHint.None, budget, _parallelism);
+            var rootKeccak = Compute(root, context);
 
             Debug.Assert(rootKeccak.DataType == KeccakOrRlp.Type.Keccak);
 
@@ -185,7 +189,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     /// <param name="commit">The original commit.</param>
     /// <param name="workItems">The work items.</param>
-    private static void ScatterGather(ICommit commit, BuildStorageTriesItem[] workItems)
+    /// <param name="parallelism">The parallel options.</param>
+    private static void ScatterGather(ICommit commit, BuildStorageTriesItem[] workItems, ParallelOptions parallelism)
     {
         if (workItems.Length == 0)
         {
@@ -200,7 +205,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
 
         var children = new ConcurrentQueue<IChildCommit>();
-        Parallel.For(0, workItems.Length,
+        Parallel.For(0, workItems.Length, parallelism,
             commit.GetChild,
             (i, _, child) =>
             {
@@ -240,7 +245,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     {
         return commit.Stats
             .Where(kvp => kvp.Value > 0)
-            .Select(kvp => new BuildStorageTriesItem(this, commit, kvp.Key, budget))
+            .Select(kvp => new BuildStorageTriesItem(this, commit, kvp.Key, budget, _parallelism))
             .ToArray();
     }
 
@@ -300,9 +305,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         public readonly TrieType TrieType;
         public readonly ComputeHint Hint;
         public readonly CacheBudget Budget;
+        public readonly ParallelOptions Parallelism;
 
-        public ComputeContext(ICommit commit, TrieType trieType, ComputeHint hint, CacheBudget budget)
+        public ComputeContext(ICommit commit, TrieType trieType, ComputeHint hint, CacheBudget budget,
+            ParallelOptions parallelism)
         {
+            Parallelism = parallelism;
             Commit = commit;
             TrieType = trieType;
             Hint = hint;
@@ -391,7 +399,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             {
                 var prefixed = new PrefixingCommit(ctx.Commit);
                 prefixed.SetPrefix(leafKey.Path);
-                var ctx2 = new ComputeContext(prefixed, TrieType.Storage, ctx.Hint, ctx.Budget);
+                var ctx2 = new ComputeContext(prefixed, TrieType.Storage, ctx.Hint, ctx.Budget, ctx.Parallelism);
                 var storageRoot = Compute(Key.Merkle(NibblePath.Empty), ctx2);
                 account = new Account(account.Balance, account.Nonce, account.CodeHash, new Keccak(storageRoot.Span));
             }
@@ -507,14 +515,16 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             var trieType = ctx.TrieType;
             var hint = ctx.Hint;
             var budget = ctx.Budget;
-
+            var parallelism = ctx.Parallelism;
+            
             // parallel calculation
-            Parallel.For((long)0, NibbleSet.NibbleCount, nibble =>
+            Parallel.For((long)0, NibbleSet.NibbleCount, parallelism, nibble =>
             {
                 var childPath = NibblePath.FromKey(stackalloc byte[1] { (byte)(nibble << NibblePath.NibbleShift) }, 0)
                     .SliceTo(1);
                 var child = commits[nibble] = commit.GetChild();
-                results[nibble] = Compute(Key.Merkle(childPath), new(child, trieType, hint, budget)).Span.ToArray();
+                results[nibble] = Compute(Key.Merkle(childPath), new(child, trieType, hint, budget, parallelism)).Span
+                    .ToArray();
             });
 
             foreach (var childCommit in commits)
@@ -1297,15 +1307,17 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         private readonly ICommit _parent;
         private readonly Keccak _account;
         private readonly CacheBudget _budget;
+        private readonly ParallelOptions _parallelism;
         private PrefixingCommit? _prefixed;
 
         public BuildStorageTriesItem(ComputeMerkleBehavior behavior, ICommit parent, Keccak account,
-            CacheBudget budget)
+            CacheBudget budget, ParallelOptions parallelism)
         {
             _behavior = behavior;
             _parent = parent;
             _account = account;
             _budget = budget;
+            _parallelism = parallelism;
             _prefixed = null;
         }
 
@@ -1347,7 +1359,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
             // compute new storage root hash
             var keccakOrRlp = _behavior.Compute(Key.Merkle(NibblePath.Empty),
-                new(_prefixed!, TrieType.Storage, hint, _budget));
+                new(_prefixed!, TrieType.Storage, hint, _budget, _parallelism));
             var storageRoot = new Keccak(keccakOrRlp.Span);
 
             // Read the existing account from the commit, without the prefix as accounts are not prefixed
