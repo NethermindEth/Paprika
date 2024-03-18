@@ -188,4 +188,9 @@ public class PagedDbTests
             read.Report(state, storage);
         }
     }
+
+    [Test]
+    public void Delete(){
+        
+    } 
 }

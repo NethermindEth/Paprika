@@ -249,6 +249,36 @@ public class SlottedArrayTests
             }
         }
     }
+
+
+    [Test]
+    public void DeleteByPrefix_WithoutMatchingPrefix()
+    {
+        Span<byte> span = stackalloc byte[48];
+        var map = new SlottedArray(span);
+        var key = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56, 0x78 });
+
+        map.TrySet(key, Data0);
+
+        map.DeleteByPrefix(NibblePath.FromKey(stackalloc byte[] {0x12}));
+
+        // Assert
+        map.TryGet(key, out var actual).Should().BeTrue("Prefixes aren't same. Shouldn't be deleted.");
+    }
+        [Test]
+    public void DeleteByPrefix_WithMatchingPrefix()
+    {
+        Span<byte> span = stackalloc byte[48];
+        var map = new SlottedArray(span);
+        var key = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56, 0x78 });
+
+        map.TrySet(key, Data0);
+
+        map.DeleteByPrefix(NibblePath.FromKey(stackalloc byte[] {0x12, 0x34, 0x56, 0x78}));
+
+        // Assert
+        map.TryGet(key, out var actual).Should().BeFalse("Prefixes are same. Should be deleted.");
+    }
 }
 
 file static class FixedMapTestExtensions

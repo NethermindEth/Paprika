@@ -350,4 +350,27 @@ public class NibblePathTests
     }
 
     private HashSet<int> _hashes = new();
+
+    [Test]
+    public void StartsWith_ReturnsTrue()
+    {
+        var prefix = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56, 0x78 });
+        var other = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56, 0x78 });
+
+        bool result = prefix.StartsWith(other);
+
+        Assert.IsTrue(result);
+    }
+
+    [Test]
+    public void StartsWith_ReturnsFalse()
+    {
+        var prefix = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56, 0x78 });
+        var other = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56});
+
+        bool result = prefix.StartsWith(other);
+
+        Assert.IsFalse(result);
+    }
 }
+
