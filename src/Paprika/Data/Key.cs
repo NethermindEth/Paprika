@@ -115,9 +115,9 @@ public readonly ref partial struct Key
 
     public override string ToString()
     {
-        return $"{nameof(Path)}: {Path.ToString()}, " +
-               $"{nameof(Type)}: {Type}, " +
-               $"{nameof(StoragePath)}: {StoragePath.ToString()}";
+        return StoragePath.Length == 0
+            ? $"{Type}, {nameof(Path)}: {Path.ToString()}"
+            : $"{Type}, {nameof(Path)}: {Path.ToString()}, {nameof(StoragePath)}: {StoragePath.ToString()}";
     }
 
     /// <summary>

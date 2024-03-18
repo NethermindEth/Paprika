@@ -520,7 +520,7 @@ public class Blockchain : IAsyncDisposable
                 return;
             }
 
-            var percentage = (double)actual.BudgetLeft / total * 100;
+            var percentage = 100 - ((double)actual.BudgetLeft / total * 100);
             reportTo.Record((int)percentage);
         }
 

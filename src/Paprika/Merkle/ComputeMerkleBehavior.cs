@@ -628,34 +628,28 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// This component appends the prefix to all the commit operations.
     /// It's useful for storage operations, that have their key prefixed with the account.
     /// </summary>
-    private class PrefixingCommit : ICommit
+    private class PrefixingCommit(ICommit commit) : ICommit
     {
-        private readonly ICommit _commit;
         private Keccak _keccak;
-
-        public PrefixingCommit(ICommit commit)
-        {
-            _commit = commit;
-        }
 
         public void SetPrefix(in NibblePath path) => SetPrefix(path.UnsafeAsKeccak);
 
         public void SetPrefix(in Keccak keccak) => _keccak = keccak;
 
         public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) =>
-            _commit.Get(Build(key));
+            commit.Get(Build(key));
 
-        public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type) => _commit.Set(Build(key), in payload, type);
+        public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type) => commit.Set(Build(key), in payload, type);
 
         public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1, EntryType type)
-            => _commit.Set(Build(key), payload0, payload1, type);
+            => commit.Set(Build(key), payload0, payload1, type);
 
         /// <summary>
         /// Builds the <see cref="_keccak"/> aware key, treating the path as the path for the storage.
         /// </summary>
         private Key Build(scoped in Key key) => Key.Raw(NibblePath.FromKey(_keccak), key.Type, key.Path);
 
-        public IChildCommit GetChild() => new ChildCommit(this, _commit.GetChild());
+        public IChildCommit GetChild() => new ChildCommit(this, commit.GetChild());
 
         public void Visit(CommitAction action, TrieType type) => throw new Exception("Should not be called");
 
