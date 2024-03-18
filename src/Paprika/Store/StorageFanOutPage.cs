@@ -115,6 +115,28 @@ public readonly unsafe struct StorageFanOutPage<TNext>(Page page) : IPageWithDat
             }
         }
     }
+    public Page Destroy(IBatchContext batch, in NibblePath prefix)
+    {
+        if (Header.BatchId != batch.BatchId)
+        {
+            // the page is from another batch, meaning, it's readonly. Copy
+            var writable = batch.GetWritableCopy(page);
+            return new StorageFanOutPage<TNext>(writable).Destroy(batch, prefix);
+        }
+        var map = new SlottedArray(Data.Data);
+        map.DeleteByPrefix(prefix);
+
+        var index = GetIndex(prefix);
+        ref var addr = ref Data.Addresses[index];
+        Page child;
+        if (!addr.IsNull)
+        {
+            child = batch.GetAt(addr);
+            var sliced = prefix.SliceFrom(ConsumedNibbles);
+            return TNext.Wrap(child).Destroy(batch, sliced);
+        }
+        return new Page(); 
+    }
 }
 
 static class StorageFanOutPage

@@ -316,6 +316,16 @@ public readonly ref struct SlottedArray
         Debug.Assert(copy._header.Deleted == 0, "All deleted should be gone");
     }
 
+    public void DeleteByPrefix(in NibblePath key)
+    {
+        foreach (var item in this.EnumerateAll())
+        {
+            if (item.Key.StartsWith(key))
+            {
+                this.Delete(item);
+            }
+        }
+    }
     /// <summary>
     /// Collects tombstones of entities that used to be. 
     /// </summary>

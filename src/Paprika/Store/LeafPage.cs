@@ -234,4 +234,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             }
         }
     }
+    public Page Destroy(IBatchContext batch, in NibblePath prefix){
+        return new Page();
+    }
 }

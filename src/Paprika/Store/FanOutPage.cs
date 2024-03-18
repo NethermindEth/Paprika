@@ -139,4 +139,7 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
             }
         }
     }
+    public Page Destroy(IBatchContext batch, in NibblePath prefix){
+        return new Page();
+    }
 }

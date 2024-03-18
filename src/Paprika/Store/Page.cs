@@ -31,6 +31,8 @@ public interface IPageWithData<TPage> : IPage
     void Report(IReporter reporter, IPageResolver resolver, int level);
 
     void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr);
+
+    Page Destroy(IBatchContext batch, in NibblePath prefix);
 }
 
 /// <summary>

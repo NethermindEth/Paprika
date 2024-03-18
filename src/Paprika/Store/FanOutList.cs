@@ -85,4 +85,20 @@ public readonly ref struct FanOutList<TPage, TPageType>(Span<DbAddress> addresse
             }
         }
     }
+    public void Destroy(IBatchContext batch, in NibblePath prefix)
+    {
+        // Destroy the Id entry about it
+        Set(prefix, ReadOnlySpan<byte>.Empty, batch);
+
+        // Destroy the account entry
+        // SetAtRoot<FanOutPage>(batch, account, ReadOnlySpan<byte>.Empty, ref Data.StateRoot);
+
+        // Remove the cached
+        // batch.IdCache.Remove(prefix.UnsafeAsKeccak);
+
+        var index = GetIndex(prefix);
+        var addr = _addresses[index];
+
+        TPage.Wrap(batch.GetAt(addr)).Destroy(batch, prefix.SliceFrom(ConsumedNibbles));
+    }
 }

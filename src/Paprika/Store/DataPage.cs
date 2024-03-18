@@ -308,4 +308,8 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             }
         }
     }
+    public Page Destroy(IBatchContext batch, in NibblePath prefix){
+        return new Page();
+    }
+
 }

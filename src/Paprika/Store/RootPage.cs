@@ -228,6 +228,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
 
         // TODO: there' no garbage collection for storage
         // It should not be hard. Walk down by the mapped path, then remove all the pages underneath.
+        Data.Storage.Destroy(batch, account);
     }
 
     private static void SetAtRoot<TPage>(IBatchContext batch, in NibblePath path, in ReadOnlySpan<byte> rawData,
