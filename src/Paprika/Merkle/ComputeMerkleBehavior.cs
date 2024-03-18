@@ -322,16 +322,17 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             // Get the current root
             var current = _root;
 
-            // If the root is set, return it
-            if (current != UIntPtr.Zero)
+            // Nothing currently memoized, rent new
+            if (current == UIntPtr.Zero)
             {
-                var page = new Page((byte*)current.ToPointer());
-                _root = Unsafe.ReadUnaligned<UIntPtr>(page.Payload);
-
-                return new PageOwner(page, ref _root);
+                return new PageOwner(_pool.Rent(false), ref _root);
             }
 
-            return new PageOwner(_pool.Rent(false), ref _root);
+            // reuse memoized
+            var page = new Page((byte*)current.ToPointer());
+            _root = Unsafe.ReadUnaligned<UIntPtr>(page.Payload);
+
+            return new PageOwner(page, ref _root);
         }
 
         public unsafe void Dispose()
