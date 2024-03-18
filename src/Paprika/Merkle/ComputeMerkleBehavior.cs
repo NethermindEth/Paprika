@@ -788,6 +788,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     /// <returns>Whether the node has changed its type </returns>
     /// <exception cref="ArgumentOutOfRangeException"></exception>
+    [SkipLocalsInit]
     private static DeleteStatus Delete(in NibblePath path, int at, ICommit commit, CacheBudget budget)
     {
         var slice = path.SliceTo(at);
@@ -983,7 +984,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     {
         return pathLength == NibblePath.KeccakNibbleCount;
     }
-
 
     /// <summary>
     /// Transforms the extension either to a <see cref="Node.Type.Leaf"/> or to a longer <see cref="Node.Type.Extension"/>.
