@@ -512,15 +512,17 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         const int initialShift = Rlp.MaxLengthOfLength + 1;
         using var buffer = ctx.Rent();
 
-        var stream = new RlpStream(buffer.Span)
+        const int slice = 1024;
+        var rlp = buffer.Span[..slice];
+
+        var stream = new RlpStream(rlp)
         {
             Position = initialShift
         };
 
         if (!runInParallel)
         {
-            const int additionalBytesForNibbleAppending = 1;
-            Span<byte> childSpan = stackalloc byte[key.Path.MaxByteLength + additionalBytesForNibbleAppending];
+            var childSpan = buffer.Span[slice..];
 
             for (byte i = 0; i < NibbleSet.NibbleCount; i++)
             {
@@ -536,7 +538,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     var childPath = key.Path.AppendNibble(i, childSpan);
                     var leafKey = Key.Merkle(childPath);
 
-                    KeccakOrRlp value = (childPath.Length == NibblePath.KeccakNibbleCount) ?
+                    var value = childPath.Length == NibblePath.KeccakNibbleCount ?
                         EncodeLeaf(leafKey, ctx, NibblePath.Empty) :
                         Compute(leafKey, ctx);
 
@@ -621,7 +623,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         stream.Position = from;
         stream.StartSequence(actualLength);
 
-        var result = KeccakOrRlp.FromSpan(buffer.Span.Slice(from, end - from));
+        var result = KeccakOrRlp.FromSpan(rlp.Slice(from, end - from));
 
         if (result.DataType == KeccakOrRlp.Type.Keccak)
         {
@@ -666,7 +668,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private KeccakOrRlp EncodeExtension(scoped in Key key, scoped in ComputeContext ctx, scoped in Node.Extension ext)
     {
-        Span<byte> span = stackalloc byte[Math.Max(ext.Path.HexEncodedLength, key.Path.MaxByteLength + 1)];
+        using var pooled = ctx.Rent();
+
+        const int slice = 1024;
+        var span = pooled.Span[..slice];
 
         // retrieve the children keccak-or-rlp
         var branchKeccakOrRlp = Compute(Key.Merkle(key.Path.Append(ext.Path, span)), ctx);
@@ -680,7 +685,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         var totalLength = Rlp.LengthOfSequence(contentLength);
 
-        RlpStream stream = new(stackalloc byte[totalLength]);
+        RlpStream stream = new(pooled.Span.Slice(slice, totalLength));
         stream.StartSequence(contentLength);
         stream.Encode(span);
         stream.Encode(branchKeccakOrRlp.Span);
