@@ -1412,8 +1412,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             // Don't parallelize this work as it would be counter-productive to have parallel over parallel.
             const ComputeHint hint = ComputeHint.DontUseParallel;
 
-            Span<byte> accountSpan = stackalloc byte[Account.MaxByteCount];
-
             // compute new storage root hash
             UIntPtr stack = default;
             using var ctx = new ComputeContext(_prefixed!, TrieType.Storage, hint, _budget, _behavior._pool, ref stack);
@@ -1431,8 +1429,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 // update it
                 account = account.WithChangedStorageRoot(storageRoot);
 
-                // set it in 
-                commit.Set(key, account.WriteTo(accountSpan));
+                // set it in
+                using var pooled = ctx.Rent();
+                commit.Set(key, account.WriteTo(pooled.Span));
             }
             else
             {
