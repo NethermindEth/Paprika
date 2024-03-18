@@ -88,6 +88,7 @@ public interface ICommit
     IReadOnlyDictionary<Keccak, int> Stats { get; }
 }
 
+
 public interface IReadOnlyCommit
 {
     /// <summary>

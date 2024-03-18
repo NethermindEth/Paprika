@@ -270,12 +270,12 @@ public class Blockchain : IAsyncDisposable
         }
     }
 
-    public IWorldState StartNew(Keccak parentKeccak)
+    public IWorldState StartNew(Keccak parentKeccak, IMetricsCollector? getMetrics = null)
     {
         lock (_blockLock)
         {
             var (batch, ancestors) = BuildBlockDataDependencies(parentKeccak);
-            return new BlockState(parentKeccak, batch, ancestors, this);
+            return new BlockState(parentKeccak, batch, ancestors, this, getMetrics);
         }
     }
 
@@ -436,16 +436,17 @@ public class Blockchain : IAsyncDisposable
         private Keccak? _hash;
 
         private int _dbReads;
-        private IStateStats _stats1;
+        private readonly IMetricsCollector? _metrics;
 
         public BlockState(Keccak parentStateRoot, IReadOnlyBatch batch, CommittedBlockState[] ancestors,
-            Blockchain blockchain)
+            Blockchain blockchain, IMetricsCollector? metrics = null)
         {
             _batch = new ReadOnlyBatchCountingRefs(batch);
 
             _ancestors = ancestors;
 
             _blockchain = blockchain;
+            _metrics = metrics;
 
             ParentHash = parentStateRoot;
 
@@ -490,7 +491,7 @@ public class Blockchain : IAsyncDisposable
         public Keccak ParentHash { get; }
 
         /// <summary>
-        /// Commits the block to the block chain.
+        /// Commits the block to the blockchain.
         /// </summary>
         public Keccak Commit(uint blockNumber)
         {
@@ -871,6 +872,8 @@ public class Blockchain : IAsyncDisposable
         private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
             ulong bloom)
         {
+            _metrics?.OnTryGet(key, keyWritten, bloom);
+
             var owner = TryGetLocal(key, keyWritten, bloom, out var succeeded);
             if (succeeded)
                 return owner.WithDepth(0);
@@ -1468,4 +1471,9 @@ public class Blockchain : IAsyncDisposable
 
         public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) => ((IReadOnlyWorldState)_current).Get(key);
     }
+}
+
+public interface IMetricsCollector
+{
+    void OnTryGet(in Key key, ReadOnlySpan<byte> keyWritten, ulong bloom);
 }

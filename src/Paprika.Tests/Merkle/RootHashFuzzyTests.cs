@@ -1,6 +1,9 @@
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Reflection;
+using System.Text;
 using FluentAssertions;
+using FluentAssertions.Formatting;
 using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
@@ -148,6 +151,7 @@ public class RootHashFuzzyTests
         public readonly Keccak RootHashAsKeccak;
         private uint _blocks;
         private Keccak _parent;
+        private readonly MetricsCollector _metrics;
 
         public CaseGenerator(int count, int storageCount, string rootHash)
         {
@@ -159,6 +163,7 @@ public class RootHashFuzzyTests
 
             _blocks = 1;
             _parent = Keccak.EmptyTreeHash;
+            _metrics = new MetricsCollector();
         }
 
         public void Run(Commit commit)
@@ -249,8 +254,11 @@ public class RootHashFuzzyTests
                 counter = 0;
                 _parent = block.Commit(_blocks++);
 
+                // var report = _metrics.Report(5);
+                // _metrics.Clear();
+
                 block.Dispose();
-                block = blockchain.StartNew(_parent);
+                block = blockchain.StartNew(_parent, /* _metrics */ null);
 
                 if (autoFinalize)
                 {
@@ -272,5 +280,38 @@ public class RootHashFuzzyTests
         var keccak = new Keccak(Convert.FromHexString(hex));
 
         merkle.RootHash.Should().Be(keccak);
+    }
+
+    sealed class MetricsCollector : IMetricsCollector
+    {
+        private readonly ConcurrentDictionary<string, int> _counters = new();
+
+        public void Clear() => _counters.Clear();
+
+        public void OnTryGet(in Key key, ReadOnlySpan<byte> keyWritten, ulong bloom)
+        {
+            _counters.AddOrUpdate(key.ToString(), 1, static (_, prev) => prev + 1);
+        }
+
+        public string Report(int minToReport)
+        {
+            var sb = new StringBuilder();
+
+            foreach (var kvp in _counters)
+            {
+                if (kvp.Value > minToReport)
+                {
+                    sb.Append(kvp.Key);
+                    sb.Append(": ");
+                    sb.Append(kvp.Value);
+                    sb.AppendLine();
+                }
+            }
+
+            return sb.ToString();
+
+            var metrics = _counters.ToArray();
+            Array.Sort(metrics, (m1, m2) => -m1.Value.CompareTo(m2.Value));
+        }
     }
 }
