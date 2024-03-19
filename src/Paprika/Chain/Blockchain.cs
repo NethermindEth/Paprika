@@ -519,8 +519,10 @@ public class Blockchain : IAsyncDisposable
                 return;
             }
 
-            var percentage = (double)actual.BudgetLeft / total * 100;
-            reportTo.Record((int)percentage);
+            var percentageLeft = (double)actual.BudgetLeft / total * 100;
+            var percentageUsed = 100 - percentageLeft;
+
+            reportTo.Record((int)percentageUsed);
         }
 
         private CommittedBlockState? CommitImpl(uint blockNumber, bool raw)
