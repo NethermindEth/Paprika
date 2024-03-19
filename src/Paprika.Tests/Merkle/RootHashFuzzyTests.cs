@@ -92,8 +92,8 @@ public class RootHashFuzzyTests
         var generator = Build(test);
 
         using var db = PagedDb.NativeMemoryDb(1024 * 1024 * 1024, 2);
-        var merkle = new ComputeMerkleBehavior(1, 1);
-        await using var blockchain = new Blockchain(db, merkle, null, new CacheBudget.Options(1000, 8), new CacheBudget.Options(1000, 8));
+        using var merkle = new ComputeMerkleBehavior(1, 1);
+        await using var blockchain = new Blockchain(db, merkle, null, new CacheBudget.Options(2000, 4), new CacheBudget.Options(2000, 4));
 
         // set
         generator.Run(blockchain, 513, false, true);
@@ -265,7 +265,7 @@ public class RootHashFuzzyTests
 
     private static void AssertRoot(string hex, ICommit commit)
     {
-        var merkle = new ComputeMerkleBehavior();
+        using var merkle = new ComputeMerkleBehavior();
 
         merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());
 

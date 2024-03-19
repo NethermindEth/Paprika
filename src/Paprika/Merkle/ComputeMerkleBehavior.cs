@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Diagnostics.Contracts;
 using System.Runtime.CompilerServices;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
@@ -33,14 +34,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     internal const string HistogramStorageProcessing = "Storage processing";
     internal const string TotalMerkle = "Total Merkle";
 
-    /// <summary>
-    /// The upper boundary of memory needed to write RLP of any Merkle node.
-    /// </summary>
-    /// <remarks>
-    /// Actually, it is lower, ~600 but let's wrap it nicely.
-    /// </remarks>
-    private const int MaxBufferNeeded = 1024;
-
     public const int DefaultMinimumTreeLevelToMemoizeKeccak = 1;
     public const int MemoizeKeccakEveryNLevel = 1;
 
@@ -51,6 +44,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private readonly Histogram<long> _storageProcessing;
     private readonly Histogram<long> _stateProcessing;
     private readonly Histogram<long> _totalMerkle;
+    private readonly BufferPool _pool;
 
     /// <summary>
     /// Initializes the Merkle.
@@ -64,6 +58,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         _minimumTreeLevelToMemoizeKeccak = minimumTreeLevelToMemoizeKeccak;
         _memoizeKeccakEvery = memoizeKeccakEvery;
         _memoization = memoization;
+
+        _pool = new BufferPool(128, true, "Merkle");
 
         _meter = new Meter(MeterName);
 
@@ -85,8 +81,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         var wrapper = new CommitWrapper(commit, true);
 
         var root = Key.Merkle(NibblePath.Empty);
-        var value = Compute(in root,
-            new ComputeContext(wrapper, TrieType.State, hint, CacheBudget.Options.None.Build()));
+
+        UIntPtr stack = default;
+        using var ctx = new ComputeContext(wrapper, TrieType.State, hint, CacheBudget.Options.None.Build(), _pool, ref stack);
+        var value = Compute(in root, ctx);
         return new Keccak(value.Span);
     }
 
@@ -97,8 +95,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         prefixed.SetPrefix(account);
 
         var root = Key.Merkle(storagePath);
-        var value = Compute(in root,
-            new ComputeContext(prefixed, TrieType.Storage, hint, CacheBudget.Options.None.Build()));
+        UIntPtr stack = default;
+        using var ctx = new ComputeContext(prefixed, TrieType.Storage, hint, CacheBudget.Options.None.Build(), _pool, ref stack);
+        var value = Compute(in root, ctx);
         return new Keccak(value.Span);
     }
 
@@ -169,7 +168,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             new BuildStateTreeItem(commit, commit.Stats.Keys, budget).DoWork();
 
             var root = Key.Merkle(NibblePath.Empty);
-            var rootKeccak = Compute(root, new ComputeContext(commit, TrieType.State, ComputeHint.None, budget));
+            UIntPtr stack = default;
+            using var ctx = new ComputeContext(commit, TrieType.State, ComputeHint.None, budget, _pool, ref stack);
+            var rootKeccak = Compute(root, ctx);
 
             Debug.Assert(rootKeccak.DataType == KeccakOrRlp.Type.Keccak);
 
@@ -294,20 +295,30 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         ForceStorageRootHashRecalculation = 4
     }
 
-    private readonly struct ComputeContext
+    private readonly ref struct ComputeContext
     {
         public readonly ICommit Commit;
         public readonly TrieType TrieType;
         public readonly ComputeHint Hint;
         public readonly CacheBudget Budget;
 
-        public ComputeContext(ICommit commit, TrieType trieType, ComputeHint hint, CacheBudget budget)
+        private readonly BufferPool _pool;
+        private readonly ref UIntPtr _root;
+
+        public ComputeContext(ICommit commit, TrieType trieType, ComputeHint hint, CacheBudget budget, BufferPool pool, ref UIntPtr root)
         {
             Commit = commit;
             TrieType = trieType;
             Hint = hint;
             Budget = budget;
+
+            _pool = pool;
+            _root = ref root;
         }
+
+        public PageOwner Rent() => PageOwner.Rent(_pool, ref _root);
+
+        public void Dispose() => PageOwner.ReturnStack(_pool, ref _root);
     }
 
     private KeccakOrRlp Compute(scoped in Key key, scoped in ComputeContext ctx)
@@ -391,7 +402,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             {
                 var prefixed = new PrefixingCommit(ctx.Commit);
                 prefixed.SetPrefix(leafKey.Path);
-                var ctx2 = new ComputeContext(prefixed, TrieType.Storage, ctx.Hint, ctx.Budget);
+                UIntPtr stack = default;
+                using var ctx2 = new ComputeContext(prefixed, TrieType.Storage, ctx.Hint, ctx.Budget, _pool, ref stack);
                 var storageRoot = Compute(Key.Merkle(NibblePath.Empty), ctx2);
                 account = new Account(account.Balance, account.Nonce, account.CodeHash, new Keccak(storageRoot.Span));
             }
@@ -416,7 +428,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             branch.Children.AllSet;
 
         var memoize = !ctx.Hint.HasFlag(ComputeHint.SkipCachedInformation) && ShouldMemoizeBranchRlp(key.Path, ctx.TrieType);
-        var bytes = ArrayPool<byte>.Shared.Rent(MaxBufferNeeded);
 
         byte[]? rlpMemoization = null;
         RlpMemo memo = default;
@@ -448,15 +459,19 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         // leave for length preamble
         const int initialShift = Rlp.MaxLengthOfLength + 1;
-        var stream = new RlpStream(bytes)
+        using var buffer = ctx.Rent();
+
+        const int slice = 1024;
+        var rlp = buffer.Span[..slice];
+
+        var stream = new RlpStream(rlp)
         {
             Position = initialShift
         };
 
         if (!runInParallel)
         {
-            const int additionalBytesForNibbleAppending = 1;
-            Span<byte> childSpan = stackalloc byte[key.Path.MaxByteLength + additionalBytesForNibbleAppending];
+            var childSpan = buffer.Span[slice..];
 
             for (byte i = 0; i < NibbleSet.NibbleCount; i++)
             {
@@ -472,7 +487,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     var childPath = key.Path.AppendNibble(i, childSpan);
                     var leafKey = Key.Merkle(childPath);
 
-                    KeccakOrRlp value = (childPath.Length == NibblePath.KeccakNibbleCount) ?
+                    var value = childPath.Length == NibblePath.KeccakNibbleCount ?
                         EncodeLeaf(leafKey, ctx, NibblePath.Empty) :
                         Compute(leafKey, ctx);
 
@@ -514,7 +529,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 var childPath = NibblePath.FromKey(stackalloc byte[1] { (byte)(nibble << NibblePath.NibbleShift) }, 0)
                     .SliceTo(1);
                 var child = commits[nibble] = commit.GetChild();
-                results[nibble] = Compute(Key.Merkle(childPath), new(child, trieType, hint, budget)).Span.ToArray();
+                UIntPtr stack = default;
+                using var ctx = new ComputeContext(child, trieType, hint, budget, _pool, ref stack);
+                results[nibble] = Compute(Key.Merkle(childPath), ctx).Span.ToArray();
             });
 
             foreach (var childCommit in commits)
@@ -555,9 +572,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         stream.Position = from;
         stream.StartSequence(actualLength);
 
-        var result = KeccakOrRlp.FromSpan(bytes.AsSpan(from, end - from));
-
-        ArrayPool<byte>.Shared.Return(bytes);
+        var result = KeccakOrRlp.FromSpan(rlp.Slice(from, end - from));
 
         if (result.DataType == KeccakOrRlp.Type.Keccak)
         {
@@ -602,7 +617,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     private KeccakOrRlp EncodeExtension(scoped in Key key, scoped in ComputeContext ctx, scoped in Node.Extension ext)
     {
-        Span<byte> span = stackalloc byte[Math.Max(ext.Path.HexEncodedLength, key.Path.MaxByteLength + 1)];
+        using var pooled = ctx.Rent();
+
+        const int slice = 1024;
+        var span = pooled.Span[..slice];
 
         // retrieve the children keccak-or-rlp
         var branchKeccakOrRlp = Compute(Key.Merkle(key.Path.Append(ext.Path, span)), ctx);
@@ -616,7 +634,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         var totalLength = Rlp.LengthOfSequence(contentLength);
 
-        RlpStream stream = new(stackalloc byte[totalLength]);
+        RlpStream stream = new(pooled.Span.Slice(slice, totalLength));
         stream.StartSequence(contentLength);
         stream.Encode(span);
         stream.Encode(branchKeccakOrRlp.Span);
@@ -719,6 +737,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// </summary>
     /// <returns>Whether the node has changed its type </returns>
     /// <exception cref="ArgumentOutOfRangeException"></exception>
+    [SkipLocalsInit]
     private static DeleteStatus Delete(in NibblePath path, int at, ICommit commit, CacheBudget budget)
     {
         var slice = path.SliceTo(at);
@@ -773,7 +792,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             commit.SetExtension(key, ext.Path, entryType);
                         }
 
-                        // The node has not change its type
+                        // The node has not changed its type
                         return DeleteStatus.NodeTypePreserved;
                     }
 
@@ -914,7 +933,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     {
         return pathLength == NibblePath.KeccakNibbleCount;
     }
-
 
     /// <summary>
     /// Transforms the extension either to a <see cref="Node.Type.Leaf"/> or to a longer <see cref="Node.Type.Extension"/>.
@@ -1343,11 +1361,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             // Don't parallelize this work as it would be counter-productive to have parallel over parallel.
             const ComputeHint hint = ComputeHint.DontUseParallel;
 
-            Span<byte> accountSpan = stackalloc byte[Account.MaxByteCount];
-
             // compute new storage root hash
-            var keccakOrRlp = _behavior.Compute(Key.Merkle(NibblePath.Empty),
-                new(_prefixed!, TrieType.Storage, hint, _budget));
+            UIntPtr stack = default;
+            using var ctx = new ComputeContext(_prefixed!, TrieType.Storage, hint, _budget, _behavior._pool, ref stack);
+            var keccakOrRlp = _behavior.Compute(Key.Merkle(NibblePath.Empty), ctx);
             var storageRoot = new Keccak(keccakOrRlp.Span);
 
             // Read the existing account from the commit, without the prefix as accounts are not prefixed
@@ -1361,8 +1378,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 // update it
                 account = account.WithChangedStorageRoot(storageRoot);
 
-                // set it in 
-                commit.Set(key, account.WriteTo(accountSpan));
+                // set it in
+                using var pooled = ctx.Rent();
+                commit.Set(key, account.WriteTo(pooled.Span));
             }
             else
             {

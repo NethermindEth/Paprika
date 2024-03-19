@@ -256,7 +256,7 @@ public class RootHashTests
 
     private static void AssertRoot(string hex, ICommit commit)
     {
-        var merkle = new ComputeMerkleBehavior();
+        using var merkle = new ComputeMerkleBehavior();
 
         merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());
 
