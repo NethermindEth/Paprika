@@ -9,7 +9,6 @@ using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.RLP;
-using Paprika.Store;
 using Paprika.Utils;
 
 namespace Paprika.Merkle;
@@ -317,59 +316,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             _root = ref root;
         }
 
-        public unsafe PageOwner Rent()
-        {
-            // Get the current root
-            var current = _root;
+        public PageOwner Rent() => PageOwner.Rent(_pool, ref _root);
 
-            // Nothing currently memoized, rent new
-            if (current == UIntPtr.Zero)
-            {
-                return new PageOwner(_pool.Rent(false), ref _root);
-            }
-
-            // reuse memoized
-            var page = new Page((byte*)current.ToPointer());
-            _root = Unsafe.ReadUnaligned<UIntPtr>(page.Payload);
-
-            return new PageOwner(page, ref _root);
-        }
-
-        public unsafe void Dispose()
-        {
-            // walk through the stack, return them all
-            var root = _root;
-
-            while (root != UIntPtr.Zero)
-            {
-                var page = new Page((byte*)root.ToPointer());
-                root = Unsafe.ReadUnaligned<UIntPtr>(page.Payload);
-                _pool.Return(page);
-            }
-        }
-    }
-
-    private readonly ref struct PageOwner
-    {
-        private readonly Page _page;
-        private readonly ref UIntPtr _stack;
-
-        public PageOwner(Page page, ref UIntPtr stack)
-        {
-            _page = page;
-            _stack = ref stack;
-        }
-
-        public Span<byte> Span => _page.Span;
-
-        public unsafe void Dispose()
-        {
-            // First, write the root on the page.
-            Unsafe.WriteUnaligned(_page.Payload, _stack);
-
-            // Then update the root to the page.
-            _stack = _page.Raw;
-        }
+        public void Dispose() => PageOwner.ReturnStack(_pool, ref _root);
     }
 
     private KeccakOrRlp Compute(scoped in Key key, scoped in ComputeContext ctx)
@@ -843,7 +792,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             commit.SetExtension(key, ext.Path, entryType);
                         }
 
-                        // The node has not change its type
+                        // The node has not changed its type
                         return DeleteStatus.NodeTypePreserved;
                     }
 
