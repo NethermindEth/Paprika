@@ -16,7 +16,9 @@ namespace Paprika.Tests.Merkle;
 /// The tests are based on Nethermind's suite provided at
 /// <see cref="https://github.com/NethermindEth/nethermind/blob/feature/paprika_merkle_tests/src/Nethermind/Nethermind.Trie.Test/PaprikaTrieTests.cs"/>
 /// </summary>
-public class RootHashTests
+[TestFixture(true)]
+[TestFixture(false)]
+public class RootHashTests(bool parallel)
 {
     [Test]
     public void Empty_tree()
@@ -216,7 +218,7 @@ public class RootHashTests
     public async Task Sepolia_big_storage_tree(int take, string storageHash)
     {
         using var db = PagedDb.NativeMemoryDb(8 * 1024 * 1024, 2);
-        var merkle = new ComputeMerkleBehavior();
+        var merkle = new ComputeMerkleBehavior(1, 1, Memoization.None, Parallelism);
 
         await using var blockchain = new Blockchain(db, merkle);
 
@@ -254,9 +256,9 @@ public class RootHashTests
         return File.ReadLines(Path.Combine(Path.GetDirectoryName(path)!, file));
     }
 
-    private static void AssertRoot(string hex, ICommit commit)
+    private void AssertRoot(string hex, ICommit commit)
     {
-        using var merkle = new ComputeMerkleBehavior();
+        using var merkle = new ComputeMerkleBehavior(1, 1, Memoization.None, Parallelism);
 
         merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());
 
@@ -264,4 +266,6 @@ public class RootHashTests
 
         merkle.RootHash.Should().Be(keccak);
     }
+
+    private int Parallelism => parallel ? ComputeMerkleBehavior.ParallelismUnlimited : ComputeMerkleBehavior.ParallelismNone;
 }
