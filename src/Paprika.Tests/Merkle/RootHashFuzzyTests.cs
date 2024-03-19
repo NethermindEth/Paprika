@@ -61,15 +61,20 @@ public class RootHashFuzzyTests
         AssertRootHash(rootHash, generator);
     }
 
-    [TestCase(nameof(Accounts_1000_Storage_1), int.MaxValue)]
-    [TestCase(nameof(Accounts_1_Storage_100), int.MaxValue)]
-    [TestCase(nameof(Accounts_100_Storage_1), int.MaxValue)]
-    public async Task CalculateStateRootHash(string test, int commitEvery)
+    [TestCase(nameof(Accounts_1000_Storage_1), int.MaxValue, true)]
+    [TestCase(nameof(Accounts_1_Storage_100), int.MaxValue, true)]
+    [TestCase(nameof(Accounts_100_Storage_1), int.MaxValue, true)]
+    [TestCase(nameof(Accounts_1000_Storage_1), int.MaxValue, false)]
+    [TestCase(nameof(Accounts_1_Storage_100), int.MaxValue, false)]
+    [TestCase(nameof(Accounts_100_Storage_1), int.MaxValue, false)]
+    public async Task CalculateStateRootHash(string test, int commitEvery, bool parallel)
     {
         var generator = Build(test);
 
         using var db = PagedDb.NativeMemoryDb(16 * 1024 * 1024, 2);
-        var merkle = new ComputeMerkleBehavior(2, 2);
+        var parallelism = parallel ? ComputeMerkleBehavior.ParallelismUnlimited : ComputeMerkleBehavior.ParallelismNone;
+        var merkle = new ComputeMerkleBehavior(1, 1, Memoization.None, parallelism);
+
         await using var blockchain = new Blockchain(db, merkle);
 
         var rootHash = generator.Run(blockchain, commitEvery);

@@ -28,6 +28,9 @@ namespace Paprika.Merkle;
 /// </remarks>
 public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 {
+    public const int ParallelismUnlimited = -1;
+    public const int ParallelismNone = 1;
+
     internal const string MeterName = "Paprika.Merkle";
 
     internal const string HistogramStateProcessing = "State processing";
@@ -40,6 +43,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private readonly int _minimumTreeLevelToMemoizeKeccak;
     private readonly int _memoizeKeccakEvery;
     private readonly Memoization _memoization;
+    private readonly int _maxDegreeOfParallelism;
+
+    // metrics
     private readonly Meter _meter;
     private readonly Histogram<long> _storageProcessing;
     private readonly Histogram<long> _stateProcessing;
@@ -52,12 +58,14 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// <param name="minimumTreeLevelToMemoizeKeccak">Minimum lvl of the tree to memoize the Keccak of a branch node.</param>
     /// <param name="memoizeKeccakEvery">How often (which lvl mod) should Keccaks be memoized.</param>
     /// <param name="memoization">What to memoize, specifically.</param>
+    /// <param name="maxDegreeOfParallelism">The maximum degree of parallelism aligned with <see cref="ParallelOptions.MaxDegreeOfParallelism"/>.</param>
     public ComputeMerkleBehavior(int minimumTreeLevelToMemoizeKeccak = DefaultMinimumTreeLevelToMemoizeKeccak,
-        int memoizeKeccakEvery = MemoizeKeccakEveryNLevel, Memoization memoization = Memoization.None)
+        int memoizeKeccakEvery = MemoizeKeccakEveryNLevel, Memoization memoization = Memoization.None, int maxDegreeOfParallelism = ParallelismUnlimited)
     {
         _minimumTreeLevelToMemoizeKeccak = minimumTreeLevelToMemoizeKeccak;
         _memoizeKeccakEvery = memoizeKeccakEvery;
         _memoization = memoization;
+        _maxDegreeOfParallelism = maxDegreeOfParallelism;
 
         _pool = new BufferPool(128, true, "Merkle");
 
@@ -160,7 +168,14 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         using (_storageProcessing.Measure())
         {
-            ScatterGather(commit, GetStorageWorkItems(commit, budget));
+            if (_maxDegreeOfParallelism == ParallelismNone)
+            {
+                ProcessStorageSingleThreaded(commit, budget);
+            }
+            else
+            {
+                ScatterGather(commit, GetStorageWorkItems(commit, budget));
+            }
         }
 
         using (_stateProcessing.Measure())
@@ -169,7 +184,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
             var root = Key.Merkle(NibblePath.Empty);
             UIntPtr stack = default;
-            using var ctx = new ComputeContext(commit, TrieType.State, ComputeHint.None, budget, _pool, ref stack);
+            var hint = _maxDegreeOfParallelism == ParallelismNone ? ComputeHint.DontUseParallel : ComputeHint.None;
+            using var ctx = new ComputeContext(commit, TrieType.State, hint, budget, _pool, ref stack);
             var rootKeccak = Compute(root, ctx);
 
             Debug.Assert(rootKeccak.DataType == KeccakOrRlp.Type.Keccak);
@@ -178,6 +194,38 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             RootHash = value;
 
             return value;
+        }
+    }
+
+    private void ProcessStorageSingleThreaded(ICommit commit, CacheBudget budget)
+    {
+        var prefixed = new PrefixingCommit(commit);
+
+        // Visit changes and build trees
+        commit.Visit((in Key key, ReadOnlySpan<byte> value) =>
+        {
+            var keccak = key.Path.UnsafeAsKeccak;
+            prefixed.SetPrefix(keccak);
+
+            if (value.IsEmpty)
+            {
+                Delete(in key.StoragePath, 0, prefixed, budget);
+            }
+            else
+            {
+                MarkPathDirty(in key.StoragePath, prefixed, budget, TrieType.Storage);
+            }
+        }, TrieType.Storage);
+
+        // Calculate and update accounts
+        foreach (var (keccak, value) in commit.Stats)
+        {
+            var hasSStores = value > 0;
+            if (hasSStores)
+            {
+                prefixed.SetPrefix(keccak);
+                BuildStorageTriesItem.CalculateStorageRoot(keccak, this, budget, prefixed, commit);
+            }
         }
     }
 
@@ -1333,7 +1381,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             _prefixed.SetPrefix(_account);
             _parent.Visit(OnStorage, TrieType.Storage);
 
-            CalculateStorageRoots(commit);
+            CalculateStorageRoot(_account, _behavior, _budget, _prefixed, commit);
         }
 
         private void OnStorage(in Key key, ReadOnlySpan<byte> value)
@@ -1356,19 +1404,19 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             }
         }
 
-        private void CalculateStorageRoots(ICommit commit)
+        public static void CalculateStorageRoot(in Keccak keccak, ComputeMerkleBehavior behavior, CacheBudget budget, PrefixingCommit prefixed, ICommit commit)
         {
             // Don't parallelize this work as it would be counter-productive to have parallel over parallel.
             const ComputeHint hint = ComputeHint.DontUseParallel;
 
             // compute new storage root hash
             UIntPtr stack = default;
-            using var ctx = new ComputeContext(_prefixed!, TrieType.Storage, hint, _budget, _behavior._pool, ref stack);
-            var keccakOrRlp = _behavior.Compute(Key.Merkle(NibblePath.Empty), ctx);
+            using var ctx = new ComputeContext(prefixed, TrieType.Storage, hint, budget, behavior._pool, ref stack);
+            var keccakOrRlp = behavior.Compute(Key.Merkle(NibblePath.Empty), ctx);
             var storageRoot = new Keccak(keccakOrRlp.Span);
 
             // Read the existing account from the commit, without the prefix as accounts are not prefixed
-            var key = Key.Account(_account);
+            var key = Key.Account(keccak);
             using var accountOwner = commit.Get(key);
 
             if (accountOwner.IsEmpty == false)
@@ -1388,7 +1436,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 // Contract is created and destroyed, then its values are destroyed
                 // The storage root should be empty, otherwise, it's wrong
                 Debug.Assert(storageRoot == Keccak.EmptyTreeHash,
-                    $"Non-existent account with hash of {_account.ToString()} should have the storage root empty");
+                    $"Non-existent account with hash of {keccak.ToString()} should have the storage root empty");
             }
         }
     }
