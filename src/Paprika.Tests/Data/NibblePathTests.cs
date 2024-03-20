@@ -355,7 +355,7 @@ public class NibblePathTests
     public void StartsWith_ReturnsTrue()
     {
         var prefix = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56, 0x78 });
-        var other = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56, 0x78 });
+        var other = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34 });
 
         bool result = prefix.StartsWith(other);
 
@@ -366,7 +366,7 @@ public class NibblePathTests
     public void StartsWith_ReturnsFalse()
     {
         var prefix = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56, 0x78 });
-        var other = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56});
+        var other = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x33, 0x56});
 
         bool result = prefix.StartsWith(other);
 

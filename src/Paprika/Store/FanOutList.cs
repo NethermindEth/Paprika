@@ -97,8 +97,13 @@ public readonly ref struct FanOutList<TPage, TPageType>(Span<DbAddress> addresse
         // batch.IdCache.Remove(prefix.UnsafeAsKeccak);
 
         var index = GetIndex(prefix);
-        var addr = _addresses[index];
+        // var addr = _addresses[index];
 
-        TPage.Wrap(batch.GetAt(addr)).Destroy(batch, prefix.SliceFrom(ConsumedNibbles));
+        ref var addr = ref _addresses[index];
+
+        if (!addr.IsNull)
+        {
+            batch.GetAddress(TPage.Wrap(batch.GetAt(addr)).Destroy(batch, prefix.SliceFrom(ConsumedNibbles))); 
+        }
     }
 }

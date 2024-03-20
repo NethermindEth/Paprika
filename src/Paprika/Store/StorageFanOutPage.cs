@@ -119,13 +119,11 @@ public readonly unsafe struct StorageFanOutPage<TNext>(Page page) : IPageWithDat
     {
         if (Header.BatchId != batch.BatchId)
         {
-            // the page is from another batch, meaning, it's readonly. Copy
             var writable = batch.GetWritableCopy(page);
             return new StorageFanOutPage<TNext>(writable).Destroy(batch, prefix);
         }
         var map = new SlottedArray(Data.Data);
         map.DeleteByPrefix(prefix);
-
         var index = GetIndex(prefix);
         ref var addr = ref Data.Addresses[index];
         Page child;
