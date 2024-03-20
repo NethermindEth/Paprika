@@ -88,7 +88,8 @@ public static class Program
                     ctx.Refresh();
                 }));
 
-            using var preCommit = new ComputeMerkleBehavior(1, 1);
+            using var preCommit =
+                new ComputeMerkleBehavior(1, 1, Memoization.None, ComputeMerkleBehavior.ParallelismNone);
 
             var blockHash = Keccak.EmptyTreeHash;
             var finalization = new Queue<Keccak>();
