@@ -67,8 +67,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         _memoization = memoization;
         _maxDegreeOfParallelism = maxDegreeOfParallelism;
 
-        _pool = new BufferPool(128, true, "Merkle");
-
+        // Metrics
         _meter = new Meter(MeterName);
 
         _storageProcessing = _meter.CreateHistogram<long>(HistogramStateProcessing, "ms",
@@ -77,6 +76,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             "How long it takes to process storage");
         _totalMerkle = _meter.CreateHistogram<long>(TotalMerkle, "ms",
             "How long it takes to process Merkle total");
+
+        // Pool
+        _pool = new BufferPool(128, true, _meter);
     }
 
     /// <summary>
@@ -477,7 +479,14 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         var memoize = !ctx.Hint.HasFlag(ComputeHint.SkipCachedInformation) && ShouldMemoizeBranchRlp(key.Path, ctx.TrieType);
 
-        byte[]? rlpMemoization = null;
+        using var buffer = ctx.Rent();
+
+        // divide buffer
+        const int rlpSlice = 1024;
+
+        var rlp = buffer.Span[..rlpSlice];
+        var rlpMemoization = buffer.Span.Slice(rlpSlice, RlpMemo.Size);
+
         RlpMemo memo = default;
 
         if (memoize)
@@ -490,8 +499,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             }
             else
             {
-                rlpMemoization = ArrayPool<byte>.Shared.Rent(RlpMemo.Size);
-                data = rlpMemoization.AsSpan(0, RlpMemo.Size);
+                data = rlpMemoization;
                 if (previousRlp.IsEmpty)
                 {
                     data.Clear();
@@ -507,10 +515,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         // leave for length preamble
         const int initialShift = Rlp.MaxLengthOfLength + 1;
-        using var buffer = ctx.Rent();
-
-        const int slice = 1024;
-        var rlp = buffer.Span[..slice];
 
         var stream = new RlpStream(rlp)
         {
@@ -519,7 +523,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         if (!runInParallel)
         {
-            var childSpan = buffer.Span[slice..];
+            var childSpan = buffer.Span[(RlpMemo.Size + rlpSlice)..];
 
             for (byte i = 0; i < NibbleSet.NibbleCount; i++)
             {
@@ -635,9 +639,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 ctx.Commit.SetBranch(key, branch.Children, memo.Raw);
             }
         }
-
-        if (rlpMemoization != null)
-            ArrayPool<byte>.Shared.Return(rlpMemoization);
 
         return result;
     }

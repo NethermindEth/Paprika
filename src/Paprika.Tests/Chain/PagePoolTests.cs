@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics.Metrics;
 using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Chain;
@@ -11,7 +12,8 @@ public class PagePoolTests
     [Test]
     public void Simple_reuse()
     {
-        using var pool = new BufferPool(1);
+        using var meter = new Meter(nameof(Simple_reuse));
+        using var pool = new BufferPool(1, true, meter);
 
         // lease and return
         var initial = pool.Rent();
