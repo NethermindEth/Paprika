@@ -14,7 +14,6 @@ public static class BitVector
     private const int BitsPerByte = 8;
     private const int Shift = 6;
 
-    [InlineArray(Size)]
     [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     public struct Of1024 : IBitVector
     {
@@ -36,7 +35,6 @@ public static class BitVector
         static ushort IBitVector.Count => Count;
     }
 
-    [InlineArray(Size)]
     [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     public struct Of512 : IBitVector
     {
