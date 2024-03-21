@@ -97,7 +97,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
     {
         if (Data.StateRoot.IsNull == false)
         {
-            var data = new FanOutPage(resolver.GetAt(Data.StateRoot));
+            var data = new DataPage(resolver.GetAt(Data.StateRoot));
             using var scope = visitor.On(data, Data.StateRoot);
         }
 
@@ -121,7 +121,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
                 return false;
             }
 
-            return new FanOutPage(batch.GetAt(Data.StateRoot)).TryGet(key.Path, batch, out result);
+            return new DataPage(batch.GetAt(Data.StateRoot)).TryGet(key.Path, batch, out result);
         }
 
         Span<byte> idSpan = stackalloc byte[sizeof(uint)];
@@ -172,7 +172,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
     {
         if (key.IsState)
         {
-            SetAtRoot<FanOutPage>(batch, key.Path, rawData, ref Data.StateRoot);
+            SetAtRoot<DataPage>(batch, key.Path, rawData, ref Data.StateRoot);
         }
         else
         {
@@ -221,7 +221,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         Data.Ids.Set(account, ReadOnlySpan<byte>.Empty, batch);
 
         // Destroy the account entry
-        SetAtRoot<FanOutPage>(batch, account, ReadOnlySpan<byte>.Empty, ref Data.StateRoot);
+        SetAtRoot<DataPage>(batch, account, ReadOnlySpan<byte>.Empty, ref Data.StateRoot);
 
         // Remove the cached
         batch.IdCache.Remove(account.UnsafeAsKeccak);
