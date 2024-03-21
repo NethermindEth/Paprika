@@ -1,8 +1,12 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
+
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.RLP;
+
+using static Paprika.Merkle.Node;
 
 namespace Paprika.Merkle;
 
@@ -11,6 +15,7 @@ namespace Paprika.Merkle;
 /// </summary>
 public static class CommitExtensions
 {
+    [SkipLocalsInit]
     public static void SetLeaf(this ICommit commit, in Key key, in NibblePath leafPath,
         EntryType type = EntryType.Persistent)
     {
@@ -24,6 +29,7 @@ public static class CommitExtensions
         commit.Set(key, leaf.WriteTo(stackalloc byte[leaf.MaxByteLength]), type);
     }
 
+    [SkipLocalsInit]
     public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children,
         EntryType type = EntryType.Persistent)
     {
@@ -31,6 +37,7 @@ public static class CommitExtensions
         commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), type);
     }
 
+    [SkipLocalsInit]
     public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, ReadOnlySpan<byte> rlp,
         EntryType type = EntryType.Persistent)
     {
@@ -38,9 +45,10 @@ public static class CommitExtensions
         commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), rlp, type);
     }
 
+    [SkipLocalsInit]
     public static void SetExtension(this ICommit commit, in Key key, in NibblePath path, EntryType type = EntryType.Persistent)
     {
-        var extension = new Node.Extension(path);
+        var extension = new Extension(path);
         commit.Set(key, extension.WriteTo(stackalloc byte[extension.MaxByteLength]), type);
     }
 

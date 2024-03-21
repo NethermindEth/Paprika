@@ -100,7 +100,7 @@ public static partial class Node
         return header;
     }
 
-    [StructLayout(LayoutKind.Explicit, Pack = 1, Size = Size)]
+    [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     public readonly struct Header
     {
         public const int Size = sizeof(byte);
@@ -113,7 +113,7 @@ public static partial class Node
         private const byte MetadataMask = 0b0011_1111;
         private const int MetadataMaskShift = 0;
 
-        [FieldOffset(0)] private readonly byte _header;
+        private readonly byte _header;
 
         public Type NodeType
         {
@@ -370,6 +370,13 @@ public static partial class Node
         private static void Assert(NibbleSet.Readonly set)
         {
             if (set.SetCount < 2)
+            {
+                ThrowAssertFail(set);
+            }
+
+            [DoesNotReturn]
+            [StackTraceHidden]
+            static void ThrowAssertFail(NibbleSet.Readonly set)
             {
                 throw new ArgumentException($"At least two nibbles should be set, but only {set.SetCount} were found");
             }

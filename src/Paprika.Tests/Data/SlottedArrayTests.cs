@@ -16,7 +16,7 @@ public class SlottedArrayTests
     private static ReadOnlySpan<byte> Data4 => new byte[] { 23, 24, 25 };
 
     [Test]
-    public void Set_Get_Delete_Get_AnotherSet()
+    public Task Set_Get_Delete_Get_AnotherSet()
     {
         var key0 = Values.Key0.Span;
 
@@ -33,10 +33,13 @@ public class SlottedArrayTests
         // should be ready to accept some data again
         map.SetAssert(key0, Data1, "Should have memory after previous delete");
         map.GetAssert(key0, Data1);
+
+        // verify
+        return Verify(span.ToArray());
     }
 
     [Test]
-    public void Enumerate_all([Values(0, 1)] int odd)
+    public Task Enumerate_all([Values(0, 1)] int odd)
     {
         Span<byte> span = stackalloc byte[256];
         var map = new SlottedArray(span);
@@ -81,10 +84,13 @@ public class SlottedArrayTests
         e.Current.RawData.SequenceEqual(Data4).Should().BeTrue();
 
         e.MoveNext().Should().BeFalse();
+
+        // verify
+        return Verify(span.ToArray());
     }
 
     [Test]
-    public void Set_Get_Empty()
+    public Task Set_Get_Empty()
     {
         var key0 = Values.Key0.Span;
 
@@ -110,10 +116,13 @@ public class SlottedArrayTests
         e.Current.RawData.SequenceEqual(data).Should().BeTrue();
 
         e.MoveNext().Should().BeFalse();
+
+        // verify
+        return Verify(span.ToArray());
     }
 
     [Test]
-    public void Defragment_when_no_more_space()
+    public Task Defragment_when_no_more_space()
     {
         // by trial and error, found the smallest value that will allow to put these two
         Span<byte> span = stackalloc byte[88];
@@ -135,10 +144,13 @@ public class SlottedArrayTests
 
         map.GetAssert(key1, Data1);
         map.GetAssert(key2, Data2);
+
+        // verify
+        return Verify(span.ToArray());
     }
 
     [Test]
-    public void Update_in_situ()
+    public Task Update_in_situ()
     {
         // by trial and error, found the smallest value that will allow to put these two
         Span<byte> span = stackalloc byte[48];
@@ -150,10 +162,13 @@ public class SlottedArrayTests
         map.SetAssert(key1, Data2);
 
         map.GetAssert(key1, Data2);
+
+        // verify
+        return Verify(span.ToArray());
     }
 
     [Test]
-    public void Update_in_resize()
+    public Task Update_in_resize()
     {
         // Update the value, with the next one being bigger.
         Span<byte> span = stackalloc byte[56];
@@ -165,10 +180,13 @@ public class SlottedArrayTests
         map.SetAssert(key0, Data2);
 
         map.GetAssert(key0, Data2);
+
+        // verify
+        return Verify(span.ToArray());
     }
 
     [Test]
-    public void Small_keys_compression()
+    public Task Small_keys_compression()
     {
         Span<byte> span = stackalloc byte[256];
         var map = new SlottedArray(span);
@@ -195,6 +213,9 @@ public class SlottedArrayTests
 
             map.GetAssert(key, value);
         }
+
+        // verify
+        return Verify(span.ToArray());
     }
 
     [Test]

@@ -7,6 +7,7 @@ using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store.PageManagers;
 using Paprika.Utils;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Paprika.Store;
 
@@ -218,6 +219,14 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 }
             }
 
+            ThrowNoMatchingPage(stateHash);
+            return null!;
+        }
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowNoMatchingPage(in Keccak stateHash)
+        {
             throw new Exception($"There is no root page with the given stateHash '{stateHash}'!");
         }
     }
@@ -323,7 +332,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         {
             if (_batchCurrent != null)
             {
-                throw new Exception("There is another batch active at the moment. Commit the other first");
+                ThrowOnlyOneBatch();
             }
 
             var ctx = _ctx ?? new Context();
@@ -346,6 +355,13 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             }
 
             return _batchCurrent = new Batch(this, root, minBatch, ctx);
+        }
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowOnlyOneBatch()
+        {
+            throw new Exception("There is another batch active at the moment. Commit the other first");
         }
     }
 
@@ -484,11 +500,20 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
         {
             if (_disposed)
-                throw new ObjectDisposedException("The readonly batch has already been disposed");
+            {
+                ThrowDisposed();
+            }
 
             _metrics.Reads++;
 
             return _root.TryGet(key, this, out result);
+
+            [DoesNotReturn]
+            [StackTraceHidden]
+            static void ThrowDisposed()
+            {
+                throw new ObjectDisposedException("The readonly batch has already been disposed");
+            }
         }
 
         public void SetMetadata(uint blockNumber, in Keccak blockHash)
@@ -512,6 +537,13 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         private void CheckDisposed()
         {
             if (_disposed)
+            {
+                ThrowObjectDisposed();
+            }
+
+            [DoesNotReturn]
+            [StackTraceHidden]
+            static void ThrowObjectDisposed()
             {
                 throw new ObjectDisposedException("This batch has been disposed already.");
             }

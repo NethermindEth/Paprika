@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -24,15 +25,32 @@ public readonly ref struct SlottedArray
 {
     private readonly ref Header _header;
     private readonly Span<byte> _data;
-    private readonly Span<Slot> _slots;
-    private readonly Span<byte> _raw;
 
     public SlottedArray(Span<byte> buffer)
     {
-        _raw = buffer;
-        _header = ref Unsafe.As<byte, Header>(ref _raw[0]);
+        _header = ref Unsafe.As<byte, Header>(ref MemoryMarshal.GetReference(buffer));
         _data = buffer.Slice(Header.Size);
-        _slots = MemoryMarshal.Cast<byte, Slot>(_data);
+    }
+
+    private readonly ref Slot this[int index]
+    {
+        get
+        {
+            var offset = index * Slot.Size;
+            if (offset >= _data.Length - Slot.Size)
+            {
+                ThrowIndexOutOfRangeException();
+            }
+
+            return ref Unsafe.As<byte, Slot>(ref Unsafe.Add(ref MemoryMarshal.GetReference(_data), offset));
+
+            [DoesNotReturn]
+            [StackTraceHidden]
+            static void ThrowIndexOutOfRangeException()
+            {
+                throw new IndexOutOfRangeException();
+            }
+        }
     }
 
     public bool TrySet(in NibblePath key, ReadOnlySpan<byte> data)
@@ -75,7 +93,7 @@ public readonly ref struct SlottedArray
         }
 
         var at = _header.Low;
-        ref var slot = ref _slots[at / Slot.Size];
+        ref var slot = ref this[at / Slot.Size];
 
         // write slot
         slot.Hash = hash;
@@ -114,12 +132,12 @@ public readonly ref struct SlottedArray
 
     public ref struct Enumerator
     {
-        [StructLayout(LayoutKind.Explicit, Size = Size)]
+        [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
         private ref struct Chunk
         {
             public const int Size = 64;
 
-            [FieldOffset(0)] private byte _start;
+            private byte _start;
 
             public Span<byte> Span => MemoryMarshal.CreateSpan(ref _start, Size);
         }
@@ -146,7 +164,7 @@ public readonly ref struct SlottedArray
             int index = _index + 1;
             var to = _map.Count;
 
-            ref var slot = ref _map._slots[index];
+            ref var slot = ref _map[index];
 
             while (index < to && slot.IsDeleted) // filter out deleted
             {
@@ -169,7 +187,7 @@ public readonly ref struct SlottedArray
 
         private Item Build()
         {
-            ref var slot = ref _map._slots[_index];
+            ref var slot = ref _map[_index];
             var span = _map.GetSlotPayload(ref slot);
             var key = Slot.UnPrepareKey(span, slot.Hash, slot.KeyPreamble, _bytes.Span, out var data);
 
@@ -226,7 +244,7 @@ public readonly ref struct SlottedArray
         var to = _header.Low / Slot.Size;
         for (var i = 0; i < to; i++)
         {
-            ref var slot = ref _slots[i];
+            ref var slot = ref this[i];
 
             // extract only not deleted and these which have at least one nibble
             if (slot.IsDeleted == false && slot.HasAtLeastOneNibble)
@@ -269,7 +287,7 @@ public readonly ref struct SlottedArray
     private void DeleteImpl(int index)
     {
         // mark as deleted first
-        _slots[index].MarkAsDeleted();
+        this[index].MarkAsDeleted();
         _header.Deleted++;
 
         // always try to compact after delete
@@ -279,7 +297,7 @@ public readonly ref struct SlottedArray
     private void Deframent()
     {
         // As data were fitting before, the will fit after so all the checks can be skipped
-        var size = _raw.Length;
+        var size = Header.Size + _data.Length;
         var array = ArrayPool<byte>.Shared.Rent(size);
         var span = array.AsSpan(0, size);
 
@@ -289,12 +307,12 @@ public readonly ref struct SlottedArray
 
         for (int i = 0; i < count; i++)
         {
-            var copyFrom = _slots[i];
+            var copyFrom = this[i];
             if (copyFrom.IsDeleted == false)
             {
-                var fromSpan = GetSlotPayload(ref _slots[i]);
+                var fromSpan = GetSlotPayload(ref this[i]);
 
-                ref var copyTo = ref copy._slots[copy._header.Low / Slot.Size];
+                ref var copyTo = ref copy[copy._header.Low / Slot.Size];
 
                 // copy raw, no decoding
                 var high = (ushort)(copy._data.Length - copy._header.High - fromSpan.Length);
@@ -310,7 +328,8 @@ public readonly ref struct SlottedArray
         }
 
         // finalize by coping over to this
-        span.CopyTo(_raw);
+        var raw = MemoryMarshal.CreateSpan(ref Unsafe.As<Header, byte>(ref _header), Header.Size + _data.Length);
+        span.CopyTo(raw);
 
         ArrayPool<byte>.Shared.Return(array);
         Debug.Assert(copy._header.Deleted == 0, "All deleted should be gone");
@@ -324,18 +343,18 @@ public readonly ref struct SlottedArray
         // start with the last written and perform checks and cleanup till all the deleted are gone
         var index = Count - 1;
 
-        while (index >= 0 && _slots[index].IsDeleted)
+        while (index >= 0 && this[index].IsDeleted)
         {
             // undo writing low
             _header.Low -= Slot.Size;
 
             // undo writing high
-            var slice = GetSlotPayload(ref _slots[index]);
+            var slice = GetSlotPayload(ref this[index]);
             var total = slice.Length;
             _header.High = (ushort)(_header.High - total);
 
             // cleanup
-            _slots[index] = default;
+            this[index] = default;
             _header.Deleted--;
 
             // move back by one to see if it's deleted as well
@@ -360,13 +379,13 @@ public readonly ref struct SlottedArray
         "key encoding is delayed but it might be called twice, here + TrySet")]
     private bool TryGetImpl(in NibblePath key, ushort hash, byte preamble, out Span<byte> data, out int slotIndex)
     {
-        var to = _header.Low / Slot.Size;
+        var to = _header.Low;
 
         // uses vectorized search, treating slots as a Span<ushort>
         // if the found index is odd -> found a slot to be queried
 
         const int notFound = -1;
-        var span = MemoryMarshal.Cast<Slot, ushort>(_slots.Slice(0, to));
+        var span = MemoryMarshal.Cast<byte, ushort>(_data.Slice(0, to));
 
         var offset = 0;
         int index = span.IndexOf(hash);
@@ -387,7 +406,7 @@ public readonly ref struct SlottedArray
             {
                 var i = offset / 2;
 
-                ref var slot = ref _slots[i];
+                ref var slot = ref this[i];
                 if (slot.IsDeleted == false && slot.KeyPreamble == preamble)
                 {
                     var actual = GetSlotPayload(ref slot);
@@ -437,7 +456,7 @@ public readonly ref struct SlottedArray
     private Span<byte> GetSlotPayload(ref Slot slot)
     {
         // assert whether the slot has a previous, if not use data.length
-        var previousSlotAddress = Unsafe.IsAddressLessThan(ref _slots[0], ref slot)
+        var previousSlotAddress = Unsafe.IsAddressLessThan(ref this[0], ref slot)
             ? Unsafe.Add(ref slot, -1).ItemAddress
             : _data.Length;
 
@@ -450,7 +469,7 @@ public readonly ref struct SlottedArray
     /// </summary>
     public static ushort HashForTests(in NibblePath key) => Slot.PrepareKey(key, out _, out _);
 
-    [StructLayout(LayoutKind.Explicit, Size = Size)]
+    [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     private struct Slot
     {
         public const int Size = 4;
@@ -510,7 +529,7 @@ public readonly ref struct SlottedArray
 
         public bool HasKeyBytes => KeyPreamble >= PreambleWithKeyBytes;
 
-        [FieldOffset(0)] private ushort Raw;
+        private ushort Raw;
 
         /// <summary>
         /// Used for vectorized search
@@ -520,7 +539,7 @@ public readonly ref struct SlottedArray
         /// <summary>
         /// The memorized result of <see cref="PrepareKey"/> of this item.
         /// </summary>
-        [FieldOffset(2)] public ushort Hash;
+        public ushort Hash;
 
         public override string ToString()
         {
@@ -619,7 +638,7 @@ public readonly ref struct SlottedArray
 
     public override string ToString() => $"{nameof(Count)}: {Count}, {nameof(CapacityLeft)}: {CapacityLeft}";
 
-    [StructLayout(LayoutKind.Explicit, Size = Size)]
+    [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     private struct Header
     {
         public const int Size = 8;
@@ -627,17 +646,17 @@ public readonly ref struct SlottedArray
         /// <summary>
         /// Represents the distance from the start.
         /// </summary>
-        [FieldOffset(0)] public ushort Low;
+        public ushort Low;
 
         /// <summary>
         /// Represents the distance from the end.
         /// </summary>
-        [FieldOffset(2)] public ushort High;
+        public ushort High;
 
         /// <summary>
         /// A rough estimates of gaps.
         /// </summary>
-        [FieldOffset(4)] public ushort Deleted;
+        public ushort Deleted;
 
         public ushort Taken => (ushort)(Low + High);
     }

@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -14,13 +14,13 @@ public static class BitVector
     private const int BitsPerByte = 8;
     private const int Shift = 6;
 
-    [StructLayout(LayoutKind.Explicit, Size = Size)]
+    [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     public struct Of1024 : IBitVector
     {
         public const int Size = Count / BitsPerByte;
         public const ushort Count = 1024;
 
-        [FieldOffset(0)] private byte _start;
+        private byte _start;
 
         public bool this[int bit]
         {
@@ -35,13 +35,13 @@ public static class BitVector
         static ushort IBitVector.Count => Count;
     }
 
-    [StructLayout(LayoutKind.Explicit, Size = Size)]
+    [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     public struct Of512 : IBitVector
     {
         public const int Size = Count / BitsPerByte;
         public const ushort Count = 512;
 
-        [FieldOffset(0)] private byte _start;
+        private byte _start;
 
         public bool this[int bit]
         {
