@@ -563,6 +563,8 @@ public class Blockchain : IAsyncDisposable
             // use append for faster copies as state and storage won't overwrite each other
             _state.CopyTo(data, OmitUseOnce, true);
             _storage.CopyTo(data, OmitUseOnce, true);
+
+            // TODO: apply InspectBeforeApply here to reduce memory usage?
             _preCommit.CopyTo(data, OmitUseOnce);
 
             // Creation acquires the lease
