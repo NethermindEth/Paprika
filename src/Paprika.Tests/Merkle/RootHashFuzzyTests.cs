@@ -61,15 +61,19 @@ public class RootHashFuzzyTests
         AssertRootHash(rootHash, generator);
     }
 
-    [TestCase(nameof(Accounts_1000_Storage_1), int.MaxValue)]
-    [TestCase(nameof(Accounts_1_Storage_100), int.MaxValue)]
-    [TestCase(nameof(Accounts_100_Storage_1), int.MaxValue)]
-    public async Task CalculateStateRootHash(string test, int commitEvery)
+    [Test]
+    public async Task CalculateStateRootHash(
+        [Values(nameof(Accounts_1_Storage_100), nameof(Accounts_100_Storage_1), nameof(Accounts_1000_Storage_1))] string test,
+        [Values(int.MaxValue, 23)] int commitEvery,
+        [Values(true, false)] bool parallel,
+        [Values(Memoization.None, Memoization.Branch)] Memoization memoization)
     {
         var generator = Build(test);
 
         using var db = PagedDb.NativeMemoryDb(16 * 1024 * 1024, 2);
-        var merkle = new ComputeMerkleBehavior(2, 2);
+        var parallelism = parallel ? ComputeMerkleBehavior.ParallelismUnlimited : ComputeMerkleBehavior.ParallelismNone;
+        var merkle = new ComputeMerkleBehavior(1, 1, memoization, parallelism);
+
         await using var blockchain = new Blockchain(db, merkle);
 
         var rootHash = generator.Run(blockchain, commitEvery);
@@ -92,8 +96,8 @@ public class RootHashFuzzyTests
         var generator = Build(test);
 
         using var db = PagedDb.NativeMemoryDb(1024 * 1024 * 1024, 2);
-        var merkle = new ComputeMerkleBehavior(1, 1);
-        await using var blockchain = new Blockchain(db, merkle, null, new CacheBudget.Options(1000, 8), new CacheBudget.Options(1000, 8));
+        using var merkle = new ComputeMerkleBehavior(1, 1);
+        await using var blockchain = new Blockchain(db, merkle, null, new CacheBudget.Options(2000, 4), new CacheBudget.Options(2000, 4));
 
         // set
         generator.Run(blockchain, 513, false, true);
@@ -265,7 +269,7 @@ public class RootHashFuzzyTests
 
     private static void AssertRoot(string hex, ICommit commit)
     {
-        var merkle = new ComputeMerkleBehavior();
+        using var merkle = new ComputeMerkleBehavior();
 
         merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());
 

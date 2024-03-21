@@ -73,10 +73,10 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         _roots = new RootPage[historyDepth];
         _batchCurrent = null;
         _ctx = new Context();
-        _pooledRoots = new BufferPool(16, true, "PagedDb-Roots");
 
         RootInit();
 
+        // Metrics
         _meter = new Meter(MeterName);
         _dbSize = _meter.CreateAtomicObservableGauge(DbSize, "MB", "The size of the database in MB");
 
@@ -91,6 +91,9 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             "The number of pages flushed during the commit");
         _commitPageCountNewlyAllocated = _meter.CreateHistogram<int>("Commit page count (new)", "pages",
             "The number of pages flushed during the commit");
+
+        // Pool
+        _pooledRoots = new BufferPool(16, true, _meter);
     }
 
     public static PagedDb NativeMemoryDb(long size, byte historyDepth = 2) =>

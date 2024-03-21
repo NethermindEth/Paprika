@@ -19,24 +19,21 @@ public class BufferPool : IDisposable
     private readonly ConcurrentQueue<Page> _pool = new();
     private readonly ConcurrentQueue<IntPtr> _slabs = new();
 
-    private readonly MetricsExtensions.IAtomicIntGauge _allocatedMB;
+    private readonly MetricsExtensions.IAtomicIntGauge? _allocatedMB;
 
-    // metrics
-    private readonly Meter _meter;
-
-    public BufferPool(int buffersInOneSlab, bool assertCountOnDispose = true, string name = "")
+    public BufferPool(int buffersInOneSlab, bool assertCountOnDispose = true, Meter? meter = null)
     {
         _buffersInOneSlab = buffersInOneSlab;
         _assertCountOnDispose = assertCountOnDispose;
 
-        var baseName = "Paprika.Chain.BufferPool";
-
-        _meter = new Meter(string.IsNullOrEmpty(name) ? baseName : baseName + "-" + name);
-        _allocatedMB = _meter.CreateAtomicObservableGauge("Total buffers' size", "MB",
-            "The amount of MB allocated in the pool");
+        if (meter != null)
+        {
+            _allocatedMB =
+                meter.CreateAtomicObservableGauge("BufferPool size", "MB", "The amount of MB allocated in the pool");
+        }
     }
 
-    public int AllocatedMB => _allocatedMB.Read();
+    public int? AllocatedMB => _allocatedMB?.Read();
 
     public unsafe Page Rent(bool clear = true)
     {
@@ -45,7 +42,7 @@ public class BufferPool : IDisposable
         {
             var allocSize = _buffersInOneSlab * BufferSize;
 
-            _allocatedMB.Add(allocSize / 1024 / 1024);
+            _allocatedMB?.Add(allocSize / 1024 / 1024);
 
             var slab = (byte*)NativeMemory.AlignedAlloc((UIntPtr)allocSize, BufferSize);
 
@@ -85,7 +82,5 @@ public class BufferPool : IDisposable
                 NativeMemory.AlignedFree(slab.ToPointer());
             }
         }
-
-        _meter.Dispose();
     }
 }

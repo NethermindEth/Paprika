@@ -22,7 +22,7 @@ namespace Paprika.Chain;
 public class Blockchain : IAsyncDisposable
 {
     // allocate 1024 pages (4MB) at once
-    private readonly BufferPool _pool = new(1024, true, "Blockchain");
+    private readonly BufferPool _pool;
 
     private readonly object _blockLock = new();
     private readonly Dictionary<uint, List<CommittedBlockState>> _blocksByNumber = new();
@@ -100,6 +100,9 @@ public class Blockchain : IAsyncDisposable
             "Number of reads that passed bloom but missed in dictionary");
         _cacheUsageState = _meter.CreateHistogram<int>("State transient cache usage per commit", "%", "How much used was the transient cache");
         _cacheUsagePreCommit = _meter.CreateHistogram<int>("PreCommit transient cache usage per commit", "%", "How much used was the transient cache");
+
+        // pool
+        _pool = new(1024, true, _meter);
 
         using var batch = _db.BeginReadOnlyBatch();
         _lastFinalized = batch.Metadata.BlockNumber;
@@ -519,8 +522,10 @@ public class Blockchain : IAsyncDisposable
                 return;
             }
 
-            var percentage = (double)actual.BudgetLeft / total * 100;
-            reportTo.Record((int)percentage);
+            var percentageLeft = (double)actual.BudgetLeft / total * 100;
+            var percentageUsed = 100 - percentageLeft;
+
+            reportTo.Record((int)percentageUsed);
         }
 
         private CommittedBlockState? CommitImpl(uint blockNumber, bool raw)
