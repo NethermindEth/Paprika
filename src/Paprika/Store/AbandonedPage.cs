@@ -24,7 +24,7 @@ public readonly struct AbandonedPage(Page page) : IPage
 
     private unsafe ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
 
-    [StructLayout(LayoutKind.Explicit, Size = Size)]
+    [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     private struct Payload
     {
         private const int Size = Page.PageSize - PageHeader.Size;
@@ -36,15 +36,15 @@ public readonly struct AbandonedPage(Page page) : IPage
         /// <summary>
         /// The count of pages contained in this page.
         /// </summary>
-        [FieldOffset(0)] public int Count;
+        public int Count;
 
         /// <summary>
         /// The address of the next page that contains information about this <see cref="IBatchContext.BatchId"/>
         /// abandoned pages.
         /// </summary>
-        [FieldOffset(sizeof(int))] public DbAddress Next;
+        public DbAddress Next;
 
-        [FieldOffset(PageAddressesOffset)] private uint AbandonedPages;
+        private uint AbandonedPages;
 
         public Span<uint> Abandoned => MemoryMarshal.CreateSpan(ref AbandonedPages, MaxCount);
     }

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
@@ -113,7 +114,8 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
 
     private static bool IsKeyLocal(in NibblePath key) => key.Length < ConsumedNibbles;
 
-    [MethodImpl(MethodImplOptions.NoInlining)]
+    [DoesNotReturn]
+    [StackTraceHidden]
     private static void ThrowNoSpaceInline() => throw new Exception("Could not set the data inline");
 
     public void Report(IReporter reporter, IPageResolver resolver, int level)

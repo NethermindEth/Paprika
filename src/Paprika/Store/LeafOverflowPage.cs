@@ -15,7 +15,8 @@ public readonly unsafe struct LeafOverflowPage(Page page)
 
     private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
 
-    [StructLayout(LayoutKind.Explicit, Size = Size)]
+    [InlineArray(Size)]
+    [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     private struct Payload
     {
         private const int Size = Page.PageSize - PageHeader.Size;
@@ -23,7 +24,7 @@ public readonly unsafe struct LeafOverflowPage(Page page)
         /// <summary>
         /// The first item of map of frames to allow ref to it.
         /// </summary>
-        [FieldOffset(0)] private byte DataStart;
+        private byte DataStart;
 
         /// <summary>
         /// Writable area.

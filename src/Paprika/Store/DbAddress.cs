@@ -1,5 +1,5 @@
 using System.Buffers.Binary;
-using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace Paprika.Store;
 
@@ -9,6 +9,7 @@ namespace Paprika.Store;
 /// 1. an address page
 /// 2. a data-frame page in the same page as the value resides in
 /// </summary>
+[StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
 public readonly struct DbAddress : IEquatable<DbAddress>
 {
     /// <summary>

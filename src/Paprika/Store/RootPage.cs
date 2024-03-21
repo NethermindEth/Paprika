@@ -240,14 +240,14 @@ public readonly unsafe struct RootPage(Page root) : IPage
     }
 }
 
-[StructLayout(LayoutKind.Explicit, Size = Size, Pack = 1)]
+[StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
 public struct Metadata
 {
     public const int Size = BlockNumberSize + Keccak.Size;
     private const int BlockNumberSize = sizeof(uint);
 
-    [FieldOffset(0)] public readonly uint BlockNumber;
-    [FieldOffset(BlockNumberSize)] public readonly Keccak StateHash;
+    public readonly uint BlockNumber;
+    public readonly Keccak StateHash;
 
     public Metadata(uint blockNumber, Keccak stateHash)
     {
