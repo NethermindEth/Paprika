@@ -618,15 +618,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         stream.Position = from;
         stream.StartSequence(actualLength);
 
-        var result = KeccakOrRlp.FromSpan(rlp.Slice(from, end - from));
-
-        if (result.DataType == KeccakOrRlp.Type.Keccak)
-        {
-            // memoize memo only if encoding branch results in the Keccak
-            ctx.Commit.SetBranch(key, branch.Children, memo.Raw);
-        }
-
-        return result;
+        return KeccakOrRlp.FromSpan(rlp.Slice(from, end - from));
     }
 
     /// <summary>
