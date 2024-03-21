@@ -1023,6 +1023,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         return DeleteStatus.ExtensionToLeaf;
     }
 
+    [SkipLocalsInit]
     private static void MarkPathDirty(in NibblePath path, ICommit commit, CacheBudget budget, TrieType trieType)
     {
         // Flag forcing the leaf creation, that saves one get of the non-existent value.
