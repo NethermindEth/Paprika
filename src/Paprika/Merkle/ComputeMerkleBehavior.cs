@@ -327,7 +327,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         var dataLength = data.Length - RlpMemo.Size;
         data[..dataLength].CopyTo(workingSet);
 
-        var compressedLength = Compress(memoizedRlp, branch.Children, workingSet[dataLength..]);
+        var compressedLength = RlpMemo.Compress(memoizedRlp, branch.Children, workingSet[dataLength..]);
 
         return workingSet[..(dataLength + compressedLength)];
     }
@@ -512,7 +512,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         {
             var childRlpRequiresUpdate = isOwnedByThisCommit == false || previousRlp.Length != RlpMemo.Size;
             memo = childRlpRequiresUpdate
-                ? Decompress(previousRlp, branch.Children, rlpMemoization)
+                ? RlpMemo.Decompress(previousRlp, branch.Children, rlpMemoization)
                 : new RlpMemo(MakeRlpWritable(previousRlp));
         }
 
@@ -634,7 +634,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// Makes the RLP writable. Should be used only after ensuring that the current <see cref="ICommit"/>
     /// is the owner of the span. This can be done by using <see cref="ReadOnlySpanOwner{T}.IsOwnedBy"/>.
     /// </summary>
-    private static Span<byte> MakeRlpWritable(ReadOnlySpan<byte> previousRlp) =>
+    public static Span<byte> MakeRlpWritable(ReadOnlySpan<byte> previousRlp) =>
         MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(previousRlp), previousRlp.Length);
 
     private KeccakOrRlp EncodeExtension(scoped in Key key, scoped in ComputeContext ctx, scoped in Node.Extension ext)
@@ -930,7 +930,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             {
                 // TODO: make it a context and pass through all the layers
                 rlpWorkingSet = ArrayPool<byte>.Shared.Rent(RlpMemo.Size);
-                memo = Decompress(leftover, branch.Children, rlpWorkingSet.AsSpan());
+                memo = RlpMemo.Decompress(leftover, branch.Children, rlpWorkingSet.AsSpan());
             }
             else
             {
@@ -1195,7 +1195,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                         var childRlpRequiresUpdate = owner.IsOwnedBy(commit) == false || leftover.Length != RlpMemo.Size;
                         var memo = childRlpRequiresUpdate
-                            ? Decompress(leftover, branch.Children, rlpMemoWorkingSet)
+                            ? RlpMemo.Decompress(leftover, branch.Children, rlpMemoWorkingSet)
                             : new RlpMemo(MakeRlpWritable(leftover));
 
                         memo.Clear(nibble);
@@ -1229,77 +1229,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         {
             throw new ArgumentOutOfRangeException();
         }
-    }
-
-    private static RlpMemo Decompress(scoped in ReadOnlySpan<byte> leftover, NibbleSet.Readonly children,
-        scoped in Span<byte> workingSet)
-    {
-        var span = workingSet[..RlpMemo.Size];
-
-        if (leftover.IsEmpty)
-        {
-            // no RLP cached yet
-            span.Clear();
-            return new RlpMemo(span);
-        }
-
-        if (leftover.Length == RlpMemo.Size)
-        {
-            leftover.CopyTo(span);
-            return new RlpMemo(span);
-        }
-
-        // The compressed form, prepare setup first
-        span.Clear();
-        var memo = new RlpMemo(span);
-
-        var at = 0;
-        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
-        {
-            if (children[i])
-            {
-                var keccak = leftover.Slice(at * Keccak.Size, Keccak.Size);
-                at++;
-
-                memo.SetRaw(keccak, i);
-            }
-        }
-
-        return memo;
-    }
-
-    private static int Compress(scoped in ReadOnlySpan<byte> memoizedRlp, NibbleSet.Readonly children, scoped in Span<byte> writeTo)
-    {
-        // fast path, for all set, no need to copy
-        if (children.AllSet)
-        {
-            memoizedRlp.CopyTo(writeTo);
-            return RlpMemo.Size;
-        }
-
-        var memo = new RlpMemo(MakeRlpWritable(memoizedRlp));
-        var at = 0;
-
-        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
-        {
-            if (children[i])
-            {
-                var dest = writeTo.Slice(at * Keccak.Size, Keccak.Size);
-                at++;
-
-                if (memo.TryGetKeccak(i, out var keccak))
-                {
-                    keccak.CopyTo(dest);
-                }
-                else
-                {
-                    dest.Clear();
-                }
-            }
-        }
-
-        // Return only children that were written
-        return at * Keccak.Size;
     }
 
     interface IWorkItem

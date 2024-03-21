@@ -60,4 +60,98 @@ public readonly ref struct RlpMemo
     }
 
     private Span<byte> GetAtNibble(byte nibble) => _buffer.Slice(nibble * Keccak.Size, Keccak.Size);
+
+    public static RlpMemo Decompress(scoped in ReadOnlySpan<byte> leftover, NibbleSet.Readonly children,
+        scoped in Span<byte> workingSet)
+    {
+        var span = workingSet[..Size];
+
+        if (leftover.IsEmpty)
+        {
+            // no RLP cached yet
+            span.Clear();
+            return new RlpMemo(span);
+        }
+
+        if (leftover.Length == Size)
+        {
+            leftover.CopyTo(span);
+            return new RlpMemo(span);
+        }
+
+        // It's neither empty or full. It must be the compressed form, prepare setup first
+        span.Clear();
+        var memo = new RlpMemo(span);
+
+        // Extract empty bits if any
+        NibbleSet.Readonly empty;
+
+        if (leftover.Length % Keccak.Size == NibbleSet.MaxByteSize)
+        {
+            var bits = leftover[^NibbleSet.MaxByteSize..];
+            NibbleSet.Readonly.ReadFrom(bits, out empty);
+        }
+        else
+        {
+            empty = default;
+        }
+
+        var at = 0;
+        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+        {
+            if (children[i] && empty[i] == false)
+            {
+                var keccak = leftover.Slice(at * Keccak.Size, Keccak.Size);
+                at++;
+
+                memo.SetRaw(keccak, i);
+            }
+        }
+
+        return memo;
+    }
+
+    public static int Compress(scoped in ReadOnlySpan<byte> memoizedRlp, NibbleSet.Readonly children, scoped in Span<byte> writeTo)
+    {
+        // fast path, for all set, no need to copy
+        if (children.AllSet)
+        {
+            memoizedRlp.CopyTo(writeTo);
+            return Size;
+        }
+
+        var memo = new RlpMemo(ComputeMerkleBehavior.MakeRlpWritable(memoizedRlp));
+        var at = 0;
+
+        var empty = new NibbleSet();
+
+        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+        {
+            if (children[i])
+            {
+                if (memo.TryGetKeccak(i, out var keccak))
+                {
+                    var dest = writeTo.Slice(at * Keccak.Size, Keccak.Size);
+                    at++;
+                    keccak.CopyTo(dest);
+                }
+                else
+                {
+                    empty[i] = true;
+                }
+            }
+        }
+
+        Debug.Assert(at != 16 || empty.SetCount == 0, "If at = 16, empty should be empty");
+
+        if (empty.SetCount > 0)
+        {
+            var dest = writeTo.Slice(at * Keccak.Size, NibbleSet.MaxByteSize);
+            new NibbleSet.Readonly(empty).WriteToWithLeftover(dest);
+            return at * Keccak.Size + NibbleSet.MaxByteSize;
+        }
+
+        // Return only children that were written
+        return at * Keccak.Size;
+    }
 }
