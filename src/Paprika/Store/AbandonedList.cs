@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 
 namespace Paprika.Store;
@@ -93,7 +94,7 @@ public struct AbandonedList
                 if (current.TryPop(out _) == false)
                 {
                     // We getting what was peeked above.
-                    throw new Exception("The page cannot be empty! It was just allocated to!");
+                    ThrowPageEmpty();
                 }
             }
             else
@@ -115,6 +116,13 @@ public struct AbandonedList
         reused = batch.GetAddress(current.AsPage());
         Current = DbAddress.Null;
         return true;
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowPageEmpty()
+        {
+            throw new Exception("The page cannot be empty! It was just allocated to!");
+        }
     }
 
     public void Register(List<DbAddress> abandoned, IBatchContext batch)

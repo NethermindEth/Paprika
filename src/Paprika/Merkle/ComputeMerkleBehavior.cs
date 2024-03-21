@@ -10,6 +10,7 @@ using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.RLP;
 using Paprika.Utils;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Paprika.Merkle;
 
@@ -404,7 +405,15 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                 return EncodeBranch(key, ctx, branch, leftover, owner.IsOwnedBy(ctx.Commit));
             default:
-                throw new ArgumentOutOfRangeException();
+                ThrowOutOfRange();
+                return default;
+        }
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowOutOfRange()
+        {
+            throw new ArgumentOutOfRangeException();
         }
     }
 
@@ -1255,8 +1264,16 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     }
                     break;
                 default:
-                    throw new ArgumentOutOfRangeException();
+                    ThrowOutOfRange();
+                    return;
             }
+        }
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowOutOfRange()
+        {
+            throw new ArgumentOutOfRangeException();
         }
     }
 

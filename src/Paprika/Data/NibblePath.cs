@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -246,7 +247,7 @@ public readonly ref struct NibblePath
     {
         if (workingSet.Length < MaxByteLength)
         {
-            throw new ArgumentException("Not enough memory to append");
+            ThrowNotEnoughMemory();
         }
 
         // TODO: do a ref comparison with Unsafe, if the same, no need to copy!
@@ -264,7 +265,7 @@ public readonly ref struct NibblePath
     {
         if (workingSet.Length <= MaxByteLength)
         {
-            throw new ArgumentException("Not enough memory to append");
+            ThrowNotEnoughMemory();
         }
 
         // TODO: do a ref comparison with Unsafe, if the same, no need to copy!
@@ -286,7 +287,7 @@ public readonly ref struct NibblePath
     {
         if (workingSet.Length <= MaxByteLength)
         {
-            throw new ArgumentException("Not enough memory to append");
+            ThrowNotEnoughMemory();
         }
 
         // TODO: do a ref comparison with Unsafe, if the same, no need to copy!
@@ -646,5 +647,12 @@ public readonly ref struct NibblePath
         }
 
         return true;
+    }
+
+    [DoesNotReturn]
+    [StackTraceHidden]
+    static void ThrowNotEnoughMemory()
+    {
+        throw new ArgumentException("Not enough memory to append");
     }
 }

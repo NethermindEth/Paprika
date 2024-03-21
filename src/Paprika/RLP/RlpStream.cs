@@ -143,7 +143,7 @@ public ref struct RlpStream
         byte byteValue = span[0];
         if (byteValue == 0)
         {
-            throw new Exception($"Non-canonical UInt256 (leading zero bytes)");
+            ThrowNonCanonical();
         }
 
         if (byteValue < 128)
@@ -155,12 +155,12 @@ public ref struct RlpStream
 
         if (byteSpan.Length > 32)
         {
-            throw new Exception("UInt256 cannot be longer than 32 bytes");
+            ThrowWrongSize();
         }
 
         if (byteSpan.Length > 1 && byteSpan[0] == 0)
         {
-            throw new Exception($"Non-canonical UInt256 (leading zero bytes)");
+            ThrowNonCanonical();
         }
 
         return new UInt256(byteSpan, true);
@@ -202,6 +202,20 @@ public ref struct RlpStream
             {
                 throw new Exception($"Unexpected byte value {buffer0}");
             }
+        }
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowNonCanonical()
+        {
+            throw new Exception($"Non-canonical UInt256 (leading zero bytes)");
+        }
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowWrongSize()
+        {
+            throw new Exception("UInt256 cannot be longer than 32 bytes");
         }
     }
 }
