@@ -297,7 +297,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             .ToArray();
     }
 
-    public ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data)
+    public ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data, Span<byte> workingSet)
     {
         if (data.IsEmpty)
             return data;
@@ -313,9 +313,22 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             return data;
         }
 
-        // Trim the cached rlp from branches.
-        // TODO: this removes the whole idea of storing RLP. It should be a call to Compress actually
-        return Node.Branch.GetOnlyBranchData(data);
+        var memoizedRlp = Node.Branch.ReadFrom(data, out var branch);
+        if (memoizedRlp.Length == 0)
+        {
+            // no RLP of children memoized, return
+            return data;
+        }
+
+        Debug.Assert(memoizedRlp.Length == RlpMemo.Size);
+
+        // There are RLPs here, compress them
+        var dataLength = data.Length - RlpMemo.Size;
+        data[..dataLength].CopyTo(workingSet);
+
+        var compressed = Compress(memoizedRlp, branch.Children, workingSet[dataLength..]);
+
+        return workingSet[..(dataLength + compressed.Length)];
     }
 
     public Keccak RootHash { get; private set; }
@@ -1225,6 +1238,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         Debug.Assert(leftover.Length == RlpMemo.Size);
         leftover.CopyTo(span);
         return new RlpMemo(span);
+    }
+
+    private static ReadOnlySpan<byte> Compress(scoped in ReadOnlySpan<byte> memoizedRlp, NibbleSet.Readonly children,
+        scoped in Span<byte> workingSet)
+    {
+        // for now, delete them all
+        return ReadOnlySpan<byte>.Empty;
     }
 
     interface IWorkItem

@@ -1200,14 +1200,24 @@ public class Blockchain : IAsyncDisposable
         {
             var preCommit = _blockchain._preCommit;
 
-            foreach (var kvp in dict)
+            var page = _blockchain._pool.Rent(false);
+            try
             {
-                if (kvp.Metadata == (byte)EntryType.Persistent)
+                var span = page.Span;
+
+                foreach (var kvp in dict)
                 {
-                    Key.ReadFrom(kvp.Key, out var key);
-                    var data = preCommit == null ? kvp.Value : preCommit.InspectBeforeApply(key, kvp.Value);
-                    batch.SetRaw(key, data);
+                    if (kvp.Metadata == (byte)EntryType.Persistent)
+                    {
+                        Key.ReadFrom(kvp.Key, out var key);
+                        var data = preCommit == null ? kvp.Value : preCommit.InspectBeforeApply(key, kvp.Value, span);
+                        batch.SetRaw(key, data);
+                    }
                 }
+            }
+            finally
+            {
+                _blockchain._pool.Return(page);
             }
         }
 
