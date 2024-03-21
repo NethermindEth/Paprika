@@ -326,9 +326,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         var dataLength = data.Length - RlpMemo.Size;
         data[..dataLength].CopyTo(workingSet);
 
-        var compressed = Compress(memoizedRlp, branch.Children, workingSet[dataLength..]);
+        var compressedLength = Compress(memoizedRlp, branch.Children, workingSet[dataLength..]);
 
-        return workingSet[..(dataLength + compressed.Length)];
+        return workingSet[..(dataLength + compressedLength)];
     }
 
     public Keccak RootHash { get; private set; }
@@ -1225,7 +1225,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private static RlpMemo Decompress(scoped in ReadOnlySpan<byte> leftover, NibbleSet.Readonly children,
         scoped in Span<byte> workingSet)
     {
-        var span = workingSet.Slice(0, RlpMemo.Size);
+        var span = workingSet[..RlpMemo.Size];
 
         if (leftover.IsEmpty)
         {
@@ -1234,17 +1234,63 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             return new RlpMemo(span);
         }
 
-        // TODO: put actual compression in place here
-        Debug.Assert(leftover.Length == RlpMemo.Size);
-        leftover.CopyTo(span);
-        return new RlpMemo(span);
+        if (leftover.Length == RlpMemo.Size)
+        {
+            leftover.CopyTo(span);
+            return new RlpMemo(span);
+        }
+
+        // The compressed form, prepare setup first
+        span.Clear();
+        var memo = new RlpMemo(span);
+
+        var at = 0;
+        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+        {
+            if (children[i])
+            {
+                var keccak = leftover.Slice(at * Keccak.Size, Keccak.Size);
+                at++;
+
+                memo.SetRaw(keccak, i);
+            }
+        }
+
+        return memo;
     }
 
-    private static ReadOnlySpan<byte> Compress(scoped in ReadOnlySpan<byte> memoizedRlp, NibbleSet.Readonly children,
-        scoped in Span<byte> workingSet)
+    private static int Compress(scoped in ReadOnlySpan<byte> memoizedRlp, NibbleSet.Readonly children, scoped in Span<byte> writeTo)
     {
-        // for now, delete them all
-        return ReadOnlySpan<byte>.Empty;
+        // fast path, for all set, no need to copy
+        if (children.AllSet)
+        {
+            memoizedRlp.CopyTo(writeTo);
+            return RlpMemo.Size;
+        }
+
+        var memo = new RlpMemo(MakeRlpWritable(memoizedRlp));
+        var at = 0;
+
+        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+        {
+            if (children[i])
+            {
+                var dest = writeTo.Slice(at * Keccak.Size, Keccak.Size);
+                at++;
+
+                if (memo.TryGetKeccak(i, out var keccak))
+                {
+                    keccak.CopyTo(dest);
+                }
+                else
+                {
+                    dest.Clear();
+                }
+            }
+        }
+
+        // Return only children that were written
+        return at * Keccak.Size;
     }
 
     interface IWorkItem
