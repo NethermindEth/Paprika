@@ -218,7 +218,7 @@ public class RootHashTests(bool parallel)
     public async Task Sepolia_big_storage_tree(int take, string storageHash)
     {
         using var db = PagedDb.NativeMemoryDb(8 * 1024 * 1024, 2);
-        var merkle = new ComputeMerkleBehavior(1, 1, Memoization.None, Parallelism);
+        var merkle = new ComputeMerkleBehavior(Parallelism);
 
         await using var blockchain = new Blockchain(db, merkle);
 
@@ -258,7 +258,7 @@ public class RootHashTests(bool parallel)
 
     private void AssertRoot(string hex, ICommit commit)
     {
-        using var merkle = new ComputeMerkleBehavior(1, 1, Memoization.None, Parallelism);
+        using var merkle = new ComputeMerkleBehavior(Parallelism);
 
         merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());
 

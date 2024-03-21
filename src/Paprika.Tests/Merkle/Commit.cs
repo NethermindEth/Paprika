@@ -12,7 +12,7 @@ namespace Paprika.Tests.Merkle;
 /// <summary>
 /// A commit mock used to provide the data and assert them when needed.
 /// </summary>
-public class Commit : ICommit
+public class Commit(bool skipMemoizedRlpCheck = false) : ICommit
 {
     // history <- before <- after
     private readonly Dictionary<byte[], byte[]> _history = new(Comparer);
@@ -106,7 +106,19 @@ public class Commit : ICommit
         else
         {
             _after.Remove(bytes, out var existing).Should().BeTrue($"key {key.ToString()} should exist");
-            payload.SequenceEqual(existing).Should().BeTrue("The value should be equal");
+
+            ReadOnlySpan<byte> data = existing;
+
+            if (skipMemoizedRlpCheck)
+            {
+                if (key.Type == DataType.Merkle && existing.Length > 0 && Node.Header.GetTypeFrom(existing) == Node.Type.Branch)
+                {
+                    // override, removing the rlp data
+                    data = Node.Branch.GetOnlyBranchData(existing);
+                }
+            }
+
+            payload.SequenceEqual(data).Should().BeTrue("The value should be equal");
         }
     }
 

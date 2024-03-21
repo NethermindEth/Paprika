@@ -45,7 +45,7 @@ public class DirtyTests
     [Test(Description = "Three accounts, diffing at first nibble. The root is a branch with nibbles set for leafs.")]
     public void Three_accounts_sharing_start_nibble()
     {
-        var commit = new Commit();
+        var commit = new Commit(skipMemoizedRlpCheck: true);
 
         const string key0 = "A0000001";
         const string key1 = "B0000002";
@@ -72,7 +72,7 @@ public class DirtyTests
         "Three accounts, sharing first nibble. The root is an extension -> branch -> with nibbles set for leafs.")]
     public void Three_accounts_starting_with_same_nibble()
     {
-        var commit = new Commit();
+        var commit = new Commit(skipMemoizedRlpCheck: true);
 
         const string key0 = "00000001";
         const string key1 = "07000002";
@@ -101,7 +101,7 @@ public class DirtyTests
     [Test]
     public void Long_extension_split_on_first()
     {
-        var commit = new Commit();
+        var commit = new Commit(skipMemoizedRlpCheck: true);
 
         const string key0 = "00010001";
         const string key1 = "00020002";
@@ -134,7 +134,7 @@ public class DirtyTests
     [Test(Description = "Split extension into a branch on the first nibble.")]
     public void Root_extension_split()
     {
-        var commit = new Commit();
+        var commit = new Commit(skipMemoizedRlpCheck: true);
 
         const string key0 = "00030001";
         const string key1 = "07030002";
@@ -161,7 +161,7 @@ public class DirtyTests
     [Test]
     public void Extension_split_last_nibble()
     {
-        var commit = new Commit();
+        var commit = new Commit(skipMemoizedRlpCheck: true);
 
         const string key0 = "00030001";
         const string key1 = "00A30002";
@@ -189,7 +189,7 @@ public class DirtyTests
     [Test]
     public void Extension_split_in_the_middle()
     {
-        var commit = new Commit();
+        var commit = new Commit(skipMemoizedRlpCheck: true);
 
         const string key0 = "00000001";
         const string key1 = "0000A002";
@@ -299,8 +299,7 @@ public class DirtyTests
 
     private void Assert(Commit commit, Action<ICommit> assert)
     {
-        const int dontMemoize = int.MaxValue;
-        var merkle = new ComputeMerkleBehavior(dontMemoize, dontMemoize, Memoization.None);
+        var merkle = new ComputeMerkleBehavior();
 
         // run merkle before
         merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());

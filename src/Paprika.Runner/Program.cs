@@ -158,7 +158,7 @@ public static class Program
                     ctx.Refresh();
                 }));
 
-            using var preCommit = new ComputeMerkleBehavior(2, 1);
+            using var preCommit = new ComputeMerkleBehavior();
             //IPreCommitBehavior preCommit = null;
 
             await using (var blockchain =
