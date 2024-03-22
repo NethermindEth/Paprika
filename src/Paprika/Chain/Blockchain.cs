@@ -944,7 +944,7 @@ public class Blockchain : IAsyncDisposable
 
             return TryGetDatabase(key);
         }
-        
+
         [SkipLocalsInit]
         private ReadOnlySpanOwnerWithMetadata<byte> TryGetDatabase(scoped in Key key)
         {
