@@ -14,7 +14,7 @@ namespace Paprika.Store;
 public readonly unsafe struct StorageFanOutPage<TNext>(Page page) : IPageWithData<StorageFanOutPage<TNext>>
     where TNext : struct, IPageWithData<TNext>
 {
-    public static StorageFanOutPage<TNext> Wrap(Page page) => new(page);
+    public static StorageFanOutPage<TNext> Wrap(Page page) => Unsafe.As<Page, StorageFanOutPage<TNext>>(ref page);
 
     private const int ConsumedNibbles = 2;
     private const int LevelDiff = 1;

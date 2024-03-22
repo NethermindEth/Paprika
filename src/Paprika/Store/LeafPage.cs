@@ -12,7 +12,7 @@ namespace Paprika.Store;
 [method: DebuggerStepThrough]
 public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 {
-    public static LeafPage Wrap(Page page) => new(page);
+    public static LeafPage Wrap(Page page) =>Unsafe.As<Page, LeafPage>(ref page);
 
     private ref PageHeader Header => ref page.Header;
 

@@ -23,7 +23,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 {
     private const int ConsumedNibbles = 1;
 
-    public static DataPage Wrap(Page page) => new(page);
+    public static DataPage Wrap(Page page) => Unsafe.As<Page, DataPage>(ref page);
 
     private const int BucketCount = 16;
 
@@ -262,10 +262,10 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             var child = batch.GetAt(bucket);
             if (child.Header.PageType == PageType.Leaf)
             {
-                return new LeafPage(child).TryGet(batch, sliced, out result);
+                return Unsafe.As<Page, LeafPage>(ref child).TryGet(batch, sliced, out result);
             }
 
-            page = new DataPage(child);
+            page = Unsafe.As<Page, DataPage>(ref child);
         } while (true);
 
         return returnValue;

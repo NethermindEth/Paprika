@@ -16,7 +16,7 @@ namespace Paprika.Store;
 [method: DebuggerStepThrough]
 public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
 {
-    public static FanOutPage Wrap(Page page) => new(page);
+    public static FanOutPage Wrap(Page page) => Unsafe.As<Page, FanOutPage>(ref page);
 
     private const int ConsumedNibbles = 2;
 
