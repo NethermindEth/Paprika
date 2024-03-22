@@ -362,7 +362,7 @@ public readonly ref struct SlottedArray
         }
     }
 
-    public bool TryGet(in NibblePath key, out ReadOnlySpan<byte> data)
+    public bool TryGet(scoped in NibblePath key, out ReadOnlySpan<byte> data)
     {
         var hash = Slot.PrepareKey(key, out byte preamble, out var trimmed);
         if (TryGetImpl(trimmed, hash, preamble, out var span, out _))

@@ -24,7 +24,7 @@ public interface IPageWithData<TPage> : IPage
     /// </summary>
     static abstract TPage Wrap(Page page);
 
-    bool TryGet(scoped NibblePath key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result);
+    bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result);
 
     Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch);
 
