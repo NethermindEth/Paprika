@@ -6,6 +6,7 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
+using Paprika.Store;
 
 namespace Paprika.Utils;
 
@@ -29,6 +30,8 @@ public class Xor8
     private readonly ulong _seed;
     private readonly byte[] _fingerprints;
 
+    private PageAccessor pageAccessor;
+
     private static int GetArrayLength(int size) => (int)(Offset + (long)FactorTimes100 * size / 100);
 
     public Xor8(HashSet<ulong> keys)
@@ -46,6 +49,7 @@ public class Xor8
 
         int reverseOrderPos;
         ulong seed;
+
 
     MainLoop:
         do
@@ -175,7 +179,8 @@ public class Xor8
             }
             fp[change] = (byte)xor;
         }
-        _fingerprints = new byte[arrayLength];
+        pageAccessor = new PageAccessor(arrayLength);
+        _fingerprints = pageAccessor.AcquirePage();
         Array.Copy(fp, _fingerprints, arrayLength);
         ArrayPool<byte>.Shared.Return(fp);
 
@@ -216,6 +221,10 @@ public class Xor8
 
     private static int Fingerprint(ulong hash) => (int)(hash & ((1 << BitsPerFingerprint) - 1));
 
+    ~Xor8()
+    {
+        pageAccessor.ReleasePage(_fingerprints);
+    }
     private static class Hash
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
