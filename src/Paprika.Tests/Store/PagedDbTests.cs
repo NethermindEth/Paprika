@@ -189,16 +189,4 @@ public class PagedDbTests
         }
     }
 
-    // [Test]
-    // public void Destroy()
-    // {
-    //     // Arrange
-    //     var account = new NibblePath(); // Provide appropriate NibblePath object
-
-    //     // Act
-    //     _yourClassInstance.Destroy(account);
-
-    //     // Assert
-    //     Assert.AreEqual(1, _mockMetrics.Writes);
-    // }
 }
