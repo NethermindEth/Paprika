@@ -139,7 +139,24 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
             }
         }
     }
-    public Page Destroy(IBatchContext batch, in NibblePath prefix){
+    public Page Destroy(IBatchContext batch, in NibblePath prefix)
+    {
+        if (Header.BatchId != batch.BatchId)
+        {
+            var writable = batch.GetWritableCopy(page);
+            return new DataPage(writable).Destroy(batch, prefix);
+        }
+        var map = new SlottedArray(Data.Data);
+        map.DeleteByPrefix(prefix);
+        var index = GetIndex(prefix);
+        ref var addr = ref Data.Addresses[index];
+        Page child;
+        if (!addr.IsNull)
+        {
+            child = batch.GetAt(addr);
+            var sliced = prefix.SliceFrom(ConsumedNibbles);
+            addr = batch.GetAddress(new DataPage(child).Destroy(batch, sliced));
+        }
         return new Page();
     }
 }

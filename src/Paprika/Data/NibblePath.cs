@@ -549,7 +549,7 @@ public readonly ref struct NibblePath
     {
         return FindFirstDifferentNibble(other) == other.Length;
     }
-    
+
     public override int GetHashCode()
     {
         if (Length <= 1)

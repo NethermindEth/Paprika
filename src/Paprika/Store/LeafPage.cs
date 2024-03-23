@@ -208,6 +208,8 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
     public int CapacityLeft => Map.CapacityLeft;
 
+    private const int ConsumedNibbles = 2;
+
     public void Report(IReporter reporter, IPageResolver resolver, int level)
     {
         var slotted = new SlottedArray(Data.DataSpan);
@@ -234,7 +236,26 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             }
         }
     }
-    public Page Destroy(IBatchContext batch, in NibblePath prefix){
+
+    private static int GetIndex(scoped in NibblePath key) => (key.GetAt(0) << NibblePath.NibbleShift) + key.GetAt(1);
+    public Page Destroy(IBatchContext batch, in NibblePath prefix)
+    {
+        if (Header.BatchId != batch.BatchId)
+        {
+            var writable = batch.GetWritableCopy(page);
+            return new LeafPage(writable).Destroy(batch, prefix);
+        }
+        var map = new SlottedArray(Data.DataSpan);
+        map.DeleteByPrefix(prefix);
+        var index = GetIndex(prefix);
+        ref var addr = ref Data.Buckets[index];
+        Page child;
+        if (!addr.IsNull)
+        {
+            child = batch.GetAt(addr);
+            var sliced = prefix.SliceFrom(ConsumedNibbles);
+            addr = batch.GetAddress(new LeafPage(child).Destroy(batch, sliced));
+        }
         return new Page();
     }
 }

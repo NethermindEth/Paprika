@@ -131,9 +131,9 @@ public readonly unsafe struct StorageFanOutPage<TNext>(Page page) : IPageWithDat
         {
             child = batch.GetAt(addr);
             var sliced = prefix.SliceFrom(ConsumedNibbles);
-            return TNext.Wrap(child).Destroy(batch, sliced);
+            addr = batch.GetAddress(TNext.Wrap(child).Destroy(batch, sliced));
         }
-        return new Page(); 
+        return new Page();
     }
 }
 
