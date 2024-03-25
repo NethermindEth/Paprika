@@ -107,18 +107,20 @@ public class Commit(bool skipMemoizedRlpCheck = false) : ICommit
         {
             _after.Remove(bytes, out var existing).Should().BeTrue($"key {key.ToString()} should exist");
 
-            ReadOnlySpan<byte> data = existing;
+            ReadOnlySpan<byte> actual = existing;
+            var expected = payload;
 
             if (skipMemoizedRlpCheck)
             {
                 if (key.Type == DataType.Merkle && existing.Length > 0 && Node.Header.GetTypeFrom(existing) == Node.Type.Branch)
                 {
                     // override, removing the rlp data
-                    data = Node.Branch.GetOnlyBranchData(existing);
+                    actual = Node.Branch.GetOnlyBranchData(existing);
+                    expected = Node.Branch.GetOnlyBranchData(payload);
                 }
             }
 
-            payload.SequenceEqual(data).Should().BeTrue("The value should be equal");
+            expected.SequenceEqual(actual).Should().BeTrue("The value should be equal");
         }
     }
 

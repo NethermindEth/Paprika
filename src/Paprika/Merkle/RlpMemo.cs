@@ -6,6 +6,8 @@ namespace Paprika.Merkle;
 
 public readonly ref struct RlpMemo
 {
+    public static readonly byte[] Empty = new byte[Size];
+
     private readonly Span<byte> _buffer;
 
     public const int Size = NibbleSet.NibbleCount * Keccak.Size;
@@ -113,13 +115,6 @@ public readonly ref struct RlpMemo
 
     public static int Compress(scoped in ReadOnlySpan<byte> memoizedRlp, NibbleSet.Readonly children, scoped in Span<byte> writeTo)
     {
-        // fast path, for all set, no need to copy
-        if (children.AllSet)
-        {
-            memoizedRlp.CopyTo(writeTo);
-            return Size;
-        }
-
         var memo = new RlpMemo(ComputeMerkleBehavior.MakeRlpWritable(memoizedRlp));
         var at = 0;
 

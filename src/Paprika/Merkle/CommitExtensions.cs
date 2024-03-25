@@ -34,7 +34,7 @@ public static class CommitExtensions
         EntryType type = EntryType.Persistent)
     {
         var branch = new Node.Branch(children);
-        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), type);
+        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), RlpMemo.Empty, type);
     }
 
     [SkipLocalsInit]
