@@ -195,15 +195,19 @@ public class Xor8
         ref var fingerprints = ref MemoryMarshal.GetArrayDataReference(_fingerprints);
 
         var hash = Hash.Hash64(key, _seed);
-        var f = Fingerprint(hash);
-        var r0 = (uint)hash;
-        var r1 = (uint)BitOperations.RotateLeft(hash, 21);
-        var r2 = (uint)BitOperations.RotateLeft(hash, 42);
-        var h0 = (int)Hash.Reduce(r0, _blockLength);
-        var h1 = (int)Hash.Reduce(r1, _blockLength) + _blockLength;
-        var h2 = (int)Hash.Reduce(r2, _blockLength) + 2 * _blockLength;
-        f ^= Unsafe.Add(ref fingerprints, h0) ^ Unsafe.Add(ref fingerprints, h1) ^ Unsafe.Add(ref fingerprints, h2);
-        return (f & 0xff) == 0;
+
+        // Pipeline byte pointer memory reads (slower than word-size reads)
+        var h0 = (int)Hash.Reduce((uint)hash, _blockLength);
+        var f0 = (int)Unsafe.Add(ref fingerprints, h0);
+
+        var h1 = (int)Hash.Reduce((uint)BitOperations.RotateLeft(hash, 21), _blockLength) + _blockLength;
+        var f1 = (int)Unsafe.Add(ref fingerprints, h1);
+
+        var h2 = (int)Hash.Reduce((uint)BitOperations.RotateLeft(hash, 42), _blockLength) + 2 * _blockLength;
+        var f2 = (int)Unsafe.Add(ref fingerprints, h2);
+
+        // Combine memory reads in-order, to avoid memory pipeline stalls
+        return ((Fingerprint(hash) & 0xff) ^ f0 ^ f1 ^ f2) == 0;
     }
 
     private int GetHash(ulong key, ulong seed, int index)
