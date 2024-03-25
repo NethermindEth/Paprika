@@ -505,6 +505,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         var rlp = buffer.Span[..rlpSlice];
         var rlpMemoization = buffer.Span.Slice(rlpSlice, RlpMemo.Size);
+        var memoizedUpdated = false;
 
         RlpMemo memo = default;
 
@@ -556,14 +557,21 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         stream.Write(value.Span);
                     }
 
-                    if (memoize) memo.Set(value, i);
+                    if (memoize)
+                    {
+                        memoizedUpdated = true;
+                        memo.Set(value, i);
+                    }
                 }
                 else
                 {
                     stream.EncodeEmptyArray();
 
-                    // TODO: might be not needed
-                    if (memoize) memo.Clear(i);
+                    if (memoize)
+                    {
+                        memo.Clear(i);
+                        memoizedUpdated = true;
+                    }
                 }
             }
         }
@@ -606,10 +614,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 {
                     if (value.Length == Keccak.Size)
                     {
+                        memoizedUpdated = true;
                         memo.SetRaw(value, i);
                     }
                     else
                     {
+                        memoizedUpdated = true;
                         memo.Clear(i);
                     }
                 }
@@ -626,6 +636,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         var from = initialShift - lengthOfLength;
         stream.Position = from;
         stream.StartSequence(actualLength);
+
+        if (memoize && !isOwnedByThisCommit && memoizedUpdated)
+        {
+
+            //
+            ctx.Commit.SetBranch(key, branch.Children, rlpMemoization, EntryType.Persistent);
+        }
 
         return KeccakOrRlp.FromSpan(rlp.Slice(from, end - from));
     }
