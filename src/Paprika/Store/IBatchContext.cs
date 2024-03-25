@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+
 using Paprika.Crypto;
 using Paprika.Utils;
 
@@ -79,7 +81,16 @@ public static class ReadOnlyBatchContextExtensions
     public static void AssertRead(this IReadOnlyBatchContext batch, in PageHeader header)
     {
         if (header.BatchId > batch.BatchId)
+        {
+            ThrowWrongBatch(header);
+        }
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowWrongBatch(in PageHeader header)
+        {
             throw new Exception($"The page that is at batch {header.BatchId} should not be read by a batch with lower batch number {header.BatchId}.");
+        }
     }
 }
 

@@ -1,5 +1,7 @@
 using System.Buffers;
 using System.Collections;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -120,7 +122,7 @@ public class Xor8
                 var k = t2[i];
                 if (t2Count[i] != 1)
                 {
-                    throw new Exception("Assertion error");
+                    ThrowAssertionError();
                 }
 
                 --t2Count[i];
@@ -179,6 +181,13 @@ public class Xor8
 
         ArrayPool<ulong>.Shared.Return(reverseOrder);
         ArrayPool<byte>.Shared.Return(reverseH);
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowAssertionError()
+        {
+            throw new Exception("Assertion error");
+        }
     }
 
     public bool MayContain(ulong key)

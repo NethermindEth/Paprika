@@ -1,4 +1,4 @@
-﻿using System.Buffers;
+using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -297,7 +297,7 @@ public readonly ref struct UShortSlottedArray
         return (ushort)(previousSlotAddress - slot.ItemAddress);
     }
 
-    [StructLayout(LayoutKind.Explicit, Size = Size)]
+    [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     private struct Slot
     {
         public const int Size = 4;
@@ -325,7 +325,7 @@ public readonly ref struct UShortSlottedArray
             set => Raw = (ushort)((Raw & ~DeletedMask) | (ushort)(value ? DeletedMask : 0));
         }
 
-        [FieldOffset(0)] private ushort Raw;
+        private ushort Raw;
 
         /// <summary>
         /// Used for vectorized search
@@ -335,7 +335,7 @@ public readonly ref struct UShortSlottedArray
         /// <summary>
         /// The key of the item.
         /// </summary>
-        [FieldOffset(2)] public ushort Key;
+        public ushort Key;
 
         public override string ToString() => $"{nameof(Key)}: {Key}, {nameof(ItemAddress)}: {ItemAddress}";
     }

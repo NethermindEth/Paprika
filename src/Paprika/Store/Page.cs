@@ -24,7 +24,7 @@ public interface IPageWithData<TPage> : IPage
     /// </summary>
     static abstract TPage Wrap(Page page);
 
-    bool TryGet(scoped NibblePath key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result);
+    bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result);
 
     Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch);
 
@@ -54,7 +54,7 @@ public static class PageExtensions
 /// <summary>
 /// The header shared across all the pages.
 /// </summary>
-[StructLayout(LayoutKind.Explicit, Pack = 1, Size = Size)]
+[StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
 public struct PageHeader
 {
     public const byte CurrentVersion = 1;
@@ -64,27 +64,27 @@ public struct PageHeader
     /// <summary>
     /// The id of the last batch that wrote to this page.
     /// </summary>
-    [FieldOffset(0)] public uint BatchId;
+    public uint BatchId;
 
     /// <summary>
     /// The version of the Paprika the page was written by.
     /// </summary>
-    [FieldOffset(4)] public byte PaprikaVersion;
+    public byte PaprikaVersion;
 
     /// <summary>
     /// The type of the page.
     /// </summary>
-    [FieldOffset(5)] public PageType PageType;
+    public PageType PageType;
 
     /// <summary>
     /// The depth of the tree.
     /// </summary>
-    [FieldOffset(6)] public byte Level;
+    public byte Level;
 
     /// <summary>
     /// Internal metadata of the given page.
     /// </summary>
-    [FieldOffset(7)] public byte Metadata;
+    public byte Metadata;
 }
 
 /// <summary>

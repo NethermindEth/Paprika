@@ -121,7 +121,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
                 return false;
             }
 
-            return new FanOutPage(batch.GetAt(Data.StateRoot)).TryGet(key.Path, batch, out result);
+            return new FanOutPage(batch.GetAt(Data.StateRoot)).TryGet(batch, key.Path, out result);
         }
 
         Span<byte> idSpan = stackalloc byte[sizeof(uint)];
@@ -143,7 +143,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         }
         else
         {
-            if (Data.Ids.TryGet(key.Path, batch, out id))
+            if (Data.Ids.TryGet(batch, key.Path, out id))
             {
                 if (cache.Count < IdCacheLimit)
                 {
@@ -161,7 +161,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
 
         var path = NibblePath.FromKey(id).Append(key.StoragePath, stackalloc byte[StorageKeySize]);
 
-        return Data.Storage.TryGet(path, batch, out result);
+        return Data.Storage.TryGet(batch, path, out result);
     }
 
     private static uint ReadId(ReadOnlySpan<byte> id) => BinaryPrimitives.ReadUInt32LittleEndian(id);
@@ -189,7 +189,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
             else
             {
                 // try fetch existing first
-                if (Data.Ids.TryGet(key.Path, batch, out var existingId) == false)
+                if (Data.Ids.TryGet(batch, key.Path, out var existingId) == false)
                 {
                     Data.AccountCounter++;
                     WriteId(idSpan, Data.AccountCounter);
@@ -240,14 +240,14 @@ public readonly unsafe struct RootPage(Page root) : IPage
     }
 }
 
-[StructLayout(LayoutKind.Explicit, Size = Size, Pack = 1)]
+[StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
 public struct Metadata
 {
     public const int Size = BlockNumberSize + Keccak.Size;
     private const int BlockNumberSize = sizeof(uint);
 
-    [FieldOffset(0)] public readonly uint BlockNumber;
-    [FieldOffset(BlockNumberSize)] public readonly Keccak StateHash;
+    public readonly uint BlockNumber;
+    public readonly Keccak StateHash;
 
     public Metadata(uint blockNumber, Keccak stateHash)
     {

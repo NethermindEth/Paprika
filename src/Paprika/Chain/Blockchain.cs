@@ -1,5 +1,6 @@
 using System.CodeDom.Compiler;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -158,7 +159,7 @@ public class Blockchain : IAsyncDisposable
                     {
                         if (!_blocksByNumber.TryGetValue(flushedTo, out var removedBlocks))
                         {
-                            throw new Exception($"Missing blocks at block number {flushedTo}");
+                            ThrowMissingBlocks(flushedTo);
                         }
 
                         var cloned = removedBlocks.ToArray();
@@ -200,6 +201,13 @@ public class Blockchain : IAsyncDisposable
             FlusherFailure?.Invoke(this, e);
             Console.WriteLine(e);
             throw;
+        }
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowMissingBlocks(uint flushedTo)
+        {
+            throw new Exception($"Missing blocks at block number {flushedTo}");
         }
     }
 
@@ -258,7 +266,8 @@ public class Blockchain : IAsyncDisposable
             // blocks by number, use remove first as usually it should be the case
             if (!_blocksByNumber.Remove(blockState.BlockNumber, out var blocks))
             {
-                throw new Exception($"Blocks @ {blockState.BlockNumber} should not be empty");
+                ThrowBlocksNotFound(blockState);
+                return;
             }
 
             blocks.Remove(blockState);
@@ -270,6 +279,13 @@ public class Blockchain : IAsyncDisposable
 
             // blocks by hash
             _blocksByHash.Remove(blockState.Hash);
+        }
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowBlocksNotFound(CommittedBlockState blockState)
+        {
+            throw new Exception($"Blocks @ {blockState.BlockNumber} should not be empty");
         }
     }
 
@@ -324,8 +340,7 @@ public class Blockchain : IAsyncDisposable
         {
             if (_blocksByHash.TryGetValue(parentKeccak, out var ancestor) == false)
             {
-                throw new Exception(
-                    $"Failed to build dependencies. Parent state with hash {parentKeccak} was not found");
+                ThrowParentStateNotFound(parentKeccak);
             }
 
             ancestor.AcquireLease(); // lease it!
@@ -340,6 +355,14 @@ public class Blockchain : IAsyncDisposable
             // pages are zeroed before, return zero on empty tree
             return keccak == Keccak.EmptyTreeHash ? Keccak.Zero : keccak;
         }
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowParentStateNotFound(in Keccak parentKeccak)
+        {
+            throw new Exception(
+                $"Failed to build dependencies. Parent state with hash {parentKeccak} was not found");
+        }
     }
 
     public void Finalize(Keccak keccak)
@@ -352,7 +375,7 @@ public class Blockchain : IAsyncDisposable
         {
             if (_blocksByHash.TryGetValue(keccak, out var block) == false)
             {
-                throw new Exception("Block that is marked as finalized is not present");
+                ThrowFinalizedBlockMissing();
             }
 
             Debug.Assert(block.BlockNumber > _lastFinalized,
@@ -389,6 +412,13 @@ public class Blockchain : IAsyncDisposable
                 // hard spin wait on breaching the size
                 SpinWait.SpinUntil(() => writer.TryWrite(block));
             }
+        }
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowFinalizedBlockMissing()
+        {
+            throw new Exception("Block that is marked as finalized is not present");
         }
     }
 
@@ -544,7 +574,7 @@ public class Blockchain : IAsyncDisposable
                 }
                 else if (!raw)
                 {
-                    throw new Exception("The same state as the parent is not handled now");
+                    ThrowSameState();
                 }
             }
 
@@ -569,6 +599,13 @@ public class Blockchain : IAsyncDisposable
             return new CommittedBlockState(xor, _destroyed, _blockchain, data, hash,
                 ParentHash,
                 blockNumber, raw);
+
+            [DoesNotReturn]
+            [StackTraceHidden]
+            static void ThrowSameState()
+            {
+                throw new Exception("The same state as the parent is not handled now");
+            }
         }
 
         /// <summary>
@@ -610,6 +647,7 @@ public class Blockchain : IAsyncDisposable
 
         private BufferPool Pool => _blockchain._pool;
 
+        [SkipLocalsInit]
         public void DestroyAccount(in Keccak address)
         {
             _hash = null;
@@ -696,6 +734,7 @@ public class Blockchain : IAsyncDisposable
             return result;
         }
 
+        [SkipLocalsInit]
         public void SetAccount(in Keccak address, in Account account, bool newAccountHint = false)
         {
             var payload = account.WriteTo(stackalloc byte[Account.MaxByteCount]);
@@ -727,6 +766,7 @@ public class Blockchain : IAsyncDisposable
             _stats!.RegisterSetStorageAccount(address);
         }
 
+        [SkipLocalsInit]
         private void SetImpl(in Key key, in ReadOnlySpan<byte> payload, EntryType type, PooledSpanDictionary dict)
         {
             // clean precalculated hash
@@ -802,6 +842,7 @@ public class Blockchain : IAsyncDisposable
         {
             private readonly PooledSpanDictionary _dict = new(pool, true);
 
+            [SkipLocalsInit]
             public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
             {
                 var hash = GetHash(key);
@@ -817,6 +858,7 @@ public class Blockchain : IAsyncDisposable
                 return parent.Get(key);
             }
 
+            [SkipLocalsInit]
             public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type)
             {
                 var hash = GetHash(key);
@@ -825,6 +867,7 @@ public class Blockchain : IAsyncDisposable
                 _dict.Set(keyWritten, hash, payload, (byte)type);
             }
 
+            [SkipLocalsInit]
             public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1, EntryType type)
             {
                 var hash = GetHash(key);
@@ -861,6 +904,7 @@ public class Blockchain : IAsyncDisposable
             public override string ToString() => _dict.ToString();
         }
 
+        [SkipLocalsInit]
         private ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
         {
             var hash = GetHash(key);
@@ -873,13 +917,17 @@ public class Blockchain : IAsyncDisposable
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
-            ulong bloom)
+        private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, ulong bloom)
         {
             var owner = TryGetLocal(key, keyWritten, bloom, out var succeeded);
             if (succeeded)
                 return owner.WithDepth(0);
 
+            return TryGetAncestors(key, keyWritten, bloom);
+        }
+
+        private ReadOnlySpanOwnerWithMetadata<byte> TryGetAncestors(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, ulong bloom)
+        {
             ushort depth = 1;
 
             var destroyedHash = CommittedBlockState.GetDestroyedHash(key);
@@ -887,13 +935,19 @@ public class Blockchain : IAsyncDisposable
             // walk all the blocks locally
             foreach (var ancestor in _ancestors)
             {
-                owner = ancestor.TryGetLocal(key, keyWritten, bloom, destroyedHash, out succeeded);
+                var owner = ancestor.TryGetLocal(key, keyWritten, bloom, destroyedHash, out var succeeded);
                 if (succeeded)
                     return owner.WithDepth(depth);
 
                 depth++;
             }
 
+            return TryGetDatabase(key);
+        }
+
+        [SkipLocalsInit]
+        private ReadOnlySpanOwnerWithMetadata<byte> TryGetDatabase(scoped in Key key)
+        {
             // report db read
             Interlocked.Increment(ref _dbReads);
 
@@ -930,14 +984,6 @@ public class Blockchain : IAsyncDisposable
                 return default;
             }
 
-            // select the map to search for
-            var dict = key.Type switch
-            {
-                DataType.Account => _state,
-                DataType.StorageCell => _storage,
-                _ => null
-            };
-
             // First always try pre-commit as it may overwrite data.
             // Don't do it for the storage though! StorageCell entries are not modified by pre-commit! It can only read them!
             if (key.Type != DataType.StorageCell && _preCommit.TryGet(keyWritten, bloom, out var span))
@@ -948,7 +994,21 @@ public class Blockchain : IAsyncDisposable
                 return new ReadOnlySpanOwner<byte>(span, this);
             }
 
-            if (dict != null && dict.TryGet(keyWritten, bloom, out span))
+            return TryGetLocalDict(key, keyWritten, bloom, out succeeded);
+        }
+
+        private ReadOnlySpanOwner<byte> TryGetLocalDict(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
+            ulong bloom, out bool succeeded)
+        {
+            // select the map to search for
+            var dict = key.Type switch
+            {
+                DataType.Account => _state,
+                DataType.StorageCell => _storage,
+                _ => null
+            };
+
+            if (dict is not null && dict.TryGet(keyWritten, bloom, out var span))
             {
                 // return with owned lease
                 succeeded = true;
@@ -959,13 +1019,7 @@ public class Blockchain : IAsyncDisposable
             _xorMissed.Add(1);
 
             // if destroyed, return false as no previous one will contain it
-            if (IsAccountDestroyed(key))
-            {
-                succeeded = true;
-                return default;
-            }
-
-            succeeded = false;
+            succeeded = IsAccountDestroyed(key);
             return default;
         }
 
@@ -1270,7 +1324,7 @@ public class Blockchain : IAsyncDisposable
             return result;
         }
 
-
+        [SkipLocalsInit]
         public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
         {
             var hash = GetHash(key);
@@ -1382,11 +1436,19 @@ public class Blockchain : IAsyncDisposable
         {
             if (!_finalized)
             {
-                throw new Exception("Finalize not called. You need to call it before disposing the raw state. " +
-                                    "Otherwise it won't be preserved properly");
+                ThrowNotFinalized();
+                return;
             }
 
             _current.Dispose();
+
+            [DoesNotReturn]
+            [StackTraceHidden]
+            static void ThrowNotFinalized()
+            {
+                throw new Exception("Finalize not called. You need to call it before disposing the raw state. " +
+                                    "Otherwise it won't be preserved properly");
+            }
         }
 
         public Account GetAccount(in Keccak address) => _current.GetAccount(address);
@@ -1466,6 +1528,13 @@ public class Blockchain : IAsyncDisposable
         private void ThrowOnFinalized()
         {
             if (_finalized)
+            {
+                ThrowAlreadyFinalized();
+            }
+
+            [DoesNotReturn]
+            [StackTraceHidden]
+            static void ThrowAlreadyFinalized()
             {
                 throw new Exception("This ras state has already been finalized!");
             }

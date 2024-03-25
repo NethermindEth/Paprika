@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
@@ -15,7 +16,7 @@ namespace Paprika.Store;
 [method: DebuggerStepThrough]
 public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
 {
-    public static FanOutPage Wrap(Page page) => new(page);
+    public static FanOutPage Wrap(Page page) => Unsafe.As<Page, FanOutPage>(ref page);
 
     private const int ConsumedNibbles = 2;
 
@@ -49,7 +50,7 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
         public Span<byte> Data => MemoryMarshal.CreateSpan(ref DataFirst, DataSize);
     }
 
-    public bool TryGet(scoped NibblePath key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
+    public bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
     {
         batch.AssertRead(Header);
 
@@ -67,7 +68,7 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
             return false;
         }
 
-        return new DataPage(batch.GetAt(addr)).TryGet(key.SliceFrom(ConsumedNibbles), batch, out result);
+        return new DataPage(batch.GetAt(addr)).TryGet(batch, key.SliceFrom(ConsumedNibbles), out result);
     }
 
     private static int GetIndex(scoped in NibblePath key) => (key.GetAt(0) << NibblePath.NibbleShift) + key.GetAt(1);
@@ -113,7 +114,8 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
 
     private static bool IsKeyLocal(in NibblePath key) => key.Length < ConsumedNibbles;
 
-    [MethodImpl(MethodImplOptions.NoInlining)]
+    [DoesNotReturn]
+    [StackTraceHidden]
     private static void ThrowNoSpaceInline() => throw new Exception("Could not set the data inline");
 
     public void Report(IReporter reporter, IPageResolver resolver, int level)

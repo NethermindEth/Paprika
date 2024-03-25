@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 
 namespace Paprika.Store.PageManagers;
@@ -12,10 +14,17 @@ public abstract unsafe class PointerPageManager(long size) : IPageManager
     {
         if (address.Raw >= MaxPage)
         {
-            throw new IndexOutOfRangeException("The database breached its size! The returned page is invalid");
+            ThrowInvalidPage();
         }
 
         return new Page((byte*)Ptr + address.FileOffset);
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowInvalidPage()
+        {
+            throw new IndexOutOfRangeException("The database breached its size! The returned page is invalid");
+        }
     }
 
     public DbAddress GetAddress(in Page page)
