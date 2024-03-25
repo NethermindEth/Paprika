@@ -121,7 +121,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
                 return false;
             }
 
-            return new DataPage(batch.GetAt(Data.StateRoot)).TryGet(key.Path, batch, out result);
+            return new DataPage(batch.GetAt(Data.StateRoot)).TryGet(batch, key.Path, out result);
         }
 
         Span<byte> idSpan = stackalloc byte[sizeof(uint)];
@@ -143,7 +143,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         }
         else
         {
-            if (Data.Ids.TryGet(key.Path, batch, out id))
+            if (Data.Ids.TryGet(batch, key.Path, out id))
             {
                 if (cache.Count < IdCacheLimit)
                 {
@@ -161,7 +161,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
 
         var path = NibblePath.FromKey(id).Append(key.StoragePath, stackalloc byte[StorageKeySize]);
 
-        return Data.Storage.TryGet(path, batch, out result);
+        return Data.Storage.TryGet(batch, path, out result);
     }
 
     private static uint ReadId(ReadOnlySpan<byte> id) => BinaryPrimitives.ReadUInt32LittleEndian(id);
@@ -189,7 +189,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
             else
             {
                 // try fetch existing first
-                if (Data.Ids.TryGet(key.Path, batch, out var existingId) == false)
+                if (Data.Ids.TryGet(batch, key.Path, out var existingId) == false)
                 {
                     Data.AccountCounter++;
                     WriteId(idSpan, Data.AccountCounter);

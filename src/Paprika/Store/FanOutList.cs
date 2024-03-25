@@ -26,7 +26,7 @@ public readonly ref struct FanOutList<TPage, TPageType>(Span<DbAddress> addresse
     private readonly Span<DbAddress> _addresses = addresses;
     private const int ConsumedNibbles = 2;
 
-    public bool TryGet(scoped NibblePath key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
+    public bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
     {
         var index = GetIndex(key);
 
@@ -37,7 +37,7 @@ public readonly ref struct FanOutList<TPage, TPageType>(Span<DbAddress> addresse
             return false;
         }
 
-        return TPage.Wrap(batch.GetAt(addr)).TryGet(key.SliceFrom(ConsumedNibbles), batch, out result);
+        return TPage.Wrap(batch.GetAt(addr)).TryGet(batch, key.SliceFrom(ConsumedNibbles), out result);
     }
 
     private static int GetIndex(scoped in NibblePath key) => (key.GetAt(0) << NibblePath.NibbleShift) + key.GetAt(1);

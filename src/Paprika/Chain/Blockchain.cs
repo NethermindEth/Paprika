@@ -919,13 +919,17 @@ public class Blockchain : IAsyncDisposable
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
-            ulong bloom)
+        private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, ulong bloom)
         {
             var owner = TryGetLocal(key, keyWritten, bloom, out var succeeded);
             if (succeeded)
                 return owner.WithDepth(0);
 
+            return TryGetAncestors(key, keyWritten, bloom);
+        }
+
+        private ReadOnlySpanOwnerWithMetadata<byte> TryGetAncestors(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, ulong bloom)
+        {
             ushort depth = 1;
 
             var destroyedHash = CommittedBlockState.GetDestroyedHash(key);
@@ -933,13 +937,19 @@ public class Blockchain : IAsyncDisposable
             // walk all the blocks locally
             foreach (var ancestor in _ancestors)
             {
-                owner = ancestor.TryGetLocal(key, keyWritten, bloom, destroyedHash, out succeeded);
+                var owner = ancestor.TryGetLocal(key, keyWritten, bloom, destroyedHash, out var succeeded);
                 if (succeeded)
                     return owner.WithDepth(depth);
 
                 depth++;
             }
 
+            return TryGetDatabase(key);
+        }
+
+        [SkipLocalsInit]
+        private ReadOnlySpanOwnerWithMetadata<byte> TryGetDatabase(scoped in Key key)
+        {
             // report db read
             Interlocked.Increment(ref _dbReads);
 
@@ -976,14 +986,6 @@ public class Blockchain : IAsyncDisposable
                 return default;
             }
 
-            // select the map to search for
-            var dict = key.Type switch
-            {
-                DataType.Account => _state,
-                DataType.StorageCell => _storage,
-                _ => null
-            };
-
             // First always try pre-commit as it may overwrite data.
             // Don't do it for the storage though! StorageCell entries are not modified by pre-commit! It can only read them!
             if (key.Type != DataType.StorageCell && _preCommit.TryGet(keyWritten, bloom, out var span))
@@ -994,7 +996,21 @@ public class Blockchain : IAsyncDisposable
                 return new ReadOnlySpanOwner<byte>(span, this);
             }
 
-            if (dict != null && dict.TryGet(keyWritten, bloom, out span))
+            return TryGetLocalDict(key, keyWritten, bloom, out succeeded);
+        }
+
+        private ReadOnlySpanOwner<byte> TryGetLocalDict(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
+            ulong bloom, out bool succeeded)
+        {
+            // select the map to search for
+            var dict = key.Type switch
+            {
+                DataType.Account => _state,
+                DataType.StorageCell => _storage,
+                _ => null
+            };
+
+            if (dict is not null && dict.TryGet(keyWritten, bloom, out var span))
             {
                 // return with owned lease
                 succeeded = true;
@@ -1005,13 +1021,7 @@ public class Blockchain : IAsyncDisposable
             _xorMissed.Add(1);
 
             // if destroyed, return false as no previous one will contain it
-            if (IsAccountDestroyed(key))
-            {
-                succeeded = true;
-                return default;
-            }
-
-            succeeded = false;
+            succeeded = IsAccountDestroyed(key);
             return default;
         }
 
