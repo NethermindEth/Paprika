@@ -14,7 +14,7 @@ namespace Paprika.Store;
 public readonly unsafe struct StorageFanOutPage<TNext>(Page page) : IPageWithData<StorageFanOutPage<TNext>>
     where TNext : struct, IPageWithData<TNext>
 {
-    public static StorageFanOutPage<TNext> Wrap(Page page) => new(page);
+    public static StorageFanOutPage<TNext> Wrap(Page page) => Unsafe.As<Page, StorageFanOutPage<TNext>>(ref page);
 
     private const int ConsumedNibbles = 2;
     private const int LevelDiff = 1;
@@ -23,7 +23,7 @@ public readonly unsafe struct StorageFanOutPage<TNext>(Page page) : IPageWithDat
 
     private ref StorageFanOutPage.Payload Data => ref Unsafe.AsRef<StorageFanOutPage.Payload>(page.Payload);
 
-    public bool TryGet(scoped NibblePath key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
+    public bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
     {
         var map = new SlottedArray(Data.Data);
 
@@ -41,7 +41,7 @@ public readonly unsafe struct StorageFanOutPage<TNext>(Page page) : IPageWithDat
             return false;
         }
 
-        return TNext.Wrap(batch.GetAt(addr)).TryGet(key.SliceFrom(ConsumedNibbles), batch, out result);
+        return TNext.Wrap(batch.GetAt(addr)).TryGet(batch, key.SliceFrom(ConsumedNibbles), out result);
     }
 
     private static int GetIndex(scoped in NibblePath key) => (key.GetAt(0) << NibblePath.NibbleShift) + key.GetAt(1);

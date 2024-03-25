@@ -46,7 +46,7 @@ public class DataPageTests : BasePageTests
             Keccak search = default;
             BinaryPrimitives.WriteInt32LittleEndian(search.BytesAsSpan, j);
 
-            data.TryGet(NibblePath.FromKey(search), batch, out var result)
+            data.TryGet(batch, NibblePath.FromKey(search), out var result)
                 .Should()
                 .BeTrue($"Failed to read {j}");
 

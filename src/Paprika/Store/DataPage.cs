@@ -1,7 +1,10 @@
 using System.Diagnostics;
+using System.Reflection.PortableExecutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
+
+using static Paprika.Merkle.Node;
 
 namespace Paprika.Store;
 
@@ -20,7 +23,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 {
     private const int ConsumedNibbles = 1;
 
-    public static DataPage Wrap(Page page) => new(page);
+    public static DataPage Wrap(Page page) => Unsafe.As<Page, DataPage>(ref page);
 
     private const int BucketCount = 16;
 
@@ -226,39 +229,46 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
     }
 
-    public bool TryGet(scoped NibblePath key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
+    public bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
+        => TryGet(batch, key, out result, this);
+
+    private static bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result, DataPage page)
     {
-        batch.AssertRead(Header);
-
-        // read in-page
-        var map = Map;
-
-        // try regular map
-        if (map.TryGet(key, out result))
+        var returnValue = false;
+        var sliced = key;
+        do
         {
-            return true;
-        }
+            batch.AssertRead(page.Header);
+            // try regular map
+            if (page.Map.TryGet(sliced, out result))
+            {
+                returnValue = true;
+                break;
+            }
 
-        if (key.IsEmpty) // empty keys are left in page
-        {
-            return false;
-        }
+            if (sliced.IsEmpty) // empty keys are left in page
+            {
+                break;
+            }
 
-        var selected = key.FirstNibble;
-        var bucket = Data.Buckets[selected];
+            var bucket = page.Data.Buckets[sliced.FirstNibble];
+            if (bucket.IsNull)
+            {
+                break;
+            }
 
-        // non-null page jump, follow it!
-        if (bucket.IsNull == false)
-        {
-            var sliced = key.SliceFrom(1);
+            // non-null page jump, follow it!
+            sliced = sliced.SliceFrom(1);
             var child = batch.GetAt(bucket);
-            return child.Header.PageType == PageType.Leaf
-                ? new LeafPage(child).TryGet(sliced, batch, out result)
-                : new DataPage(child).TryGet(sliced, batch, out result);
-        }
+            if (child.Header.PageType == PageType.Leaf)
+            {
+                return Unsafe.As<Page, LeafPage>(ref child).TryGet(batch, sliced, out result);
+            }
 
-        result = default;
-        return false;
+            page = Unsafe.As<Page, DataPage>(ref child);
+        } while (true);
+
+        return returnValue;
     }
 
     private SlottedArray Map => new(Data.DataSpan);

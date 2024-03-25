@@ -12,7 +12,7 @@ namespace Paprika.Store;
 [method: DebuggerStepThrough]
 public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 {
-    public static LeafPage Wrap(Page page) => new(page);
+    public static LeafPage Wrap(Page page) => Unsafe.As<Page, LeafPage>(ref page);
 
     private ref PageHeader Header => ref page.Header;
 
@@ -181,7 +181,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         return (Map.TrySet(key, data), page);
     }
 
-    public bool TryGet(scoped NibblePath key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
+    public bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
     {
         batch.AssertRead(Header);
 
