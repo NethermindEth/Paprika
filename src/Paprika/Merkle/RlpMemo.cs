@@ -81,7 +81,7 @@ public readonly ref struct RlpMemo
             return new RlpMemo(span);
         }
 
-        // It's neither empty or full. It must be the compressed form, prepare setup first
+        // It's neither empty nor full. It must be the compressed form, prepare setup first
         span.Clear();
         var memo = new RlpMemo(span);
 
@@ -138,6 +138,12 @@ public readonly ref struct RlpMemo
         }
 
         Debug.Assert(at != 16 || empty.SetCount == 0, "If at = 16, empty should be empty");
+
+        if (empty.SetCount == children.SetCount)
+        {
+            // None of children has their Keccak memoized. Instead of reporting it, return nothing written.
+            return 0;
+        }
 
         if (empty.SetCount > 0)
         {

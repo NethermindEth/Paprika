@@ -11,7 +11,7 @@ public class RlpMemoTests
     {
         Span<byte> raw = stackalloc byte[RlpMemo.Size];
 
-        Run(raw, NibbleSet.MaxByteSize, NibbleSet.Readonly.All);
+        Run(raw, 0, NibbleSet.Readonly.All);
     }
 
     [Test]
@@ -91,8 +91,7 @@ public class RlpMemoTests
         var children = new NibbleSet((byte)child0, (byte)child1);
 
         // just empty map encoded 
-        const int size = NibbleSet.MaxByteSize;
-        Run(raw, size, children);
+        Run(raw, 0, children);
     }
 
     private static void Run(Span<byte> memoRaw, int compressedSize, NibbleSet.Readonly children)
