@@ -41,10 +41,10 @@ public class PooledSpanDictionary : IDisposable
         _pool = pool;
         _preserveOldValues = preserveOldValues;
 
-        var pages = new Page[Root.PageCount];
+        Span<UIntPtr> pages = stackalloc UIntPtr[Root.PageCount];
         for (var i = 0; i < Root.PageCount; i++)
         {
-            pages[i] = RentNewPage(true);
+            pages[i] = RentNewPage(true).Raw;
         }
 
         _root = new Root(pages);
@@ -546,11 +546,11 @@ public class PooledSpanDictionary : IDisposable
         private const int Size = PageCount * ItemSize;
 
         [FieldOffset(0)]
-        private Page _pages;
+        private UIntPtr _pages;
 
         /// <summary>
         /// 16gives 4kb * 16, 64kb allocated per dictionary.
-        /// This gives 16k buckets which should be sufficient to have a really low ratio of collisions for majority of the blocks.
+        /// This gives 16k buckets which should be sufficient to have a really low ratio of collisions for the majority of the blocks.
         /// </summary>
         public const int PageCount = 16;
 
@@ -560,7 +560,7 @@ public class PooledSpanDictionary : IDisposable
         private const int BucketsPerPage = Page.PageSize / sizeof(uint);
         private const int InPageMask = BucketsPerPage - 1;
 
-        public Root(Page[] pages)
+        public Root(ReadOnlySpan<UIntPtr> pages)
         {
             pages.CopyTo(MemoryMarshal.CreateSpan(ref _pages, PageCount));
         }
@@ -570,8 +570,8 @@ public class PooledSpanDictionary : IDisposable
             get
             {
                 var shift = bucket >> PageShift;
-                var raw = Unsafe.Add(ref _pages, shift).Raw;
-                return ref Unsafe.Add(ref Unsafe.AsRef<uint>(raw.ToPointer()), bucket & InPageMask);
+                var ptr = Unsafe.Add(ref _pages, shift).ToPointer();
+                return ref Unsafe.Add(ref Unsafe.AsRef<uint>(ptr), bucket & InPageMask);
             }
         }
     }
