@@ -59,8 +59,9 @@ public class RlpMemoTests
         }
 
         // clear zeroes
-        raw.Slice(zero0 * Keccak.Size, Keccak.Size).Clear();
-        raw.Slice(zero1 * Keccak.Size, Keccak.Size).Clear();
+        var memo = new RlpMemo(raw);
+        memo.Clear((byte)zero0);
+        memo.Clear((byte)zero1);
 
         Run(raw, RlpMemo.Size - 2 * Keccak.Size + NibbleSet.MaxByteSize, NibbleSet.Readonly.All);
     }

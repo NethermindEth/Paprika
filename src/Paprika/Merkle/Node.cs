@@ -332,7 +332,8 @@ public static partial class Node
         public int MaxByteLength => Header.Size +
                                     (HeaderHasAllSet(Header) ? 0 : NibbleSet.MaxByteSize);
 
-        private const byte HeaderMetadataKeccakMask = 0b0000_0001;
+
+        // private const byte HeaderMetadataKeccakMask = 0b0000_0001;
         private const byte HeaderMetadataAllChildrenSetMask = 0b0000_0010;
 
         public readonly Header Header;

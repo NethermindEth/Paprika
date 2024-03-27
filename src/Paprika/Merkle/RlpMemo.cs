@@ -88,9 +88,11 @@ public readonly ref struct RlpMemo
         // Extract empty bits if any
         NibbleSet.Readonly empty;
 
-        if (leftover.Length % Keccak.Size == NibbleSet.MaxByteSize)
+        // The empty bytes length is anything that is not aligned to the Keccak size
+        var emptyBytesLength = leftover.Length % Keccak.Size;
+        if (emptyBytesLength > 0)
         {
-            var bits = leftover[^NibbleSet.MaxByteSize..];
+            var bits = leftover[^emptyBytesLength..];
             NibbleSet.Readonly.ReadFrom(bits, out empty);
         }
         else

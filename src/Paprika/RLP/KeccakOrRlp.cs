@@ -38,7 +38,7 @@ public readonly struct KeccakOrRlp
 
         if (data.Length < 32)
         {
-            // encode length as teh first byte
+            // encode length as the first byte
             output[0] = (byte)data.Length;
             data.CopyTo(output[NonKeccakOffset..]);
             return new KeccakOrRlp(Type.Rlp, output);
