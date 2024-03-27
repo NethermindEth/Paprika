@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using HdrHistogram;
 using Paprika.Data;
@@ -10,7 +11,7 @@ namespace Paprika.Store;
 /// </summary>
 public interface IReporter
 {
-    void ReportDataUsage(PageType type, int level, int filledBuckets, int entriesPerPage, int capacityLeft);
+    void ReportDataUsage(PageType type, int pageLevel, int trimmedNibbles, in SlottedArray array);
 
     /// <summary>
     /// Reports how many batches ago the page was updated.
@@ -27,7 +28,7 @@ public interface IReporting
     void Report(IReporter state, IReporter storage);
 }
 
-public class StatisticsReporter : IReporter
+public class StatisticsReporter(TrieType trieType) : IReporter
 {
     public readonly SortedDictionary<int, Level> Levels = new();
     public readonly Dictionary<PageType, int> PageTypes = new();
@@ -36,30 +37,75 @@ public class StatisticsReporter : IReporter
     public readonly Dictionary<int, long> Sizes = new();
     public readonly Dictionary<int, IntHistogram> SizeHistograms = new();
 
+    public long DataSize = 0;
+
+    public long MerkleBranchSize = 0;
+    public long MerkleExtensionSize = 0;
+    public long MerkleLeafSize = 0;
+
     public readonly IntHistogram LeafCapacityLeft = new(10000, 5);
     public readonly IntHistogram LeafOverflowCapacityLeft = new(10000, 5);
     public readonly IntHistogram LeafOverflowCount = new(100, 5);
 
     public readonly IntHistogram PageAge = new(uint.MaxValue, 5);
 
-    public void ReportDataUsage(PageType type, int level, int filledBuckets, int entriesPerPage, int capacityLeft)
+    public void ReportDataUsage(PageType type, int pageLevel, int trimmedNibbles, in SlottedArray array)
     {
-        if (Levels.TryGetValue(level, out var lvl) == false)
+        if (Levels.TryGetValue(pageLevel, out var lvl) == false)
         {
-            lvl = Levels[level] = new Level();
+            lvl = Levels[pageLevel] = new Level();
         }
 
         PageCount++;
 
-        lvl.ChildCount.RecordValue(filledBuckets);
+        lvl.Entries.RecordValue(array.Count);
 
-        lvl.Entries.RecordValue(entriesPerPage);
+        var capacityLeft = array.CapacityLeft;
         lvl.CapacityLeft.RecordValue(capacityLeft);
 
         if (type == PageType.Leaf)
             LeafCapacityLeft.RecordValue(capacityLeft);
         else if (type == PageType.LeafOverflow)
             LeafOverflowCapacityLeft.RecordValue(capacityLeft);
+
+        // analyze data
+        foreach (var item in array.EnumerateAll())
+        {
+            var size = item.RawData.Length;
+            var isMerkle = item.Key.Length + trimmedNibbles < NibblePath.KeccakNibbleCount;
+
+            if (isMerkle)
+            {
+                if (size > 0)
+                {
+                    var nodeType = Node.Header.GetTypeFrom(item.RawData);
+                    switch (nodeType)
+                    {
+                        case Node.Type.Leaf:
+                            MerkleLeafSize += size;
+                            break;
+                        case Node.Type.Extension:
+                            MerkleExtensionSize += size;
+                            break;
+                        case Node.Type.Branch:
+                            MerkleBranchSize += size;
+                            break;
+                        default:
+                            throw new ArgumentOutOfRangeException();
+                    }
+                }
+            }
+            else
+            {
+                DataSize += size;
+            }
+
+            if (!isMerkle && trieType == TrieType.Storage && item.RawData.Length > 32)
+            {
+                throw new Exception(
+                    $"Storage, not Merkle node with local key {item.Key.ToString()}, has more than 32 bytes");
+            }
+        }
     }
 
     public void ReportPage(uint ageInBatches, PageType type)
@@ -97,18 +143,6 @@ public class StatisticsReporter : IReporter
     private const int KeyShift = 8;
     private const int KeyDiff = 1;
 
-    // private static int GetKey(in StoreKey key, in ReadOnlySpan<byte> data)
-    // {
-    //     var encoded = (int)key.Type;
-    //     if ((key.Type & DataType.Merkle) != DataType.Merkle)
-    //     {
-    //         return encoded;
-    //     }
-    //
-    //     Node.Header.ReadFrom(data, out var header);
-    //     return encoded | (((int)header.NodeType + KeyDiff) << KeyShift);
-    // }
-
     public static string GetNameForSize(int i)
     {
         var type = (DataType)(i & 0xFF);
@@ -126,7 +160,6 @@ public class StatisticsReporter : IReporter
     public class Level
     {
         public readonly IntHistogram ChildCount = new(1000, 5);
-
         public readonly IntHistogram Entries = new(1000, 5);
         public readonly IntHistogram CapacityLeft = new(10000, 5);
     }
