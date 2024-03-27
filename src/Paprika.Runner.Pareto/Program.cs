@@ -183,8 +183,8 @@ public static class Program
 
             using var read = db.BeginReadOnlyBatch();
 
-            var state = new StatisticsReporter();
-            var storage = new StatisticsReporter();
+            var state = new StatisticsReporter(TrieType.State);
+            var storage = new StatisticsReporter(TrieType.Storage);
             read.Report(state, storage);
 
             spectre.Cancel();

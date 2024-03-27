@@ -208,16 +208,16 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
     public int CapacityLeft => Map.CapacityLeft;
 
-    public void Report(IReporter reporter, IPageResolver resolver, int level)
+    public void Report(IReporter reporter, IPageResolver resolver, int pageLevel, int trimmedNibbles)
     {
         var slotted = new SlottedArray(Data.DataSpan);
-        reporter.ReportDataUsage(Header.PageType, level, 0, slotted.Count, slotted.CapacityLeft);
+        reporter.ReportDataUsage(Header.PageType, pageLevel, trimmedNibbles, slotted);
 
         foreach (var bucket in Data.Buckets)
         {
             if (bucket.IsNull == false)
             {
-                new LeafOverflowPage(resolver.GetAt(bucket)).Report(reporter, resolver, level + 1);
+                new LeafOverflowPage(resolver.GetAt(bucket)).Report(reporter, resolver, pageLevel + 1, trimmedNibbles);
             }
         }
     }
