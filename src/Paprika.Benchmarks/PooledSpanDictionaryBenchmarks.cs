@@ -6,7 +6,7 @@ using Paprika.Data;
 
 namespace Paprika.Benchmarks;
 
-//[DotTraceDiagnoser]
+[DisassemblyDiagnoser]
 [MemoryDiagnoser]
 public class PooledSpanDictionaryBenchmarks
 {
@@ -70,7 +70,8 @@ public class PooledSpanDictionaryBenchmarks
             Keccak k = default;
             BinaryPrimitives.WriteInt32LittleEndian(k.BytesAsSpan, i);
 
-            var key = Key.Raw(NibblePath.FromKey(k), DataType.StorageCell, NibblePath.FromKey(k));
+            var path = NibblePath.FromKey(k);
+            var key = Key.Raw(path, DataType.StorageCell, path);
             var written = key.WriteTo(span);
 
             var hash = Blockchain.GetHash(key);

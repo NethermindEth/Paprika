@@ -104,6 +104,10 @@ public class PooledSpanDictionary : IDisposable
             ref var at = ref Unsafe.Add(ref page.Ref, (int)atPage);
 
             var header = at & PreambleBits;
+            
+            // Search the entry only if it was not destroyed before.
+            // If it was destroyed and amended, the younger version already should have been found in this search.
+            // If it was not, it means that the key does not exist and it was not an update for the given key.
             if ((header & DestroyedBit) == 0)
             {
                 // not destroyed, ready to be searched, decode leftover, big endian
