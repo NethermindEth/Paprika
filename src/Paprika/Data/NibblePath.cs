@@ -546,6 +546,10 @@ public readonly ref struct NibblePath
 
         return FindFirstDifferentNibble(other) == Length;
     }
+    public bool StartsWith(in NibblePath other)
+    {
+        return FindFirstDifferentNibble(other) == other.Length;
+    }
 
     public override int GetHashCode()
     {

@@ -85,4 +85,17 @@ public readonly ref struct FanOutList<TPage, TPageType>(Span<DbAddress> addresse
             }
         }
     }
+    public void Destroy(IBatchContext batch, in NibblePath prefix)
+    {
+        Set(prefix, ReadOnlySpan<byte>.Empty, batch);
+
+        var index = GetIndex(prefix);
+
+        ref var addr = ref _addresses[index];
+
+        if (!addr.IsNull)
+        {
+            batch.GetAddress(TPage.Wrap(batch.GetAt(addr)).Destroy(batch, prefix.SliceFrom(ConsumedNibbles)));
+        }
+    }
 }
