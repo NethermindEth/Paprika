@@ -406,13 +406,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             case Node.Type.Extension:
                 return EncodeExtension(key, ctx, ext);
             case Node.Type.Branch:
-                var useMemoized = !ctx.Hint.HasFlag(ComputeHint.SkipCachedInformation);
-                if (useMemoized && branch.HasKeccak)
-                {
-                    // return memoized value
-                    return branch.Keccak;
-                }
-
                 return EncodeBranch(key, ctx, branch, leftover, owner.IsOwnedBy(ctx.Commit));
             default:
                 ThrowOutOfRange();
@@ -956,7 +949,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
             memo.Clear(nibble);
 
-            var shouldUpdate = branch.HasKeccak || !branch.Children.Equals(children);
+            var shouldUpdate = !branch.Children.Equals(children);
 
             // There's the cached RLP
             if (shouldUpdate || childRlpRequiresUpdate)
@@ -1219,7 +1212,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                         createLeaf = !branch.Children[nibble];
                         var children = branch.Children.Set(nibble);
-                        var shouldUpdateBranch = createLeaf || branch.HasKeccak;
+                        var shouldUpdateBranch = createLeaf;
 
                         if (shouldUpdateBranch || childRlpRequiresUpdate)
                         {
