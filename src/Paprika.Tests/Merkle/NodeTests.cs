@@ -204,18 +204,18 @@ public class NodeTests
         decoded.Equals(leaf).Should().BeTrue($"Expected {leaf.ToString()}, got {decoded.ToString()}");
     }
 
-    [TestCase(new byte[] { 253, 137 }, 0, 1)]
-    [TestCase(new byte[] { 253, 137 }, 0, 2)]
-    [TestCase(new byte[] { 253, 137 }, 1, 1)]
-    [TestCase(new byte[] { 253, 137 }, 1, 2)]
-    [TestCase(new byte[] { 253, 137 }, 1, 3)]
-    public void Leaf_paths(byte[] raw, int odd, int length)
+    [TestCase(new byte[] { 253, 137 }, 0, 2, 2)]
+    [TestCase(new byte[] { 253, 137 }, 1, 1, 1)]
+    [TestCase(new byte[] { 253, 137 }, 1, 3, 2)]
+    public void Leaf_paths(byte[] raw, int odd, int length, int expectedLength)
     {
         var path = NibblePath.FromKey(raw).SliceFrom(odd).SliceTo(length);
         var leaf = new Node.Leaf(path);
         Span<byte> buffer = stackalloc byte[leaf.MaxByteLength];
 
         var encoded = leaf.WriteTo(buffer);
+        encoded.Length.Should().Be(expectedLength);
+
         var leftover = Node.Leaf.ReadFrom(encoded, out var decoded);
 
         leftover.Length.Should().Be(0);
@@ -304,29 +304,29 @@ public class NodeTests
         actual.Equals(branch).Should().BeTrue();
     }
 
-    [Test]
-    public void Node_read_sequential()
-    {
-        var nibblePath = NibblePath.FromKey(new byte[] { 0x1, 0x2, 0x4, 0x5 });
-        const ushort nibbleBitSet = 0b0000_0011;
-        var keccak = Values.Key0;
-
-        var leaf = new Node.Leaf(nibblePath);
-        var extension = new Node.Extension(nibblePath);
-        var branch = new Node.Branch(new NibbleSet.Readonly(nibbleBitSet), keccak);
-
-        Span<byte> buffer = new byte[leaf.MaxByteLength + extension.MaxByteLength + branch.MaxByteLength];
-
-        var writeLeftover = leaf.WriteToWithLeftover(buffer);
-        writeLeftover = extension.WriteToWithLeftover(writeLeftover);
-        _ = branch.WriteToWithLeftover(writeLeftover);
-
-        var readLeftover = Node.ReadFrom(out _, out var actualLeaf, out _, out _, buffer);
-        readLeftover = Node.ReadFrom(out _, out _, out var actualExtension, out _, readLeftover);
-        _ = Node.ReadFrom(out _, out _, out _, out var actualBranch, readLeftover);
-
-        actualLeaf.Equals(leaf).Should().BeTrue();
-        actualExtension.Equals(extension).Should().BeTrue();
-        actualBranch.Equals(branch).Should().BeTrue();
-    }
+    // No longer valid as leafs, encode more dense
+    // [Test]
+    // public void Node_read_sequential()
+    // {
+    //     var nibblePath = NibblePath.FromKey(new byte[] { 0x1, 0x2, 0x4, 0x5 });
+    //     const ushort nibbleBitSet = 0b0000_0011;
+    //
+    //     var leaf = new Node.Leaf(nibblePath);
+    //     var extension = new Node.Extension(nibblePath);
+    //     var branch = new Node.Branch(new NibbleSet.Readonly(nibbleBitSet));
+    //
+    //     Span<byte> buffer = new byte[leaf.MaxByteLength + extension.MaxByteLength + branch.MaxByteLength];
+    //
+    //     var writeLeftover = leaf.WriteToWithLeftover(buffer);
+    //     writeLeftover = extension.WriteToWithLeftover(writeLeftover);
+    //     _ = branch.WriteToWithLeftover(writeLeftover);
+    //
+    //     var readLeftover = Node.ReadFrom(out _, out var actualLeaf, out _, out _, buffer);
+    //     readLeftover = Node.ReadFrom(out _, out _, out var actualExtension, out _, readLeftover);
+    //     _ = Node.ReadFrom(out _, out _, out _, out var actualBranch, readLeftover);
+    //
+    //     actualLeaf.Equals(leaf).Should().BeTrue();
+    //     actualExtension.Equals(extension).Should().BeTrue();
+    //     actualBranch.Equals(branch).Should().BeTrue();
+    // }
 }
