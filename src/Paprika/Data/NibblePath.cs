@@ -566,8 +566,6 @@ public readonly ref struct NibblePath
 
     private static readonly char[] Hex = "0123456789ABCDEF".ToArray();
 
-    public bool EndsWith(in NibblePath other) => SliceFrom(Length - other.Length).Equals(other);
-
     public bool Equals(in NibblePath other)
     {
         if (other.Length != Length || (other._odd & OddBit) != (_odd & OddBit))

@@ -33,9 +33,6 @@ public class StatisticsReporter : IReporter
     public readonly Dictionary<PageType, int> PageTypes = new();
     public int PageCount;
 
-    public readonly Dictionary<int, long> Sizes = new();
-    public readonly Dictionary<int, IntHistogram> SizeHistograms = new();
-
     public readonly IntHistogram LeafCapacityLeft = new(10000, 5);
     public readonly IntHistogram LeafOverflowCapacityLeft = new(10000, 5);
     public readonly IntHistogram LeafOverflowCount = new(100, 5);
@@ -96,18 +93,6 @@ public class StatisticsReporter : IReporter
 
     private const int KeyShift = 8;
     private const int KeyDiff = 1;
-
-    // private static int GetKey(in StoreKey key, in ReadOnlySpan<byte> data)
-    // {
-    //     var encoded = (int)key.Type;
-    //     if ((key.Type & DataType.Merkle) != DataType.Merkle)
-    //     {
-    //         return encoded;
-    //     }
-    //
-    //     Node.Header.ReadFrom(data, out var header);
-    //     return encoded | (((int)header.NodeType + KeyDiff) << KeyShift);
-    // }
 
     public static string GetNameForSize(int i)
     {

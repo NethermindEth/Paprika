@@ -2,7 +2,7 @@ namespace Paprika.Utils;
 
 public static class SpanExtensions
 {
-    public static readonly byte[] ZeroByte = new byte[] { 0 };
+    private static readonly byte[] ZeroByte = [0];
 
     public static Span<byte> WithoutLeadingZeros(this Span<byte> bytes)
     {
