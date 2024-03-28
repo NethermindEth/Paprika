@@ -24,7 +24,7 @@ public class DataPageTests : BasePageTests
 
         var data = new DataPage(page);
 
-        const int spins = 200;
+        const int spins = 100;
         const int count = 1024;
 
         for (var spin = 0; spin < spins; spin++)

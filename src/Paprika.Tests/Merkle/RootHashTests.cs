@@ -164,8 +164,6 @@ public class RootHashTests(bool parallel)
                 var b0 = (byte)((nibble0 << 4) | nibble1);
                 key[startFromByte] = b0;
 
-                Console.WriteLine($"Case: {b0}");
-
                 var account = new Account((uint)b0 + 1, b0, new Keccak(key), Keccak.EmptyTreeHash);
                 commit.Set(Key.Account(NibblePath.FromKey(key)), account.WriteTo(destination));
             }
