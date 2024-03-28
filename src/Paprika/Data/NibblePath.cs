@@ -19,6 +19,34 @@ namespace Paprika.Data;
 /// </remarks>
 public readonly ref struct NibblePath
 {
+    /// <summary>
+    /// An array of singles, that can be used to create a path of length 1, both odd and even.
+    /// Used by <see cref="Single"/>.
+    /// </summary>
+    private static ReadOnlySpan<byte> Singles => new byte[]
+    {
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+        0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF
+    };
+
+    /// <summary>
+    /// Creates a <see cref="NibblePath"/> with length of 1.
+    /// </summary>
+    /// <param name="nibble">The nibble that should be in the path.</param>
+    /// <param name="odd">The oddity.</param>
+    /// <returns>The path</returns>
+    /// <remarks>
+    /// Highly optimized, branchless, just a few moves and adds.
+    /// </remarks>
+    public static NibblePath Single(byte nibble, int odd)
+    {
+        Debug.Assert(nibble <= NibbleMask, "Nibble breached the value");
+        Debug.Assert(odd <= 1, "Odd should be 1 or 0");
+
+        ref var singles = ref Unsafe.AsRef(ref MemoryMarshal.GetReference(Singles));
+        return new NibblePath(ref Unsafe.Add(ref singles, nibble), (byte)odd, 1);
+    }
+
     public const int MaxLengthValue = byte.MaxValue / 2 + 2;
     public const int NibblePerByte = 2;
     public const int NibbleShift = 8 / NibblePerByte;
@@ -33,6 +61,7 @@ public readonly ref struct NibblePath
     private readonly byte _odd;
 
     public bool IsOdd => _odd == OddBit;
+    public int Oddity => _odd;
 
     public static NibblePath Empty => default;
 
