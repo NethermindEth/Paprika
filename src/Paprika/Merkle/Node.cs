@@ -177,24 +177,18 @@ public static partial class Node
             $" }}";
     }
 
+    /// <remarks>
+    /// Leafs are one of the biggest items in the database (Ethereum, mainnet, 40GB total).
+    /// To encode them efficiently, the following structure is used. If the length of the leaf is:
+    ///
+    /// 1. even, the header contains even info and the raw bytes are added after the header.
+    /// 2. odd, the header contains even info, then the first odd nibble is written, and the rest as in the above
+    /// </remarks>
     public readonly ref partial struct Leaf
     {
-        public int MaxByteLength => Header.Size + Path.RawSpan.Length;
+        public int MaxByteLength => Header.Size + Path.RawSpan.Length - Path.Oddity;
 
-        private const byte OddPathMetadata = 0b0100_0000;
-        private const byte OddPathMetadataShift = 6;
-        private const byte LengthMetadata = 0b0011_1111;
-
-        /// <summary>
-        /// There's a single 64-nibble long path.
-        /// There are two 63-nibble long paths:
-        /// 1. an odd, encoded: 0b0111_1110
-        /// 2. an even, encoded: 0b0011_1110
-        /// aw we subtract 1 from length as no leafs with 0 paths are stored.
-        /// This make it unique addressing and allows to save one byte for the nibble path length. 
-        /// </summary>
-        private const byte FullPathMetadata = 0b0111_1111;
-
+        private const byte OddPathMetadata = 0b0001_0000;
         public const int MinimalLeafPathLength = 1;
 
         public readonly Header Header;
@@ -209,20 +203,13 @@ public static partial class Node
 
         public Leaf(NibblePath path)
         {
-            // Leaves shall never be marked as dirty or not. This information will be held by branch
+            Assert(path.Length >= MinimalLeafPathLength,
+                "Leaves that have empty path should not be persisted. They should be stored only in the branch");
+            Assert((path.Oddity + path.Length) % 2 == 0,
+                "If path is odd, length should be odd as well. If even, even");
 
-            Assert(path.Length >= MinimalLeafPathLength);
-
-            if (path.Length == NibblePath.KeccakNibbleCount)
-            {
-                Header = new Header(Type.Leaf, FullPathMetadata);
-            }
-            else
-            {
-                var oddity = path.IsOdd ? OddPathMetadata : default;
-                var length = path.Length - MinimalLeafPathLength;
-                Header = new Header(Type.Leaf, (byte)(oddity | length));
-            }
+            var metadata = path.IsOdd ? (byte)(OddPathMetadata | path.FirstNibble) : 0;
+            Header = new Header(Type.Leaf, (byte)metadata);
 
             Path = path;
         }
@@ -236,31 +223,38 @@ public static partial class Node
         public Span<byte> WriteToWithLeftover(Span<byte> output)
         {
             var leftover = Header.WriteToWithLeftover(output);
-            Path.RawSpan.CopyTo(leftover);
-            return leftover[Path.RawSpan.Length..];
+            var span = Path.RawSpan;
+            if (Path.IsOdd)
+            {
+                // consume first byte as it's odd and the odd nibble is in the header
+                span = span[1..];
+            }
+
+            if (span.Length > 0)
+            {
+                span.CopyTo(leftover);
+            }
+
+            return leftover[span.Length..];
         }
 
         public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Leaf leaf)
         {
             var leftover = Header.ReadFrom(source, out var header);
 
-            if (header.Metadata == FullPathMetadata)
+            NibblePath path;
+            if ((header.Metadata & OddPathMetadata) == OddPathMetadata)
             {
-                leaf = new Leaf(header, NibblePath.FromKey(leftover[..Keccak.Size]));
-                return leftover[Keccak.Size..];
+                // Construct path by wrapping the source and slicing by one to move to first nibble.
+                path = NibblePath.FromKey(source, 1);
+            }
+            else
+            {
+                path = NibblePath.FromKey(leftover);
             }
 
-            var length = (header.Metadata & LengthMetadata) + MinimalLeafPathLength;
-            var oddity = (header.Metadata & OddPathMetadata) >> OddPathMetadataShift;
-
-            var actualLength = (length + oddity + MinimalLeafPathLength) / 2;
-
-            var path = NibblePath.FromKey(leftover.Slice(0, actualLength))
-                .SliceFrom(oddity)
-                .SliceTo(length);
-
             leaf = new Leaf(header, path);
-            return leftover[actualLength..];
+            return ReadOnlySpan<byte>.Empty;
         }
 
         public bool Equals(in Leaf other) =>
