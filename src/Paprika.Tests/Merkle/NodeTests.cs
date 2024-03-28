@@ -46,11 +46,10 @@ public class NodeTests
     [Test]
     public void Branch_properties()
     {
-        ushort nibbles = 0b0000_0000_0000_0011;
-        var branch = new Node.Branch(new NibbleSet.Readonly(nibbles), Values.Key0);
+        const ushort nibbles = 0b0000_0000_0000_0011;
+        var branch = new Node.Branch(new NibbleSet.Readonly(nibbles));
 
         branch.Header.NodeType.Should().Be(Node.Type.Branch);
-        branch.Keccak.Should().Be(Values.Key0);
     }
 
     [Test]
@@ -58,8 +57,8 @@ public class NodeTests
     {
         Assert.Throws<ArgumentException>(() =>
         {
-            ushort nibbles = 0b0000_0000_0000_0000;
-            _ = new Node.Branch(new NibbleSet.Readonly(nibbles), Values.Key0);
+            const ushort nibbles = 0b0000_0000_0000_0000;
+            _ = new Node.Branch(new NibbleSet.Readonly(nibbles));
         });
     }
 
@@ -71,7 +70,7 @@ public class NodeTests
             Assert.Throws<ArgumentException>(() =>
             {
                 ushort nibbles = (ushort)(0b0000_0000_0000_00001 << i);
-                _ = new Node.Branch(new NibbleSet.Readonly(nibbles), Values.Key0);
+                _ = new Node.Branch(new NibbleSet.Readonly(nibbles));
             });
         }
     }
@@ -80,7 +79,7 @@ public class NodeTests
     public void Branch_some_nibbles()
     {
         ushort nibbles = 0b0110_1001_0101_1010;
-        var branch = new Node.Branch(new NibbleSet.Readonly(nibbles), Values.Key0);
+        var branch = new Node.Branch(new NibbleSet.Readonly(nibbles));
 
         var expected = new byte[] { 1, 3, 4, 6, 8, 11, 13, 14 };
 
@@ -88,15 +87,6 @@ public class NodeTests
         {
             branch.Children[nibble].Should().BeTrue($"Nibble {nibble} was expected to be set, but it's not");
         }
-    }
-
-    [Test]
-    public void Branch_no_keccak()
-    {
-        ushort nibbles = 0b0110_1001_0101_1010;
-        var branch = new Node.Branch(new NibbleSet.Readonly(nibbles));
-
-        branch.Keccak.Should().Be(Keccak.Zero);
     }
 
     private static object[] _branchReadWriteCases =
@@ -110,7 +100,7 @@ public class NodeTests
     [TestCaseSource(nameof(_branchReadWriteCases))]
     public void Branch_read_write(ushort nibbleBitSet, Keccak keccak)
     {
-        var branch = new Node.Branch(new NibbleSet.Readonly(nibbleBitSet), keccak);
+        var branch = new Node.Branch(new NibbleSet.Readonly(nibbleBitSet));
         Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
 
         var encoded = branch.WriteTo(buffer);
@@ -126,7 +116,7 @@ public class NodeTests
     [TestCase((ushort)0b0000_1000_0001_0000)]
     public void Branch_read_write_no_keccak(ushort nibbleBitSet)
     {
-        var branch = new Node.Branch(new NibbleSet.Readonly(nibbleBitSet), default(Keccak));
+        var branch = new Node.Branch(new NibbleSet.Readonly(nibbleBitSet));
         Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
 
         var encoded = branch.WriteTo(buffer);
@@ -137,32 +127,14 @@ public class NodeTests
     }
 
     [Test]
-    public void Branch_no_keccak_encoded_smaller_than_with_keccak()
+    public void Branch_all_set()
     {
-        const ushort nibbles = 0b0110_1001_0101_1010;
-        var noKeccak = new Node.Branch(new NibbleSet.Readonly(nibbles));
-        var hasKeccak = new Node.Branch(new NibbleSet.Readonly(nibbles), Values.Key0);
-
-        Span<byte> noKeccakBuffer = stackalloc byte[noKeccak.MaxByteLength];
-        var encodedNoKeccak = noKeccak.WriteTo(noKeccakBuffer);
-
-        Span<byte> hasKeccakBuffer = stackalloc byte[hasKeccak.MaxByteLength];
-        var encodedHasKeccak = hasKeccak.WriteTo(hasKeccakBuffer);
-
-        noKeccak.MaxByteLength.Should().BeLessThan(hasKeccak.MaxByteLength);
-        encodedNoKeccak.Length.Should().BeLessThan(encodedHasKeccak.Length);
-    }
-
-    [TestCase(true)]
-    [TestCase(false)]
-    public void Branch_all_set(bool keccak)
-    {
-        var branch = new Node.Branch(NibbleSet.Readonly.All, keccak ? Values.Key0 : default);
+        var branch = new Node.Branch(NibbleSet.Readonly.All);
 
         Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
         var encoded = branch.WriteTo(buffer);
 
-        encoded.Length.Should().Be(1 + (keccak ? Keccak.Size : 0), "Full branch should encode to one byte");
+        encoded.Length.Should().Be(1, "Full branch should encode to one byte");
 
         var leftover = Node.Branch.ReadFrom(encoded, out var decoded);
 
@@ -291,9 +263,8 @@ public class NodeTests
     public void Node_read_branch()
     {
         const ushort nibbleBitSet = 0b1100_0011_0101_1010;
-        var keccak = Values.Key0;
 
-        var branch = new Node.Branch(new NibbleSet.Readonly(nibbleBitSet), keccak);
+        var branch = new Node.Branch(new NibbleSet.Readonly(nibbleBitSet));
         Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
 
         var encoded = branch.WriteTo(buffer);

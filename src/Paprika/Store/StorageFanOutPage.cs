@@ -92,15 +92,18 @@ public readonly unsafe struct StorageFanOutPage<TNext>(Page page) : IPageWithDat
         return Set(key, data, batch);
     }
 
-    public void Report(IReporter reporter, IPageResolver resolver, int level)
+    public void Report(IReporter reporter, IPageResolver resolver, int pageLevel, int trimmedNibbles)
     {
+        var consumedNibbles = trimmedNibbles + ConsumedNibbles;
         foreach (var bucket in Data.Addresses)
         {
             if (!bucket.IsNull)
             {
-                TNext.Wrap(resolver.GetAt(bucket)).Report(reporter, resolver, level + LevelDiff);
+                TNext.Wrap(resolver.GetAt(bucket)).Report(reporter, resolver, pageLevel + LevelDiff, consumedNibbles);
             }
         }
+
+        reporter.ReportDataUsage(Header.PageType, pageLevel, trimmedNibbles, new SlottedArray(Data.Data));
     }
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)

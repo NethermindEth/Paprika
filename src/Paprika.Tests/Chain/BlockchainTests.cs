@@ -121,7 +121,7 @@ public class BlockchainTests
 
         using var db = PagedDb.NativeMemoryDb(16 * Mb, 2);
 
-        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(2, 2));
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
 
         var block = blockchain.StartNew(Keccak.EmptyTreeHash);
         block.SetAccount(Key0, new Account(1, 1));
@@ -183,7 +183,7 @@ public class BlockchainTests
     public async Task Account_destruction_spin()
     {
         using var db = PagedDb.NativeMemoryDb(8 * Mb, 2);
-        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(1, 1, Memoization.None));
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
 
         var parent = Keccak.EmptyTreeHash;
 
@@ -403,7 +403,7 @@ public class BlockchainTests
         using var db = PagedDb.NativeMemoryDb(256 * Mb, 2);
         var counter = 0;
 
-        var behavior = new ComputeMerkleBehavior(2, 2);
+        var behavior = new ComputeMerkleBehavior();
 
         await using (var blockchain = new Blockchain(db, behavior))
         {

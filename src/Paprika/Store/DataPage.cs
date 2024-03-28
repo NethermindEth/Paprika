@@ -273,30 +273,22 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
     private SlottedArray Map => new(Data.DataSpan);
 
-    public void Report(IReporter reporter, IPageResolver resolver, int level)
+    public void Report(IReporter reporter, IPageResolver resolver, int pageLevel, int trimmedNibbles)
     {
-        var emptyBuckets = 0;
-
         foreach (var bucket in Data.Buckets)
         {
-            if (bucket.IsNull)
-            {
-                emptyBuckets++;
-            }
-            else
+            if (!bucket.IsNull)
             {
                 var child = resolver.GetAt(bucket);
                 if (child.Header.PageType == PageType.Leaf)
-                    new LeafPage(child).Report(reporter, resolver, level + 1);
+                    new LeafPage(child).Report(reporter, resolver, pageLevel + 1, trimmedNibbles + 1);
                 else
-                    new DataPage(child).Report(reporter, resolver, level + 1);
+                    new DataPage(child).Report(reporter, resolver, pageLevel + 1, trimmedNibbles + 1);
             }
         }
 
         var slotted = new SlottedArray(Data.DataSpan);
-
-        reporter.ReportDataUsage(Header.PageType, level, BucketCount - emptyBuckets, slotted.Count,
-            slotted.CapacityLeft);
+        reporter.ReportDataUsage(Header.PageType, pageLevel, trimmedNibbles, slotted);
     }
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)

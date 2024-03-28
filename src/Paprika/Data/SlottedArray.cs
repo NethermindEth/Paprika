@@ -126,6 +126,7 @@ public readonly ref struct SlottedArray
     public int Count => _header.Low / Slot.Size;
 
     public int CapacityLeft => _data.Length - _header.Taken;
+    public int CapacityTotal => _data.Length;
 
     public Enumerator EnumerateAll() =>
         new(this);

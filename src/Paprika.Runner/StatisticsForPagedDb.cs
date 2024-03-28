@@ -1,5 +1,6 @@
 using System.Text;
 using HdrHistogram;
+using Paprika.Merkle;
 using Paprika.Store;
 using Spectre.Console;
 using Spectre.Console.Rendering;
@@ -14,8 +15,8 @@ public static class StatisticsForPagedDb
 
         try
         {
-            var state = new StatisticsReporter();
-            var storage = new StatisticsReporter();
+            var state = new StatisticsReporter(TrieType.State);
+            var storage = new StatisticsReporter(TrieType.Storage);
 
             read.Report(state, storage);
 
@@ -38,6 +39,8 @@ public static class StatisticsForPagedDb
         }
     }
 
+    private static double ToGb(long value) => (double)value / 1024 / 1024 / 1024;
+
     private static Layout BuildReport(StatisticsReporter reporter, string name)
     {
         var up = new Layout("up");
@@ -46,7 +49,19 @@ public static class StatisticsForPagedDb
 
         var layout = new Layout().SplitRows(up, sizes, leafs);
 
-        var general = $"Number of pages: {reporter.PageCount}";
+        var totalMerkle = reporter.MerkleBranchSize + reporter.MerkleExtensionSize + reporter.MerkleLeafSize;
+        var general =
+            $"Size total: {ToGb((long)reporter.PageCount * Page.PageSize):F2}GB:\n" +
+            $" Merkle:    {ToGb(totalMerkle):F2}GB:\n" +
+            $"  Branches: {ToGb(reporter.MerkleBranchSize):F2}GB\n" +
+            $"  Ext.:     {ToGb(reporter.MerkleExtensionSize):F2}GB\n" +
+            $"  Leaf:     {ToGb(reporter.MerkleLeafSize):F2}GB\n" +
+            $" Data:      {ToGb(reporter.DataSize):F2}GB\n" +
+            "---\n" +
+            $" Branches with small empty set: {reporter.MerkleBranchWithSmallEmpty}\n" +
+            $" Branches with 15 children: {reporter.MerkleBranchWithOneChildMissing}\n" +
+            $" Branches with 2 children: {reporter.MerkleBranchWithTwoChildrenOnly}\n";
+
         up.Update(new Panel(general).Header($"General stats for {name}").Expand());
 
         var t = new Table();

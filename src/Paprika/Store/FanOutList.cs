@@ -64,13 +64,15 @@ public readonly ref struct FanOutList<TPage, TPageType>(Span<DbAddress> addresse
         addr = batch.GetAddress(updated);
     }
 
-    public void Report(IReporter reporter, IPageResolver resolver, int level)
+    public void Report(IReporter reporter, IPageResolver resolver, int level, int trimmedNibbles)
     {
+        var consumedNibbles = trimmedNibbles + ConsumedNibbles;
+
         foreach (var bucket in _addresses)
         {
             if (!bucket.IsNull)
             {
-                TPage.Wrap(resolver.GetAt(bucket)).Report(reporter, resolver, level + 1);
+                TPage.Wrap(resolver.GetAt(bucket)).Report(reporter, resolver, level + 1, consumedNibbles);
             }
         }
     }

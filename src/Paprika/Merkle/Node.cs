@@ -324,41 +324,19 @@ public static partial class Node
     public readonly ref struct Branch
     {
         public int MaxByteLength => Header.Size +
-                                    (HeaderHasAllSet(Header) ? 0 : NibbleSet.MaxByteSize) +
-                                    (HeaderHasKeccak(Header) ? Keccak.Size : 0);
+                                    (HeaderHasAllSet(Header) ? 0 : NibbleSet.MaxByteSize);
 
-        private const byte HeaderMetadataKeccakMask = 0b0000_0001;
+
+        // private const byte HeaderMetadataKeccakMask = 0b0000_0001;
         private const byte HeaderMetadataAllChildrenSetMask = 0b0000_0010;
 
         public readonly Header Header;
         public readonly NibbleSet.Readonly Children;
-        public readonly Keccak Keccak;
-
-        private Branch(Header header, NibbleSet.Readonly children, Keccak keccak)
-        {
-            Header = ValidateHeaderKeccak(ValidateHeaderNodeType(header, Type.Branch), shouldHaveKeccak: true);
-            Children = children;
-            Keccak = keccak;
-        }
 
         private Branch(Header header, NibbleSet.Readonly children)
         {
-            Header = ValidateHeaderKeccak(header, shouldHaveKeccak: false);
+            Header = ValidateHeaderNodeType(header, Type.Branch);
             Children = children;
-            Keccak = default;
-        }
-
-        public Branch(NibbleSet.Readonly children, Keccak keccak)
-        {
-            var allSet = children.AllSet ? HeaderMetadataAllChildrenSetMask : 0;
-            var hasKeccak = keccak == default ? 0 : HeaderMetadataKeccakMask;
-
-            Header = new Header(Type.Branch, metadata: (byte)(hasKeccak | allSet));
-
-            Assert(children);
-
-            Children = children;
-            Keccak = keccak;
         }
 
         private static void Assert(NibbleSet.Readonly set)
@@ -383,24 +361,7 @@ public static partial class Node
             Assert(children);
 
             Children = children;
-            Keccak = default;
         }
-
-        private static Header ValidateHeaderKeccak(Header header, bool shouldHaveKeccak)
-        {
-            var expected = shouldHaveKeccak ? HeaderMetadataKeccakMask : 0;
-            var actual = header.Metadata & HeaderMetadataKeccakMask;
-
-            Debug.Assert(actual == expected,
-                $"Expected {nameof(Header)} to have {nameof(Keccak)} = {shouldHaveKeccak}, got {!shouldHaveKeccak}");
-
-            return header;
-        }
-
-        public bool HasKeccak => HeaderHasKeccak(Header);
-
-        private static bool HeaderHasKeccak(Header header) =>
-            (header.Metadata & HeaderMetadataKeccakMask) == HeaderMetadataKeccakMask;
 
         private static bool HeaderHasAllSet(Header header) =>
             (header.Metadata & HeaderMetadataAllChildrenSetMask) == HeaderMetadataAllChildrenSetMask;
@@ -421,11 +382,6 @@ public static partial class Node
                 leftover = Children.WriteToWithLeftover(leftover);
             }
 
-            if (HeaderHasKeccak(Header))
-            {
-                leftover = Keccak.WriteToWithLeftover(leftover);
-            }
-
             return leftover;
         }
 
@@ -443,15 +399,7 @@ public static partial class Node
                 leftover = NibbleSet.Readonly.ReadFrom(leftover, out children);
             }
 
-            if (HeaderHasKeccak(header))
-            {
-                leftover = Keccak.ReadFrom(leftover, out var keccak);
-                branch = new Branch(header, children, keccak);
-            }
-            else
-            {
-                branch = new Branch(header, children);
-            }
+            branch = new Branch(header, children);
 
             return leftover;
         }
@@ -467,21 +415,17 @@ public static partial class Node
 
         private static int GetBranchDataLength(Header header) =>
             Header.Size +
-            (HeaderHasAllSet(header) ? 0 : NibbleSet.MaxByteSize) +
-            (HeaderHasKeccak(header) ? Keccak.Size : 0);
+            (HeaderHasAllSet(header) ? 0 : NibbleSet.MaxByteSize);
 
         public bool Equals(in Branch other)
         {
             return Header.Equals(other.Header)
-                   && Children.Equals(other.Children)
-                   && Keccak.Equals(other.Keccak);
+                   && Children.Equals(other.Children);
         }
 
         public override string ToString() =>
             $"{nameof(Branch)} {{ " +
             $"{nameof(Header)}: {Header.ToString()}, " +
-            $"{nameof(Children)}: {Children}, " +
-            $"{nameof(Keccak)}: {Keccak} " +
-            $"}}";
+            $"{nameof(Children)}: {Children} }}";
     }
 }

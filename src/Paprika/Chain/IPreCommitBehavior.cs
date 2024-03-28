@@ -24,8 +24,9 @@ public interface IPreCommitBehavior
     /// </summary>
     /// <param name="key">The key related to data.</param>
     /// <param name="data">The data.</param>
+    /// <param name="workingSet">The additional memory that might be used to copy over to it.</param>
     /// <returns>The data that should be put in place.</returns>
-    ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data) => data;
+    ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data, Span<byte> workingSet) => data;
 
     /// <summary>
     /// Executed when the new account is created, allowing for some optimizations.
