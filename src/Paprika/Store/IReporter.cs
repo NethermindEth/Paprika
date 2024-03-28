@@ -143,26 +143,6 @@ public class StatisticsReporter(TrieType trieType) : IReporter
         LeafOverflowCount.RecordValue(count);
     }
 
-    // public void ReportItem(in StoreKey key, ReadOnlySpan<byte> rawData)
-    // {
-    //     var index = GetKey(key, rawData);
-    //
-    //     // total size
-    //     const int slottedArraySlot = 4;
-    //     var keyEstimatedLength = key.Payload.Length + slottedArraySlot;
-    //     var total = rawData.Length + keyEstimatedLength;
-    //
-    //     ref var value = ref CollectionsMarshal.GetValueRefOrAddDefault(Sizes, index, out _);
-    //     value += total;
-    //
-    //     if (!SizeHistograms.TryGetValue(index, out var histogram))
-    //     {
-    //         SizeHistograms[index] = histogram = new IntHistogram(1000, 3);
-    //     }
-    //
-    //     histogram.RecordValue(total);
-    // }
-
     private const int KeyShift = 8;
     private const int KeyDiff = 1;
 

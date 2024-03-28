@@ -1,6 +1,4 @@
-using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
-using System.Net.Mime;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using HdrHistogram;
@@ -103,26 +101,19 @@ public sealed class Metrics : IDisposable
 
     public void Dispose() => _listener.Dispose();
 
-    interface IMeasurement
+    private interface IMeasurement
     {
         void Update(double measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags);
     }
 
-    abstract class Measurement : IMeasurement, IMeasurementValue
+    private abstract class Measurement : IMeasurement, IMeasurementValue
     {
-        private readonly Instrument _instrument;
-
         private long _value;
 
         public void Update(double measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags) =>
             Volatile.Write(ref _value, Update(measurement));
 
         protected abstract long Update(double measurement);
-
-        private Measurement(Instrument instrument)
-        {
-            _instrument = instrument;
-        }
 
         public static Measurement Build(Instrument instrument)
         {
@@ -133,35 +124,35 @@ public sealed class Metrics : IDisposable
 
                 if (definition == typeof(ObservableGauge<>))
                 {
-                    return new GaugeMeasurement(instrument);
+                    return new GaugeMeasurement();
                 }
 
                 if (definition == typeof(Counter<>))
                 {
-                    return new CounterMeasurement(instrument);
+                    return new CounterMeasurement();
                 }
 
                 if (definition == typeof(Histogram<>))
                 {
-                    return new HistogramHdrMeasurement(instrument);
+                    return new HistogramHdrMeasurement();
                 }
             }
 
             throw new NotImplementedException($"Not implemented for type {type}");
         }
 
-        private class GaugeMeasurement(Instrument instrument) : Measurement(instrument)
+        private class GaugeMeasurement : Measurement
         {
             protected override long Update(double measurement) => (long)measurement;
         }
 
         // for now use the last value
-        private class HistogramLastMeasurement(Instrument instrument) : Measurement(instrument)
+        private class HistogramLastMeasurement(Instrument instrument) : Measurement()
         {
             protected override long Update(double measurement) => (long)measurement;
         }
 
-        private class HistogramHdrMeasurement(Instrument instrument) : Measurement(instrument)
+        private class HistogramHdrMeasurement : Measurement
         {
             private const double Percentile = 99;
             private readonly LongConcurrentHistogram _histogram = new(1, 1, int.MaxValue, 4);
@@ -180,7 +171,7 @@ public sealed class Metrics : IDisposable
             }
         }
 
-        private class CounterMeasurement(Instrument instrument) : Measurement(instrument)
+        private class CounterMeasurement : Measurement
         {
             private long _sum;
 
