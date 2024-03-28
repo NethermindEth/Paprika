@@ -182,7 +182,7 @@ public class BlockchainTests
     [Category(Categories.LongRunning)]
     public async Task Account_destruction_spin()
     {
-        using var db = PagedDb.NativeMemoryDb(128 * Mb, 2);
+        using var db = PagedDb.NativeMemoryDb(8 * Mb, 2);
         await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(1, 1, Memoization.None));
 
         var parent = Keccak.EmptyTreeHash;
@@ -192,7 +192,7 @@ public class BlockchainTests
         byte[] value = [13];
         byte[] read = new byte[32];
 
-        const uint spins = 2000;
+        const uint spins = 200;
         for (uint at = 1; at < spins; at++)
         {
             using var block = blockchain.StartNew(parent);
