@@ -327,7 +327,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         var dataLength = data.Length - RlpMemo.Size;
         data[..dataLength].CopyTo(workingSet);
 
-        var compressedLength = RlpMemo.Compress(memoizedRlp, branch.Children, workingSet[dataLength..]);
+        var compressedLength = RlpMemo.Compress(key, memoizedRlp, branch.Children, workingSet[dataLength..]);
 
         return workingSet[..(dataLength + compressedLength)];
     }
