@@ -587,8 +587,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             // parallel calculation
             Parallel.For((long)0, NibbleSet.NibbleCount, nibble =>
             {
-                var childPath = NibblePath.FromKey(stackalloc byte[1] { (byte)(nibble << NibblePath.NibbleShift) }, 0)
-                    .SliceTo(1);
+                var childPath = NibblePath.Single((byte)nibble, 0);
+
                 var child = commits[nibble] = commit.GetChild();
                 UIntPtr stack = default;
                 using var ctx = new ComputeContext(child, trieType, hint, budget, _pool, ref stack);
@@ -910,10 +910,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     // need to collapse the branch
                     var childType = Node.ReadFrom(out var childLeaf, out var childExt, onlyChildSpanOwner.Span);
 
-                    var firstNibblePath =
-                        NibblePath
-                            .FromKey(stackalloc byte[1] { (byte)(onlyNibble << NibblePath.NibbleShift) })
-                            .SliceTo(1);
+                    var firstNibblePath = NibblePath.Single(onlyNibble, odd: 1 - newAt % 2);
 
                     if (childType == Node.Type.Extension)
                     {
