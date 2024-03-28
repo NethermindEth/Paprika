@@ -51,12 +51,16 @@ public static class StatisticsForPagedDb
 
         var totalMerkle = reporter.MerkleBranchSize + reporter.MerkleExtensionSize + reporter.MerkleLeafSize;
         var general =
-            $"Size total: {ToGb(reporter.PageCount * Page.PageSize):F2}GB:\n" +
+            $"Size total: {ToGb((long)reporter.PageCount * Page.PageSize):F2}GB:\n" +
             $" Merkle:    {ToGb(totalMerkle):F2}GB:\n" +
             $"  Branches: {ToGb(reporter.MerkleBranchSize):F2}GB\n" +
             $"  Ext.:     {ToGb(reporter.MerkleExtensionSize):F2}GB\n" +
             $"  Leaf:     {ToGb(reporter.MerkleLeafSize):F2}GB\n" +
-            $" Data:      {ToGb(reporter.MerkleLeafSize):F2}GB\n";
+            $" Data:      {ToGb(reporter.DataSize):F2}GB\n" +
+            "---\n" +
+            $" Branches with small empty set: {reporter.MerkleBranchWithSmallEmpty}\n" +
+            $" Branches with 15 children: {reporter.MerkleBranchWithOneChildMissing}\n" +
+            $" Branches with 2 children: {reporter.MerkleBranchWithTwoChildrenOnly}\n";
 
         up.Update(new Panel(general).Header($"General stats for {name}").Expand());
 

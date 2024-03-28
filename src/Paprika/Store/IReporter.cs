@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using HdrHistogram;
+using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
 
@@ -34,14 +35,14 @@ public class StatisticsReporter(TrieType trieType) : IReporter
     public readonly Dictionary<PageType, int> PageTypes = new();
     public int PageCount;
 
-    public readonly Dictionary<int, long> Sizes = new();
-    public readonly Dictionary<int, IntHistogram> SizeHistograms = new();
+    public long DataSize;
 
-    public long DataSize = 0;
-
-    public long MerkleBranchSize = 0;
-    public long MerkleExtensionSize = 0;
-    public long MerkleLeafSize = 0;
+    public long MerkleBranchSize;
+    public long MerkleBranchWithSmallEmpty;
+    public long MerkleBranchWithOneChildMissing;
+    public long MerkleBranchWithTwoChildrenOnly;
+    public long MerkleExtensionSize;
+    public long MerkleLeafSize;
 
     public readonly IntHistogram LeafCapacityLeft = new(10000, 5);
     public readonly IntHistogram LeafOverflowCapacityLeft = new(10000, 5);
@@ -60,7 +61,7 @@ public class StatisticsReporter(TrieType trieType) : IReporter
 
         lvl.Entries.RecordValue(array.Count);
 
-        var capacityLeft = array.CapacityLeft;
+        var capacityLeft = array.CapacityLeft + 1; // to ensure zeroes are handled well
         lvl.CapacityLeft.RecordValue(capacityLeft);
 
         if (type == PageType.Leaf)
@@ -71,14 +72,15 @@ public class StatisticsReporter(TrieType trieType) : IReporter
         // analyze data
         foreach (var item in array.EnumerateAll())
         {
-            var size = item.RawData.Length;
+            var data = item.RawData;
+            var size = data.Length;
             var isMerkle = item.Key.Length + trimmedNibbles < NibblePath.KeccakNibbleCount;
 
             if (isMerkle)
             {
                 if (size > 0)
                 {
-                    var nodeType = Node.Header.GetTypeFrom(item.RawData);
+                    var nodeType = Node.Header.GetTypeFrom(data);
                     switch (nodeType)
                     {
                         case Node.Type.Leaf:
@@ -89,6 +91,27 @@ public class StatisticsReporter(TrieType trieType) : IReporter
                             break;
                         case Node.Type.Branch:
                             MerkleBranchSize += size;
+                            var leftover = Node.Branch.ReadFrom(data, out var branch);
+
+                            if (branch.Children.SetCount == 15)
+                            {
+                                MerkleBranchWithOneChildMissing++;
+                            }
+                            else if (branch.Children.SetCount == 2)
+                            {
+                                MerkleBranchWithTwoChildrenOnly++;
+                            }
+
+                            var len = leftover.Length % Keccak.Size;
+                            if (len > 0)
+                            {
+                                NibbleSet.Readonly.ReadFrom(leftover[^len..], out var empty);
+                                if (empty.SetCount <= 2)
+                                {
+                                    MerkleBranchWithSmallEmpty++;
+                                }
+                            }
+
                             break;
                         default:
                             throw new ArgumentOutOfRangeException();
@@ -100,7 +123,7 @@ public class StatisticsReporter(TrieType trieType) : IReporter
                 DataSize += size;
             }
 
-            if (!isMerkle && trieType == TrieType.Storage && item.RawData.Length > 32)
+            if (!isMerkle && trieType == TrieType.Storage && data.Length > 32)
             {
                 throw new Exception(
                     $"Storage, not Merkle node with local key {item.Key.ToString()}, has more than 32 bytes");
