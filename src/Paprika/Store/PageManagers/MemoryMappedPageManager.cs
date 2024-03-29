@@ -86,9 +86,16 @@ public class MemoryMappedPageManager : PointerPageManager
         }
     }
 
+    /// <summary>
+    /// The amount of pages that can be combined in a single write.
+    /// </summary>
+    private const int MaxWriteBatch = 64;
+
     private void ScheduleWrites(ICollection<DbAddress> dbAddresses)
     {
         var count = dbAddresses.Count;
+        if (count == 0)
+            return;
 
         if (_toWrite.Length < count)
         {
@@ -101,16 +108,37 @@ public class MemoryMappedPageManager : PointerPageManager
         // raw sorting, to make writes ordered
         MemoryMarshal.Cast<DbAddress, uint>(span).Sort();
 
-        foreach (var addr in span)
+        var start = span[0];
+        uint batch = 1;
+
+        for (var i = 1; i < span.Length; i++)
         {
-            _pendingWrites.Add(WriteAt(addr).AsTask());
+            var next = DbAddress.Page(start.Raw + batch + 1);
+            if (next != span[i] || batch >= MaxWriteBatch)
+            {
+                // flush existing batch
+                _pendingWrites.Add(WriteAt(start, batch).AsTask());
+
+                // start a new batch
+                start = span[i];
+                batch = 1;
+
+            }
+            else
+            {
+                // just go on
+                batch++;
+            }
         }
+
+        // flush what is left
+        _pendingWrites.Add(WriteAt(start, batch).AsTask());
     }
 
-    private ValueTask WriteAt(DbAddress addr)
+    private ValueTask WriteAt(DbAddress addr, uint count = 1)
     {
         var page = GetAt(addr);
-        return RandomAccess.WriteAsync(_file.SafeFileHandle, Own(page).Memory, addr.FileOffset);
+        return RandomAccess.WriteAsync(_file.SafeFileHandle, Own(page, count).Memory, addr.FileOffset);
     }
 
     private async Task AwaitWrites()
@@ -160,7 +188,7 @@ public class MemoryMappedPageManager : PointerPageManager
         _file.Dispose();
     }
 
-    private PageMemoryOwner Own(Page page)
+    private PageMemoryOwner Own(Page page, uint count)
     {
         if (_owners.TryPop(out var owner) == false)
         {
@@ -170,6 +198,8 @@ public class MemoryMappedPageManager : PointerPageManager
         _ownersUsed.Add(owner);
 
         owner.Page = page;
+        owner.Count = count;
+
         return owner;
     }
 
@@ -186,12 +216,13 @@ public class MemoryMappedPageManager : PointerPageManager
     private class PageMemoryOwner : MemoryManager<byte>
     {
         public Page Page;
+        public uint Count;
 
         protected override void Dispose(bool disposing)
         {
         }
 
-        public override unsafe Span<byte> GetSpan() => new(Page.Raw.ToPointer(), Page.PageSize);
+        public override unsafe Span<byte> GetSpan() => new(Page.Raw.ToPointer(), (int)(Page.PageSize * Count));
 
         public override unsafe MemoryHandle Pin(int elementIndex = 0) =>
             new((byte*)Page.Raw.ToPointer() + elementIndex);
