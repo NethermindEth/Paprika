@@ -54,7 +54,7 @@ public class RootHashFuzzyTests
         var generator = Build(test);
 
         using var db = PagedDb.NativeMemoryDb(32 * 1024 * 1024, 2);
-        var merkle = new ComputeMerkleBehavior(2, 2);
+        var merkle = new ComputeMerkleBehavior();
         await using var blockchain = new Blockchain(db, merkle);
 
         var rootHash = generator.Run(blockchain, commitEvery);
@@ -65,14 +65,13 @@ public class RootHashFuzzyTests
     public async Task CalculateStateRootHash(
         [Values(nameof(Accounts_1_Storage_100), nameof(Accounts_100_Storage_1), nameof(Accounts_1000_Storage_1))] string test,
         [Values(int.MaxValue, 23)] int commitEvery,
-        [Values(true, false)] bool parallel,
-        [Values(Memoization.None, Memoization.Branch)] Memoization memoization)
+        [Values(true, false)] bool parallel)
     {
         var generator = Build(test);
 
         using var db = PagedDb.NativeMemoryDb(16 * 1024 * 1024, 2);
         var parallelism = parallel ? ComputeMerkleBehavior.ParallelismUnlimited : ComputeMerkleBehavior.ParallelismNone;
-        var merkle = new ComputeMerkleBehavior(1, 1, memoization, parallelism);
+        var merkle = new ComputeMerkleBehavior(parallelism);
 
         await using var blockchain = new Blockchain(db, merkle);
 
@@ -96,7 +95,7 @@ public class RootHashFuzzyTests
         var generator = Build(test);
 
         using var db = PagedDb.NativeMemoryDb(1024 * 1024 * 1024, 2);
-        using var merkle = new ComputeMerkleBehavior(1, 1);
+        using var merkle = new ComputeMerkleBehavior(ComputeMerkleBehavior.ParallelismNone);
         await using var blockchain = new Blockchain(db, merkle, null, new CacheBudget.Options(2000, 4), new CacheBudget.Options(2000, 4));
 
         // set

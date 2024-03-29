@@ -89,7 +89,7 @@ public static class Program
                 }));
 
             using var preCommit =
-                new ComputeMerkleBehavior(1, 1, Memoization.None, ComputeMerkleBehavior.ParallelismNone);
+                new ComputeMerkleBehavior(ComputeMerkleBehavior.ParallelismNone);
 
             var blockHash = Keccak.EmptyTreeHash;
             var finalization = new Queue<Keccak>();
@@ -183,8 +183,8 @@ public static class Program
 
             using var read = db.BeginReadOnlyBatch();
 
-            var state = new StatisticsReporter();
-            var storage = new StatisticsReporter();
+            var state = new StatisticsReporter(TrieType.State);
+            var storage = new StatisticsReporter(TrieType.Storage);
             read.Report(state, storage);
 
             spectre.Cancel();

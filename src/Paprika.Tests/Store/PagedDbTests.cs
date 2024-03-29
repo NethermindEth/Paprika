@@ -3,6 +3,7 @@ using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Merkle;
 using Paprika.Store;
 
 namespace Paprika.Tests.Store;
@@ -182,8 +183,8 @@ public class PagedDbTests
                 actual.SequenceEqual(expected).Should().BeTrue();
             }
 
-            var state = new StatisticsReporter();
-            var storage = new StatisticsReporter();
+            var state = new StatisticsReporter(TrieType.State);
+            var storage = new StatisticsReporter(TrieType.Storage);
 
             read.Report(state, storage);
         }

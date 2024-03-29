@@ -158,13 +158,17 @@ public static class Program
                     ctx.Refresh();
                 }));
 
-            using var preCommit = new ComputeMerkleBehavior(2, 1);
+            using var preCommit = new ComputeMerkleBehavior();
+
+            var gate = new SingleAsyncGate(FinalizeEvery + 10);
             //IPreCommitBehavior preCommit = null;
 
             await using (var blockchain =
                          new Blockchain(db, preCommit, config.FlushEvery, default, default, 1000, reporter.Observe))
             {
-                counter = Writer(config, blockchain, bigStorageAccount, random, layout[writing]);
+                blockchain.Flushed += (_, e) => gate.Signal(e.blockNumber);
+
+                counter = Writer(config, blockchain, bigStorageAccount, random, layout[writing], gate);
             }
 
             // waiting for finalization
@@ -268,12 +272,11 @@ public static class Program
     private static Random BuildRandom() => new(RandomSeed);
 
     private static int Writer(Case config, Blockchain blockchain, Keccak bigStorageAccount, Random random,
-        Layout reporting)
+        Layout reporting, SingleAsyncGate gate)
     {
         var report = new StringBuilder();
         string result = "";
         var counter = 0;
-        var sameHashOccured = false;
 
         bool bigStorageAccountCreated = false;
 
@@ -318,6 +321,8 @@ public static class Program
             }
 
             hash = worldState.Commit(block);
+
+            gate.WaitAsync(block).Wait();
 
             result = $"{hash.ToString()?[..8]}...";
 
