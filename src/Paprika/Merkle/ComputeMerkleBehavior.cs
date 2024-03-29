@@ -1426,6 +1426,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 // A leaf will be created here.
                 return;
             }
+            
+            if (owner.QueryDepth > 0)
+            {
+                // data came from the depth
+                context.Set(key, owner.Span);
+            }
 
             // read the existing one
             Node.ReadFrom(out var type, out _, out var ext, out var branch, owner.Span);
@@ -1450,12 +1456,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         return;
                     }
                 case Node.Type.Branch:
-                    if (owner.QueryDepth > 0)
+                    var nibble = path[i];
+                    if (branch.Children[nibble] == false)
                     {
-                        // data came from the depth
-                        context.Set(key, owner.Span);
+                        // no children set, will be created
+                        return;
                     }
-
+                    
                     if (LeafCanBeOmitted(i + 1))
                     {
                         // no need to store leaf on the last level

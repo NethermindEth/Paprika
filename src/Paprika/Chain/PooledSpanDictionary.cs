@@ -148,11 +148,12 @@ public class PooledSpanDictionary : IDisposable
         {
             if (metadataWhere(kvp.Metadata))
             {
+                Key.ReadType(kvp.Key);
                 destination.SetImpl(kvp.Key, kvp.Hash, kvp.Value, ReadOnlySpan<byte>.Empty, kvp.Metadata, append);
             }
         }
     }
-
+    
     private static int GetLeftover(ref byte sliced) =>
         ((sliced & Byte0Mask) << 16) +
         (Unsafe.Add(ref sliced, 1) << 8) +
