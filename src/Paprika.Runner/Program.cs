@@ -160,7 +160,7 @@ public static class Program
 
             using var preCommit = new ComputeMerkleBehavior(ComputeMerkleBehavior.ParallelismNone);
 
-            var gate = new SingleAsyncGate(FinalizeEvery + 10);
+            var gate = new SingleAsyncGate(FinalizeEvery + 32);
             //IPreCommitBehavior preCommit = null;
 
             await using (var blockchain =

@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics.Metrics;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 using Paprika.Utils;
@@ -27,6 +28,9 @@ public class MemoryMappedPageManager : PointerPageManager
     private readonly List<PageMemoryOwner> _ownersUsed = new();
     private readonly List<Task> _pendingWrites = new();
     private DbAddress[] _toWrite = new DbAddress[1];
+
+    private readonly Meter _meter;
+    private readonly Histogram<int> _fileWrites;
 
     public unsafe MemoryMappedPageManager(long size, byte historyDepth, string dir,
         PersistenceOptions options = PersistenceOptions.FlushFile) : base(size)
@@ -62,6 +66,9 @@ public class MemoryMappedPageManager : PointerPageManager
         _whole = _mapped.CreateViewAccessor();
         _whole.SafeMemoryMappedViewHandle.AcquirePointer(ref _ptr);
         _options = options;
+
+        _meter = new Meter("Paprika.Store.PageManager");
+        _fileWrites = _meter.CreateHistogram<int>("File writes", "Syscall", "Actual numbers of file writes issued");
     }
 
     public static string GetPaprikaFilePath(string dir) => System.IO.Path.Combine(dir, PaprikaFileName);
@@ -74,6 +81,8 @@ public class MemoryMappedPageManager : PointerPageManager
     {
         if (_options == PersistenceOptions.MMapOnly)
             return;
+
+        int writes;
 
         if (options != CommitOptions.DangerNoWrite)
         {
@@ -115,6 +124,8 @@ public class MemoryMappedPageManager : PointerPageManager
             var addr = span[range.Start];
             _pendingWrites.Add(WriteAt(addr, (uint)range.Length).AsTask());
         }
+
+        _fileWrites.Record(_pendingWrites.Count);
     }
 
     private ValueTask WriteAt(DbAddress addr, uint count = 1)
@@ -164,6 +175,8 @@ public class MemoryMappedPageManager : PointerPageManager
 
     public override void Dispose()
     {
+        _meter.Dispose();
+
         _whole.SafeMemoryMappedViewHandle.ReleasePointer();
         _whole.Dispose();
         _mapped.Dispose();
