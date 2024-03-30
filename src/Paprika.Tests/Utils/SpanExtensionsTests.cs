@@ -20,7 +20,7 @@ public class SpanExtensionsTests
 
         var e = span.BatchConsecutive();
 
-        MoveNext(ref e, new Range(0, span.Length));
+        MoveNext(ref e, new(0, span.Length));
 
         End(e);
     }
@@ -34,8 +34,8 @@ public class SpanExtensionsTests
 
         var e = span.BatchConsecutive(max);
 
-        MoveNext(ref e, new Range(0, max));
-        MoveNext(ref e, new Range(2, max));
+        MoveNext(ref e, new(0, max));
+        MoveNext(ref e, new(2, max));
 
         End(e);
     }
@@ -49,8 +49,8 @@ public class SpanExtensionsTests
 
         var e = span.BatchConsecutive();
 
-        MoveNext(ref e, new Range(0, at));
-        MoveNext(ref e, new Range(at, span.Length - at));
+        MoveNext(ref e, new(0, at));
+        MoveNext(ref e, new(at, span.Length - at));
 
         End(e);
     }
@@ -64,15 +64,15 @@ public class SpanExtensionsTests
 
         var e = span.BatchConsecutive(max);
 
-        MoveNext(ref e, new Range(0, 1));
-        MoveNext(ref e, new Range(1, max));
-        MoveNext(ref e, new Range(3, max));
-        MoveNext(ref e, new Range(5, 1));
+        MoveNext(ref e, new(0, 1));
+        MoveNext(ref e, new(1, max));
+        MoveNext(ref e, new(3, max));
+        MoveNext(ref e, new(5, 1));
 
         End(e);
     }
 
-    private static void MoveNext(ref SpanExtensions.RangeEnumerator<int> e, Range range)
+    private static void MoveNext(ref SpanExtensions.RangeEnumerator<int> e, (int Start, int Length) range)
     {
         e.MoveNext().Should().BeTrue();
         e.Current.Should().Be(range);

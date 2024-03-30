@@ -82,7 +82,7 @@ public static class SpanExtensions
         }
 
         /// <summary>Gets the element at the current position of the enumerator.</summary>
-        public Range Current
+        public (int Start, int Length) Current
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => new(_from, _length);
