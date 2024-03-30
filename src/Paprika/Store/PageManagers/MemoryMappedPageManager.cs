@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
+using Paprika.Utils;
 
 namespace Paprika.Store.PageManagers;
 
@@ -106,33 +107,14 @@ public class MemoryMappedPageManager : PointerPageManager
         var span = _toWrite.AsSpan(0, count);
 
         // raw sorting, to make writes ordered
-        MemoryMarshal.Cast<DbAddress, uint>(span).Sort();
+        var numbers = MemoryMarshal.Cast<DbAddress, uint>(span);
+        numbers.Sort();
 
-        var start = span[0];
-        uint batch = 1;
-
-        for (var i = 1; i < span.Length; i++)
+        foreach (var range in numbers.BatchConsecutive(MaxWriteBatch))
         {
-            var next = DbAddress.Page(start.Raw + batch + 1);
-            if (next != span[i] || batch >= MaxWriteBatch)
-            {
-                // flush existing batch
-                _pendingWrites.Add(WriteAt(start, batch).AsTask());
-
-                // start a new batch
-                start = span[i];
-                batch = 1;
-
-            }
-            else
-            {
-                // just go on
-                batch++;
-            }
+            var addr = span[range.Start];
+            _pendingWrites.Add(WriteAt(addr, (uint)range.Length).AsTask());
         }
-
-        // flush what is left
-        _pendingWrites.Add(WriteAt(start, batch).AsTask());
     }
 
     private ValueTask WriteAt(DbAddress addr, uint count = 1)
