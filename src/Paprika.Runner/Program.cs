@@ -51,7 +51,7 @@ public static class Program
         new(50_000, 1000, 11 * Gb, true, TimeSpan.FromSeconds(5), false, false);
 
     private static readonly Case DiskSmallFlushFile =
-        new(50_000, 1000, 32 * Gb, true, TimeSpan.FromSeconds(5), true, false);
+        new(50_000, 1000, 32 * Gb, true, TimeSpan.FromSeconds(60), true, false);
 
     private const int MaxReorgDepth = 64;
     private const int FinalizeEvery = 64;
