@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.RLP;
@@ -9,7 +12,7 @@ public readonly ref struct RlpMemo
 {
     public static readonly byte[] Empty = new byte[Size];
 
-    private readonly Span<byte> _buffer;
+    private readonly ref byte data;
 
     public const int Size = NibbleSet.NibbleCount * Keccak.Size;
 
@@ -17,52 +20,57 @@ public readonly ref struct RlpMemo
     {
         Debug.Assert(buffer.Length == Size);
 
-        _buffer = buffer;
+        data = ref MemoryMarshal.GetReference(buffer);
     }
 
-    public ReadOnlySpan<byte> Raw => _buffer;
+    public ReadOnlySpan<byte> Raw => MemoryMarshal.CreateReadOnlySpan(ref data, Size);
 
     public void SetRaw(ReadOnlySpan<byte> keccak, byte nibble)
     {
         Debug.Assert(keccak.Length == Keccak.Size);
-        keccak.CopyTo(GetAtNibble(nibble));
+        keccak.CopyTo(MemoryMarshal.CreateSpan(ref GetAtNibble(nibble), Keccak.Size));
     }
+
+    private void SetUnaligned(in Keccak keccak, byte nibble)
+    {
+        Unsafe.WriteUnaligned(ref GetAtNibble(nibble), keccak);
+    }
+
+    private void SetUnaligned(in byte from, byte nibble)
+    {
+        Unsafe.WriteUnaligned(ref GetAtNibble(nibble), Unsafe.ReadUnaligned<Keccak>(in from));
+    }
+
+    private Keccak GetUnaligned(byte nibble)
+    {
+        return Unsafe.ReadUnaligned<Keccak>(ref GetAtNibble(nibble));
+    }
+
 
     public void Set(in KeccakOrRlp keccakOrRlp, byte nibble)
     {
-        var span = GetAtNibble(nibble);
-
         if (keccakOrRlp.DataType == KeccakOrRlp.Type.Keccak)
         {
-            keccakOrRlp.Span.CopyTo(span);
+            SetUnaligned(keccakOrRlp.Unsafe, nibble);
         }
         else
         {
-            // on rlp, memoize none
-            span.Clear();
+            Clear(nibble);
         }
     }
 
     public void Clear(byte nibble)
     {
-        GetAtNibble(nibble).Clear();
+        Unsafe.WriteUnaligned(ref GetAtNibble(nibble), default(Keccak));
     }
 
-    public bool TryGetKeccak(byte nibble, out ReadOnlySpan<byte> keccak)
+    public bool TryGetKeccak(byte nibble, out Keccak keccak)
     {
-        var span = GetAtNibble(nibble);
-
-        if (span.IndexOfAnyExcept((byte)0) >= 0)
-        {
-            keccak = span;
-            return true;
-        }
-
-        keccak = default;
-        return false;
+        keccak = GetUnaligned(nibble);
+        return keccak != default;
     }
 
-    private Span<byte> GetAtNibble(byte nibble) => _buffer.Slice(nibble * Keccak.Size, Keccak.Size);
+    private ref byte GetAtNibble(byte nibble) => ref Unsafe.Add(ref data, nibble * Keccak.Size);
 
     public static RlpMemo Decompress(scoped in ReadOnlySpan<byte> leftover, NibbleSet.Readonly children,
         scoped in Span<byte> workingSet)
@@ -102,14 +110,14 @@ public readonly ref struct RlpMemo
         }
 
         var at = 0;
+        ref var source = ref MemoryMarshal.GetReference(leftover);
+
         for (byte i = 0; i < NibbleSet.NibbleCount; i++)
         {
             if (children[i] && empty[i] == false)
             {
-                var keccak = leftover.Slice(at * Keccak.Size, Keccak.Size);
+                memo.SetUnaligned(Unsafe.Add(ref source, at * Keccak.Size), i);
                 at++;
-
-                memo.SetRaw(keccak, i);
             }
         }
 
@@ -131,15 +139,16 @@ public readonly ref struct RlpMemo
 
         var empty = new NibbleSet();
 
+        ref var dest = ref MemoryMarshal.GetReference(writeTo);
+
         for (byte i = 0; i < NibbleSet.NibbleCount; i++)
         {
             if (children[i])
             {
                 if (memo.TryGetKeccak(i, out var keccak))
                 {
-                    var dest = writeTo.Slice(at * Keccak.Size, Keccak.Size);
+                    Unsafe.WriteUnaligned(ref Unsafe.Add(ref dest, at * Keccak.Size), keccak);
                     at++;
-                    keccak.CopyTo(dest);
                 }
                 else
                 {
@@ -158,8 +167,8 @@ public readonly ref struct RlpMemo
 
         if (empty.SetCount > 0)
         {
-            var dest = writeTo.Slice(at * Keccak.Size, NibbleSet.MaxByteSize);
-            new NibbleSet.Readonly(empty).WriteToWithLeftover(dest);
+            var emptyDest = writeTo.Slice(at * Keccak.Size, NibbleSet.MaxByteSize);
+            new NibbleSet.Readonly(empty).WriteToWithLeftover(emptyDest);
             return at * Keccak.Size + NibbleSet.MaxByteSize;
         }
 

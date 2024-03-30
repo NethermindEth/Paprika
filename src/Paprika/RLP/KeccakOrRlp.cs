@@ -20,6 +20,8 @@ public readonly struct KeccakOrRlp
     public readonly Type DataType;
     private readonly Keccak _keccak;
 
+    public Keccak Unsafe => _keccak;
+
     public Span<byte> Span => DataType == Type.Keccak
         ? _keccak.BytesAsSpan
         : _keccak.BytesAsSpan.Slice(NonKeccakOffset, _keccak.BytesAsSpan[0]);

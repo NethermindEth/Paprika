@@ -3,6 +3,7 @@ using Nethermind.Int256;
 using Paprika.Utils;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 
 namespace Paprika.RLP;
 
@@ -102,11 +103,11 @@ public ref struct RlpStream
 
     public RlpStream Encode(in Keccak keccak)
     {
-        // TODO: If keccak is a known one like `Keccak.OfAnEmptyString` or `Keccak.OfAnEmptySequenceRlp`
-        // we can cache those `Rlp`s to be reused
-
         WriteByte(160);
-        Write(keccak.BytesAsSpan);
+
+        // Fast unaligned write instead of byte copy
+        Unsafe.WriteUnaligned(ref Data[Position], keccak);
+        Position += Keccak.Size;
 
         return this;
     }
