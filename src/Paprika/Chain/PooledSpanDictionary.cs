@@ -54,9 +54,10 @@ public class PooledSpanDictionary : IDisposable
         AllocateNewPage();
     }
 
+    [SkipLocalsInit]
     public bool TryGet(scoped ReadOnlySpan<byte> key, ulong hash, out ReadOnlySpan<byte> result)
     {
-        ref var entry = ref TryGetImpl(hash, key);
+        ref var entry = ref TryGetImpl(key, hash);
 
         if (Entry.Exists(in entry))
         {
@@ -83,7 +84,8 @@ public class PooledSpanDictionary : IDisposable
     private const int KeyLengthLength = 1;
     private const int ValueLengthLength = 2;
 
-    private ref Entry TryGetImpl(ulong hash, scoped ReadOnlySpan<byte> key)
+    [SkipLocalsInit]
+    private ref Entry TryGetImpl(scoped ReadOnlySpan<byte> key, ulong hash)
     {
         var next = _root[hash];
         ref var pages = ref MemoryMarshal.GetReference(CollectionsMarshal.AsSpan(_pages));
@@ -175,7 +177,7 @@ public class PooledSpanDictionary : IDisposable
         if (append == false)
         {
             ref var pages = ref MemoryMarshal.GetReference(CollectionsMarshal.AsSpan(_pages));
-            ref var search = ref TryGetImpl(hash, key);
+            ref var search = ref TryGetImpl(key, hash);
 
             if (Entry.Exists(search))
             {
@@ -235,7 +237,7 @@ public class PooledSpanDictionary : IDisposable
 
     public void Destroy(scoped ReadOnlySpan<byte> key, ulong hash)
     {
-        ref var entry = ref TryGetImpl(hash, key);
+        ref var entry = ref TryGetImpl(key, hash);
         ref var pages = ref MemoryMarshal.GetReference(CollectionsMarshal.AsSpan(_pages));
 
         if (Entry.Exists(in entry))
