@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using BenchmarkDotNet.Attributes;
 using Paprika.Chain;
 
@@ -7,6 +8,83 @@ namespace Paprika.Benchmarks;
 public class PooledSpanDictionaryBenchmarks
 {
     private readonly BufferPool _pool = new(1, false);
+    private readonly PooledSpanDictionary _bigDict;
+    private const int BigDictCount = 32_000;
+    private static ReadOnlySpan<byte> Value32Bytes => new byte[]
+    {
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+        0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+        0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF,
+    };
+
+    public PooledSpanDictionaryBenchmarks()
+    {
+        _bigDict = new PooledSpanDictionary(new BufferPool(124, false, null));
+
+        Span<byte> key = stackalloc byte[4];
+
+        for (uint i = 0; i < BigDictCount; i++)
+        {
+            Unsafe.WriteUnaligned(ref key[0], i);
+            _bigDict.Set(key, i, Value32Bytes, 1);
+        }
+    }
+
+    [Benchmark]
+    public int Read_from_big_dict()
+    {
+        Span<byte> key = stackalloc byte[4];
+
+        var count = 0;
+        for (uint i = 0; i < BigDictCount; i++)
+        {
+            Unsafe.WriteUnaligned(ref key[0], i);
+            if (_bigDict.TryGet(key, i, out var data))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+
+    [Benchmark]
+    public int Read_missing_with_hash_collisions()
+    {
+        Span<byte> key = stackalloc byte[4];
+
+        var count = 0;
+        for (uint i = 0; i < BigDictCount; i++)
+        {
+            Unsafe.WriteUnaligned(ref key[0], i + 1_000_000);
+            if (_bigDict.TryGet(key, i, out var data))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    [Benchmark]
+    public int Read_missing_with_no_hash_collisions()
+    {
+        Span<byte> key = stackalloc byte[4];
+
+        var count = 0;
+        for (uint i = 0; i < BigDictCount; i++)
+        {
+            Unsafe.WriteUnaligned(ref key[0], i);
+            if (_bigDict.TryGet(key, i + 1_000_000, out var data))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
 
     [Benchmark]
     public int Read_write_small()
@@ -15,17 +93,12 @@ public class PooledSpanDictionaryBenchmarks
 
         Span<byte> key = stackalloc byte[2];
 
-        for (byte i = 0; i < 255; i++)
-        {
-            key[0] = i;
-            dict.Set(key, i, key, 1);
-        }
-
         var count = 0;
         for (byte i = 0; i < 255; i++)
         {
             key[0] = i;
-            dict.TryGet(key, (ulong)i, out var result);
+            dict.Set(key, i, key, 1);
+            dict.TryGet(key, i, out var result);
             count += result[0];
         }
 
