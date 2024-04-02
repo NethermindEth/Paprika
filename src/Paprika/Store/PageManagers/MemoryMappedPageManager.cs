@@ -1,6 +1,8 @@
 using System.Buffers;
+using System.Diagnostics.Metrics;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
+using Paprika.Utils;
 
 namespace Paprika.Store.PageManagers;
 
@@ -26,6 +28,9 @@ public class MemoryMappedPageManager : PointerPageManager
     private readonly List<PageMemoryOwner> _ownersUsed = new();
     private readonly List<Task> _pendingWrites = new();
     private DbAddress[] _toWrite = new DbAddress[1];
+
+    private readonly Meter _meter;
+    private readonly Histogram<int> _fileWrites;
 
     public unsafe MemoryMappedPageManager(long size, byte historyDepth, string dir,
         PersistenceOptions options = PersistenceOptions.FlushFile) : base(size)
@@ -61,6 +66,9 @@ public class MemoryMappedPageManager : PointerPageManager
         _whole = _mapped.CreateViewAccessor();
         _whole.SafeMemoryMappedViewHandle.AcquirePointer(ref _ptr);
         _options = options;
+
+        _meter = new Meter("Paprika.Store.PageManager");
+        _fileWrites = _meter.CreateHistogram<int>("File writes", "Syscall", "Actual numbers of file writes issued");
     }
 
     public static string GetPaprikaFilePath(string dir) => System.IO.Path.Combine(dir, PaprikaFileName);
@@ -74,6 +82,8 @@ public class MemoryMappedPageManager : PointerPageManager
         if (_options == PersistenceOptions.MMapOnly)
             return;
 
+        int writes;
+
         if (options != CommitOptions.DangerNoWrite)
         {
             ScheduleWrites(dbAddresses);
@@ -86,9 +96,16 @@ public class MemoryMappedPageManager : PointerPageManager
         }
     }
 
+    /// <summary>
+    /// The amount of pages that can be combined in a single write.
+    /// </summary>
+    private const int MaxWriteBatch = 64;
+
     private void ScheduleWrites(ICollection<DbAddress> dbAddresses)
     {
         var count = dbAddresses.Count;
+        if (count == 0)
+            return;
 
         if (_toWrite.Length < count)
         {
@@ -99,18 +116,22 @@ public class MemoryMappedPageManager : PointerPageManager
         var span = _toWrite.AsSpan(0, count);
 
         // raw sorting, to make writes ordered
-        MemoryMarshal.Cast<DbAddress, uint>(span).Sort();
+        var numbers = MemoryMarshal.Cast<DbAddress, uint>(span);
+        numbers.Sort();
 
-        foreach (var addr in span)
+        foreach (var range in numbers.BatchConsecutive(MaxWriteBatch))
         {
-            _pendingWrites.Add(WriteAt(addr).AsTask());
+            var addr = span[range.Start];
+            _pendingWrites.Add(WriteAt(addr, (uint)range.Length).AsTask());
         }
+
+        _fileWrites.Record(_pendingWrites.Count);
     }
 
-    private ValueTask WriteAt(DbAddress addr)
+    private ValueTask WriteAt(DbAddress addr, uint count = 1)
     {
         var page = GetAt(addr);
-        return RandomAccess.WriteAsync(_file.SafeFileHandle, Own(page).Memory, addr.FileOffset);
+        return RandomAccess.WriteAsync(_file.SafeFileHandle, Own(page, count).Memory, addr.FileOffset);
     }
 
     private async Task AwaitWrites()
@@ -154,13 +175,15 @@ public class MemoryMappedPageManager : PointerPageManager
 
     public override void Dispose()
     {
+        _meter.Dispose();
+
         _whole.SafeMemoryMappedViewHandle.ReleasePointer();
         _whole.Dispose();
         _mapped.Dispose();
         _file.Dispose();
     }
 
-    private PageMemoryOwner Own(Page page)
+    private PageMemoryOwner Own(Page page, uint count)
     {
         if (_owners.TryPop(out var owner) == false)
         {
@@ -170,6 +193,8 @@ public class MemoryMappedPageManager : PointerPageManager
         _ownersUsed.Add(owner);
 
         owner.Page = page;
+        owner.Count = count;
+
         return owner;
     }
 
@@ -186,12 +211,13 @@ public class MemoryMappedPageManager : PointerPageManager
     private class PageMemoryOwner : MemoryManager<byte>
     {
         public Page Page;
+        public uint Count;
 
         protected override void Dispose(bool disposing)
         {
         }
 
-        public override unsafe Span<byte> GetSpan() => new(Page.Raw.ToPointer(), Page.PageSize);
+        public override unsafe Span<byte> GetSpan() => new(Page.Raw.ToPointer(), (int)(Page.PageSize * Count));
 
         public override unsafe MemoryHandle Pin(int elementIndex = 0) =>
             new((byte*)Page.Raw.ToPointer() + elementIndex);

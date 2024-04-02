@@ -51,14 +51,14 @@ public static class Program
         new(50_000, 1000, 11 * Gb, true, TimeSpan.FromSeconds(5), false, false);
 
     private static readonly Case DiskSmallFlushFile =
-        new(50_000, 1000, 11 * Gb, true, TimeSpan.FromSeconds(5), true, false);
+        new(50_000, 1000, 32 * Gb, true, TimeSpan.FromSeconds(60), true, false);
 
     private const int MaxReorgDepth = 64;
     private const int FinalizeEvery = 64;
 
     private const int RandomSeed = 17;
     private const long Gb = 1024 * 1024 * 1024L;
-    private const int UseStorageEveryNAccounts = 10;
+    private const int UseStorageEveryNAccounts = 2;
 
     public static async Task Main(String[] args)
     {
@@ -158,9 +158,9 @@ public static class Program
                     ctx.Refresh();
                 }));
 
-            using var preCommit = new ComputeMerkleBehavior();
+            using var preCommit = new ComputeMerkleBehavior(ComputeMerkleBehavior.ParallelismNone);
 
-            var gate = new SingleAsyncGate(FinalizeEvery + 10);
+            var gate = new SingleAsyncGate(FinalizeEvery + 32);
             //IPreCommitBehavior preCommit = null;
 
             await using (var blockchain =
