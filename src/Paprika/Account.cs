@@ -42,7 +42,9 @@ public readonly struct Account : IEquatable<Account>
 
     public void WithChangedStorageRoot(in Keccak newStorageRoot, out Account account)
     {
+        // Fast copy to return buffer
         account = this;
+        // Overwrite the storage root hash
         Unsafe.AsRef(in account.StorageRootHash) = newStorageRoot;
     }
 
