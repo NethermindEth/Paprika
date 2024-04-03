@@ -34,7 +34,7 @@ public static class CommitExtensions
         EntryType type = EntryType.Persistent)
     {
         var branch = new Node.Branch(children);
-        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), type);
+        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), RlpMemo.Empty, type);
     }
 
     [SkipLocalsInit]
@@ -46,17 +46,9 @@ public static class CommitExtensions
     }
 
     [SkipLocalsInit]
-    public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, Keccak keccak,
-        ReadOnlySpan<byte> rlp, EntryType type = EntryType.Persistent)
-    {
-        var branch = new Node.Branch(children, keccak);
-        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), rlp, type);
-    }
-
-    [SkipLocalsInit]
     public static void SetExtension(this ICommit commit, in Key key, in NibblePath path, EntryType type = EntryType.Persistent)
     {
-        var extension = new Node.Extension(path);
+        var extension = new Extension(path);
         commit.Set(key, extension.WriteTo(stackalloc byte[extension.MaxByteLength]), type);
     }
 

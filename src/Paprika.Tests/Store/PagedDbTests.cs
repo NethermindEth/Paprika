@@ -3,6 +3,7 @@ using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Merkle;
 using Paprika.Store;
 
 namespace Paprika.Tests.Store;
@@ -182,10 +183,63 @@ public class PagedDbTests
                 actual.SequenceEqual(expected).Should().BeTrue();
             }
 
-            var state = new StatisticsReporter();
-            var storage = new StatisticsReporter();
+            var state = new StatisticsReporter(TrieType.State);
+            var storage = new StatisticsReporter(TrieType.Storage);
 
             read.Report(state, storage);
+        }
+    }
+
+    [Test]
+    public async Task HasState_queries_state_properly()
+    {
+        var keccak = Values.Key0;
+
+        const byte historyDepth = 16;
+        const byte spins = 51;
+
+        using var db = PagedDb.NativeMemoryDb(2 * Mb, historyDepth);
+
+        var value = new byte[4];
+
+        for (uint i = 1; i < spins; i++)
+        {
+            using var batch = db.BeginNextBatch();
+
+            Keccak hash = default;
+            BinaryPrimitives.WriteUInt32LittleEndian(hash.BytesAsSpan, i);
+            BinaryPrimitives.WriteUInt32LittleEndian(value, i);
+
+            batch.SetRaw(Key.StorageCell(NibblePath.FromKey(keccak), keccak), value);
+            batch.SetMetadata(i, hash);
+            await batch.Commit(CommitOptions.FlushDataAndRoot);
+        }
+
+        for (uint i = 1; i < spins; i++)
+        {
+            Keccak hash = default;
+            BinaryPrimitives.WriteUInt32LittleEndian(hash.BytesAsSpan, i);
+
+            var shouldHaveState = i >= spins - historyDepth;
+            db.HasState(hash).Should().Be(shouldHaveState, $"Failed at {i}th spin");
+
+            if (shouldHaveState)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(value, i);
+
+                using var read = db.BeginReadOnlyBatch(hash);
+                read.Metadata.StateHash.Should().Be(hash);
+                read.Metadata.BlockNumber.Should().Be(i);
+                AssertRead(value, keccak, read);
+            }
+        }
+
+        return;
+
+        static void AssertRead(byte[] bytes, in Keccak key, IReadOnlyBatch read)
+        {
+            read.TryGet(Key.StorageCell(NibblePath.FromKey(key), key), out var existing).Should().BeTrue();
+            existing.SequenceEqual(bytes).Should().BeTrue();
         }
     }
 }

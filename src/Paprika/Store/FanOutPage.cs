@@ -118,13 +118,14 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
     [StackTraceHidden]
     private static void ThrowNoSpaceInline() => throw new Exception("Could not set the data inline");
 
-    public void Report(IReporter reporter, IPageResolver resolver, int level)
+    public void Report(IReporter reporter, IPageResolver resolver, int pageLevel, int trimmedNibbles)
     {
+        var consumedNibbles = trimmedNibbles + ConsumedNibbles;
         foreach (var bucket in Data.Addresses)
         {
             if (!bucket.IsNull)
             {
-                new DataPage(resolver.GetAt(bucket)).Report(reporter, resolver, level + 1);
+                new DataPage(resolver.GetAt(bucket)).Report(reporter, resolver, pageLevel + 1, consumedNibbles);
             }
         }
     }

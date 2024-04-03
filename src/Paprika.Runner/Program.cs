@@ -51,14 +51,14 @@ public static class Program
         new(50_000, 1000, 11 * Gb, true, TimeSpan.FromSeconds(5), false, false);
 
     private static readonly Case DiskSmallFlushFile =
-        new(50_000, 1000, 11 * Gb, true, TimeSpan.FromSeconds(5), true, false);
+        new(50_000, 1000, 32 * Gb, true, TimeSpan.FromSeconds(60), true, false);
 
     private const int MaxReorgDepth = 64;
     private const int FinalizeEvery = 64;
 
     private const int RandomSeed = 17;
     private const long Gb = 1024 * 1024 * 1024L;
-    private const int UseStorageEveryNAccounts = 10;
+    private const int UseStorageEveryNAccounts = 2;
 
     public static async Task Main(String[] args)
     {
@@ -158,13 +158,17 @@ public static class Program
                     ctx.Refresh();
                 }));
 
-            using var preCommit = new ComputeMerkleBehavior(2, 1);
+            using var preCommit = new ComputeMerkleBehavior(ComputeMerkleBehavior.ParallelismNone);
+
+            var gate = new SingleAsyncGate(FinalizeEvery + 32);
             //IPreCommitBehavior preCommit = null;
 
             await using (var blockchain =
                          new Blockchain(db, preCommit, config.FlushEvery, default, default, 1000, reporter.Observe))
             {
-                counter = Writer(config, blockchain, bigStorageAccount, random, layout[writing]);
+                blockchain.Flushed += (_, e) => gate.Signal(e.blockNumber);
+
+                counter = Writer(config, blockchain, bigStorageAccount, random, layout[writing], gate);
             }
 
             // waiting for finalization
@@ -268,12 +272,11 @@ public static class Program
     private static Random BuildRandom() => new(RandomSeed);
 
     private static int Writer(Case config, Blockchain blockchain, Keccak bigStorageAccount, Random random,
-        Layout reporting)
+        Layout reporting, SingleAsyncGate gate)
     {
         var report = new StringBuilder();
         string result = "";
         var counter = 0;
-        var sameHashOccured = false;
 
         bool bigStorageAccountCreated = false;
 
@@ -318,6 +321,8 @@ public static class Program
             }
 
             hash = worldState.Commit(block);
+
+            gate.WaitAsync(block).Wait();
 
             result = $"{hash.ToString()?[..8]}...";
 

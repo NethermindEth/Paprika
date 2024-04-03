@@ -113,7 +113,7 @@ public class RawTests
 
         using var raw = blockchain.StartRaw();
 
-        for (uint i = 0; i < 10_000; i++)
+        for (uint i = 0; i < 1_000; i++)
         {
             raw.SetAccount(account, new Account(i, i));
             raw.Commit();

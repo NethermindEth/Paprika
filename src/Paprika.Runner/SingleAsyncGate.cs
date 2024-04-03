@@ -1,18 +1,11 @@
-namespace Paprika.Runner.Pareto;
+namespace Paprika.Runner;
 
-public sealed class SingleAsyncGate
+public sealed class SingleAsyncGate(uint minGap)
 {
-    private readonly uint _minGap;
-
     private readonly object _lock = new();
     private uint _signaled;
     private uint _awaited;
     private TaskCompletionSource? _wait;
-
-    public SingleAsyncGate(uint minGap)
-    {
-        _minGap = minGap;
-    }
 
     public Task WaitAsync(uint wait)
     {
@@ -29,7 +22,7 @@ public sealed class SingleAsyncGate
         }
     }
 
-    private bool IsSatisfied(uint value) => _signaled + _minGap >= value;
+    private bool IsSatisfied(uint value) => _signaled + minGap >= value;
 
     public void Signal(uint value)
     {

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Net.Sockets;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -55,7 +54,7 @@ public class PooledSpanDictionary : IDisposable
     public bool TryGet(scoped ReadOnlySpan<byte> key, ulong hash, out ReadOnlySpan<byte> result)
     {
         var (leftover, bucket) = GetBucketAndLeftover(hash);
-        var search = TryGetImpl(leftover, bucket, key);
+        var search = TryGetImpl(key, leftover, bucket);
         if (search.IsFound)
         {
             result = search.Data;
@@ -89,22 +88,19 @@ public class PooledSpanDictionary : IDisposable
     private const int KeyLengthLength = 1;
     private const int ValueLengthLength = 2;
 
-    private SearchResult TryGetImpl(uint leftover, uint bucket, scoped ReadOnlySpan<byte> key)
+    private unsafe SearchResult TryGetImpl(scoped ReadOnlySpan<byte> key, uint leftover, uint bucket)
     {
         Debug.Assert(BitOperations.LeadingZeroCount(leftover) >= 11, "First 10 bits should be left unused");
 
         var address = _root[(int)bucket];
-        if (address == 0) return default;
+        if (address == 0) goto NotFound;
 
-        var pages = CollectionsMarshal.AsSpan(_pages);
+        ref var pages = ref MemoryMarshal.GetReference(CollectionsMarshal.AsSpan(_pages));
         do
         {
             var (pageNo, atPage) = Math.DivRem(address, Page.PageSize);
 
-            // TODO: optimize, unsafe ref?
-            var sliced = pages[(int)pageNo].Span.Slice((int)atPage);
-
-            ref var at = ref MemoryMarshal.GetReference(sliced);
+            ref var at = ref Unsafe.AsRef<byte>((byte*)Unsafe.Add(ref pages, pageNo).Raw.ToPointer() + atPage);
 
             var header = at & PreambleBits;
             if ((header & DestroyedBit) == 0)
@@ -116,15 +112,14 @@ public class PooledSpanDictionary : IDisposable
                 {
                     ref var payload = ref Unsafe.Add(ref at, PreambleLength + AddressLength);
 
-                    var storedKeyLength = payload;
+                    var storedKeyLength = (int)payload;
                     if (storedKeyLength == key.Length)
                     {
                         var storedKey = MemoryMarshal.CreateSpan(ref Unsafe.Add(ref payload, KeyLengthLength),
                             storedKeyLength);
                         if (storedKey.SequenceEqual(key))
                         {
-                            ref var data = ref Unsafe.Add(ref payload, KeyLengthLength + storedKeyLength);
-                            return new SearchResult(ref at, ref data);
+                            return new SearchResult(ref at);
                         }
                     }
                 }
@@ -133,6 +128,7 @@ public class PooledSpanDictionary : IDisposable
             // Decode next entry address
             address = Unsafe.ReadUnaligned<uint>(ref Unsafe.Add(ref at, PreambleLength));
         } while (address != 0);
+    NotFound:
         return default;
     }
 
@@ -163,11 +159,17 @@ public class PooledSpanDictionary : IDisposable
         public bool IsFound => !Unsafe.IsNullRef(ref _header);
 
         private readonly ref byte _header;
-        private readonly ref byte _data;
-
-        public SearchResult(ref byte header, ref byte data)
+        private readonly ref byte GetData
         {
-            _data = ref data;
+            get
+            {
+                ref var payload = ref Unsafe.Add(ref _header, PreambleLength + AddressLength);
+                return ref Unsafe.Add(ref payload, KeyLengthLength + payload);
+            }
+        }
+
+        public SearchResult(ref byte header)
+        {
             _header = ref header;
         }
 
@@ -179,8 +181,9 @@ public class PooledSpanDictionary : IDisposable
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get
             {
-                return MemoryMarshal.CreateSpan(ref Unsafe.Add(ref _data, ValueLengthLength),
-                Unsafe.ReadUnaligned<ushort>(ref _data));
+                ref var data = ref GetData;
+                return MemoryMarshal.CreateSpan(ref Unsafe.Add(ref data, ValueLengthLength),
+                Unsafe.ReadUnaligned<ushort>(ref data));
             }
         }
 
@@ -190,15 +193,16 @@ public class PooledSpanDictionary : IDisposable
                 return false;
 
             var length = data0.Length + data1.Length;
-            if (Unsafe.ReadUnaligned<ushort>(ref _data) >= length)
+            ref var data = ref GetData;
+            if (Unsafe.ReadUnaligned<ushort>(ref data) >= length)
             {
                 // update metadata bit
                 _header = (byte)((_header & ~MetadataBits) | (metadata << MetadataShift));
 
                 // There's the place to have it update in place
-                Unsafe.WriteUnaligned(ref _data, (ushort)length);
+                Unsafe.WriteUnaligned(ref data, (ushort)length);
 
-                var destination = MemoryMarshal.CreateSpan(ref Unsafe.Add(ref _data, ValueLengthLength), length);
+                var destination = MemoryMarshal.CreateSpan(ref Unsafe.Add(ref data, ValueLengthLength), length);
                 data0.CopyTo(destination);
                 if (data1.IsEmpty == false)
                 {
@@ -219,7 +223,7 @@ public class PooledSpanDictionary : IDisposable
     }
 
     public void Set(scoped ReadOnlySpan<byte> key, ulong hash, ReadOnlySpan<byte> data, byte metadata) =>
-        SetImpl(key, Mix(hash), data, ReadOnlySpan<byte>.Empty, metadata);
+        SetImpl(key, Mix(hash), data, default, metadata);
 
     public void Set(scoped ReadOnlySpan<byte> key, ulong hash, ReadOnlySpan<byte> data0, ReadOnlySpan<byte> data1,
         byte metadata) => SetImpl(key, Mix(hash), data0, data1, metadata);
@@ -233,7 +237,7 @@ public class PooledSpanDictionary : IDisposable
         var (leftover, bucket) = GetBucketAndLeftover(mixed);
         if (append == false)
         {
-            var search = TryGetImpl(leftover, bucket, key);
+            var search = TryGetImpl(key, leftover, bucket);
 
             if (search.IsFound)
             {
@@ -286,7 +290,7 @@ public class PooledSpanDictionary : IDisposable
     public void Destroy(scoped ReadOnlySpan<byte> key, ulong hash)
     {
         var (leftover, bucket) = GetBucketAndLeftover(hash);
-        var found = TryGetImpl(leftover, bucket, key);
+        var found = TryGetImpl(key, leftover, bucket);
 
         if (found.IsFound)
             found.Destroy();
@@ -511,7 +515,7 @@ public class PooledSpanDictionary : IDisposable
         {
             get
             {
-                var raw = pages[bucket >> PageShift].Raw;
+                var raw = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(pages), bucket >> PageShift).Raw;
                 return ref Unsafe.Add(ref Unsafe.AsRef<uint>(raw.ToPointer()), bucket & InPageMask);
             }
         }

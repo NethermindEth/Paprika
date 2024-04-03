@@ -251,8 +251,6 @@ public class NibblePathTests
         appended.Length.Should().Be((byte)(length + 1));
         appended.FindFirstDifferentNibble(path).Should().Be(length);
         appended.GetAt(length).Should().Be(nibble);
-
-        Console.WriteLine(path.ToString());
     }
 
     [Test]
