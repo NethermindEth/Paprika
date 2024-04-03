@@ -59,8 +59,7 @@ public class PooledSpanDictionary : IDisposable
 
         if (Entry.Exists(in entry))
         {
-            ref var pages = ref MemoryMarshal.GetReference(CollectionsMarshal.AsSpan(_pages));
-            result = GetData(entry, in pages);
+            result = GetData(entry);
             return true;
         }
 
@@ -91,11 +90,19 @@ public class PooledSpanDictionary : IDisposable
         {
             ref var entry = ref Unsafe.AsRef<Entry>(next);
             ref var preamble = ref GetPreamble(entry);
+            var length = Unsafe.Add(ref preamble, PreambleLength);
 
             // combine all checks in one bit-wise, move only if all are zero
-            if (((entry.hash - hash) | (uint)(preamble & DestroyedBit)) == 0)
+            // 1. Hash equal
+            // 2. preamble not destroyed
+            // 3. key length
+            if ((unchecked(entry.hash - hash) | (uint)(preamble & DestroyedBit) | unchecked((uint)(key.Length - length))) == 0)
             {
-                var actual = GetKey(ref preamble);
+                // create actual key
+                var actual =
+                    MemoryMarshal.CreateReadOnlySpan(ref Unsafe.Add(ref preamble, PreambleLength + KeyLengthLength),
+                        length);
+
                 if (actual.SequenceEqual(key))
                 {
                     return ref entry;
@@ -110,7 +117,7 @@ public class PooledSpanDictionary : IDisposable
 
     private static ref byte GetPreamble(in Entry entry) => ref GetEntryPayload(entry);
 
-    private static ReadOnlySpan<byte> GetKey(in Entry entry, in Page pages)
+    private static ReadOnlySpan<byte> GetKey(in Entry entry)
     {
         ref var payload = ref GetEntryPayload(entry);
         var length = Unsafe.Add(ref payload, PreambleLength);
@@ -123,7 +130,7 @@ public class PooledSpanDictionary : IDisposable
         return MemoryMarshal.CreateReadOnlySpan(ref Unsafe.Add(ref preamble, PreambleLength + KeyLengthLength), length);
     }
 
-    private static ReadOnlySpan<byte> GetData(in Entry entry, in Page pages)
+    private static ReadOnlySpan<byte> GetData(in Entry entry)
     {
         ref var payload = ref GetEntryPayload(entry);
         var keyLength = Unsafe.Add(ref payload, PreambleLength);
@@ -245,7 +252,6 @@ public class PooledSpanDictionary : IDisposable
     /// </summary>
     public unsafe ref struct Enumerator
     {
-        private readonly ref Page _pages;
         private ref Entry _entry;
 
         private Entry* _next = default;
@@ -257,7 +263,6 @@ public class PooledSpanDictionary : IDisposable
         /// </summary>
         public Enumerator(PooledSpanDictionary dictionary)
         {
-            _pages = ref MemoryMarshal.GetReference(CollectionsMarshal.AsSpan(dictionary._pages));
             _rootEnumerator = dictionary._root.GetEnumerator();
             if (_rootEnumerator.MoveNext())
             {
@@ -289,7 +294,7 @@ public class PooledSpanDictionary : IDisposable
             return true;
         }
 
-        public Item Current => new(in _entry, in _pages);
+        public Item Current => new(in _entry);
 
         public void Dispose()
         {
@@ -299,18 +304,16 @@ public class PooledSpanDictionary : IDisposable
         public readonly ref struct Item
         {
             private readonly ref readonly Entry _entry;
-            private readonly ref readonly Page _pages;
 
-            public Item(in Entry entry, in Page pages)
+            public Item(in Entry entry)
             {
                 _entry = ref entry;
-                _pages = ref pages;
             }
 
-            public ReadOnlySpan<byte> Key => GetKey(in _entry, in _pages);
+            public ReadOnlySpan<byte> Key => GetKey(in _entry);
 
 
-            public ReadOnlySpan<byte> Value => GetData(in _entry, in _pages);
+            public ReadOnlySpan<byte> Value => GetData(in _entry);
 
             public ulong Hash => _entry.hash;
 
