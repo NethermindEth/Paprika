@@ -24,7 +24,7 @@ public readonly struct Account : IEquatable<Account>
                            && CodeHash == EmptyCodeHash
                            && StorageRootHash == EmptyStorageRoot;
 
-    public Account(UInt256 balance, UInt256 nonce)
+    public Account(in UInt256 balance, in UInt256 nonce)
     {
         Balance = balance;
         Nonce = nonce;
@@ -32,7 +32,7 @@ public readonly struct Account : IEquatable<Account>
         StorageRootHash = EmptyStorageRoot;
     }
 
-    public Account(UInt256 balance, UInt256 nonce, Keccak codeHash, Keccak storageRootHash)
+    public Account(in UInt256 balance, in UInt256 nonce, in Keccak codeHash, in Keccak storageRootHash)
     {
         Balance = balance;
         Nonce = nonce;
@@ -40,20 +40,26 @@ public readonly struct Account : IEquatable<Account>
         StorageRootHash = storageRootHash;
     }
 
-    public Account WithChangedStorageRoot(Keccak newStorageRoot) => new(Balance, Nonce, CodeHash, newStorageRoot);
+    public void WithChangedStorageRoot(in Keccak newStorageRoot, out Account account)
+    {
+        account = this;
+        Unsafe.AsRef(in account.StorageRootHash) = newStorageRoot;
+    }
 
-    public bool Equals(Account other) => Balance.Equals(other.Balance) &&
+    public bool Equals(Account other) => EqualsByRef(other);
+
+    public bool EqualsByRef(in Account other) => Balance.Equals(other.Balance) &&
                                          Nonce == other.Nonce &&
                                          CodeHash == other.CodeHash &&
                                          StorageRootHash == other.StorageRootHash;
 
-    public override bool Equals(object? obj) => obj is Account other && Equals(other);
+    public override bool Equals(object? obj) => obj is Account other && EqualsByRef(other);
 
     public override int GetHashCode() => HashCode.Combine(Balance, Nonce, CodeHash, StorageRootHash);
 
-    public static bool operator ==(Account left, Account right) => left.Equals(right);
+    public static bool operator ==(in Account left, in Account right) => left.EqualsByRef(right);
 
-    public static bool operator !=(Account left, Account right) => !left.Equals(right);
+    public static bool operator !=(in Account left, in Account right) => !left.EqualsByRef(right);
 
     public override string ToString() =>
         $"{nameof(Nonce)}: {Nonce}, " +
