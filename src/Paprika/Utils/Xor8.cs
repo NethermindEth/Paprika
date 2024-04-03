@@ -153,7 +153,7 @@ public class Xor8
         t2 = null;
 
         _seed = seed;
-        var fp = ArrayPool<byte>.Shared.Rent(arrayLength);
+        var fp = new byte[arrayLength];
         for (var i = reverseOrderPos - 1; i >= 0; i--)
         {
             var k = reverseOrder[i];
@@ -175,9 +175,7 @@ public class Xor8
             }
             fp[change] = (byte)xor;
         }
-        _fingerprints = new byte[arrayLength];
-        Array.Copy(fp, _fingerprints, arrayLength);
-        ArrayPool<byte>.Shared.Return(fp);
+        _fingerprints = fp;
 
         ArrayPool<ulong>.Shared.Return(reverseOrder);
         ArrayPool<byte>.Shared.Return(reverseH);
