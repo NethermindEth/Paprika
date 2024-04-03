@@ -18,11 +18,9 @@ public class PooledSpanDictionary : IDisposable
     private readonly List<Page> _pages = new();
 
     private Page _current;
-    private int _currentNumber;
     private int _position;
 
     private Page _entries;
-    private int _entryPage;
     private int _entryPosition = Page.PageSize;
 
     private readonly Root _root;
@@ -92,17 +90,15 @@ public class PooledSpanDictionary : IDisposable
         while (next != default)
         {
             ref var entry = ref Unsafe.AsRef<Entry>(next);
+            ref var preamble = ref GetPreamble(entry);
 
-            if (entry.hash == hash)
+            // combine all checks in one bit-wise, move only if all are zero
+            if (((entry.hash - hash) | (uint)(preamble & DestroyedBit)) == 0)
             {
-                ref var preamble = ref GetPreamble(entry);
-                if ((preamble & DestroyedBit) != DestroyedBit)
+                var actual = GetKey(ref preamble);
+                if (actual.SequenceEqual(key))
                 {
-                    var actual = GetKey(ref preamble);
-                    if (actual.SequenceEqual(key))
-                    {
-                        return ref entry;
-                    }
+                    return ref entry;
                 }
             }
 
@@ -159,7 +155,8 @@ public class PooledSpanDictionary : IDisposable
     public void Set(scoped ReadOnlySpan<byte> key, ulong hash, ReadOnlySpan<byte> data0, ReadOnlySpan<byte> data1,
         byte metadata) => SetImpl(key, hash, data0, data1, metadata);
 
-    private unsafe void SetImpl(scoped ReadOnlySpan<byte> key, ulong hash, ReadOnlySpan<byte> data0, ReadOnlySpan<byte> data1,
+    private unsafe void SetImpl(scoped ReadOnlySpan<byte> key, ulong hash, ReadOnlySpan<byte> data0,
+        ReadOnlySpan<byte> data1,
         byte metadata, bool append = false)
     {
         if (append == false)
@@ -331,7 +328,6 @@ public class PooledSpanDictionary : IDisposable
     {
         var page = RentNewPage(false);
         _current = page;
-        _currentNumber = _pages.Count - 1;
         _position = 0;
     }
 
@@ -367,7 +363,6 @@ public class PooledSpanDictionary : IDisposable
         {
             _entryPosition = 0;
             _entries = RentNewPage(false);
-            _entryPage = _pages.Count - 1;
         }
 
         var position = _entryPosition;
