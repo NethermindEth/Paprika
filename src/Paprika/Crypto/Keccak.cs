@@ -121,10 +121,10 @@ public readonly struct Keccak : IEquatable<Keccak>
 
     public string ToString(bool withZeroX) => Span.ToHexString(withZeroX);
 
-    public static bool operator ==(Keccak left, Keccak right) => left.Equals(right);
+    public static bool operator ==(in Keccak left, in Keccak right) => left.Equals(right);
 
-    public static bool operator !=(Keccak left, Keccak right) => !(left == right);
-    public static Vector256<byte> operator ^(Keccak left, Keccak right)
+    public static bool operator !=(in Keccak left, in Keccak right) => !(left == right);
+    public static Vector256<byte> operator ^(in Keccak left, in Keccak right)
     {
         return left.Bytes ^ right.Bytes;
     }
