@@ -65,11 +65,6 @@ public readonly ref struct NibblePath
 
     public static NibblePath Empty => default;
 
-    /// <summary>
-    /// The byte length of an empty path.
-    /// </summary>
-    public const int EmptyEncodedLength = 1;
-
     public bool IsEmpty => Length == 0;
 
     public static NibblePath Parse(string hex)
@@ -384,20 +379,6 @@ public readonly ref struct NibblePath
         return actualKey.Equals(expected);
     }
 
-    /// <summary>
-    /// Reads the first byte of nibble of the path without decoding it fully.
-    /// </summary>
-    public static byte ReadFirstNibble(ReadOnlySpan<byte> source)
-    {
-        // Access the second byte first as then the range check is already done on the first.
-        var doubleNibble = (int)source[PreambleLength];
-        var metaData = source[0];
-        var odd = OddBit & metaData;
-
-        // inlined: GetShift
-        return (byte)((doubleNibble >> ((1 - odd) * NibbleShift)) & NibbleMask);
-    }
-
     public int FindFirstDifferentNibble(in NibblePath other)
     {
         var length = Math.Min(other.Length, Length);
@@ -479,7 +460,8 @@ public readonly ref struct NibblePath
         }
     }
 
-    const int HexPreambleLength = 1;
+    private const int HexPreambleLength = 1;
+
     public int HexEncodedLength => Length / NibblePerByte + HexPreambleLength;
 
     private const byte OddFlag = 0x10;
