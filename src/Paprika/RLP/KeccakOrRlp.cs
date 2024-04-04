@@ -34,7 +34,7 @@ public readonly struct KeccakOrRlp
     public static implicit operator KeccakOrRlp(in Keccak keccak) => new(in keccak);
 
     [SkipLocalsInit]
-    public static KeccakOrRlp FromSpan(scoped Span<byte> data)
+    public static KeccakOrRlp FromSpan(scoped ReadOnlySpan<byte> data)
     {
         KeccakOrRlp keccak;
         Unsafe.SkipInit(out keccak);
