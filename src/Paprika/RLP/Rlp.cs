@@ -1,7 +1,9 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 
 using Nethermind.Int256;
-using Paprika.Utils;
 
 namespace Paprika.RLP;
 
@@ -10,20 +12,24 @@ public static class Rlp
     public const int LengthOfKeccakRlp = 33;
     public const int MaxLengthOfLength = 4;
 
-    public static int LengthOf(UInt256 item)
+    [SkipLocalsInit]
+    public static int LengthOf(in UInt256 item)
     {
         if (item < 128UL)
         {
             return 1;
         }
 
-        const int size = 32;
-        Span<byte> bytes = stackalloc byte[size];
+        Vector256<byte> data;
+        Unsafe.SkipInit(out data);
+
+        Span<byte> bytes = MemoryMarshal.CreateSpan(ref Unsafe.As<Vector256<byte>,byte>(ref data), Vector256<byte>.Count);
+
         item.ToBigEndian(bytes);
 
         // at least one will be set as the first check is above, zero would not pass it
         var index = bytes.IndexOfAnyExcept((byte)0);
-        var lengthWithoutLeadingZeroes = size - index;
+        var lengthWithoutLeadingZeroes = Vector256<byte>.Count - index;
         return lengthWithoutLeadingZeroes + 1;
     }
 
