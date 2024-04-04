@@ -17,7 +17,7 @@ public static class Serializer
     /// Writes <paramref name="value"/> without encoding the length, returning the leftover.
     /// The caller should store length elsewhere.
     /// </summary>
-    public static Span<byte> WriteWithLeftover(this UInt256 value, Span<byte> destination, out int length)
+    public static int WriteWithLeftover(in UInt256 value, Span<byte> destination)
     {
         var slice = destination.Slice(0, Uint256Size);
         value.ToBigEndian(slice);
@@ -26,16 +26,15 @@ public static class Serializer
         if (firstNonZero == NotFound)
         {
             // all zeros
-            length = 0;
-            return destination;
+            return 0;
         }
 
         // some non-zeroes
-        length = Uint256Size - firstNonZero;
+        var length = Uint256Size - firstNonZero;
 
         // move left
         destination.Slice(firstNonZero, length).CopyTo(destination.Slice(0, length));
-        return destination.Slice(length);
+        return length;
     }
 
     public static void ReadFrom(ReadOnlySpan<byte> source, out UInt256 value)
