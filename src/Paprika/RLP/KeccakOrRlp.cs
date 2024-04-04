@@ -1,4 +1,5 @@
 using Paprika.Crypto;
+using System.Runtime.CompilerServices;
 using SpanExtensions = Paprika.Crypto.SpanExtensions;
 
 namespace Paprika.RLP;
@@ -9,7 +10,7 @@ namespace Paprika.RLP;
 /// </summary>
 public readonly struct KeccakOrRlp
 {
-    private const int NonKeccakOffset = 1;
+    private const int KeccakLength = 32;
 
     public enum Type : byte
     {
@@ -17,35 +18,45 @@ public readonly struct KeccakOrRlp
         Rlp = 1,
     }
 
-    public readonly Type DataType;
     private readonly Keccak _keccak;
+    private readonly int _length;
 
-    public Span<byte> Span => DataType == Type.Keccak
-        ? _keccak.BytesAsSpan
-        : _keccak.BytesAsSpan.Slice(NonKeccakOffset, _keccak.BytesAsSpan[0]);
+    public readonly Type DataType => _length == KeccakLength ? Type.Keccak : Type.Rlp;
 
-    private KeccakOrRlp(Type dataType, scoped Span<byte> data)
+    public Span<byte> Span => _keccak.BytesAsSpan[.._length];
+
+    private KeccakOrRlp(in Keccak keccak)
     {
-        DataType = dataType;
-        _keccak = new Keccak(data);
+        _keccak = keccak;
+        _length = KeccakLength;
     }
 
-    public static implicit operator KeccakOrRlp(Keccak keccak) => new(Type.Keccak, keccak.BytesAsSpan);
+    public static implicit operator KeccakOrRlp(in Keccak keccak) => new(in keccak);
 
-    public static KeccakOrRlp FromSpan(scoped Span<byte> data)
+    [SkipLocalsInit]
+    public static KeccakOrRlp FromSpan(scoped ReadOnlySpan<byte> data)
     {
-        Span<byte> output = stackalloc byte[Keccak.Size];
+        KeccakOrRlp keccak;
+        Unsafe.SkipInit(out keccak);
 
-        if (data.Length < 32)
+        if (data.Length < KeccakLength)
         {
-            // encode length as the first byte
-            output[0] = (byte)data.Length;
-            data.CopyTo(output[NonKeccakOffset..]);
-            return new KeccakOrRlp(Type.Rlp, output);
+            // Zero out keccak as we might not use all of it
+            Unsafe.AsRef(in keccak._keccak) = default;
+            // Set length to the data length
+            Unsafe.AsRef(in keccak._length) = (byte)data.Length;
+            // Copy data to keccak space
+            data.CopyTo(keccak._keccak.BytesAsSpan);
+        }
+        else
+        {
+            // Compute hash directly to keccak
+            KeccakHash.ComputeHash(data, keccak._keccak.BytesAsSpan);
+            // Set length to KeccakLength
+            Unsafe.AsRef(in keccak._length) = (byte)KeccakLength;
         }
 
-        KeccakHash.ComputeHash(data, output);
-        return new KeccakOrRlp(Type.Keccak, output);
+        return keccak;
     }
 
     public override string ToString() => DataType == Type.Keccak
