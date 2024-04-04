@@ -513,16 +513,17 @@ public readonly ref struct SlottedArray
         private const ushort KeyPreambleMask = unchecked((ushort)~AddressMask);
         private const ushort KeyPreambleShift = 12;
 
-        private const byte KeyPreambleBeyond = 0b101; // If more than 4 nibbles, use value 5 and beyond to mark it.
+        private const byte KeyPreambleBeyond = 0b101; // Some key nibbles are stored along data, this is the marker.
         private const byte KeyPreambleEmpty = 0b000; // Empty, no key's nibbles encoded.
         private const byte KeyPreambleOddBit = 0b001; // The bit used for odd-starting paths.
         private const byte KeyPreambleDelete = KeyPreambleOddBit; // Empty cannot be odd, odd is used as deleted marker.
+        // 0b110, 0b111 are not used
 
         public const byte KeyPreambleWithBytes = KeyPreambleBeyond << KeyPreambleLengthShift;
 
         private const byte KeyPreambleLengthShift = 1;
 
-        private const byte KeyPreambleMaxEncodedLength = 4;
+        private const byte KeyPreambleMaxEncodedLength = KeyPreambleBeyond - 1;
         private const byte KeySlice = 2;
 
         private const int HashByteShift = 8;
