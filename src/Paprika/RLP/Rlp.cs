@@ -23,7 +23,7 @@ public static class Rlp
         Vector256<byte> data;
         Unsafe.SkipInit(out data);
 
-        Span<byte> bytes = MemoryMarshal.CreateSpan(ref Unsafe.As<Vector256<byte>,byte>(ref data), Vector256<byte>.Count);
+        Span<byte> bytes = MemoryMarshal.CreateSpan(ref Unsafe.As<Vector256<byte>, byte>(ref data), Vector256<byte>.Count);
 
         item.ToBigEndian(bytes);
 
