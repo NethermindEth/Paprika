@@ -441,7 +441,7 @@ public readonly ref struct SlottedArray
         // if the found index is odd -> found a slot to be queried
 
         const int notFound = -1;
-        var span = AsUshortSpan(to);
+        var span = AsUshortSpan(length: to);
 
         var offset = 0;
         int index = span.IndexOf(hash);
