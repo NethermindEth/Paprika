@@ -47,7 +47,7 @@ public readonly ref struct SlottedArray
         get
         {
             var offset = index * Slot.Size;
-            if (offset >= _dataLength - Slot.Size)
+            if ((uint)offset >= (uint)(_dataLength - Slot.Size))
             {
                 ThrowIndexOutOfRangeException();
             }
