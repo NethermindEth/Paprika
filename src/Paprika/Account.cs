@@ -1,3 +1,6 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -21,7 +24,7 @@ public readonly struct Account : IEquatable<Account>
                            && CodeHash == EmptyCodeHash
                            && StorageRootHash == EmptyStorageRoot;
 
-    public Account(UInt256 balance, UInt256 nonce)
+    public Account(in UInt256 balance, in UInt256 nonce)
     {
         Balance = balance;
         Nonce = nonce;
@@ -29,7 +32,7 @@ public readonly struct Account : IEquatable<Account>
         StorageRootHash = EmptyStorageRoot;
     }
 
-    public Account(UInt256 balance, UInt256 nonce, Keccak codeHash, Keccak storageRootHash)
+    public Account(in UInt256 balance, in UInt256 nonce, in Keccak codeHash, in Keccak storageRootHash)
     {
         Balance = balance;
         Nonce = nonce;
@@ -37,20 +40,28 @@ public readonly struct Account : IEquatable<Account>
         StorageRootHash = storageRootHash;
     }
 
-    public Account WithChangedStorageRoot(Keccak newStorageRoot) => new(Balance, Nonce, CodeHash, newStorageRoot);
+    public void WithChangedStorageRoot(in Keccak newStorageRoot, out Account account)
+    {
+        // Fast copy to return buffer
+        account = this;
+        // Overwrite the storage root hash
+        Unsafe.AsRef(in account.StorageRootHash) = newStorageRoot;
+    }
 
-    public bool Equals(Account other) => Balance.Equals(other.Balance) &&
+    public bool Equals(Account other) => EqualsByRef(other);
+
+    public bool EqualsByRef(in Account other) => Balance.Equals(other.Balance) &&
                                          Nonce == other.Nonce &&
                                          CodeHash == other.CodeHash &&
                                          StorageRootHash == other.StorageRootHash;
 
-    public override bool Equals(object? obj) => obj is Account other && Equals(other);
+    public override bool Equals(object? obj) => obj is Account other && EqualsByRef(other);
 
     public override int GetHashCode() => HashCode.Combine(Balance, Nonce, CodeHash, StorageRootHash);
 
-    public static bool operator ==(Account left, Account right) => left.Equals(right);
+    public static bool operator ==(in Account left, in Account right) => left.EqualsByRef(right);
 
-    public static bool operator !=(Account left, Account right) => !left.Equals(right);
+    public static bool operator !=(in Account left, in Account right) => !left.EqualsByRef(right);
 
     public override string ToString() =>
         $"{nameof(Nonce)}: {Nonce}, " +
@@ -97,14 +108,17 @@ public readonly struct Account : IEquatable<Account>
     /// Serializes the account balance and nonce.
     /// </summary>
     /// <returns>The actual payload written.</returns>
+    [SkipLocalsInit]
     public Span<byte> WriteTo(Span<byte> destination)
     {
+        int balanceAndNonceLength;
+        ref var dest = ref MemoryMarshal.GetReference(destination);
+
         if (Balance <= MaxDenseBalance && Nonce <= MaxDenseNonce)
         {
             // special case, we can encode it a dense way
-            var span = destination.Slice(DensePreambleLength);
-            span = Balance.WriteWithLeftover(span, out var balanceLength);
-            Nonce.WriteWithLeftover(span, out var nonceLength);
+            var balanceLength = Serializer.WriteWithLeftover(Balance, destination[DensePreambleLength..]);
+            var nonceLength = Serializer.WriteWithLeftover(Nonce, destination[(DensePreambleLength + balanceLength)..]);
 
             var codeHashStorageRootExist = CodeHashOrStorageRootExist;
 
@@ -113,52 +127,69 @@ public readonly struct Account : IEquatable<Account>
                                     (nonceLength << DenseNonceLengthShift) |
                                     ((codeHashStorageRootExist ? 1 : 0) << DenseCodeHashAndStorageRootExistShift));
 
-            var balanceAndNonceLength = DensePreambleLength + balanceLength + nonceLength;
+            balanceAndNonceLength = DensePreambleLength + balanceLength + nonceLength;
 
             // CodeHash & StorageRootHash flags
-            if (!codeHashStorageRootExist)
+            if (!CodeHashOrStorageRootExist)
             {
-                return destination.Slice(0, balanceAndNonceLength);
+                return destination[..balanceAndNonceLength];
             }
-
-            CodeHash.BytesAsSpan.CopyTo(destination.Slice(balanceAndNonceLength));
-            StorageRootHash.BytesAsSpan.CopyTo(destination.Slice(balanceAndNonceLength + Keccak.Size));
-
-            return destination.Slice(0, balanceAndNonceLength + Keccak.Size + Keccak.Size);
         }
-
+        else
         {
-            // really big numbers
-            var span = destination.Slice(BigPreambleLength);
-            span = Balance.WriteWithLeftover(span, out var balanceLength);
-            span = Nonce.WriteWithLeftover(span, out var nonceLength);
+            // Massive numbers
+            var balanceLength = Serializer.WriteWithLeftover(Balance, destination[BigPreambleLength..]);
+            var nonceLength = Serializer.WriteWithLeftover(Nonce, destination[(BigPreambleLength + balanceLength)..]);
 
-            destination[BigPreambleBalanceIndex] = (byte)balanceLength;
-            destination[BigPreambleNonceIndex] = (byte)nonceLength;
+            // Write lengths
+            Unsafe.Add(ref dest, BigPreambleBalanceIndex) = (byte)balanceLength;
+            Unsafe.Add(ref dest, BigPreambleNonceIndex) = (byte)nonceLength;
 
-            CodeHash.BytesAsSpan.CopyTo(span);
-            StorageRootHash.BytesAsSpan.CopyTo(span.Slice(Keccak.Size));
-
-            return destination.Slice(0, BigPreambleLength + balanceLength + nonceLength + Keccak.Size + Keccak.Size);
+            balanceAndNonceLength = BigPreambleLength + balanceLength + nonceLength;
         }
+
+        Unsafe.WriteUnaligned(ref Unsafe.Add(ref dest, balanceAndNonceLength), CodeHash);
+        Unsafe.WriteUnaligned(ref Unsafe.Add(ref dest, balanceAndNonceLength + Keccak.Size), StorageRootHash);
+
+        return destination.Slice(0, balanceAndNonceLength + Keccak.Size + Keccak.Size);
     }
 
-    private bool CodeHashOrStorageRootExist => CodeHash != EmptyCodeHash || StorageRootHash != EmptyStorageRoot;
+    private bool CodeHashOrStorageRootExist
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            if (Vector256.IsHardwareAccelerated)
+            {
+                // The bitwise equivalent of the one below
+                return !((CodeHash ^ EmptyCodeHash) | (StorageRootHash ^ EmptyStorageRoot)).Equals(Vector256<byte>.Zero);
+            }
+            else
+            {
+                return CodeHash != EmptyCodeHash || StorageRootHash != EmptyStorageRoot;
+            }
+        }
+    }
 
     /// <summary>
     /// Reads the account balance and nonce.
     /// </summary>
+    [SkipLocalsInit]
     public static void ReadFrom(ReadOnlySpan<byte> source, out Account account)
     {
+        UInt256 balance;
+        UInt256 nonce;
+
         var first = source[0];
+        int consumed;
         if ((first & DenseMask) == DenseMask)
         {
             // special case, decode the dense
             var nonceLength = (first & DenseNonceLengthMask) >> DenseNonceLengthShift;
             var balanceLength = first & DenseBalanceMask;
 
-            Serializer.ReadFrom(source.Slice(DensePreambleLength, balanceLength), out var balance);
-            Serializer.ReadFrom(source.Slice(DensePreambleLength + balanceLength, nonceLength), out var nonce);
+            Serializer.ReadFrom(source.Slice(DensePreambleLength, balanceLength), out balance);
+            Serializer.ReadFrom(source.Slice(DensePreambleLength + balanceLength, nonceLength), out nonce);
 
             var codeHashStorageRootExist =
                 (first & DenseCodeHashAndStorageRootExistMask) == DenseCodeHashAndStorageRootExistMask;
@@ -169,24 +200,23 @@ public readonly struct Account : IEquatable<Account>
                 return;
             }
 
-            account = new Account(balance, nonce,
-                new Keccak(source.Slice(DensePreambleLength + balanceLength + nonceLength, Keccak.Size)),
-                new Keccak(source.Slice(DensePreambleLength + balanceLength + nonceLength + Keccak.Size, Keccak.Size)));
-
-            return;
+            consumed = DensePreambleLength + balanceLength + nonceLength;
         }
-
+        else
         {
+
             var balanceLength = source[BigPreambleBalanceIndex];
             var nonceLength = source[BigPreambleNonceIndex];
 
-            Serializer.ReadFrom(source.Slice(BigPreambleLength, balanceLength), out var balance);
-            Serializer.ReadFrom(source.Slice(BigPreambleLength + balanceLength, nonceLength), out var nonce);
+            Serializer.ReadFrom(source.Slice(BigPreambleLength, balanceLength), out balance);
+            Serializer.ReadFrom(source.Slice(BigPreambleLength + balanceLength, nonceLength), out nonce);
 
-            account = new Account(balance, nonce,
-                new Keccak(source.Slice(BigPreambleLength + balanceLength + nonceLength, Keccak.Size)),
-                new Keccak(source.Slice(BigPreambleLength + balanceLength + nonceLength + Keccak.Size, Keccak.Size))
-            );
+            consumed = BigPreambleLength + balanceLength + nonceLength;
         }
+
+        account = new Account(balance, nonce,
+            Unsafe.ReadUnaligned<Keccak>(in source[consumed]),
+            Unsafe.ReadUnaligned<Keccak>(in source[consumed + Keccak.Size])
+        );
     }
 }
