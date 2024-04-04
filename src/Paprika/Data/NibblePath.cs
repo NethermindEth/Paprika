@@ -461,7 +461,7 @@ public readonly ref struct NibblePath
     }
 
     private const int HexPreambleLength = 1;
-    
+
     public int HexEncodedLength => Length / NibblePerByte + HexPreambleLength;
 
     private const byte OddFlag = 0x10;
