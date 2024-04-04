@@ -3,6 +3,9 @@ using Nethermind.Int256;
 using Paprika.Utils;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 
 namespace Paprika.RLP;
 
@@ -84,6 +87,7 @@ public ref struct RlpStream
         return this;
     }
 
+    [SkipLocalsInit]
     public RlpStream Encode(in UInt256 value)
     {
         if (value.IsZero)
@@ -92,7 +96,10 @@ public ref struct RlpStream
         }
         else
         {
-            Span<byte> bytes = stackalloc byte[32];
+            Vector256<byte> data;
+            Unsafe.SkipInit(out data);
+            Span<byte> bytes = MemoryMarshal.CreateSpan(ref Unsafe.As<Vector256<byte>, byte>(ref data), Vector256<byte>.Count);
+
             value.ToBigEndian(bytes);
             Encode(bytes.WithoutLeadingZeros());
         }
