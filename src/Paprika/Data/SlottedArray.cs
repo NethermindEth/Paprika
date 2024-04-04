@@ -1,10 +1,8 @@
 using System.Buffers;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Text;
 using Paprika.Store;
 using Paprika.Utils;
 
@@ -24,12 +22,24 @@ namespace Paprika.Data;
 public readonly ref struct SlottedArray
 {
     private readonly ref Header _header;
-    private readonly Span<byte> _data;
+    private readonly int _dataLength;
 
     public SlottedArray(Span<byte> buffer)
     {
         _header = ref Unsafe.As<byte, Header>(ref MemoryMarshal.GetReference(buffer));
-        _data = buffer.Slice(Header.Size);
+        _dataLength = buffer.Length - Header.Size;
+
+        if (_dataLength < 0)
+        {
+            ThrowBufferTooSmall();
+        }
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowBufferTooSmall()
+        {
+            throw new ArgumentOutOfRangeException("The buffer is too small");
+        }
     }
 
     private readonly ref Slot this[int index]
@@ -37,12 +47,12 @@ public readonly ref struct SlottedArray
         get
         {
             var offset = index * Slot.Size;
-            if (offset >= _data.Length - Slot.Size)
+            if (offset >= _dataLength - Slot.Size)
             {
                 ThrowIndexOutOfRangeException();
             }
 
-            return ref Unsafe.As<byte, Slot>(ref Unsafe.Add(ref MemoryMarshal.GetReference(_data), offset));
+            return ref Unsafe.As<byte, Slot>(ref Unsafe.Add(ref Unsafe.As<Header, byte>(ref _header), Header.Size + offset));
 
             [DoesNotReturn]
             [StackTraceHidden]
@@ -51,6 +61,51 @@ public readonly ref struct SlottedArray
                 throw new IndexOutOfRangeException();
             }
         }
+    }
+
+    private Span<ushort> AsUshortSpan(int length)
+    {
+        if ((uint)length > (uint)_dataLength)
+        {
+            ThrowLengthTooLong(length, _dataLength);
+        }
+        if ((length & 0b1) != 0)
+        {
+            NotUshortLength(length);
+        }
+
+        return MemoryMarshal.CreateSpan(ref Unsafe.AddByteOffset(ref Unsafe.As<Header, ushort>(ref _header), Header.Size), length / 2);
+
+        static void NotUshortLength(int length)
+        {
+            throw new ArgumentOutOfRangeException($"The length must be even, is {length}");
+        }
+    }
+
+    private Span<byte> AsSpan(int offset)
+    {
+        if ((uint)offset > (uint)_dataLength)
+        {
+            ThrowOffsetTooLong(offset);
+        }
+
+        return MemoryMarshal.CreateSpan(ref Unsafe.Add(ref Unsafe.As<Header, byte>(ref _header), Header.Size + offset), _dataLength - offset);
+    }
+
+    private Span<byte> AsSpan(int offset, int length)
+    {
+        if ((uint)offset > (uint)_dataLength)
+        {
+            ThrowOffsetTooLong(offset);
+        }
+
+        var maxLength = _dataLength - offset;
+        if ((uint)length > (uint)maxLength)
+        {
+            ThrowLengthTooLong(length, maxLength);
+        }
+
+        return MemoryMarshal.CreateSpan(ref Unsafe.Add(ref Unsafe.As<Header, byte>(ref _header), Header.Size + offset), length);
     }
 
     public bool TrySet(in NibblePath key, ReadOnlySpan<byte> data)
@@ -73,7 +128,7 @@ public readonly ref struct SlottedArray
         // does not exist yet, calculate total memory needed
         var total = GetTotalSpaceRequired(preamble, trimmed, data);
 
-        if (_header.Taken + total + Slot.Size > _data.Length)
+        if (_header.Taken + total + Slot.Size > _dataLength)
         {
             if (_header.Deleted == 0)
             {
@@ -85,7 +140,7 @@ public readonly ref struct SlottedArray
             Deframent();
 
             // re-evaluate again
-            if (_header.Taken + total + Slot.Size > _data.Length)
+            if (_header.Taken + total + Slot.Size > _dataLength)
             {
                 // not enough memory
                 return false;
@@ -98,10 +153,10 @@ public readonly ref struct SlottedArray
         // write slot
         slot.Hash = hash;
         slot.KeyPreamble = preamble;
-        slot.ItemAddress = (ushort)(_data.Length - _header.High - total);
+        slot.ItemAddress = (ushort)(_dataLength - _header.High - total);
 
         // write item: length_key, key, data
-        var dest = _data.Slice(slot.ItemAddress, total);
+        var dest = AsSpan(slot.ItemAddress, total);
 
         if (HasKeyBytes(preamble))
         {
@@ -125,8 +180,8 @@ public readonly ref struct SlottedArray
     /// </summary>
     public int Count => _header.Low / Slot.Size;
 
-    public int CapacityLeft => _data.Length - _header.Taken;
-    public int CapacityTotal => _data.Length;
+    public int CapacityLeft => _dataLength - _header.Taken;
+    public int CapacityTotal => _dataLength;
 
     public Enumerator EnumerateAll() =>
         new(this);
@@ -298,7 +353,7 @@ public readonly ref struct SlottedArray
     private void Deframent()
     {
         // As data were fitting before, the will fit after so all the checks can be skipped
-        var size = Header.Size + _data.Length;
+        var size = Header.Size + _dataLength;
         var array = ArrayPool<byte>.Shared.Rent(size);
         var span = array.AsSpan(0, size);
 
@@ -316,8 +371,8 @@ public readonly ref struct SlottedArray
                 ref var copyTo = ref copy[copy._header.Low / Slot.Size];
 
                 // copy raw, no decoding
-                var high = (ushort)(copy._data.Length - copy._header.High - fromSpan.Length);
-                fromSpan.CopyTo(copy._data.Slice(high));
+                var high = (ushort)(copy._dataLength - copy._header.High - fromSpan.Length);
+                fromSpan.CopyTo(copy.AsSpan(high));
 
                 copyTo.Hash = copyFrom.Hash;
                 copyTo.ItemAddress = high;
@@ -329,7 +384,7 @@ public readonly ref struct SlottedArray
         }
 
         // finalize by coping over to this
-        var raw = MemoryMarshal.CreateSpan(ref Unsafe.As<Header, byte>(ref _header), Header.Size + _data.Length);
+        var raw = MemoryMarshal.CreateSpan(ref Unsafe.As<Header, byte>(ref _header), Header.Size + _dataLength);
         span.CopyTo(raw);
 
         ArrayPool<byte>.Shared.Return(array);
@@ -386,7 +441,7 @@ public readonly ref struct SlottedArray
         // if the found index is odd -> found a slot to be queried
 
         const int notFound = -1;
-        var span = MemoryMarshal.Cast<byte, ushort>(_data.Slice(0, to));
+        var span = AsUshortSpan(to);
 
         var offset = 0;
         int index = span.IndexOf(hash);
@@ -459,10 +514,10 @@ public readonly ref struct SlottedArray
         // assert whether the slot has a previous, if not use data.length
         var previousSlotAddress = Unsafe.IsAddressLessThan(ref this[0], ref slot)
             ? Unsafe.Add(ref slot, -1).ItemAddress
-            : _data.Length;
+            : _dataLength;
 
         var length = previousSlotAddress - slot.ItemAddress;
-        return _data.Slice(slot.ItemAddress, length);
+        return AsSpan(slot.ItemAddress, length);
     }
 
     /// <summary>
@@ -635,6 +690,20 @@ public readonly ref struct SlottedArray
                     return prefix.Append(trimmed, suffix, workingSet[limit..]);
             }
         }
+    }
+
+    [DoesNotReturn]
+    [StackTraceHidden]
+    private void ThrowOffsetTooLong(int offset)
+    {
+        throw new ArgumentOutOfRangeException($"Offset {offset} is longer than dataLength {_dataLength}");
+    }
+
+    [DoesNotReturn]
+    [StackTraceHidden]
+    private static void ThrowLengthTooLong(int length, int maxLength)
+    {
+        throw new ArgumentOutOfRangeException($"Length {length} is longer than remaining length {maxLength}");
     }
 
     public override string ToString() => $"{nameof(Count)}: {Count}, {nameof(CapacityLeft)}: {CapacityLeft}";
