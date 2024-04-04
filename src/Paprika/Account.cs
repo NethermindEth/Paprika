@@ -177,15 +177,19 @@ public readonly struct Account : IEquatable<Account>
     [SkipLocalsInit]
     public static void ReadFrom(ReadOnlySpan<byte> source, out Account account)
     {
+        UInt256 balance;
+        UInt256 nonce;
+
         var first = source[0];
+        int consumed;
         if ((first & DenseMask) == DenseMask)
         {
             // special case, decode the dense
             var nonceLength = (first & DenseNonceLengthMask) >> DenseNonceLengthShift;
             var balanceLength = first & DenseBalanceMask;
 
-            Serializer.ReadFrom(source.Slice(DensePreambleLength, balanceLength), out var balance);
-            Serializer.ReadFrom(source.Slice(DensePreambleLength + balanceLength, nonceLength), out var nonce);
+            Serializer.ReadFrom(source.Slice(DensePreambleLength, balanceLength), out balance);
+            Serializer.ReadFrom(source.Slice(DensePreambleLength + balanceLength, nonceLength), out nonce);
 
             var codeHashStorageRootExist =
                 (first & DenseCodeHashAndStorageRootExistMask) == DenseCodeHashAndStorageRootExistMask;
@@ -196,24 +200,23 @@ public readonly struct Account : IEquatable<Account>
                 return;
             }
 
-            account = new Account(balance, nonce,
-                new Keccak(source.Slice(DensePreambleLength + balanceLength + nonceLength, Keccak.Size)),
-                new Keccak(source.Slice(DensePreambleLength + balanceLength + nonceLength + Keccak.Size, Keccak.Size)));
-
-            return;
+            consumed = DensePreambleLength + balanceLength + nonceLength;
         }
-
+        else
         {
+
             var balanceLength = source[BigPreambleBalanceIndex];
             var nonceLength = source[BigPreambleNonceIndex];
 
-            Serializer.ReadFrom(source.Slice(BigPreambleLength, balanceLength), out var balance);
-            Serializer.ReadFrom(source.Slice(BigPreambleLength + balanceLength, nonceLength), out var nonce);
+            Serializer.ReadFrom(source.Slice(BigPreambleLength, balanceLength), out balance);
+            Serializer.ReadFrom(source.Slice(BigPreambleLength + balanceLength, nonceLength), out nonce);
 
-            account = new Account(balance, nonce,
-                new Keccak(source.Slice(BigPreambleLength + balanceLength + nonceLength, Keccak.Size)),
-                new Keccak(source.Slice(BigPreambleLength + balanceLength + nonceLength + Keccak.Size, Keccak.Size))
-            );
+            consumed = BigPreambleLength + balanceLength + nonceLength;
         }
+
+        account = new Account(balance, nonce,
+            Unsafe.ReadUnaligned<Keccak>(in source[consumed]),
+            Unsafe.ReadUnaligned<Keccak>(in source[consumed + Keccak.Size])
+        );
     }
 }
