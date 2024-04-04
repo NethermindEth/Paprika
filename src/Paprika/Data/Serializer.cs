@@ -1,4 +1,7 @@
 using Nethermind.Int256;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 
 namespace Paprika.Data;
 
@@ -37,11 +40,18 @@ public static class Serializer
         return length;
     }
 
+    [SkipLocalsInit]
     public static void ReadFrom(ReadOnlySpan<byte> source, out UInt256 value)
     {
-        Span<byte> uint256 = stackalloc byte[Uint256Size];
+        if (source.Length != Uint256Size)
+        {
+            // Clear the vector as we might not fill all of it
+            Vector256<byte> data = default;
+            Span<byte> uint256 = MemoryMarshal.CreateSpan(ref Unsafe.As<Vector256<byte>, byte>(ref data), Vector256<byte>.Count);
+            source.CopyTo(uint256.Slice(Uint256Size - source.Length));
+            source = uint256;
+        }
 
-        source.CopyTo(uint256.Slice(Uint256Size - source.Length));
-        value = new UInt256(uint256, BigEndian);
+        value = new UInt256(source, BigEndian);
     }
 }
