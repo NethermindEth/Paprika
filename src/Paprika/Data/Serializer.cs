@@ -1,4 +1,7 @@
 using Nethermind.Int256;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 
 namespace Paprika.Data;
 
@@ -17,7 +20,7 @@ public static class Serializer
     /// Writes <paramref name="value"/> without encoding the length, returning the leftover.
     /// The caller should store length elsewhere.
     /// </summary>
-    public static Span<byte> WriteWithLeftover(this UInt256 value, Span<byte> destination, out int length)
+    public static int WriteWithLeftover(in UInt256 value, Span<byte> destination)
     {
         var slice = destination.Slice(0, Uint256Size);
         value.ToBigEndian(slice);
@@ -26,23 +29,29 @@ public static class Serializer
         if (firstNonZero == NotFound)
         {
             // all zeros
-            length = 0;
-            return destination;
+            return 0;
         }
 
         // some non-zeroes
-        length = Uint256Size - firstNonZero;
+        var length = Uint256Size - firstNonZero;
 
         // move left
         destination.Slice(firstNonZero, length).CopyTo(destination.Slice(0, length));
-        return destination.Slice(length);
+        return length;
     }
 
+    [SkipLocalsInit]
     public static void ReadFrom(ReadOnlySpan<byte> source, out UInt256 value)
     {
-        Span<byte> uint256 = stackalloc byte[Uint256Size];
+        if (source.Length != Uint256Size)
+        {
+            // Clear the vector as we might not fill all of it
+            Vector256<byte> data = default;
+            Span<byte> uint256 = MemoryMarshal.CreateSpan(ref Unsafe.As<Vector256<byte>, byte>(ref data), Vector256<byte>.Count);
+            source.CopyTo(uint256.Slice(Uint256Size - source.Length));
+            source = uint256;
+        }
 
-        source.CopyTo(uint256.Slice(Uint256Size - source.Length));
-        value = new UInt256(uint256, BigEndian);
+        value = new UInt256(source, BigEndian);
     }
 }

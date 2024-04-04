@@ -1390,7 +1390,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 Account.ReadFrom(accountOwner.Span, out var account);
 
                 // update it
-                account = account.WithChangedStorageRoot(storageRoot);
+                account.WithChangedStorageRoot(storageRoot, out account);
 
                 // set it in
                 using var pooled = ctx.Rent();
