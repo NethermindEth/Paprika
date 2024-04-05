@@ -87,7 +87,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         UIntPtr stack = default;
         using var ctx = new ComputeContext(wrapper, TrieType.State, hint, CacheBudget.Options.None.Build(), _pool,
             ref stack);
-        var value = Compute(in root, ctx);
+        Compute(in root, ctx, out var value);
         return new Keccak(value.Span);
     }
 
@@ -101,7 +101,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         UIntPtr stack = default;
         using var ctx = new ComputeContext(prefixed, TrieType.Storage, hint, CacheBudget.Options.None.Build(), _pool,
             ref stack);
-        var value = Compute(in root, ctx);
+        Compute(in root, ctx, out var value);
         return new Keccak(value.Span);
     }
 
@@ -182,7 +182,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             UIntPtr stack = default;
             var hint = _maxDegreeOfParallelism == ParallelismNone ? ComputeHint.DontUseParallel : ComputeHint.None;
             using var ctx = new ComputeContext(commit, TrieType.State, hint, budget, _pool, ref stack);
-            var rootKeccak = Compute(root, ctx);
+            Compute(root, ctx, out var rootKeccak);
 
             Debug.Assert(rootKeccak.DataType == KeccakOrRlp.Type.Keccak);
 
@@ -382,7 +382,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         public void Dispose() => PageOwner.ReturnStack(_pool, ref _root);
     }
 
-    private KeccakOrRlp Compute(scoped in Key key, scoped in ComputeContext ctx)
+    private void Compute(scoped in Key key, scoped in ComputeContext ctx, out KeccakOrRlp keccakOrRlp)
     {
         using var owner = ctx.Commit.Get(key);
 
@@ -395,21 +395,25 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         if (owner.IsEmpty)
         {
             // empty tree, return empty
-            return Keccak.EmptyTreeHash;
+            keccakOrRlp = Keccak.EmptyTreeHash;
         }
 
         var leftover = Node.ReadFrom(out var type, out var leaf, out var ext, out var branch, owner.Span);
         switch (type)
         {
             case Node.Type.Leaf:
-                return EncodeLeaf(key, ctx, leaf.Path);
+                EncodeLeaf(key, ctx, leaf.Path, out keccakOrRlp);
+                return;
             case Node.Type.Extension:
-                return EncodeExtension(key, ctx, ext);
+                EncodeExtension(key, ctx, ext, out keccakOrRlp);
+                return;
             case Node.Type.Branch:
-                return EncodeBranch(key, ctx, branch, leftover, owner.IsOwnedBy(ctx.Commit));
+                EncodeBranch(key, ctx, branch, leftover, owner.IsOwnedBy(ctx.Commit), out keccakOrRlp);
+                return;
             default:
                 ThrowOutOfRange();
-                return default;
+                keccakOrRlp = default;
+                return;
         }
 
         [DoesNotReturn]
@@ -421,7 +425,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     }
 
     [SkipLocalsInit]
-    private KeccakOrRlp EncodeLeaf(scoped in Key key, scoped in ComputeContext ctx, scoped in NibblePath leafPath)
+    private void EncodeLeaf(scoped in Key key, scoped in ComputeContext ctx, scoped in NibblePath leafPath, out KeccakOrRlp keccakOrRlp)
     {
         var leafTotalPath =
             key.Path.Append(leafPath, stackalloc byte[NibblePath.MaxLengthValue * 2 + 1]);
@@ -432,15 +436,16 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             : Key.Raw(leafTotalPath, DataType.StorageCell, NibblePath.Empty);
 
         using var leafData = ctx.Commit.Get(leafKey);
-        return EncodeLeafByPath(leafKey, ctx, leafPath, leafData);
+        EncodeLeafByPath(leafKey, ctx, leafPath, leafData, out keccakOrRlp);
     }
 
     [SkipLocalsInit]
-    private KeccakOrRlp EncodeLeafByPath(
+    private void EncodeLeafByPath(
         scoped in Key leafKey,
         scoped in ComputeContext ctx,
         scoped in NibblePath leafPath,
-        scoped in ReadOnlySpanOwnerWithMetadata<byte> leafData)
+        scoped in ReadOnlySpanOwnerWithMetadata<byte> leafData,
+        out KeccakOrRlp keccakOrRlp)
     {
 #if SNAP_SYNC_SUPPORT
         if (SnapSync.TryGetBoundaryValue(leafData.Span, out var keccak))
@@ -455,7 +460,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             ctx.Commit.Set(leafKey, leafData.Span, entryType);
         }
 
-        KeccakOrRlp keccakOrRlp;
         if (ctx.TrieType == TrieType.State)
         {
             Account.ReadFrom(leafData.Span, out var account);
@@ -466,22 +470,20 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 prefixed.SetPrefix(leafKey.Path);
                 UIntPtr stack = default;
                 using var ctx2 = new ComputeContext(prefixed, TrieType.Storage, ctx.Hint, ctx.Budget, _pool, ref stack);
-                var storageRoot = Compute(Key.Merkle(NibblePath.Empty), ctx2);
-                account = new Account(account.Balance, account.Nonce, account.CodeHash, new Keccak(storageRoot.Span));
+                Compute(Key.Merkle(NibblePath.Empty), ctx2, out keccakOrRlp);
+                account = new Account(account.Balance, account.Nonce, account.CodeHash, new Keccak(keccakOrRlp.Span));
             }
 
             Node.Leaf.KeccakOrRlp(leafPath, account, out keccakOrRlp);
-            return keccakOrRlp;
         }
 
         Debug.Assert(ctx.TrieType == TrieType.Storage, "Only storage now");
 
         Node.Leaf.KeccakOrRlp(leafPath, leafData.Span, out keccakOrRlp);
-        return keccakOrRlp;
     }
 
-    private KeccakOrRlp EncodeBranch(scoped in Key key, scoped in ComputeContext ctx, scoped in Node.Branch branch,
-        ReadOnlySpan<byte> previousRlp, bool isOwnedByThisCommit)
+    private void EncodeBranch(scoped in Key key, scoped in ComputeContext ctx, scoped in Node.Branch branch,
+        ReadOnlySpan<byte> previousRlp, bool isOwnedByThisCommit, out KeccakOrRlp keccakOrRlp)
     {
         // Parallelize at the root level any trie, state or storage, that have all children set.
         // This heuristic is used to estimate that the tree should be big enough to gain from making this computation
@@ -536,24 +538,29 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     var childPath = key.Path.AppendNibble(i, childSpan);
                     var leafKey = Key.Merkle(childPath);
 
-                    var value = childPath.Length == NibblePath.KeccakNibbleCount
-                        ? EncodeLeaf(leafKey, ctx, NibblePath.Empty)
-                        : Compute(leafKey, ctx);
-
-                    // it's either Keccak or a span. Both are encoded the same ways
-                    if (value.DataType == KeccakOrRlp.Type.Keccak)
+                    if (childPath.Length == NibblePath.KeccakNibbleCount)
                     {
-                        stream.Encode(value.Span);
+                        EncodeLeaf(leafKey, ctx, NibblePath.Empty, out keccakOrRlp);
                     }
                     else
                     {
-                        stream.Write(value.Span);
+                        Compute(leafKey, ctx, out keccakOrRlp);
+                    }
+
+                    // it's either Keccak or a span. Both are encoded the same ways
+                    if (keccakOrRlp.DataType == KeccakOrRlp.Type.Keccak)
+                    {
+                        stream.Encode(keccakOrRlp.Span);
+                    }
+                    else
+                    {
+                        stream.Write(keccakOrRlp.Span);
                     }
 
                     if (memoize)
                     {
                         memoizedUpdated = true;
-                        memo.Set(value, i);
+                        memo.Set(keccakOrRlp, i);
                     }
                 }
                 else
@@ -587,7 +594,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 var child = commits[nibble] = commit.GetChild();
                 UIntPtr stack = default;
                 using var ctx = new ComputeContext(child, trieType, hint, budget, _pool, ref stack);
-                results[nibble] = Compute(Key.Merkle(childPath), ctx).Span.ToArray();
+                Compute(Key.Merkle(childPath), ctx, out KeccakOrRlp keccakRlp);
+                results[nibble] = keccakRlp.Span.ToArray();
             });
 
             foreach (var childCommit in commits)
@@ -637,7 +645,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             ctx.Commit.SetBranch(key, branch.Children, rlpMemoization, EntryType.Persistent);
         }
 
-        return KeccakOrRlp.FromSpan(rlp.Slice(from, end - from));
+        KeccakOrRlp.FromSpan(rlp.Slice(from, end - from), out keccakOrRlp);
     }
 
     /// <summary>
@@ -647,7 +655,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     public static Span<byte> MakeRlpWritable(ReadOnlySpan<byte> previousRlp) =>
         MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(previousRlp), previousRlp.Length);
 
-    private KeccakOrRlp EncodeExtension(scoped in Key key, scoped in ComputeContext ctx, scoped in Node.Extension ext)
+    private void EncodeExtension(scoped in Key key, scoped in ComputeContext ctx, scoped in Node.Extension ext, out KeccakOrRlp keccakOrRlp)
     {
         using var pooled = ctx.Rent();
 
@@ -655,13 +663,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         var span = pooled.Span[..slice];
 
         // retrieve the children keccak-or-rlp
-        var branchKeccakOrRlp = Compute(Key.Merkle(key.Path.Append(ext.Path, span)), ctx);
+        Compute(Key.Merkle(key.Path.Append(ext.Path, span)), ctx, out keccakOrRlp);
 
         ext.Path.HexEncode(span, false);
         span = span.Slice(0, ext.Path.HexEncodedLength); // trim the span to the hex
 
-        var contentLength = Rlp.LengthOf(span) + (branchKeccakOrRlp.DataType == KeccakOrRlp.Type.Rlp
-            ? branchKeccakOrRlp.Span.Length
+        var contentLength = Rlp.LengthOf(span) + (keccakOrRlp.DataType == KeccakOrRlp.Type.Rlp
+            ? keccakOrRlp.Span.Length
             : Rlp.LengthOfKeccakRlp);
 
         var totalLength = Rlp.LengthOfSequence(contentLength);
@@ -669,9 +677,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         RlpStream stream = new(pooled.Span.Slice(slice, totalLength));
         stream.StartSequence(contentLength);
         stream.Encode(span);
-        stream.Encode(branchKeccakOrRlp.Span);
-
-        return stream.ToKeccakOrRlp();
+        stream.Encode(keccakOrRlp.Span);
+        stream.ToKeccakOrRlp(out keccakOrRlp);
     }
 
     /// <summary>
@@ -1378,7 +1385,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             // compute new storage root hash
             UIntPtr stack = default;
             using var ctx = new ComputeContext(prefixed, TrieType.Storage, hint, budget, behavior._pool, ref stack);
-            var keccakOrRlp = behavior.Compute(Key.Merkle(NibblePath.Empty), ctx);
+            behavior.Compute(Key.Merkle(NibblePath.Empty), ctx, out var keccakOrRlp);
             var storageRoot = new Keccak(keccakOrRlp.Span);
 
             // Read the existing account from the commit, without the prefix as accounts are not prefixed

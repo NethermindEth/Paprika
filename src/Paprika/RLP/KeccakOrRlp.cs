@@ -34,9 +34,8 @@ public readonly struct KeccakOrRlp
     public static implicit operator KeccakOrRlp(in Keccak keccak) => new(in keccak);
 
     [SkipLocalsInit]
-    public static KeccakOrRlp FromSpan(scoped ReadOnlySpan<byte> data)
+    public static void FromSpan(scoped ReadOnlySpan<byte> data, out KeccakOrRlp keccak)
     {
-        KeccakOrRlp keccak;
         Unsafe.SkipInit(out keccak);
 
         if (data.Length < KeccakLength)
@@ -55,8 +54,6 @@ public readonly struct KeccakOrRlp
             // Set length to KeccakLength
             Unsafe.AsRef(in keccak._length) = (byte)KeccakLength;
         }
-
-        return keccak;
     }
 
     public override string ToString() => DataType == Type.Keccak
@@ -66,8 +63,8 @@ public readonly struct KeccakOrRlp
 
 public static class RlpStreamExtensions
 {
-    public static KeccakOrRlp ToKeccakOrRlp(this scoped RlpStream stream)
+    public static void ToKeccakOrRlp(this ref RlpStream stream, out KeccakOrRlp keccak)
     {
-        return KeccakOrRlp.FromSpan(stream.Data);
+        KeccakOrRlp.FromSpan(stream.Data, out keccak);
     }
 }

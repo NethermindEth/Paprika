@@ -13,10 +13,19 @@ public class KeccakOrRlpBenchmarks
     [Benchmark(OperationsPerInvoke = 4)]
     public int From_span_rlp()
     {
-        return KeccakOrRlp.FromSpan(RlpSpan).Span.Length +
-            KeccakOrRlp.FromSpan(RlpSpan).Span.Length +
-            KeccakOrRlp.FromSpan(RlpSpan).Span.Length +
-            KeccakOrRlp.FromSpan(RlpSpan).Span.Length;
+        int length = 0;
+        KeccakOrRlp keccak;
+
+        KeccakOrRlp.FromSpan(RlpSpan, out keccak);
+        length += keccak.Span.Length;
+        KeccakOrRlp.FromSpan(RlpSpan, out keccak);
+        length += keccak.Span.Length;
+        KeccakOrRlp.FromSpan(RlpSpan, out keccak);
+        length += keccak.Span.Length;
+        KeccakOrRlp.FromSpan(RlpSpan, out keccak);
+        length += keccak.Span.Length;
+
+        return length;
     }
 
     [Benchmark(OperationsPerInvoke = 4)]
@@ -24,9 +33,18 @@ public class KeccakOrRlpBenchmarks
     {
         var span = Keccak.EmptyTreeHash.Span;
 
-        return KeccakOrRlp.FromSpan(span).Span.Length +
-               KeccakOrRlp.FromSpan(span).Span.Length +
-               KeccakOrRlp.FromSpan(span).Span.Length +
-               KeccakOrRlp.FromSpan(span).Span.Length;
+        int length = 0;
+        KeccakOrRlp keccak;
+
+        KeccakOrRlp.FromSpan(span, out keccak);
+        length += keccak.Span.Length;
+        KeccakOrRlp.FromSpan(span, out keccak);
+        length += keccak.Span.Length;
+        KeccakOrRlp.FromSpan(span, out keccak);
+        length += keccak.Span.Length;
+        KeccakOrRlp.FromSpan(span, out keccak);
+        length += keccak.Span.Length;
+
+        return length;
     }
 }

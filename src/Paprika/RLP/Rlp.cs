@@ -12,7 +12,7 @@ public static class Rlp
     public const int LengthOfKeccakRlp = 33;
     public const int MaxLengthOfLength = 4;
 
-    [SkipLocalsInit]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int LengthOf(in UInt256 item)
     {
         if (item < 128UL)
@@ -20,6 +20,13 @@ public static class Rlp
             return 1;
         }
 
+        return LongerLengthOf(item);
+    }
+
+    [SkipLocalsInit]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static int LongerLengthOf(in UInt256 item)
+    {
         Vector256<byte> data;
         Unsafe.SkipInit(out data);
 
@@ -58,6 +65,7 @@ public static class Rlp
         return 1 + contentLength + LengthOfLength(contentLength);
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     public static int LengthOfLength(int value)
     {
         int bits = 32 - BitOperations.LeadingZeroCount((uint)value | 1);
