@@ -476,6 +476,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             }
 
             Node.Leaf.KeccakOrRlp(leafPath, account, out keccakOrRlp);
+            return;
         }
 
         Debug.Assert(ctx.TrieType == TrieType.Storage, "Only storage now");
