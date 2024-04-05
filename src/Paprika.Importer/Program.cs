@@ -39,7 +39,8 @@ using var headers = new DbOnTheRocks(path, GetSettings(DbNames.Headers), cfg, lo
 using var blockNumbers = new DbOnTheRocks(path, GetSettings(DbNames.BlockNumbers), cfg, logs);
 var headerStore = new HeaderStore(headers, blockNumbers);
 
-using var store = new TrieStore(state, logs);
+using var trieStore = new TrieStore(state, logs);
+var store = trieStore.GetTrieStore(null);
 
 // from BlockTree.cs
 var stateHeadHashDbEntryAddress = new byte[16];
@@ -52,7 +53,7 @@ var trie = new StateTree(store, logs);
 
 var back = 0;
 var blockNumber = bestPersistedState.Value;
-
+TreePath emptyPath;
 do
 {
     var bestPersisted = blockInfos.Get(blockNumber - back);
@@ -71,7 +72,9 @@ do
     {
         throw new Exception($"Searched for {back} block back since {blockNumber} and failed to load the root");
     }
-} while (trie.RootRef.TryResolveNode(store) == false);
+    
+    emptyPath = TreePath.Empty;
+} while (trie.RootRef.TryResolveNode(store, ref emptyPath) == false);
 
 var dir = Directory.GetCurrentDirectory();
 var dataPath = Path.Combine(dir, "db");
@@ -220,17 +223,17 @@ DbSettings GetSettings(string dbName)
     return new DbSettings(dbName, dbPath);
 }
 
-static TrieNode MoveDownInTree(byte[] nibbles, PatriciaTree trie, ITrieNodeResolver store)
-{
-    var root = trie.RootRef!;
-
-    for (var i = 0; i < nibbles.Length; i++)
-    {
-        root.ResolveNode(store, ReadFlags.HintCacheMiss);
-        root = root.GetChild(store, nibbles[i])!;
-    }
-
-    root.ResolveNode(store, ReadFlags.HintCacheMiss);
-
-    return root;
-}
+// static TrieNode MoveDownInTree(byte[] nibbles, PatriciaTree trie, ITrieNodeResolver store)
+// {
+//     var root = trie.RootRef!;
+//
+//     for (var i = 0; i < nibbles.Length; i++)
+//     {
+//         root.ResolveNode(store, ReadFlags.HintCacheMiss);
+//         root = root.GetChild(store, nibbles[i])!;
+//     }
+//
+//     root.ResolveNode(store, ReadFlags.HintCacheMiss);
+//
+//     return root;
+// }

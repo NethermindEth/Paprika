@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Nethermind.Core.Crypto;
 using Nethermind.Trie;
 using Paprika.Data;
 
@@ -17,7 +18,7 @@ public struct PathContext : INodeContext<PathContext>
 
     public Span<byte> Span => MemoryMarshal.CreateSpan(ref First, PathLength);
 
-    public PathContext Add(byte[] nibblePath)
+    public PathContext Add(ReadOnlySpan<byte> nibblePath)
     {
         var added = NibblePath.FromRawNibbles(nibblePath, stackalloc byte[(nibblePath.Length + 1) / 2]);
         var current = NibblePath.FromKey(Span).SliceTo(Length);
@@ -42,6 +43,15 @@ public struct PathContext : INodeContext<PathContext>
         var result = default(PathContext);
         appended.RawSpan.CopyTo(result.Span);
         result.Length = appended.Length;
+
+        return result;
+    }
+
+    public PathContext AddStorage(in ValueHash256 storage)
+    {
+        var result = default(PathContext);
+        storage.BytesAsSpan.CopyTo(result.Span);
+        result.Length = 64;
 
         return result;
     }
