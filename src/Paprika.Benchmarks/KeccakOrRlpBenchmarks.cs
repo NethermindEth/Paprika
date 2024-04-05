@@ -17,13 +17,13 @@ public class KeccakOrRlpBenchmarks
         KeccakOrRlp keccak;
 
         KeccakOrRlp.FromSpan(RlpSpan, out keccak);
-        length += keccak.Span.Length;
+        length += keccak.Length;
         KeccakOrRlp.FromSpan(RlpSpan, out keccak);
-        length += keccak.Span.Length;
+        length += keccak.Length;
         KeccakOrRlp.FromSpan(RlpSpan, out keccak);
-        length += keccak.Span.Length;
+        length += keccak.Length;
         KeccakOrRlp.FromSpan(RlpSpan, out keccak);
-        length += keccak.Span.Length;
+        length += keccak.Length;
 
         return length;
     }
@@ -37,13 +37,13 @@ public class KeccakOrRlpBenchmarks
         KeccakOrRlp keccak;
 
         KeccakOrRlp.FromSpan(span, out keccak);
-        length += keccak.Span.Length;
+        length += keccak.Length;
         KeccakOrRlp.FromSpan(span, out keccak);
-        length += keccak.Span.Length;
+        length += keccak.Length;
         KeccakOrRlp.FromSpan(span, out keccak);
-        length += keccak.Span.Length;
+        length += keccak.Length;
         KeccakOrRlp.FromSpan(span, out keccak);
-        length += keccak.Span.Length;
+        length += keccak.Length;
 
         return length;
     }

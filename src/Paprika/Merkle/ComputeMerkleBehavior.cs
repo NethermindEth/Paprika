@@ -88,7 +88,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         using var ctx = new ComputeContext(wrapper, TrieType.State, hint, CacheBudget.Options.None.Build(), _pool,
             ref stack);
         Compute(in root, ctx, out var value);
-        return new Keccak(value.Span);
+        return value.Keccak;
     }
 
     public Keccak CalculateStorageHash(IReadOnlyWorldState commit, in Keccak account, NibblePath storagePath = default)
@@ -102,7 +102,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         using var ctx = new ComputeContext(prefixed, TrieType.Storage, hint, CacheBudget.Options.None.Build(), _pool,
             ref stack);
         Compute(in root, ctx, out var value);
-        return new Keccak(value.Span);
+        return value.Keccak;
     }
 
     class CommitWrapper : IChildCommit
@@ -186,10 +186,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
             Debug.Assert(rootKeccak.DataType == KeccakOrRlp.Type.Keccak);
 
-            var value = new Keccak(rootKeccak.Span);
-            RootHash = value;
+            RootHash = rootKeccak.Keccak;
 
-            return value;
+            return rootKeccak.Keccak;
         }
     }
 
@@ -472,7 +471,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 UIntPtr stack = default;
                 using var ctx2 = new ComputeContext(prefixed, TrieType.Storage, ctx.Hint, ctx.Budget, _pool, ref stack);
                 Compute(Key.Merkle(NibblePath.Empty), ctx2, out keccakOrRlp);
-                account = new Account(account.Balance, account.Nonce, account.CodeHash, new Keccak(keccakOrRlp.Span));
+                account = new Account(account.Balance, account.Nonce, account.CodeHash, keccakOrRlp.Keccak);
             }
 
             Node.Leaf.KeccakOrRlp(leafPath, account, out keccakOrRlp);
@@ -552,7 +551,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     // it's either Keccak or a span. Both are encoded the same ways
                     if (keccakOrRlp.DataType == KeccakOrRlp.Type.Keccak)
                     {
-                        stream.Encode(keccakOrRlp.Span);
+                        stream.Encode(keccakOrRlp.Keccak);
                     }
                     else
                     {
@@ -671,7 +670,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         span = span.Slice(0, ext.Path.HexEncodedLength); // trim the span to the hex
 
         var contentLength = Rlp.LengthOf(span) + (keccakOrRlp.DataType == KeccakOrRlp.Type.Rlp
-            ? keccakOrRlp.Span.Length
+            ? keccakOrRlp.Length
             : Rlp.LengthOfKeccakRlp);
 
         var totalLength = Rlp.LengthOfSequence(contentLength);
@@ -679,7 +678,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         RlpStream stream = new(pooled.Span.Slice(slice, totalLength));
         stream.StartSequence(contentLength);
         stream.Encode(span);
-        stream.Encode(keccakOrRlp.Span);
+        stream.Encode(keccakOrRlp.Keccak);
         stream.ToKeccakOrRlp(out keccakOrRlp);
     }
 
@@ -1388,7 +1387,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             UIntPtr stack = default;
             using var ctx = new ComputeContext(prefixed, TrieType.Storage, hint, budget, behavior._pool, ref stack);
             behavior.Compute(Key.Merkle(NibblePath.Empty), ctx, out var keccakOrRlp);
-            var storageRoot = new Keccak(keccakOrRlp.Span);
 
             // Read the existing account from the commit, without the prefix as accounts are not prefixed
             var key = Key.Account(keccak);
@@ -1399,7 +1397,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 Account.ReadFrom(accountOwner.Span, out var account);
 
                 // update it
-                account.WithChangedStorageRoot(storageRoot, out account);
+                account.WithChangedStorageRoot(keccakOrRlp.Keccak, out account);
 
                 // set it in
                 using var pooled = ctx.Rent();
@@ -1410,7 +1408,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 //see: https://sepolia.etherscan.io/tx/0xb3790025b59b7e31d6d8249e8962234217e0b5b02e47ecb2942b8c4d0f4a3cfe
                 // Contract is created and destroyed, then its values are destroyed
                 // The storage root should be empty, otherwise, it's wrong
-                Debug.Assert(storageRoot == Keccak.EmptyTreeHash,
+                Debug.Assert(keccakOrRlp.Keccak == Keccak.EmptyTreeHash,
                     $"Non-existent account with hash of {keccak.ToString()} should have the storage root empty");
             }
         }

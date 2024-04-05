@@ -115,11 +115,25 @@ public ref struct RlpStream
 
     public void Encode(in Keccak keccak)
     {
-        // TODO: If keccak is a known one like `Keccak.OfAnEmptyString` or `Keccak.OfAnEmptySequenceRlp`
-        // we can cache those `Rlp`s to be reused
+        if (Data.Length - Position < Vector256<byte>.Count + 1)
+        {
+            ThrowTooSmallException();
+        }
 
-        WriteByte(160);
-        Write(keccak.BytesAsSpan);
+        ref byte start = ref Unsafe.Add(ref MemoryMarshal.GetReference(Data), Position);
+        start = 160;
+
+        Unsafe.As<byte, Vector256<byte>>(ref Unsafe.Add(ref start, 1))
+            = Unsafe.As<Keccak, Vector256<byte>>(ref Unsafe.AsRef(in keccak));
+
+        Position += Vector256<byte>.Count + 1;
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowTooSmallException()
+        {
+            throw new ArgumentOutOfRangeException("Too small");
+        }
     }
 
     private void WriteEncodedLength(int value)
