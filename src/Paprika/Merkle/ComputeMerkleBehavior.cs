@@ -396,6 +396,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         {
             // empty tree, return empty
             keccakOrRlp = Keccak.EmptyTreeHash;
+            return;
         }
 
         var leftover = Node.ReadFrom(out var type, out var leaf, out var ext, out var branch, owner.Span);

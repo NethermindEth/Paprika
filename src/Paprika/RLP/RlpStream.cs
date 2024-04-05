@@ -24,10 +24,9 @@ public ref struct RlpStream
 
     public void StartSequence(int contentLength)
     {
-        byte prefix;
         if (contentLength < 56)
         {
-            prefix = (byte)(192 + contentLength);
+            byte prefix = (byte)(192 + contentLength);
             WriteByte(prefix);
         }
         else
