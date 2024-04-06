@@ -221,7 +221,7 @@ public class SlottedArrayTests
     [Test]
     public void Hashing()
     {
-        var hashes = new Dictionary<ushort, string>();
+        var hashes = new Dictionary<int, string>();
 
         // empty
         Unique("");
@@ -262,7 +262,10 @@ public class SlottedArrayTests
         void Unique(string key)
         {
             var path = NibblePath.Parse(key);
-            var hash = SlottedArray.HashForTests(path);
+            var tuple = SlottedArray.HashForTests(path);
+
+            var hash = tuple.hash << 8 | tuple.preamble;
+
 
             if (hashes.TryAdd(hash, key) == false)
             {
