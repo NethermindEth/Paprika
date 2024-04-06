@@ -487,9 +487,9 @@ public readonly ref struct SlottedArray
         public const int Size = 4;
 
         /// <summary>
-        /// The address currently requires 12 bits [0-11] to address whole page. 
+        /// The address mask, currently supports <see cref="KeyPreambleShift"/> bits which allows to address anything withing 8kb. 
         /// </summary>
-        private const ushort AddressMask = Page.PageSize - 1;
+        private const ushort AddressMask = unchecked((ushort)~KeyPreambleMask);
 
         /// <summary>
         /// The address of this item.
@@ -511,8 +511,8 @@ public readonly ref struct SlottedArray
         public void MarkAsDeleted() => KeyPreamble = KeyPreambleDelete;
 
         // Preamble uses all bits that AddressMask does not
-        private const ushort KeyPreambleMask = 0b_1111_0000_0000_0000;
-        private const ushort KeyPreambleShift = 12;
+        private const ushort KeyPreambleMask = 0b_1110_0000_0000_0000;
+        private const ushort KeyPreambleShift = 13;
 
         // Lengths encoding
         private const byte KeyPreambleLengthShift = 1;
