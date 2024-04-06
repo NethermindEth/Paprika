@@ -218,6 +218,32 @@ public class SlottedArrayTests
         return Verify(span.ToArray());
     }
 
+    [TestCase(0)]
+    [TestCase(1)]
+    public void Gather_stats(byte odd)
+    {
+        var map = new SlottedArray(stackalloc byte[256]);
+        var data = ReadOnlySpan<byte>.Empty;
+        const byte doubled = 2;
+
+        map.SetAssert(NibblePath.Single(1, odd), data);
+        map.SetAssert(NibblePath.Single(doubled, odd), data);
+        map.SetAssert(NibblePath.Single(3, odd), data);
+        map.SetAssert(NibblePath.Single(5, odd), data);
+        map.SetAssert(NibblePath.Single(0xA, odd), data);
+
+        // double
+        map.SetAssert(NibblePath.Single(doubled, odd).AppendNibble(0xA, stackalloc byte[4]), data);
+
+        Span<ushort> stats = stackalloc ushort[16];
+        map.GatherCountStatistics(stats);
+
+        stats[1].Should().Be(1);
+        stats[doubled].Should().Be(2);
+        stats[0].Should().Be(0, "Because it was not set");
+        stats[0xA].Should().Be(1);
+    }
+
     [Test]
     public void Hashing()
     {
