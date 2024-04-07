@@ -330,7 +330,7 @@ public sealed class KeccakHash
                 {
                     state[i] ^= input64[i];
                 }
-            
+
                 input64 = input64[ulongRounds..];
                 KeccakF(state);
             }
