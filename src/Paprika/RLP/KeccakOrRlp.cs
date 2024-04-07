@@ -50,7 +50,7 @@ public readonly struct KeccakOrRlp
         else
         {
             // Compute hash directly to keccak
-            KeccakHash.ComputeHash(data, keccak.Keccak.BytesAsSpan);
+            KeccakHash.ComputeHash(data, out Unsafe.AsRef(in keccak.Keccak));
             // Set length to KeccakLength
             Unsafe.AsRef(in keccak.Length) = (byte)KeccakLength;
         }

@@ -75,15 +75,13 @@ public readonly struct Keccak : IEquatable<Keccak>
             return OfAnEmptyString;
         }
 
-        Keccak result = default;
-        KeccakHash.ComputeHashBytesToSpan(input, result.BytesAsSpan);
+        KeccakHash.ComputeHash(input, out Keccak result);
         return result;
     }
 
     private static Keccak InternalCompute(byte[] input)
     {
-        Keccak result = default;
-        KeccakHash.ComputeHashBytesToSpan(input, result.BytesAsSpan);
+        KeccakHash.ComputeHash(input, out Keccak result);
         return result;
     }
 
