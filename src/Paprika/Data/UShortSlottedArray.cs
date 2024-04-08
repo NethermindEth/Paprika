@@ -303,7 +303,7 @@ public readonly ref struct UShortSlottedArray
         public const int Size = 4;
 
         // ItemAddress, requires 12 bits [0-11] to address whole page 
-        private const ushort AddressMask = Page.PageSize - 1;
+        private const ushort AddressMask = unchecked((ushort)~DeletedMask);
 
         /// <summary>
         /// The address of this item.
@@ -314,7 +314,7 @@ public readonly ref struct UShortSlottedArray
             set => Raw = (ushort)((Raw & ~AddressMask) | value);
         }
 
-        private const ushort DeletedMask = 0b0001_0000_0000_0000;
+        private const ushort DeletedMask = 0b1000_0000_0000_0000;
 
         /// <summary>
         /// The data type contained in this slot.

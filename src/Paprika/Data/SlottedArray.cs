@@ -487,7 +487,7 @@ public readonly ref struct SlottedArray
         public const int Size = 4;
 
         /// <summary>
-        /// The address mask, currently supports <see cref="KeyPreambleShift"/> bits which allows to address anything withing 8kb. 
+        /// The address mask, currently supports 13 bits which allows to address anything withing 8kb. 
         /// </summary>
         private const ushort AddressMask = unchecked((ushort)~KeyPreambleMask);
 

@@ -95,7 +95,7 @@ public struct PageHeader
 /// </summary>
 public readonly unsafe struct Page : IPage, IEquatable<Page>
 {
-    public const int PageSize = 4 * 1024;
+    public const int PageSize = 8 * 1024;
 
     private readonly byte* _ptr;
 
