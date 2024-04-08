@@ -128,7 +128,7 @@ public abstract class RefCountingDisposable : IDisposable
         return leases == Disposing ? "Disposed" : $"Leases: {leases}";
     }
 
-    [StructLayout(LayoutKind.Explicit, Size = 64 + sizeof(long))]
+    [StructLayout(LayoutKind.Explicit, Size = 128)]
     private struct PaddedValue
     {
         [FieldOffset(64)]
