@@ -9,13 +9,13 @@ namespace Paprika.Utils;
 /// </summary>
 public abstract class RefCountingDisposable : IDisposable
 {
-    private const int Initial = 1;
+    private const int Single = 1;
     private const int NoAccessors = 0;
     private const int Disposing = -1;
 
     private PaddedValue _leases;
 
-    protected RefCountingDisposable(int initialCount = Initial)
+    protected RefCountingDisposable(int initialCount = Single)
     {
         _leases.Value = initialCount;
     }
@@ -47,7 +47,7 @@ public abstract class RefCountingDisposable : IDisposable
 
         while (true)
         {
-            var prev = Interlocked.CompareExchange(ref _leases.Value, current + 1, current);
+            var prev = Interlocked.CompareExchange(ref _leases.Value, current + Single, current);
             if (prev == current)
             {
                 // Successfully acquired
@@ -83,7 +83,7 @@ public abstract class RefCountingDisposable : IDisposable
 
         while (true)
         {
-            var prev = Interlocked.CompareExchange(ref _leases.Value, current - 1, current);
+            var prev = Interlocked.CompareExchange(ref _leases.Value, current - Single, current);
             if (prev != current)
             {
                 current = prev;
@@ -91,7 +91,7 @@ public abstract class RefCountingDisposable : IDisposable
                 Thread.SpinWait(1);
                 continue;
             }
-            if (prev == 1)
+            if (prev == Single)
             {
                 // Last use, try to dispose underlying
                 break;
@@ -128,7 +128,7 @@ public abstract class RefCountingDisposable : IDisposable
         return leases == Disposing ? "Disposed" : $"Leases: {leases}";
     }
 
-    [StructLayout(LayoutKind.Explicit, Size = 128)]
+    [StructLayout(LayoutKind.Explicit, Size = 64 + sizeof(long))]
     private struct PaddedValue
     {
         [FieldOffset(64)]
