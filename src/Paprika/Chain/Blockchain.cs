@@ -644,19 +644,20 @@ public class Blockchain : IAsyncDisposable
 
             if (_blockchain._preCommit.CanPrefetch)
             {
-                return _prefetcher = new PreCommitPrefetcher(new PooledSpanDictionary(Pool, true), this);
+                return _prefetcher = new PreCommitPrefetcher(_preCommit, this);
             }
 
             return null;
         }
 
-        private class PreCommitPrefetcher(PooledSpanDictionary cache, BlockState parent) : IDisposable, IPreCommitPrefetcher, IPrefetcherContext
+        private class PreCommitPrefetcher(PooledSpanDictionary cache, BlockState parent)
+            : IDisposable, IPreCommitPrefetcher, IPrefetcherContext
         {
             private bool _prefetchPossible = true;
 
             private readonly HashSet<int> _accounts = new();
             private readonly HashSet<ulong> _cached = new();
-            
+
             public bool CanPrefetchFurther => Volatile.Read(ref _prefetchPossible);
 
             public void PrefetchAccount(in Keccak account)
@@ -681,11 +682,23 @@ public class Blockchain : IAsyncDisposable
                 }
             }
 
+            public void PrefetchStorage(in Keccak account, in Keccak storage)
+            {
+                // For now, just prefetch account
+                PrefetchAccount(account);
+            }
+
             public void BlockFurtherPrefetching()
             {
                 lock (cache)
                 {
                     _prefetchPossible = false;
+                }
+
+                foreach (var kvp in cache)
+                {
+                    Key.ReadFrom(kvp.Key, out var key);
+                    parent._bloom.Add(GetHash(key));
                 }
             }
 
@@ -695,7 +708,7 @@ public class Blockchain : IAsyncDisposable
                 var hash = GetHash(key);
                 var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
-                if (cache.TryGet(keyWritten, hash, out var data))
+                if (_cached.Contains(hash) && cache.TryGet(keyWritten, hash, out var data))
                 {
                     // No ownership needed, it's all local here
                     var owner = new ReadOnlySpanOwner<byte>(data, null);
@@ -706,41 +719,19 @@ public class Blockchain : IAsyncDisposable
             }
 
             [SkipLocalsInit]
-            public void Set(in Key key, in ReadOnlySpan<byte> payload)
+            public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type)
             {
                 var hash = GetHash(key);
 
                 _cached.Add(hash);
 
                 var k = key.WriteTo(stackalloc byte[key.MaxByteLength]);
-                cache.Set(k, hash, payload, (byte)EntryType.Persistent);
+                cache.Set(k, hash, payload, (byte)type);
             }
 
-            public ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, ulong hash, out bool succeeded)
+            public void Dispose()
             {
-                if (key.Type != DataType.Merkle || !_cached.Contains(hash))
-                {
-                    succeeded = false;
-                    return default;
-                }
-                
-                if (cache.TryGet(keyWritten, hash, out var data))
-                {
-                    succeeded = true;
-                    
-                    // Report as non local depth
-                    const ushort nonLocalDepth = 1;
-                    
-                    // No ownership needed, it's all local here
-                    var owner = new ReadOnlySpanOwner<byte>(data, null);
-                    return new ReadOnlySpanOwnerWithMetadata<byte>(owner, nonLocalDepth);
-                }
-
-                succeeded = false;
-                return default;
             }
-
-            public void Dispose() => cache.Dispose();
         }
 
         public uint BlockNumber { get; private set; }
@@ -1040,13 +1031,6 @@ public class Blockchain : IAsyncDisposable
             var owner = TryGetLocal(key, keyWritten, bloom, out var succeeded);
             if (succeeded)
                 return owner.WithDepth(0);
-
-            if (_prefetcher != null)
-            {
-                var prefetched = _prefetcher.TryGet(key, keyWritten, bloom, out succeeded);
-                if (succeeded)
-                    return prefetched;
-            }
 
             return TryGetAncestors(key, keyWritten, bloom);
         }

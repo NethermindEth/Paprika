@@ -153,7 +153,7 @@ public class PooledSpanDictionary : IDisposable
             }
         }
     }
-    
+
     private static int GetLeftover(ref byte sliced) =>
         ((sliced & Byte0Mask) << 16) +
         (Unsafe.Add(ref sliced, 1) << 8) +

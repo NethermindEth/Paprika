@@ -1426,22 +1426,29 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 // A leaf will be created here.
                 return;
             }
-            
-            if (owner.QueryDepth > 0)
-            {
-                // data came from the depth
-                context.Set(key, owner.Span);
-            }
 
             // read the existing one
             Node.ReadFrom(out var type, out _, out var ext, out var branch, owner.Span);
+
+            var nonLocal = owner.QueryDepth > 0;
+
             switch (type)
             {
                 case Node.Type.Leaf:
-                    // No copy for leaf atm
+                    if (nonLocal)
+                    {
+                        // data came from the depth
+                        context.Set(key, owner.Span, EntryType.UseOnce);
+                    }
                     return;
                 case Node.Type.Extension:
                     {
+                        if (nonLocal)
+                        {
+                            // data came from the depth
+                            context.Set(key, owner.Span, EntryType.UseOnce);
+                        }
+
                         var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
                         if (diffAt == ext.Path.Length)
                         {
@@ -1456,13 +1463,19 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         return;
                     }
                 case Node.Type.Branch:
+                    if (nonLocal)
+                    {
+                        // Will be modified and we can set to persistent already
+                        context.Set(key, owner.Span, EntryType.Persistent);
+                    }
+
                     var nibble = path[i];
                     if (branch.Children[nibble] == false)
                     {
                         // no children set, will be created
                         return;
                     }
-                    
+
                     if (LeafCanBeOmitted(i + 1))
                     {
                         // no need to store leaf on the last level

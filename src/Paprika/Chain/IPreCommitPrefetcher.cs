@@ -25,11 +25,7 @@ public interface IPreCommitPrefetcher
     /// </summary>
     /// <param name="account">The account to be prefetched.</param>
     /// <param name="storage">The storage slot</param>
-    void PrefetchStorage(in Keccak account, in Keccak storage)
-    {
-        // currently, only accounts have their data prefetched.
-        PrefetchAccount(account);
-    }
+    void PrefetchStorage(in Keccak account, in Keccak storage);
 }
 
 /// <summary>
@@ -48,5 +44,5 @@ public interface IPrefetcherContext
     /// <summary>
     /// Sets the value under the given key.
     /// </summary>
-    void Set(in Key key, in ReadOnlySpan<byte> payload);
+    void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type = EntryType.Persistent);
 }
