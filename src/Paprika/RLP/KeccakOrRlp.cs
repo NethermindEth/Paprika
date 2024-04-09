@@ -18,56 +18,53 @@ public readonly struct KeccakOrRlp
         Rlp = 1,
     }
 
-    private readonly Keccak _keccak;
-    private readonly int _length;
+    public readonly Keccak Keccak;
+    public readonly int Length;
 
-    public readonly Type DataType => _length == KeccakLength ? Type.Keccak : Type.Rlp;
+    public readonly Type DataType => Length == KeccakLength ? Type.Keccak : Type.Rlp;
 
-    public Span<byte> Span => _keccak.BytesAsSpan[.._length];
+    public Span<byte> Span => Keccak.BytesAsSpan[..Length];
 
     private KeccakOrRlp(in Keccak keccak)
     {
-        _keccak = keccak;
-        _length = KeccakLength;
+        Keccak = keccak;
+        Length = KeccakLength;
     }
 
     public static implicit operator KeccakOrRlp(in Keccak keccak) => new(in keccak);
 
     [SkipLocalsInit]
-    public static KeccakOrRlp FromSpan(scoped ReadOnlySpan<byte> data)
+    public static void FromSpan(scoped ReadOnlySpan<byte> data, out KeccakOrRlp keccak)
     {
-        KeccakOrRlp keccak;
         Unsafe.SkipInit(out keccak);
 
         if (data.Length < KeccakLength)
         {
             // Zero out keccak as we might not use all of it
-            Unsafe.AsRef(in keccak._keccak) = default;
+            Unsafe.AsRef(in keccak.Keccak) = default;
             // Set length to the data length
-            Unsafe.AsRef(in keccak._length) = (byte)data.Length;
+            Unsafe.AsRef(in keccak.Length) = (byte)data.Length;
             // Copy data to keccak space
-            data.CopyTo(keccak._keccak.BytesAsSpan);
+            data.CopyTo(keccak.Keccak.BytesAsSpan);
         }
         else
         {
             // Compute hash directly to keccak
-            KeccakHash.ComputeHash(data, keccak._keccak.BytesAsSpan);
+            KeccakHash.ComputeHash(data, out Unsafe.AsRef(in keccak.Keccak));
             // Set length to KeccakLength
-            Unsafe.AsRef(in keccak._length) = (byte)KeccakLength;
+            Unsafe.AsRef(in keccak.Length) = (byte)KeccakLength;
         }
-
-        return keccak;
     }
 
     public override string ToString() => DataType == Type.Keccak
-        ? $"Keccak: {_keccak.ToString()}"
+        ? $"Keccak: {Keccak.ToString()}"
         : $"RLP: {SpanExtensions.ToHexString(Span, true)}";
 }
 
 public static class RlpStreamExtensions
 {
-    public static KeccakOrRlp ToKeccakOrRlp(this scoped RlpStream stream)
+    public static void ToKeccakOrRlp(this ref RlpStream stream, out KeccakOrRlp keccak)
     {
-        return KeccakOrRlp.FromSpan(stream.Data);
+        KeccakOrRlp.FromSpan(stream.Data, out keccak);
     }
 }
