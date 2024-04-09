@@ -695,10 +695,9 @@ public class Blockchain : IAsyncDisposable
                     _prefetchPossible = false;
                 }
 
-                foreach (var kvp in cache)
+                foreach (var key in _cached)
                 {
-                    Key.ReadFrom(kvp.Key, out var key);
-                    parent._bloom.Add(GetHash(key));
+                    parent._bloom.Add(key);
                 }
             }
 
