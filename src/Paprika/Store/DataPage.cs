@@ -61,7 +61,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         }
 
         // No place in map, try flush to leafs first
-        TryFlushToLeafs(map, batch);
+        TryFlushDownToExistingChildren(map, batch);
 
         // Try to write again in the map
         if (map.TrySet(key, data))
@@ -97,26 +97,28 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         return Set(key, data, batch);
     }
 
-    private void TryFlushToLeafs(in SlottedArray map, IBatchContext batch)
+    private void TryFlushDownToExistingChildren(in SlottedArray map, IBatchContext batch)
     {
-        var anyLeafs = false;
+        var anyChildren = false;
 
-        Span<LeafPage> leafs = stackalloc LeafPage[BucketCount];
+        Span<Page> children = stackalloc Page[BucketCount];
+
         for (var i = 0; i < BucketCount; i++)
         {
             var addr = Data.Buckets[i];
             if (addr.IsNull == false)
             {
                 var child = batch.GetAt(addr);
-                if (child.Header.PageType == PageType.Leaf)
+                var type = child.Header.PageType;
+                if (type is PageType.Leaf or PageType.Standard)
                 {
-                    leafs[i] = new LeafPage(child);
-                    anyLeafs = true;
+                    children[i] = child;
+                    anyChildren = true;
                 }
             }
         }
 
-        if (anyLeafs == false)
+        if (anyChildren == false)
             return;
 
         foreach (var item in map.EnumerateAll())
@@ -126,22 +128,38 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
                 continue;
 
             var i = key.FirstNibble;
-            ref var leaf = ref leafs[i];
-            var leafExists = leaf.AsPage().Raw != UIntPtr.Zero;
 
-            if (leafExists)
+            ref var child = ref children[i];
+            var childExist = child.Raw != UIntPtr.Zero;
+
+            if (childExist)
             {
-                var (copied, cow) = leaf.TrySet(key.SliceFrom(ConsumedNibbles), item.RawData, batch);
-                if (copied)
+                var sliced = key.SliceFrom(ConsumedNibbles);
+
+                Page @new;
+                if (child.Header.PageType == PageType.Leaf)
                 {
-                    map.Delete(item);
+                    var leaf = new LeafPage(child);
+
+                    var (copied, cow) = leaf.TrySet(sliced, item.RawData, batch);
+                    if (copied)
+                    {
+                        map.Delete(item);
+                    }
+
+                    @new = cow;
+                }
+                else
+                {
+                    var data = new DataPage(child);
+                    @new = data.Set(sliced, item.RawData, batch);
                 }
 
                 // Check if the page requires the update, if yes, update
-                if (!cow.Equals(leaf.AsPage()))
+                if (!@new.Equals(child.AsPage()))
                 {
-                    leaf = new LeafPage(cow);
-                    Data.Buckets[i] = batch.GetAddress(cow);
+                    child = @new;
+                    Data.Buckets[i] = batch.GetAddress(@new);
                 }
             }
         }

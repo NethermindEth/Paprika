@@ -3,6 +3,9 @@ using Nethermind.Int256;
 using Paprika.Utils;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 
 namespace Paprika.RLP;
 
@@ -19,22 +22,25 @@ public ref struct RlpStream
         Data = data;
     }
 
-    public RlpStream StartSequence(int contentLength)
+    public void StartSequence(int contentLength)
     {
-        byte prefix;
         if (contentLength < 56)
         {
-            prefix = (byte)(192 + contentLength);
+            byte prefix = (byte)(192 + contentLength);
             WriteByte(prefix);
         }
         else
         {
-            prefix = (byte)(247 + Rlp.LengthOfLength(contentLength));
-            WriteByte(prefix);
-            WriteEncodedLength(contentLength);
+            LongSequenceStart(contentLength);
         }
+    }
 
-        return this;
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void LongSequenceStart(int contentLength)
+    {
+        var prefix = (byte)(247 + Rlp.LengthOfLength(contentLength));
+        WriteByte(prefix);
+        WriteEncodedLength(contentLength);
     }
 
     public void WriteByte(byte byteToWrite)
@@ -56,7 +62,7 @@ public ref struct RlpStream
 
     public void EncodeEmptyArray() => WriteByte(EmptyArrayByte);
 
-    public RlpStream Encode(scoped ReadOnlySpan<byte> input)
+    public void Encode(scoped ReadOnlySpan<byte> input)
     {
         if (input.Length == 0)
         {
@@ -74,17 +80,23 @@ public ref struct RlpStream
         }
         else
         {
-            int lengthOfLength = Rlp.LengthOfLength(input.Length);
-            byte prefix = (byte)(183 + lengthOfLength);
-            WriteByte(prefix);
-            WriteEncodedLength(input.Length);
-            Write(input);
+            EncodeLong(input);
         }
-
-        return this;
     }
 
-    public RlpStream Encode(in UInt256 value)
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void EncodeLong(scoped ReadOnlySpan<byte> input)
+    {
+        int lengthOfLength = Rlp.LengthOfLength(input.Length);
+        byte prefix = (byte)(183 + lengthOfLength);
+        WriteByte(prefix);
+        WriteEncodedLength(input.Length);
+        Write(input);
+    }
+
+    [SkipLocalsInit]
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    public void Encode(in UInt256 value)
     {
         if (value.IsZero)
         {
@@ -92,23 +104,36 @@ public ref struct RlpStream
         }
         else
         {
-            Span<byte> bytes = stackalloc byte[32];
+            Vector256<byte> data;
+            Unsafe.SkipInit(out data);
+            Span<byte> bytes = MemoryMarshal.CreateSpan(ref Unsafe.As<Vector256<byte>, byte>(ref data), Vector256<byte>.Count);
+
             value.ToBigEndian(bytes);
             Encode(bytes.WithoutLeadingZeros());
         }
-
-        return this;
     }
 
-    public RlpStream Encode(in Keccak keccak)
+    public void Encode(in Keccak keccak)
     {
-        // TODO: If keccak is a known one like `Keccak.OfAnEmptyString` or `Keccak.OfAnEmptySequenceRlp`
-        // we can cache those `Rlp`s to be reused
+        if (Data.Length - Position < Vector256<byte>.Count + 1)
+        {
+            ThrowTooSmallException();
+        }
 
-        WriteByte(160);
-        Write(keccak.BytesAsSpan);
+        ref byte start = ref Unsafe.Add(ref MemoryMarshal.GetReference(Data), Position);
+        start = 160;
 
-        return this;
+        Unsafe.As<byte, Vector256<byte>>(ref Unsafe.Add(ref start, 1))
+            = Unsafe.As<Keccak, Vector256<byte>>(ref Unsafe.AsRef(in keccak));
+
+        Position += Vector256<byte>.Count + 1;
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowTooSmallException()
+        {
+            throw new ArgumentOutOfRangeException("Too small");
+        }
     }
 
     private void WriteEncodedLength(int value)

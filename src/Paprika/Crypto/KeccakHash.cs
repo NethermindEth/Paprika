@@ -14,9 +14,9 @@
 //  You should have received a copy of the GNU Lesser General Public License
 //  along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
 
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using static System.Numerics.BitOperations;
 
@@ -25,12 +25,7 @@ namespace Paprika.Crypto;
 
 public sealed class KeccakHash
 {
-    public const int HASH_SIZE = 32;
-    private const int STATE_SIZE = 200;
-    private const int HASH_DATA_AREA = 136;
     private const int ROUNDS = 24;
-    private const int LANE_BITS = 8 * 8;
-    private const int TEMP_BUFF_SIZE = 144;
 
     private static readonly ulong[] RoundConstants =
     {
@@ -43,8 +38,6 @@ public sealed class KeccakHash
         0x000000000000800aUL, 0x800000008000000aUL, 0x8000000080008081UL,
         0x8000000000008080UL, 0x0000000080000001UL, 0x8000000080008008UL
     };
-
-    private static int GetRoundSize(int hashSize) => checked(STATE_SIZE - 2 * hashSize);
 
     // update the state with given number of rounds
     private static void KeccakF(Span<ulong> st)
@@ -316,54 +309,46 @@ public sealed class KeccakHash
         st[24] = asu;
     }
 
-    public static void ComputeHashBytesToSpan(ReadOnlySpan<byte> input, Span<byte> output)
-    {
-        ComputeHash(input, output);
-    }
-
     // compute a Keccak hash (md) of given byte length from "in"
-    public static void ComputeHash(ReadOnlySpan<byte> input, Span<byte> output)
+    public static void ComputeHash(ReadOnlySpan<byte> input, out Keccak output)
     {
-        int size = output.Length;
-        int roundSize = GetRoundSize(size);
-        if (output.Length <= 0 || output.Length > STATE_SIZE)
-        {
-            ThrowBadKeccak();
-        }
+        const int stateSize = 200;
+        const int roundSize = 136;
+        const int ulongSize = stateSize / sizeof(ulong);
+        const int ulongRounds = roundSize / sizeof(ulong);
 
-        Span<ulong> state = stackalloc ulong[STATE_SIZE / sizeof(ulong)];
+        Span<ulong> state = stackalloc ulong[ulongSize];
 
-        int remainingInputLength = input.Length;
-        for (; remainingInputLength >= roundSize; remainingInputLength -= roundSize, input = input[roundSize..])
+        int loopLength = input.Length / roundSize * roundSize;
+        if (loopLength > 0)
         {
-            ReadOnlySpan<ulong> input64 = MemoryMarshal.Cast<byte, ulong>(input[..roundSize]);
-            for (int i = 0; i < input64.Length; i++)
+            ReadOnlySpan<ulong> input64 = MemoryMarshal.Cast<byte, ulong>(input[..loopLength]);
+            input = input.Slice(loopLength);
+            while (input64.Length > 0)
             {
-                state[i] ^= input64[i];
+                for (int i = 0; i < ulongRounds; i++)
+                {
+                    state[i] ^= input64[i];
+                }
+
+                input64 = input64[ulongRounds..];
+                KeccakF(state);
             }
-
-            KeccakF(state);
         }
 
-        // last block and padding
-        if (input.Length >= TEMP_BUFF_SIZE || input.Length > roundSize || roundSize + 1 >= TEMP_BUFF_SIZE || roundSize == 0 || roundSize - 1 >= TEMP_BUFF_SIZE)
-        {
-            ThrowBadKeccak();
-        }
-
-        Span<byte> temp = stackalloc byte[TEMP_BUFF_SIZE];
-        input[..remainingInputLength].CopyTo(temp);
-        temp[remainingInputLength] = 1;
+        Span<byte> temp = stackalloc byte[roundSize];
+        input.CopyTo(temp);
+        temp[input.Length] = 1;
         temp[roundSize - 1] |= 0x80;
 
-        Span<ulong> tempU64 = MemoryMarshal.Cast<byte, ulong>(temp[..roundSize]);
+        Span<ulong> tempU64 = MemoryMarshal.Cast<byte, ulong>(temp);
         for (int i = 0; i < tempU64.Length; i++)
         {
             state[i] ^= tempU64[i];
         }
 
         KeccakF(state);
-        MemoryMarshal.AsBytes(state[..(size / sizeof(ulong))]).CopyTo(output);
+        output = Unsafe.As<ulong, Keccak>(ref MemoryMarshal.GetReference(state));
     }
 
     [DoesNotReturn]
