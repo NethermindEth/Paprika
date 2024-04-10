@@ -30,7 +30,7 @@ abstract class BatchContextBase(uint batchId) : IBatchContext
 
         var @new = GetNewPage(out _, false);
         page.CopyTo(@new);
-        AssignBatchId(@new);
+        AssignBatchId(ref @new);
 
         return @new;
     }
@@ -49,7 +49,7 @@ abstract class BatchContextBase(uint batchId) : IBatchContext
     /// <summary>
     /// Assigns the batch identifier to a given page, marking it writable by this batch.
     /// </summary>
-    public void AssignBatchId(Page page)
+    public void AssignBatchId(ref Page page)
     {
         page.Header.BatchId = BatchId;
         page.Header.PaprikaVersion = PageHeader.CurrentVersion;

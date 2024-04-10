@@ -86,7 +86,7 @@ public struct AbandonedList
             {
                 var dest = batch.GetAt(newAt);
                 current.CopyTo(dest);
-                batch.AssignBatchId(dest);
+                batch.AssignBatchId(ref dest);
 
                 current = new AbandonedPage(dest);
 

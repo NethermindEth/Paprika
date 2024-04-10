@@ -55,7 +55,7 @@ public interface IBatchContext : IReadOnlyBatchContext
     /// <summary>
     /// Assigns the batch identifier to a given page, marking it writable by this batch.
     /// </summary>
-    void AssignBatchId(Page page);
+    void AssignBatchId(ref Page page);
 
     /// <summary>
     /// Tries to get the page and if it does not exist, allocates one.

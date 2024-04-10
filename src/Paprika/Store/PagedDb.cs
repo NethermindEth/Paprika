@@ -625,7 +625,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
 
             _written.Add(addr);
 
-            AssignBatchId(page);
+            AssignBatchId(ref page);
             return page;
         }
 
