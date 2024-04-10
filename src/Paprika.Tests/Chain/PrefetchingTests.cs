@@ -4,6 +4,7 @@ using FluentAssertions;
 using Nethermind.Int256;
 using Paprika.Chain;
 using Paprika.Crypto;
+using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Store;
 
@@ -27,7 +28,7 @@ public class PrefetchingTests
         var random = new Random(13);
         var accounts = new Keccak[blocks];
         random.NextBytes(MemoryMarshal.Cast<Keccak, byte>(accounts));
-        
+
         // Create structure first
         var parent = Keccak.EmptyTreeHash;
 
@@ -35,7 +36,7 @@ public class PrefetchingTests
 
         for (uint account = 0; account < blocks; account++)
         {
-            
+
             start.SetAccount(accounts[account], new Account(13, bigNonce));
         }
 
@@ -48,24 +49,24 @@ public class PrefetchingTests
             var keccak = accounts[i];
             using var block = blockchain.StartNew(parent);
 
-            db.MerkleReadsForbid(false);
-            
+            db.AllowAllReads();
+
             // prefetch first
             var p = block.OpenPrefetcher();
             p!.CanPrefetchFurther.Should().BeTrue();
             p.PrefetchAccount(keccak);
-            
-            // forbid reads
-            db.MerkleReadsForbid(true);
 
-            block.SetAccount(keccak, new Account(i, bigNonce));
+            // forbid reads
+            db.ForbidReads((in Key key) => key.Type == DataType.Merkle);
+
+            block.SetAccount(keccak, new Account(i, i));
             parent = block.Commit(i);
-            
+
             blockchain.Finalize(parent);
             await blockchain.WaitTillFlush(i);
         }
     }
-    
+
     [Explicit]
     [TestCase(true)]
     [TestCase(false)]

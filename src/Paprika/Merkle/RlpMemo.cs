@@ -118,13 +118,13 @@ public readonly ref struct RlpMemo
 
     public static int Compress(in Key key, scoped in ReadOnlySpan<byte> memoizedRlp, NibbleSet.Readonly children, scoped in Span<byte> writeTo)
     {
-        // Optimization, omitting some of the branches to memoize.
-        // It omits only these with two children where the cost of the recompute is not big.
-        // To prevent an attack of spawning multiple levels of such branches, only even are skipped
-        if (children.SetCount == 2 && (key.Path.Length + key.StoragePath.Length) % 2 == 0)
-        {
-            return 0;
-        }
+        // // Optimization, omitting some of the branches to memoize.
+        // // It omits only these with two children where the cost of the recompute is not big.
+        // // To prevent an attack of spawning multiple levels of such branches, only even are skipped
+        // if (children.SetCount == 2 && (key.Path.Length + key.StoragePath.Length) % 2 == 0)
+        // {
+        //     return 0;
+        // }
 
         var memo = new RlpMemo(ComputeMerkleBehavior.MakeRlpWritable(memoizedRlp));
         var at = 0;
