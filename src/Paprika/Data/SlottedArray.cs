@@ -631,12 +631,9 @@ public readonly ref struct SlottedArray
                 return prefix;
             }
 
-            var suffixValue = (byte)(hash & 0xFF);
-            var suffix = NibblePath.Dual(suffixValue);
-
             const int limit = 3;
             data = NibblePath.ReadFrom(input, out var trimmed);
-            return prefix.Append(trimmed, suffix, workingSet[limit..]);
+            return prefix.Append(trimmed, hash, workingSet[limit..]);
         }
     }
 
