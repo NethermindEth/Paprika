@@ -47,8 +47,8 @@ public class RootHashFuzzyTests
     }
 
     [TestCase(nameof(Accounts_100_Storage_1), int.MaxValue)]
-    [TestCase(nameof(Accounts_1000_Storage_1000), int.MaxValue)]
     [TestCase(nameof(Accounts_1_Storage_100), 11)]
+    [TestCase(nameof(Accounts_1000_Storage_1000), int.MaxValue, Category = Categories.LongRunning)]
     public async Task In_memory_run(string test, int commitEvery)
     {
         var generator = Build(test);

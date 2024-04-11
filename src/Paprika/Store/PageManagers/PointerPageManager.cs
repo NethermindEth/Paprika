@@ -14,16 +14,16 @@ public abstract unsafe class PointerPageManager(long size) : IPageManager
     {
         if (address.Raw >= MaxPage)
         {
-            ThrowInvalidPage();
+            ThrowInvalidPage(address.Raw);
         }
 
         return new Page((byte*)Ptr + address.FileOffset);
 
         [DoesNotReturn]
         [StackTraceHidden]
-        static void ThrowInvalidPage()
+        void ThrowInvalidPage(uint raw)
         {
-            throw new IndexOutOfRangeException("The database breached its size! The returned page is invalid");
+            throw new IndexOutOfRangeException($"The database breached its size! Requested page {raw} from max {MaxPage}. The returned page is invalid");
         }
     }
 

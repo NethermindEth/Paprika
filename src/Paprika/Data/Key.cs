@@ -93,6 +93,8 @@ public readonly ref partial struct Key
         return leftover;
     }
 
+    public static DataType ReadType(ReadOnlySpan<byte> source) => (DataType)source[0];
+
     public bool IsState => Type == DataType.Account ||
                            (Type == DataType.Merkle && Path.Length < NibblePath.KeccakNibbleCount);
 
