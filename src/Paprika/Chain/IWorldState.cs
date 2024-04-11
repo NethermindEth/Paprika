@@ -42,6 +42,8 @@ public interface IWorldState : IDisposable
     void Reset();
 
     public IStateStats Stats { get; }
+
+    public IPreCommitPrefetcher? OpenPrefetcher();
 }
 
 public interface IReadOnlyWorldState : IReadOnlyCommit, IDisposable

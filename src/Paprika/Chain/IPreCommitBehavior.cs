@@ -41,6 +41,20 @@ public interface IPreCommitBehavior
     void OnAccountDestroyed(in Keccak address, ICommit commit)
     {
     }
+
+    /// <summary>
+    /// Whether this allows prefetching behavior.
+    /// </summary>
+    bool CanPrefetch => false;
+
+    /// <summary>
+    /// Runs the prefetch for the given account
+    /// </summary>
+    /// <param name="account"></param>
+    /// <param name="accessor"></param>
+    void Prefetch(in Keccak account, IPrefetcherContext accessor)
+    {
+    }
 }
 
 /// <summary>

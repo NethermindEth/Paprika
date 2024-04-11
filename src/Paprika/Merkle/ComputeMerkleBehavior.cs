@@ -39,9 +39,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     internal const string HistogramStorageProcessing = "Storage processing";
     internal const string TotalMerkle = "Total Merkle";
 
-    public const int DefaultMinimumTreeLevelToMemoizeKeccak = 1;
-    public const int MemoizeKeccakEveryNLevel = 1;
-
     private readonly int _maxDegreeOfParallelism;
 
     // metrics
@@ -641,7 +638,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         if (memoize && !isOwnedByThisCommit && memoizedUpdated)
         {
-
             //
             ctx.Commit.SetBranch(key, branch.Children, rlpMemoization, EntryType.Persistent);
         }
@@ -1410,6 +1406,92 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 // The storage root should be empty, otherwise, it's wrong
                 Debug.Assert(keccakOrRlp.Keccak == Keccak.EmptyTreeHash,
                     $"Non-existent account with hash of {keccak.ToString()} should have the storage root empty");
+            }
+        }
+    }
+
+
+    public bool CanPrefetch => true;
+
+    public void Prefetch(in Keccak account, IPrefetcherContext context)
+    {
+        // Use a similar algorithm to walking through as the MarkPathAsDirty.
+        // Preload only branches
+        // Flag forcing the leaf creation, that saves one get of the non-existent value.
+        var path = NibblePath.FromKey(account);
+
+        for (var i = 0; i <= path.Length; i++)
+        {
+            var slice = path.SliceTo(i);
+            var key = Key.Merkle(slice);
+            var leftoverPath = path.SliceFrom(i);
+
+            // Query for the node
+            using var owner = context.Get(key);
+            if (owner.IsEmpty)
+            {
+                // A leaf will be created here.
+                return;
+            }
+
+            // read the existing one
+            Node.ReadFrom(out var type, out _, out var ext, out var branch, owner.Span);
+
+            var nonLocal = owner.QueryDepth > 0;
+
+            switch (type)
+            {
+                case Node.Type.Leaf:
+                    if (nonLocal)
+                    {
+                        // data came from the depth
+                        context.Set(key, owner.Span, EntryType.UseOnce);
+                    }
+                    return;
+                case Node.Type.Extension:
+                    {
+                        if (nonLocal)
+                        {
+                            // data came from the depth
+                            context.Set(key, owner.Span, EntryType.UseOnce);
+                        }
+
+                        var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
+                        if (diffAt == ext.Path.Length)
+                        {
+                            // The path overlaps with what is there, move forward
+                            i += ext.Path.Length - 1;
+
+                            // Consider adding the extension here?
+                            continue;
+                        }
+
+                        // The paths are different, handle by MarkPathAsDirty
+                        return;
+                    }
+                case Node.Type.Branch:
+                    if (nonLocal)
+                    {
+                        // Will be modified and we can set to persistent already
+                        context.Set(key, owner.Span, EntryType.Persistent);
+                    }
+
+                    var nibble = path[i];
+                    if (branch.Children[nibble] == false)
+                    {
+                        // no children set, will be created
+                        return;
+                    }
+
+                    if (LeafCanBeOmitted(i + 1))
+                    {
+                        // no need to store leaf on the last level
+                        return;
+                    }
+
+                    break;
+                default:
+                    return;
             }
         }
     }
