@@ -149,15 +149,15 @@ public readonly ref struct NibblePath
         }
         else if (i <= 4)
         {
-            ref ushort u = ref Unsafe.As<byte, ushort>(ref _span);
+            var u = (uint)Unsafe.As<byte, ushort>(ref _span);
             var s = BinaryPrimitives.ReverseEndianness(u);
+            s >>= NibbleShift;
+            Unsafe.As<byte, ushort>(ref _span) = (ushort)BinaryPrimitives.ReverseEndianness(s);
             if (i == 4)
             {
-                var overflow = (byte)((s & 0xf) << 4);
-                Unsafe.Add(ref _span, 2) = overflow;
+                var overflow = ((s & 0xf000) >> (NibbleShift * 2));
+                Unsafe.Add(ref _span, 2) = (byte)overflow;
             }
-            s >>= NibbleShift;
-            u = BinaryPrimitives.ReverseEndianness(s);
         }
         else
         {
