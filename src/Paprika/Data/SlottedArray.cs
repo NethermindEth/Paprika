@@ -611,28 +611,22 @@ public readonly ref struct SlottedArray
 
             workingSet[0] = (byte)(hash >> HashByteShift);
             NibblePath prefix;
-            if (count <= 4)
+            if (count <= 4 && count > 2)
             {
-                if (count > 2)
-                {
-                    workingSet[1] = (byte)(hash & 0xFF);
-                }
-
-                data = input;
-                prefix = NibblePath.FromKey(workingSet, 0, count);
-                if ((preamble & KeyPreambleOddBit) != 0)
-                {
-                    prefix.UnsafeMakeOdd();
-                }
-
-                return prefix;
+                workingSet[1] = (byte)(hash & 0xFF);
             }
 
-            prefix = NibblePath.FromKey(workingSet, 0, KeySlice);
+            prefix = NibblePath.FromKey(workingSet, 0, count > 4 ? KeySlice : count);
 
             if ((preamble & KeyPreambleOddBit) != 0)
             {
                 prefix.UnsafeMakeOdd(); // moving odd can make move beyond 0th
+            }
+
+            if (count <= 4)
+            {
+                data = input;
+                return prefix;
             }
 
             var suffixValue = (byte)(hash & 0xFF);

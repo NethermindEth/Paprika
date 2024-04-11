@@ -138,6 +138,7 @@ public readonly ref struct NibblePath
     /// <summary>
     /// Reuses the memory of this nibble path moving it to odd position.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void UnsafeMakeOdd()
     {
         Debug.Assert(_odd == 0, "Should not be applied to odd");
@@ -151,8 +152,7 @@ public readonly ref struct NibblePath
         else if (i <= 4)
         {
             var u = (uint)Unsafe.As<byte, ushort>(ref _span);
-            var s = BinaryPrimitives.ReverseEndianness(u);
-            s >>= NibbleShift;
+            var s = BinaryPrimitives.ReverseEndianness(u) >> NibbleShift;
             Unsafe.As<byte, ushort>(ref _span) = (ushort)BinaryPrimitives.ReverseEndianness(s);
             if (i == 4)
             {
