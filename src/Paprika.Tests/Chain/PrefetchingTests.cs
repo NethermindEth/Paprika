@@ -14,7 +14,7 @@ namespace Paprika.Tests.Chain;
 
 public class PrefetchingTests
 {
-    //[Test]
+    [Test]
     public async Task Prefetches_properly_on_not_changed_structure()
     {
         using var original = PagedDb.NativeMemoryDb(8 * 1024 * 1024, 2);
