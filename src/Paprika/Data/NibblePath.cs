@@ -259,14 +259,30 @@ public readonly ref struct NibblePath
 
         destination[0] = (byte)(odd | (Length << LengthShift));
 
-        if (!Unsafe.AreSame(ref _span, ref Unsafe.Add(ref MemoryMarshal.GetReference(destination), PreambleLength)))
+        if (length == sizeof(byte))
+        {
+            Unsafe.Add(ref MemoryMarshal.GetReference(destination), PreambleLength) = _span;
+        }
+        else if (length == sizeof(ushort))
+        {
+            Unsafe.As<byte, ushort>(ref Unsafe.Add(ref MemoryMarshal.GetReference(destination), PreambleLength))
+                = Unsafe.As<byte, ushort>(ref _span);
+        }
+        else if (length == sizeof(ushort) + sizeof(byte))
+        {
+            Unsafe.As<byte, ushort>(ref Unsafe.Add(ref MemoryMarshal.GetReference(destination), PreambleLength))
+                = Unsafe.As<byte, ushort>(ref _span);
+            Unsafe.As<byte, ushort>(ref Unsafe.Add(ref MemoryMarshal.GetReference(destination), PreambleLength + sizeof(ushort)))
+                = Unsafe.As<byte, ushort>(ref Unsafe.Add(ref _span, sizeof(ushort)));
+        }
+        else if (!Unsafe.AreSame(ref _span, ref Unsafe.Add(ref MemoryMarshal.GetReference(destination), PreambleLength)))
         {
             MemoryMarshal.CreateSpan(ref _span, length).CopyTo(destination.Slice(PreambleLength));
         }
 
         // clearing the oldest nibble, if needed
         // yes, it can be branch free
-        if (((odd + Length) & 1) == 1)
+        if (((odd + Length) & 1) != 0)
         {
             ref var oldest = ref destination[length];
             oldest = (byte)(oldest & 0b1111_0000);
