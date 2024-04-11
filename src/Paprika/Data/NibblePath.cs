@@ -146,6 +146,7 @@ public readonly ref struct NibblePath
         if (i == 1)
         {
             _span = (byte)(_span >> NibbleShift);
+            Unsafe.AsRef(in _odd) = OddBit;
         }
         else if (i <= 4)
         {
@@ -158,21 +159,22 @@ public readonly ref struct NibblePath
                 var overflow = ((s & 0xf000) >> (NibbleShift * 2));
                 Unsafe.Add(ref _span, 2) = (byte)overflow;
             }
+            Unsafe.AsRef(in _odd) = OddBit;
         }
         else
         {
             LargeUnsafeMakeOdd();
         }
-        Unsafe.AsRef(in _odd) = OddBit;
-
     }
 
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void LargeUnsafeMakeOdd()
     {
         for (var i = (int)Length; i > 0; i--)
         {
             UnsafeSetAt(i, 0, GetAt(i - 1));
         }
+        Unsafe.AsRef(in _odd) = OddBit;
     }
 
     /// <summary>
