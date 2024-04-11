@@ -1,4 +1,6 @@
 using System;
+using System.Buffers;
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
@@ -140,12 +142,37 @@ public readonly ref struct NibblePath
     {
         Debug.Assert(_odd == 0, "Should not be applied to odd");
 
-        for (int i = Length; i > 0; i--)
+        var i = (int)Length;
+        if (i == 1)
+        {
+            _span = (byte)(_span >> NibbleShift);
+        } 
+        else if (i <= 4)
+        {
+            ref ushort u = ref Unsafe.As<byte,ushort>(ref _span);
+            var s = BinaryPrimitives.ReverseEndianness(u);
+            if (i == 4)
+            {
+                var overflow = (byte)((s & 0xf) << 4);
+                Unsafe.Add(ref _span, 2) = overflow;
+            }
+            s >>= NibbleShift;
+            u = BinaryPrimitives.ReverseEndianness(s);
+        }
+        else
+        {
+            LargeUnsafeMakeOdd();
+        }
+        Unsafe.AsRef(in _odd) = OddBit;
+
+    }
+
+    private void LargeUnsafeMakeOdd()
+    {
+        for (var i = (int)Length; i > 0; i--)
         {
             UnsafeSetAt(i, 0, GetAt(i - 1));
         }
-
-        Unsafe.AsRef(in _odd) = OddBit;
     }
 
     /// <summary>
