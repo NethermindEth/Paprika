@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using FluentAssertions;
 using Nethermind.Int256;
@@ -22,12 +23,11 @@ public class PrefetchingTests
         var merkle = new ComputeMerkleBehavior(ComputeMerkleBehavior.ParallelismNone);
         await using var blockchain = new Blockchain(db, merkle);
 
-        const int blocks = 100;
+        // Nicely fill 2 levels of the tree, so that RlpMemo.Compress does not remove branches with two children
+        const int blocks = 256;
         var bigNonce = new UInt256(100, 100, 100, 100);
 
-        var random = new Random(13);
         var accounts = new Keccak[blocks];
-        random.NextBytes(MemoryMarshal.Cast<Keccak, byte>(accounts));
 
         // Create structure first
         var parent = Keccak.EmptyTreeHash;
@@ -36,8 +36,7 @@ public class PrefetchingTests
 
         for (uint account = 0; account < blocks; account++)
         {
-
-            start.SetAccount(accounts[account], new Account(13, bigNonce));
+            Set(accounts, account, start, bigNonce);
         }
 
         parent = start.Commit(1);
@@ -65,6 +64,13 @@ public class PrefetchingTests
             blockchain.Finalize(parent);
             await blockchain.WaitTillFlush(i);
         }
+    }
+
+    private static void Set(Keccak[] accounts, uint account, IWorldState start, UInt256 bigNonce)
+    {
+        ref var k = ref accounts[account];
+        BinaryPrimitives.WriteUInt32LittleEndian(k.BytesAsSpan, account);
+        start.SetAccount(k, new Account(13, bigNonce));
     }
 
     [Explicit]
