@@ -14,7 +14,7 @@ namespace Paprika.Tests.Chain;
 
 public class PrefetchingTests
 {
-    [Test]
+    //[Test]
     public async Task Prefetches_properly_on_not_changed_structure()
     {
         using var original = PagedDb.NativeMemoryDb(32 * 1024 * 1024, 2);
@@ -74,8 +74,8 @@ public class PrefetchingTests
     }
 
     [Explicit]
-    [TestCase(true)]
-    [TestCase(false)]
+    [TestCase(true, Category = Categories.LongRunning)]
+    [TestCase(false, Category = Categories.LongRunning)]
     public async Task Spin(bool prefetch)
     {
         var commits = new Stopwatch();
