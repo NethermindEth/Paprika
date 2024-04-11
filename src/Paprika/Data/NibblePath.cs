@@ -345,11 +345,12 @@ public readonly ref struct NibblePath
 
         // TODO: do a ref comparison with Unsafe, if the same, no need to copy!
         WriteTo(workingSet);
-
-        var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(Length + other.Length));
+        
+        var length = (int)Length;
+        var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(length + other.Length));
         for (int i = 0; i < other.Length; i++)
         {
-            appended.UnsafeSetAt(Length + i, 0, other[i]);
+            appended.UnsafeSetAt(length + i, 0, other[i]);
         }
 
         return appended;
@@ -358,7 +359,7 @@ public readonly ref struct NibblePath
     /// <summary>
     /// Appends the <see cref="other1"/> and then <see cref="other2"/> path using the <paramref name="workingSet"/> as the working memory.
     /// </summary>
-    public NibblePath Append(scoped in NibblePath other1, ushort hash, Span<byte> workingSet)
+    public NibblePath Append(scoped in NibblePath other1, int hash, Span<byte> workingSet)
     {
         if (workingSet.Length <= MaxByteLength)
         {
@@ -368,14 +369,15 @@ public readonly ref struct NibblePath
         // TODO: do a ref comparison with Unsafe, if the same, no need to copy!
         WriteTo(workingSet);
 
-        var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(Length + other1.Length + 2));
+        var length = (int)Length;
+        var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(length + other1.Length + 2));
 
         for (var i = 0; i < other1.Length; i++)
         {
-            appended.UnsafeSetAt(Length + i, 0, other1[i]);
+            appended.UnsafeSetAt(length + i, 0, other1[i]);
         }
 
-        var start = Length + other1.Length;
+        var start = length + other1.Length;
         appended.UnsafeSetAt(start + 0, 0, (byte)((hash & 0xf0) >> NibbleShift));
         appended.UnsafeSetAt(start + 1, 0, (byte)(hash & 0xf));
 
