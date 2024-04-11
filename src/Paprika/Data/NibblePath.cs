@@ -146,10 +146,10 @@ public readonly ref struct NibblePath
         if (i == 1)
         {
             _span = (byte)(_span >> NibbleShift);
-        } 
+        }
         else if (i <= 4)
         {
-            ref ushort u = ref Unsafe.As<byte,ushort>(ref _span);
+            ref ushort u = ref Unsafe.As<byte, ushort>(ref _span);
             var s = BinaryPrimitives.ReverseEndianness(u);
             if (i == 4)
             {
