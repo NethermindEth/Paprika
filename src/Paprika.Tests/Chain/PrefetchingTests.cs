@@ -23,6 +23,9 @@ public class PrefetchingTests
         var merkle = new ComputeMerkleBehavior(ComputeMerkleBehavior.ParallelismNone);
         await using var blockchain = new Blockchain(db, merkle);
 
+        var wait = new SemaphoreSlim(0, 1000);
+        blockchain.Flushed += (_, _) => wait.Release();
+
         // Nicely fill 2 levels of the tree, so that RlpMemo.Compress does not remove branches with two children
         const int blocks = 256;
         var bigNonce = new UInt256(100, 100, 100, 100);
@@ -41,7 +44,8 @@ public class PrefetchingTests
 
         parent = start.Commit(1);
         blockchain.Finalize(parent);
-        await blockchain.WaitTillFlush(1);
+
+        await wait.WaitAsync();
 
         for (uint i = 2; i < blocks; i++)
         {
@@ -62,7 +66,7 @@ public class PrefetchingTests
             parent = block.Commit(i);
 
             blockchain.Finalize(parent);
-            await blockchain.WaitTillFlush(i);
+            await wait.WaitAsync();
         }
     }
 
