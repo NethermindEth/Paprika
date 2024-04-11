@@ -345,7 +345,7 @@ public readonly ref struct NibblePath
 
         // TODO: do a ref comparison with Unsafe, if the same, no need to copy!
         WriteTo(workingSet);
-        
+
         var length = (int)Length;
         var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(length + other.Length));
         for (int i = 0; i < other.Length; i++)
