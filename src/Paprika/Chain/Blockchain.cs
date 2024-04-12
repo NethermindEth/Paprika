@@ -99,8 +99,10 @@ public class Blockchain : IAsyncDisposable
             "The number of the blocks in the flush queue");
         _bloomMissedReads = _meter.CreateCounter<long>("Bloom missed reads", "Reads",
             "Number of reads that passed bloom but missed in dictionary");
-        _cacheUsageState = _meter.CreateHistogram<int>("State transient cache usage per commit", "%", "How much used was the transient cache");
-        _cacheUsagePreCommit = _meter.CreateHistogram<int>("PreCommit transient cache usage per commit", "%", "How much used was the transient cache");
+        _cacheUsageState = _meter.CreateHistogram<int>("State transient cache usage per commit", "%",
+            "How much used was the transient cache");
+        _cacheUsagePreCommit = _meter.CreateHistogram<int>("PreCommit transient cache usage per commit", "%",
+            "How much used was the transient cache");
 
         // pool
         _pool = new(1024, true, _meter);
@@ -427,8 +429,8 @@ public class Blockchain : IAsyncDisposable
     /// </summary>
     private class BlockState : RefCountingDisposable, IWorldState, ICommit, IProvideDescription, IStateStats
     {
-        [ThreadStatic]
-        private static HashSet<ulong>? s_bloomCache;
+        [ThreadStatic] private static HashSet<ulong>? s_bloomCache;
+
         /// <summary>
         /// A simple bloom filter to assert whether the given key was set in a given block, used to speed up getting the keys.
         /// </summary>
@@ -462,6 +464,8 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private PooledSpanDictionary _preCommit = null!;
 
+        private PreCommitPrefetcher? _prefetcher;
+
         private readonly DelayedMetrics.DelayedCounter<long, DelayedMetrics.LongIncrement> _xorMissed;
         private readonly CacheBudget _cacheBudgetStorageAndStage;
         private readonly CacheBudget _cacheBudgetPreCommit;
@@ -469,7 +473,6 @@ public class Blockchain : IAsyncDisposable
         private Keccak? _hash;
 
         private int _dbReads;
-        private IStateStats _stats1;
 
         public BlockState(Keccak parentStateRoot, IReadOnlyBatch batch, CommittedBlockState[] ancestors,
             Blockchain blockchain)
@@ -523,14 +526,16 @@ public class Blockchain : IAsyncDisposable
         public Keccak ParentHash { get; }
 
         /// <summary>
-        /// Commits the block to the block chain.
+        /// Commits the block to the blockchain.
         /// </summary>
         public Keccak Commit(uint blockNumber)
         {
             var committed = CommitImpl(blockNumber, false);
 
-            ReportCacheUsage(_blockchain._cacheBudgetStateAndStorage, _cacheBudgetStorageAndStage, _blockchain._cacheUsageState);
-            ReportCacheUsage(_blockchain._cacheBudgetPreCommit, _cacheBudgetPreCommit, _blockchain._cacheUsagePreCommit);
+            ReportCacheUsage(_blockchain._cacheBudgetStateAndStorage, _cacheBudgetStorageAndStage,
+                _blockchain._cacheUsageState);
+            ReportCacheUsage(_blockchain._cacheBudgetPreCommit, _cacheBudgetPreCommit,
+                _blockchain._cacheUsagePreCommit);
 
             if (committed != null)
             {
@@ -560,6 +565,8 @@ public class Blockchain : IAsyncDisposable
 
         private CommittedBlockState? CommitImpl(uint blockNumber, bool raw)
         {
+            _prefetcher?.BlockFurtherPrefetching();
+
             EnsureHash();
 
             var hash = _hash!.Value;
@@ -627,6 +634,104 @@ public class Blockchain : IAsyncDisposable
         }
 
         IStateStats IWorldState.Stats => this;
+
+        public IPreCommitPrefetcher? OpenPrefetcher()
+        {
+            if (_prefetcher != null)
+            {
+                throw new Exception("Prefetching already started");
+            }
+
+            if (_blockchain._preCommit.CanPrefetch)
+            {
+                return _prefetcher = new PreCommitPrefetcher(_preCommit, this);
+            }
+
+            return null;
+        }
+
+        private class PreCommitPrefetcher(PooledSpanDictionary cache, BlockState parent)
+            : IDisposable, IPreCommitPrefetcher, IPrefetcherContext
+        {
+            private bool _prefetchPossible = true;
+
+            private readonly HashSet<int> _accounts = new();
+            private readonly HashSet<ulong> _cached = new();
+
+            public bool CanPrefetchFurther => Volatile.Read(ref _prefetchPossible);
+
+            public void PrefetchAccount(in Keccak account)
+            {
+                if (CanPrefetchFurther == false)
+                    return;
+
+                lock (cache)
+                {
+                    if (_prefetchPossible == false)
+                    {
+                        return;
+                    }
+
+                    if (_accounts.Add(account.GetHashCode()) == false)
+                    {
+                        // already prefetched
+                        return;
+                    }
+
+                    parent._blockchain._preCommit.Prefetch(account, this);
+                }
+            }
+
+            public void PrefetchStorage(in Keccak account, in Keccak storage)
+            {
+                // For now, just prefetch account
+                PrefetchAccount(account);
+            }
+
+            public void BlockFurtherPrefetching()
+            {
+                lock (cache)
+                {
+                    _prefetchPossible = false;
+                }
+
+                foreach (var key in _cached)
+                {
+                    parent._bloom.Add(key);
+                }
+            }
+
+            [SkipLocalsInit]
+            public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
+            {
+                var hash = GetHash(key);
+                var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+
+                if (_cached.Contains(hash) && cache.TryGet(keyWritten, hash, out var data))
+                {
+                    // No ownership needed, it's all local here
+                    var owner = new ReadOnlySpanOwner<byte>(data, null);
+                    return new ReadOnlySpanOwnerWithMetadata<byte>(owner, 0);
+                }
+
+                return parent.TryGetAncestors(key, keyWritten, hash);
+            }
+
+            [SkipLocalsInit]
+            public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type)
+            {
+                var hash = GetHash(key);
+
+                _cached.Add(hash);
+
+                var k = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+                cache.Set(k, hash, payload, (byte)type);
+            }
+
+            public void Dispose()
+            {
+            }
+        }
 
         public uint BlockNumber { get; private set; }
 
@@ -919,7 +1024,8 @@ public class Blockchain : IAsyncDisposable
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, ulong bloom)
+        private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
+            ulong bloom)
         {
             var owner = TryGetLocal(key, keyWritten, bloom, out var succeeded);
             if (succeeded)
@@ -928,7 +1034,8 @@ public class Blockchain : IAsyncDisposable
             return TryGetAncestors(key, keyWritten, bloom);
         }
 
-        private ReadOnlySpanOwnerWithMetadata<byte> TryGetAncestors(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten, ulong bloom)
+        private ReadOnlySpanOwnerWithMetadata<byte> TryGetAncestors(scoped in Key key,
+            scoped ReadOnlySpan<byte> keyWritten, ulong bloom)
         {
             ushort depth = 1;
 
@@ -1044,6 +1151,7 @@ public class Blockchain : IAsyncDisposable
             _preCommit.Dispose();
             _batch.Dispose();
             _xorMissed.Dispose();
+            _prefetcher?.Dispose();
 
             // release all the ancestors
             foreach (var ancestor in _ancestors)
@@ -1052,6 +1160,7 @@ public class Blockchain : IAsyncDisposable
             }
 
             ReturnCacheToPool();
+            return;
 
             void ReturnCacheToPool()
             {

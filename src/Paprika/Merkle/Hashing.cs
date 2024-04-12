@@ -23,12 +23,12 @@ public static partial class Node
                 + Rlp.LengthOfKeccakRlp; // StorageRootHash
 
             Span<byte> valueRlp = stackalloc byte[Rlp.LengthOfSequence(accountRlpLength)];
-            new RlpStream(valueRlp)
-                .StartSequence(accountRlpLength)
-                .Encode(account.Nonce)
-                .Encode(account.Balance)
-                .Encode(account.StorageRootHash)
-                .Encode(account.CodeHash);
+            var rlp = new RlpStream(valueRlp);
+            rlp.StartSequence(accountRlpLength);
+            rlp.Encode(account.Nonce);
+            rlp.Encode(account.Balance);
+            rlp.Encode(account.StorageRootHash);
+            rlp.Encode(account.CodeHash);
 
             Finalize(nibblePath, valueRlp, out result);
         }
@@ -45,11 +45,11 @@ public static partial class Node
             var totalLength = Rlp.LengthOfSequence(encodedLength);
 
             Span<byte> accountAndPathRlp = stackalloc byte[totalLength];
-            result = new RlpStream(accountAndPathRlp)
-                .StartSequence(encodedLength)
-                .Encode(hexPath)
-                .Encode(valueRlp)
-                .ToKeccakOrRlp();
+            var rlp = new RlpStream(accountAndPathRlp);
+            rlp.StartSequence(encodedLength);
+            rlp.Encode(hexPath);
+            rlp.Encode(valueRlp);
+            rlp.ToKeccakOrRlp(out result);
         }
 
         [SkipLocalsInit]

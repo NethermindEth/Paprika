@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.InteropServices;
 
 namespace Paprika.Utils;
 
@@ -8,16 +9,15 @@ namespace Paprika.Utils;
 /// </summary>
 public abstract class RefCountingDisposable : IDisposable
 {
-    private const int Initial = 1;
+    private const int Single = 1;
     private const int NoAccessors = 0;
     private const int Disposing = -1;
-    private const int DisposingBarrier = 0;
 
-    private int _leases;
+    private PaddedValue _leases;
 
-    protected RefCountingDisposable(int initialCount = Initial)
+    protected RefCountingDisposable(int initialCount = Single)
     {
-        _leases = initialCount;
+        _leases.Value = initialCount;
     }
 
     public void AcquireLease()
@@ -37,17 +37,33 @@ public abstract class RefCountingDisposable : IDisposable
 
     protected bool TryAcquireLease()
     {
-        var value = Interlocked.Increment(ref _leases);
-        var previous = value - 1;
-        if (previous < DisposingBarrier)
+        // Volatile read for starting value
+        var current = Volatile.Read(ref _leases.Value);
+        if (current == Disposing)
         {
-            // move back as the component is being disposed
-            Interlocked.Decrement(ref _leases);
-
+            // Already disposed
             return false;
         }
 
-        return true;
+        while (true)
+        {
+            var prev = Interlocked.CompareExchange(ref _leases.Value, current + Single, current);
+            if (prev == current)
+            {
+                // Successfully acquired
+                return true;
+            }
+            if (prev == Disposing)
+            {
+                // Already disposed
+                return false;
+            }
+
+            // Try again with new starting value
+            current = prev;
+            // Add PAUSE instruction to reduce shared core contention
+            Thread.SpinWait(1);
+        }
     }
 
     /// <summary>
@@ -57,15 +73,50 @@ public abstract class RefCountingDisposable : IDisposable
 
     private void ReleaseLeaseOnce()
     {
-        var value = Interlocked.Decrement(ref _leases);
-
-        if (value == NoAccessors)
+        // Volatile read for starting value
+        var current = Volatile.Read(ref _leases.Value);
+        if (current <= NoAccessors)
         {
-            if (Interlocked.CompareExchange(ref _leases, Disposing, NoAccessors) == NoAccessors)
+            // Mismatched Acquire/Release
+            ThrowOverDisposed();
+        }
+
+        while (true)
+        {
+            var prev = Interlocked.CompareExchange(ref _leases.Value, current - Single, current);
+            if (prev != current)
             {
-                // set to disposed by this Release
-                CleanUp();
+                current = prev;
+                // Add PAUSE instruction to reduce shared core contention
+                Thread.SpinWait(1);
+                continue;
             }
+            if (prev == Single)
+            {
+                // Last use, try to dispose underlying
+                break;
+            }
+            if (prev <= NoAccessors)
+            {
+                // Mismatched Acquire/Release
+                ThrowOverDisposed();
+            }
+
+            // Successfully released
+            return;
+        }
+
+        if (Interlocked.CompareExchange(ref _leases.Value, Disposing, NoAccessors) == NoAccessors)
+        {
+            // set to disposed by this Release
+            CleanUp();
+        }
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowOverDisposed()
+        {
+            throw new Exception("The lease has already been disposed");
         }
     }
 
@@ -73,7 +124,14 @@ public abstract class RefCountingDisposable : IDisposable
 
     public override string ToString()
     {
-        var leases = Volatile.Read(ref _leases);
-        return leases == Disposing ? "Disposed" : $"Leases: {Volatile.Read(ref leases)}";
+        var leases = Volatile.Read(ref _leases.Value);
+        return leases == Disposing ? "Disposed" : $"Leases: {leases}";
+    }
+
+    [StructLayout(LayoutKind.Explicit, Size = 128)]
+    private struct PaddedValue
+    {
+        [FieldOffset(64)]
+        public long Value;
     }
 }
