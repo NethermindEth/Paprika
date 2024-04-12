@@ -1,10 +1,8 @@
 using System.Buffers;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Text;
 using Paprika.Store;
 using Paprika.Utils;
 
@@ -177,25 +175,25 @@ public readonly ref struct SlottedArray
             if (index < to)
             {
                 _index = index;
-                _current = Build();
+                Build(out _current);
                 return true;
             }
 
             return false;
         }
 
-        public Item Current => _current;
+        public readonly Item Current => _current;
 
-        private Item Build()
+        private void Build(out Item value)
         {
             ref var slot = ref _map[_index];
             var span = _map.GetSlotPayload(ref slot);
-            var key = Slot.UnPrepareKey(span, slot.Hash, slot.KeyPreamble, _bytes.Span, out var data);
+            var key = Slot.UnPrepareKey(slot.Hash, slot.KeyPreamble, span, _bytes.Span, out var data);
 
-            return new Item(key, data, _index);
+            value = new Item(key, data, _index);
         }
 
-        public void Dispose()
+        public readonly void Dispose()
         {
         }
 
@@ -207,7 +205,7 @@ public readonly ref struct SlottedArray
         }
 
         // a shortcut to not allocate, just copy the enumerator
-        public Enumerator GetEnumerator() => this;
+        public readonly Enumerator GetEnumerator() => this;
     }
 
     /// <summary>
@@ -495,7 +493,7 @@ public readonly ref struct SlottedArray
         /// </summary>
         public ushort ItemAddress
         {
-            get => (ushort)(Raw & AddressMask);
+            readonly get => (ushort)(Raw & AddressMask);
             set => Raw = (ushort)((Raw & ~AddressMask) | value);
         }
 
@@ -532,11 +530,11 @@ public readonly ref struct SlottedArray
 
         public byte KeyPreamble
         {
-            get => (byte)((Raw & KeyPreambleMask) >> KeyPreambleShift);
+            readonly get => (byte)((Raw & KeyPreambleMask) >> KeyPreambleShift);
             set => Raw = (ushort)((Raw & ~KeyPreambleMask) | (value << KeyPreambleShift));
         }
 
-        public byte Nibble0Th => (byte)(Hash >> (HashByteShift + NibblePath.NibbleShift) & 0xF);
+        public readonly byte Nibble0Th => (byte)(Hash >> (HashByteShift + NibblePath.NibbleShift) & 0xF);
 
         public bool HasKeyBytes => KeyPreamble >= KeyPreambleWithBytes;
 
@@ -552,7 +550,7 @@ public readonly ref struct SlottedArray
         /// </summary>
         public ushort Hash;
 
-        public override string ToString()
+        public override readonly string ToString()
         {
             return
                 $"{nameof(Hash)}: {Hash}, {nameof(ItemAddress)}: {ItemAddress}";
@@ -601,50 +599,41 @@ public readonly ref struct SlottedArray
                             (key.GetAt(length - 2) << shift) | key.GetAt(length - 1));
         }
 
-        public static NibblePath UnPrepareKey(ReadOnlySpan<byte> input, ushort hash, byte preamble, Span<byte> workingSet, out ReadOnlySpan<byte> data)
+        [SkipLocalsInit]
+        public static NibblePath UnPrepareKey(ushort hash, byte preamble, ReadOnlySpan<byte> input, Span<byte> workingSet, out ReadOnlySpan<byte> data)
         {
-            var odd = preamble & KeyPreambleOddBit;
             var count = preamble >> KeyPreambleLengthShift;
+            if (count == 0)
+            {
+                data = input;
+                return default;
+            }
+
+            if (count <= 2 || count > 4)
+            {
+                workingSet[0] = (byte)(hash >> HashByteShift);
+            }
+            else
+            {
+                Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(workingSet))
+                   = (ushort)((hash >> HashByteShift) | (hash << HashByteShift));
+            }
+
+            NibblePath prefix = NibblePath.FromKey(workingSet, 0, count > 4 ? KeySlice : count);
+            if ((preamble & KeyPreambleOddBit) != 0)
+            {
+                prefix.UnsafeMakeOdd(); // moving odd can make move beyond 0th
+            }
+
+            if (count <= 4)
+            {
+                data = input;
+                return prefix;
+            }
 
             const int limit = 3;
-            var span = workingSet[..limit]; // use only 3 as its only up to 4 nibbles here + odd
-
-            switch (count)
-            {
-                case 0:
-                    data = input;
-                    return NibblePath.Empty;
-                case 1:
-                    data = input;
-                    workingSet[0] = (byte)(hash >> HashByteShift);
-                    return NibblePath.FromKey(span).SliceTo(1).UnsafeMakeOdd(odd);
-                case 2:
-                    data = input;
-                    workingSet[0] = (byte)(hash >> HashByteShift);
-                    return NibblePath.FromKey(span).SliceTo(2).UnsafeMakeOdd(odd);
-                case 3:
-                    data = input;
-                    workingSet[0] = (byte)(hash >> HashByteShift);
-                    workingSet[1] = (byte)(hash & 0xFF);
-                    return NibblePath.FromKey(span).SliceTo(3).UnsafeMakeOdd(odd);
-                case 4:
-                    data = input;
-                    workingSet[0] = (byte)(hash >> HashByteShift);
-                    workingSet[1] = (byte)(hash & 0xFF);
-                    return NibblePath.FromKey(span).SliceTo(4).UnsafeMakeOdd(odd);
-                default:
-                    data = NibblePath.ReadFrom(input, out var trimmed);
-
-                    workingSet[0] = (byte)(hash >> HashByteShift);
-                    var prefix =
-                        NibblePath.FromKey(span).SliceTo(KeySlice)
-                            .UnsafeMakeOdd(odd); // moving odd can make move beyond 0th
-
-                    var suffixValue = (byte)(hash & 0xFF);
-                    var suffix = NibblePath.FromKey(MemoryMarshal.CreateSpan(ref suffixValue, 1));
-
-                    return prefix.Append(trimmed, suffix, workingSet[limit..]);
-            }
+            data = NibblePath.ReadFrom(input, out var trimmed);
+            return prefix.Append(trimmed, hash, workingSet[limit..]);
         }
     }
 
@@ -670,6 +659,6 @@ public readonly ref struct SlottedArray
         /// </summary>
         public ushort Deleted;
 
-        public ushort Taken => (ushort)(Low + High);
+        public readonly ushort Taken => (ushort)(Low + High);
     }
 }
