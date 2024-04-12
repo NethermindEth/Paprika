@@ -234,23 +234,21 @@ public readonly ref struct NibblePath
 
         destination[0] = (byte)(odd | (length << LengthShift));
 
+        ref var destStart = ref Unsafe.Add(ref MemoryMarshal.GetReference(destination), PreambleLength);
         if (spanLength == sizeof(byte))
         {
-            Unsafe.Add(ref MemoryMarshal.GetReference(destination), PreambleLength) = _span;
+            destStart = _span;
         }
         else if (spanLength == sizeof(ushort))
         {
-            Unsafe.As<byte, ushort>(ref Unsafe.Add(ref MemoryMarshal.GetReference(destination), PreambleLength))
-                = Unsafe.As<byte, ushort>(ref _span);
+            Unsafe.As<byte, ushort>(ref destStart) = Unsafe.As<byte, ushort>(ref _span);
         }
         else if (spanLength == sizeof(ushort) + sizeof(byte))
         {
-            Unsafe.As<byte, ushort>(ref Unsafe.Add(ref MemoryMarshal.GetReference(destination), PreambleLength))
-                = Unsafe.As<byte, ushort>(ref _span);
-            Unsafe.As<byte, ushort>(ref Unsafe.Add(ref MemoryMarshal.GetReference(destination), PreambleLength + sizeof(ushort)))
-                = Unsafe.As<byte, ushort>(ref Unsafe.Add(ref _span, sizeof(ushort)));
+            Unsafe.As<byte, ushort>(ref destStart) = Unsafe.As<byte, ushort>(ref _span);
+            Unsafe.Add(ref destStart, sizeof(ushort)) = Unsafe.Add(ref _span, sizeof(ushort));
         }
-        else if (!Unsafe.AreSame(ref _span, ref Unsafe.Add(ref MemoryMarshal.GetReference(destination), PreambleLength)))
+        else if (!Unsafe.AreSame(ref _span, ref destStart))
         {
             MemoryMarshal.CreateSpan(ref _span, spanLength).CopyTo(destination.Slice(PreambleLength));
         }
@@ -401,7 +399,7 @@ public readonly ref struct NibblePath
 
         var odd = OddBit & b;
         var length = (b >> LengthShift);
-        
+
         source = source.Slice(PreambleLength);
 
         nibblePath = new NibblePath(source, odd, length);
