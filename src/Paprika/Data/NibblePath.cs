@@ -169,8 +169,19 @@ public readonly ref struct NibblePath
     /// </returns>
     public static NibblePath FromKey(in Keccak key, int nibbleFrom = 0)
     {
-        var count = Keccak.Size * NibblePerByte;
-        return new NibblePath(key.BytesAsSpan, nibbleFrom, count - nibbleFrom);
+        var count = Keccak.Size * NibblePerByte - nibbleFrom;
+        if ((uint)count > byte.MaxValue)
+        {
+            ThrowOutOfRange(nibbleFrom);
+        }
+        return new NibblePath(ref key.BytesRef, (byte)nibbleFrom, (byte)count);
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowOutOfRange(int nibbleFrom)
+        {
+            throw new ArgumentOutOfRangeException($"nibbleFrom is too long at {nibbleFrom}");
+        }
     }
 
     /// <summary>
@@ -400,10 +411,8 @@ public readonly ref struct NibblePath
         var odd = OddBit & b;
         var length = (b >> LengthShift);
 
-        source = source.Slice(PreambleLength);
-
-        nibblePath = new NibblePath(source, odd, length);
-        return source.Slice(GetSpanLength(odd, length));
+        nibblePath = new NibblePath(ref Unsafe.Add(ref MemoryMarshal.GetReference(source), PreambleLength), (byte)odd, (byte)length);
+        return source.Slice(PreambleLength + GetSpanLength(odd, length));
     }
 
     public static Span<byte> ReadFrom(Span<byte> source, out NibblePath nibblePath)
@@ -413,9 +422,8 @@ public readonly ref struct NibblePath
         var odd = OddBit & b;
         var length = (b >> LengthShift);
 
-        source = source.Slice(PreambleLength);
-        nibblePath = new NibblePath(source, odd, length);
-        return source.Slice(GetSpanLength(odd, length));
+        nibblePath = new NibblePath(ref Unsafe.Add(ref MemoryMarshal.GetReference(source), PreambleLength), (byte)odd, (byte)length);
+        return source.Slice(PreambleLength + GetSpanLength(odd, length));
     }
 
     public static bool TryReadFrom(Span<byte> source, in NibblePath expected, out Span<byte> leftover)

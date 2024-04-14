@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using static System.Runtime.CompilerServices.Unsafe;
@@ -13,6 +14,7 @@ public readonly struct Keccak : IEquatable<Keccak>
 
     public const int Size = 32;
 
+    public ref byte BytesRef => ref Unsafe.As<Vector256<byte>, byte>(ref Unsafe.AsRef(in Bytes));
     public Span<byte> BytesAsSpan => MemoryMarshal.AsBytes(MemoryMarshal.CreateSpan(ref AsRef(in Bytes), 1));
 
     public ReadOnlySpan<byte> Span =>
