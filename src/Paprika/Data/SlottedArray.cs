@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
@@ -615,68 +616,68 @@ public readonly ref struct SlottedArray
         {
             const int shift = NibblePath.NibbleShift;
 
-            var odd = preamble & KeyPreambleOddBit;
             var options = (preamble >> KeyPreambleLengthShift) & KeyPreambleLengthMask;
 
-            NibblePath prefix = default;
-
+            NibblePath prefix;
+            int length;
             if (options == KeyPreambleLengthLessThan4)
             {
-                var length = hash & 0x000F;
-                data = input;
+                length = hash & 0x000F;
 
-                switch (length)
+                if (length < 2)
                 {
-                    case 0:
-                        return NibblePath.Empty;
-                    case 1:
-                        return NibblePath.Single((byte)(hash >> (shift + HashByteShift)), odd);
-                    case 2:
-                        workingSet[0] = (byte)(hash >> HashByteShift);
-                        prefix = NibblePath.FromKey(workingSet, 0, 2);
-                        break;
-                    case 3:
-                        workingSet[0] = (byte)(hash >> HashByteShift);
-                        workingSet[1] = (byte)(hash & 0xFF);
-                        prefix = NibblePath.FromKey(workingSet, 0, 3);
-                        break;
+                    data = input;
+                    if (length == 0)
+                    {
+                        prefix = default;
+                        goto ReturnPrefix;
+                    }
+                    if (length == 1)
+                    {
+                        prefix = NibblePath.Single((byte)(hash >> (shift + HashByteShift)), preamble & KeyPreambleOddBit);
+                        goto ReturnPrefix;
+                    }
                 }
-
-                if (odd == KeyPreambleOddBit)
-                {
-                    prefix.UnsafeMakeOdd();
-                }
-
-                return prefix;
             }
-
-            if (options == KeyPreambleLengthIs4)
+            else if (options == KeyPreambleLengthIs4)
             {
-                data = input;
-                workingSet[0] = (byte)(hash >> HashByteShift);
-                workingSet[1] = (byte)(hash & 0xFF);
-                prefix = NibblePath.FromKey(workingSet, 0, 4);
-                if (odd == KeyPreambleOddBit)
-                {
-                    prefix.UnsafeMakeOdd();
-                }
-
-                return prefix;
+                length = 4;
+            }
+            else
+            {
+                // 5 or more, only needs to be greater than 4 for the remaining logic
+                length = 5;
             }
 
-            const int limit = 3;
-            var span = workingSet[..limit]; // use only 3 as its only up to 4 nibbles here + odd
+            if (length <= 2 || length > 4)
+            {
+                workingSet[0] = (byte)(hash >> HashByteShift);
+            }
+            else
+            {
+                Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(workingSet))
+                   = BinaryPrimitives.ReverseEndianness(hash);
+            }
 
-            data = NibblePath.ReadFrom(input, out var trimmed);
-
-            workingSet[0] = (byte)(hash >> HashByteShift);
-            prefix = NibblePath.FromKey(span).SliceTo(KeySlice);
-            if (odd == KeyPreambleOddBit)
+            prefix = NibblePath.FromKey(workingSet, 0, length > 4 ? KeySlice : length);
+            if ((preamble & KeyPreambleOddBit) != 0)
             {
                 prefix.UnsafeMakeOdd();
             }
 
-            return prefix.Append(trimmed, hash, workingSet[limit..]);
+            if (length <= 4)
+            {
+                data = input;
+                goto ReturnPrefix;
+            }
+
+            const int limit = 3;
+            data = NibblePath.ReadFrom(input, out var trimmed);
+            prefix = prefix.Append(trimmed, hash, workingSet[limit..]);
+            goto ReturnPrefix;
+
+        ReturnPrefix:
+            return prefix;
         }
     }
 
