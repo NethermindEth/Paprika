@@ -253,6 +253,23 @@ public readonly ref struct SlottedArray
         }
     }
 
+    public void GatherSizeStatistics(Span<ushort> buckets)
+    {
+        Debug.Assert(buckets.Length == BucketCount);
+
+        var to = _header.Low / Slot.Size;
+        for (var i = 0; i < to; i++)
+        {
+            ref var slot = ref this[i];
+
+            // extract only not deleted and these which have at least one nibble
+            if (slot.IsDeleted == false && slot.HasAtLeastOneNibble)
+            {
+                buckets[slot.Nibble0Th] += (ushort)(GetSlotPayload(ref slot).Length + Slot.Size);
+            }
+        }
+    }
+
     private const int KeyLengthLength = 1;
 
     private static int GetTotalSpaceRequired(byte preamble, in NibblePath key, ReadOnlySpan<byte> data)

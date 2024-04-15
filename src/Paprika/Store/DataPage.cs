@@ -70,7 +70,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         }
 
         // Find most frequent nibble
-        var nibble = FindMostFrequentNibble(map);
+        var nibble = FindNibbleToFlushDown(map);
 
         // Try get the child page
         ref var address = ref Data.Buckets[nibble];
@@ -191,7 +191,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         return destination;
     }
 
-    private static byte FindMostFrequentNibble(SlottedArray map)
+    private static byte FindNibbleToFlushDown(SlottedArray map)
     {
         const int count = SlottedArray.BucketCount;
 

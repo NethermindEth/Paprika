@@ -230,8 +230,9 @@ public class SlottedArrayTests
         // set empty
         map.SetAssert(NibblePath.Empty, data);
 
-        // set 16 
-        for (byte i = 0; i < 16; i++)
+        // set 15
+        const int missing = 15;
+        for (byte i = 0; i < 15; i++)
         {
             map.SetAssert(NibblePath.Single(i, odd), data);
         }
@@ -251,7 +252,60 @@ public class SlottedArrayTests
         for (var i = 0; i < buckets.Length; i++)
         {
             var bucket = buckets[i];
-            bucket.Should().Be((ushort)(i == additional ? 2 : 1));
+            var expected = i switch
+            {
+                additional => 2,
+                missing => 0,
+                _ => 1
+            };
+
+            bucket.Should().Be((ushort)expected);
+        }
+    }
+
+    [TestCase(0)]
+    [TestCase(1)]
+    public void Gathering_stats_size(int odd)
+    {
+        Span<byte> span = stackalloc byte[256];
+        var map = new SlottedArray(span);
+
+        Span<byte> data = stackalloc byte[] { 1, 3, 7 };
+        var datumLength = (ushort)(data.Length + 4);
+
+        // set empty
+        map.SetAssert(NibblePath.Empty, data);
+
+        // set 15
+        const int missing = 15;
+        for (byte i = 0; i < 15; i++)
+        {
+            map.SetAssert(NibblePath.Single(i, odd), data);
+        }
+
+        // make key 0xAAAA
+        const int additional = 10;
+        Span<byte> key = stackalloc byte[2];
+        key[0] = additional << NibblePath.NibbleShift | additional;
+        key[1] = additional << NibblePath.NibbleShift | additional;
+
+        var k = NibblePath.FromKey(key, odd, 2);
+        map.SetAssert(k, data);
+
+        Span<ushort> buckets = stackalloc ushort[16];
+        map.GatherSizeStatistics(buckets);
+
+        for (var i = 0; i < buckets.Length; i++)
+        {
+            var bucket = buckets[i];
+            var expected = i switch
+            {
+                additional => 2 * datumLength,
+                missing => 0,
+                _ => datumLength
+            };
+
+            bucket.Should().Be((ushort)expected);
         }
     }
 
