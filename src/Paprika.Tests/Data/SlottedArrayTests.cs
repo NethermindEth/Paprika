@@ -218,6 +218,43 @@ public class SlottedArrayTests
         return Verify(span.ToArray());
     }
 
+    [TestCase(0)]
+    [TestCase(1)]
+    public void Gathering_stats_count(int odd)
+    {
+        Span<byte> span = stackalloc byte[256];
+        var map = new SlottedArray(span);
+
+        var data = ReadOnlySpan<byte>.Empty;
+
+        // set empty
+        map.SetAssert(NibblePath.Empty, data);
+
+        // set 16 
+        for (byte i = 0; i < 16; i++)
+        {
+            map.SetAssert(NibblePath.Single(i, odd), data);
+        }
+
+        // make key 0xAAAA
+        const int additional = 10;
+        Span<byte> key = stackalloc byte[2];
+        key[0] = additional << NibblePath.NibbleShift | additional;
+        key[1] = additional << NibblePath.NibbleShift | additional;
+
+        var k = NibblePath.FromKey(key, odd, 2);
+        map.SetAssert(k, data);
+
+        Span<ushort> buckets = stackalloc ushort[16];
+        map.GatherCountStatistics(buckets);
+
+        for (var i = 0; i < buckets.Length; i++)
+        {
+            var bucket = buckets[i];
+            bucket.Should().Be((ushort)(i == additional ? 2 : 1));
+        }
+    }
+
     [Test]
     public void Hashing()
     {
