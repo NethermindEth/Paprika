@@ -668,16 +668,18 @@ public readonly ref struct SlottedArray
             if (length <= 4)
             {
                 data = input;
-                goto ReturnPrefix;
             }
-
-            const int limit = 3;
-            data = NibblePath.ReadFrom(input, out var trimmed);
-            prefix = prefix.Append(trimmed, hash, workingSet[limit..]);
-            goto ReturnPrefix;
-
+            else
+            {
+                goto Longer;
+            }
         ReturnPrefix:
             return prefix;
+        Longer:
+            const int limit = 3;
+            data = NibblePath.ReadFrom(input, out var trimmed);
+            return prefix.Append(trimmed, hash, workingSet[limit..]);
+
         }
     }
 
