@@ -180,13 +180,13 @@ public static class TestExtensions
 
         chain.Flushed += (_, block) =>
         {
-            if (block.blockNumber == blockNumber)
-                tcs.SetResult();
+            if (block.blockNumber >= blockNumber)
+                tcs.TrySetResult();
         };
 
         chain.FlusherFailure += (_, ex) =>
         {
-            tcs.SetException(ex);
+            tcs.TrySetException(ex);
         };
 
         return tcs.Task;

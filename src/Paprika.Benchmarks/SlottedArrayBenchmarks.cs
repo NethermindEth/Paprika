@@ -6,6 +6,7 @@ using Paprika.Store;
 
 namespace Paprika.Benchmarks;
 
+[DisassemblyDiagnoser]
 public class SlottedArrayBenchmarks
 {
     private readonly byte[] _writtenLittleEndian = new byte[Page.PageSize];
@@ -156,6 +157,21 @@ public class SlottedArrayBenchmarks
             {
                 length += value.Length;
             }
+        }
+
+        return length;
+    }
+
+    [Benchmark]
+    public int EnumerateAll()
+    {
+        var map = new SlottedArray(_writtenLittleEndian);
+
+        var length = 0;
+        foreach (var item in map.EnumerateAll())
+        {
+            length += item.Key.Length;
+            length += item.RawData.Length;
         }
 
         return length;
