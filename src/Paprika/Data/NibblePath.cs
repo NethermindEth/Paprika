@@ -117,28 +117,29 @@ public readonly ref struct NibblePath
     {
         Debug.Assert(_odd == 0, "Should not be applied to odd");
 
-        var i = (int)Length;
+        var i = (nint)Length;
         if (i == 1)
         {
             _span = (byte)(_span >> NibbleShift);
-            Unsafe.AsRef(in _odd) = OddBit;
         }
         else if (i <= 4)
         {
-            var u = (uint)Unsafe.As<byte, ushort>(ref _span);
+            var u = (nuint)Unsafe.As<byte, ushort>(ref _span);
             var s = BinaryPrimitives.ReverseEndianness(u) >> NibbleShift;
-            Unsafe.As<byte, ushort>(ref _span) = (ushort)BinaryPrimitives.ReverseEndianness(s);
+            s = BinaryPrimitives.ReverseEndianness(s);
+            Unsafe.As<byte, ushort>(ref _span) = (ushort)s;
             if (i == 4)
             {
-                var overflow = ((s & 0xf000) >> (NibbleShift * 2));
-                Unsafe.Add(ref _span, 2) = (byte)overflow;
+                var overflow = ((s) >> (NibbleShift * 4));
+                Unsafe.Add(ref _span, 2) = (byte)(overflow & 0xf0);
             }
-            Unsafe.AsRef(in _odd) = OddBit;
         }
         else
         {
             LargeUnsafeMakeOdd();
+            return;
         }
+        Unsafe.AsRef(in _odd) = OddBit;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
