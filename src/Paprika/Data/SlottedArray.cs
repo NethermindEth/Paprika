@@ -671,8 +671,10 @@ public readonly ref struct SlottedArray
                 goto ReturnPrefix;
             }
 
+            const int limit = 3;
             data = NibblePath.ReadFrom(input, out var trimmed);
-            prefix = prefix.Append(trimmed, hash, workingSet);
+            prefix = prefix.Append(trimmed, hash, workingSet[limit..]);
+            goto ReturnPrefix;
 
         ReturnPrefix:
             return prefix;
