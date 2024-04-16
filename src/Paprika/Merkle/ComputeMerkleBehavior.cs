@@ -63,7 +63,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         s_parallelOptions = new()
         {
             // Override default with setting
-            MaxDegreeOfParallelism = maxDegreeOfParallelism <= 0 ? Environment.ProcessorCount : maxDegreeOfParallelism
+            MaxDegreeOfParallelism = Math.Max(1, maxDegreeOfParallelism < 0 ? Environment.ProcessorCount : maxDegreeOfParallelism)
         };
 
         // Metrics
