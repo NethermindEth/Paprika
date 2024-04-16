@@ -10,22 +10,8 @@ namespace Paprika.Store;
 /// Root page is a page that contains all the needed metadata from the point of view of the database.
 /// It also includes the blockchain information like block hash or block number.
 /// </summary>
-/// <remarks>
-/// Considerations for page types selected:
-///
-/// State:
-/// <see cref="Payload.StateRoot"/> is <see cref="FanOutPage"/> that splits accounts into 256 buckets.
-/// This makes the updates update more pages, but adds a nice fan out for fast searches.
-/// Account ids:
-/// <see cref="Payload.StorageTrees"/> is a <see cref="FanOutList"/> of <see cref="FanOutPage"/>s. This gives 64k buckets on two levels. Searches should search no more than 3 levels of pages.
-///
-/// Storage:
-/// <see cref="Payload.Storage"/> is a <see cref="FanOutList"/> of <see cref="FanOutPage"/>s. This gives 64k buckets on two levels. 
-/// </remarks>
 public readonly unsafe struct RootPage(Page root) : IPage
 {
-    private const int StorageKeySize = Keccak.Size + Keccak.Size + 1;
-
     public ref PageHeader Header => ref root.Header;
 
     public ref Payload Data => ref Unsafe.AsRef<Payload>(root.Payload);
@@ -42,24 +28,28 @@ public readonly unsafe struct RootPage(Page root) : IPage
         /// The address of the next free page. This should be used rarely as pages should be reused
         /// with <see cref="AbandonedPage"/>.
         /// </summary>
-        [FieldOffset(0)] public DbAddress NextFreePage;
+        [FieldOffset(0)]
+        public DbAddress NextFreePage;
+
+        [FieldOffset(DbAddress.Size)]
+        public DbAddress LastStorageRootPage;
 
         /// <summary>
         /// The first of the data pages.
         /// </summary>
-        [FieldOffset(DbAddress.Size)]
+        [FieldOffset(DbAddress.Size * 2)]
         public DbAddress StateRoot;
 
         /// <summary>
         /// Metadata of this root
         /// </summary>
-        [FieldOffset(DbAddress.Size * 2)]
+        [FieldOffset(DbAddress.Size * 3)]
         public Metadata Metadata;
 
         /// <summary>
         /// Mapping Keccak -> DbAddress of the storage tree.
         /// </summary>
-        [FieldOffset(DbAddress.Size * 2 + Metadata.Size)]
+        [FieldOffset(DbAddress.Size * 3 + Metadata.Size)]
         private DbAddress IdsPayload;
 
         public FanOutList<FanOutPage, IdentityType> StorageTrees =>
@@ -142,7 +132,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
             }
         }
 
-        return batch.GetAt(id).GetPageWithData(batch, key.StoragePath, out result);
+        return new StorageRootPage(batch.GetAt(id)).TryGet(in key, batch, out result);
     }
 
     private static DbAddress ReadId(ReadOnlySpan<byte> id) => new(BinaryPrimitives.ReadUInt32LittleEndian(id));
@@ -173,23 +163,30 @@ public readonly unsafe struct RootPage(Page root) : IPage
                 }
                 else
                 {
-                    // doest not exist, create first, memoize
-                    var p = batch.GetNewPage(out addr, true);
-                    p.Header.BatchId = batch.BatchId;
-                    p.Header.PaprikaVersion = PageHeader.CurrentVersion;
-                    p.Header.PageType = PageType.Leaf;
-                    p.Header.Level = 0;
+                    // The key is not cached and is not mapped in the storage trees. Requires allocating a new place.
+                    // Let's start with the lats memoized storage root and check if it has some place left.
 
-                    // set in trees and in cache
+                    // If the last storage root is null or has no more space, allocate new
+                    if (Data.LastStorageRootPage.IsNull || new StorageRootPage(batch.GetAt(Data.LastStorageRootPage)).HasEmptySlot == false)
+                    {
+                        batch.GetNewPage(out addr, true);
+                    }
+
+                    // The last storage root is not null and has some empty places
+                    Data.LastStorageRootPage = batch.GetAddress(new StorageRootPage(batch.GetAt(addr)).Set(key, rawData, batch));
+
+                    // Set in trees and in cache
                     WriteId(span, addr);
                     Data.StorageTrees.Set(NibblePath.FromKey(keccak), span, batch);
                     cache[keccak] = addr;
+                    return;
                 }
             }
 
             // perform set
             var page = batch.GetAt(addr);
-            var updated = page.SetPageWithData(key.StoragePath, rawData, batch);
+            var storage = new StorageRootPage(page);
+            var updated = storage.Set(key, rawData, batch);
 
             if (updated.Equals(page))
             {
@@ -197,12 +194,17 @@ public readonly unsafe struct RootPage(Page root) : IPage
                 return;
             }
 
-            addr = batch.GetAddress(updated);
-
-            // update in cache and set back
-            cache[keccak] = addr;
+            // write updated mapping
             WriteId(span, addr);
-            Data.StorageTrees.Set(NibblePath.FromKey(keccak), span, batch);
+
+            foreach (var k in storage.Keys)
+            {
+                if (k != Keccak.Zero)
+                {
+                    cache[keccak] = addr;
+                    Data.StorageTrees.Set(NibblePath.FromKey(k), span, batch);
+                }
+            }
         }
     }
 
