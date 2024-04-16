@@ -388,9 +388,9 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     private class ReadOnlyBatch(PagedDb db, RootPage root, string name) : IReportingReadOnlyBatch, IReadOnlyBatchContext
     {
         [ThreadStatic]
-        private static ConcurrentDictionary<Keccak, uint>? s_cache;
+        private static ConcurrentDictionary<Keccak, DbAddress>? s_cache;
 
-        private ConcurrentDictionary<Keccak, uint> _idCache = Interlocked.Exchange(ref s_cache, null) ?? new(Environment.ProcessorCount,
+        private ConcurrentDictionary<Keccak, DbAddress> _idCache = Interlocked.Exchange(ref s_cache, null) ?? new(Environment.ProcessorCount,
             RootPage.IdCacheLimit);
 
         public RootPage Root => root;
@@ -439,12 +439,12 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 new DataPage(GetAt(root.Data.StateRoot)).Report(state, this, 0, 0);
             }
 
-            root.Data.Storage.Report(storage, this, 0, 0);
+            // root.Data.Storage.Report(storage, this, 0, 0);
         }
 
         public uint BatchId => root.Header.BatchId;
 
-        public IDictionary<Keccak, uint> IdCache
+        public IDictionary<Keccak, DbAddress> StorageTreeCache
         {
             get
             {
@@ -490,7 +490,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _abandoned = ctx.Abandoned;
             _written = ctx.Written;
 
-            IdCache = ctx.IdCache;
+            StorageTreeCache = ctx.IdCache;
 
             _metrics = new BatchMetrics();
         }
@@ -653,7 +653,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             _abandoned.Add(addr);
         }
 
-        public override Dictionary<Keccak, uint> IdCache { get; }
+        public override Dictionary<Keccak, DbAddress> StorageTreeCache { get; }
 
         public void Dispose()
         {
@@ -683,10 +683,10 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             Page = new((byte*)NativeMemory.AlignedAlloc(Page.PageSize, (UIntPtr)UIntPtr.Size));
             Abandoned = new List<DbAddress>();
             Written = new HashSet<DbAddress>();
-            IdCache = new Dictionary<Keccak, uint>();
+            IdCache = new Dictionary<Keccak, DbAddress>();
         }
 
-        public Dictionary<Keccak, uint> IdCache { get; }
+        public Dictionary<Keccak, DbAddress> IdCache { get; }
 
         public Page Page { get; }
 

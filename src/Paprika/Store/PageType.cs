@@ -10,7 +10,7 @@ public enum PageType : byte
     Standard = 1,
 
     /// <summary>
-    /// A page that is a Standard page but holds the account identity mappin.
+    /// A page that is a Standard page but holds the account identity mapping.
     /// </summary>
     Identity = 2,
 

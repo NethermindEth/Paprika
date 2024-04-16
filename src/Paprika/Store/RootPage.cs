@@ -17,7 +17,7 @@ namespace Paprika.Store;
 /// <see cref="Payload.StateRoot"/> is <see cref="FanOutPage"/> that splits accounts into 256 buckets.
 /// This makes the updates update more pages, but adds a nice fan out for fast searches.
 /// Account ids:
-/// <see cref="Payload.Ids"/> is a <see cref="FanOutList"/> of <see cref="FanOutPage"/>s. This gives 64k buckets on two levels. Searches should search no more than 3 levels of pages.
+/// <see cref="Payload.StorageTrees"/> is a <see cref="FanOutList"/> of <see cref="FanOutPage"/>s. This gives 64k buckets on two levels. Searches should search no more than 3 levels of pages.
 ///
 /// Storage:
 /// <see cref="Payload.Storage"/> is a <see cref="FanOutList"/> of <see cref="FanOutPage"/>s. This gives 64k buckets on two levels. 
@@ -45,40 +45,28 @@ public readonly unsafe struct RootPage(Page root) : IPage
         [FieldOffset(0)] public DbAddress NextFreePage;
 
         /// <summary>
-        /// The account counter
-        /// </summary>
-        [FieldOffset(DbAddress.Size)] public uint AccountCounter;
-
-        /// <summary>
         /// The first of the data pages.
         /// </summary>
-        [FieldOffset(DbAddress.Size + sizeof(uint))]
+        [FieldOffset(DbAddress.Size)]
         public DbAddress StateRoot;
 
         /// <summary>
         /// Metadata of this root
         /// </summary>
-        [FieldOffset(DbAddress.Size * 2 + sizeof(uint))]
+        [FieldOffset(DbAddress.Size * 2)]
         public Metadata Metadata;
 
         /// <summary>
-        /// Storage.
+        /// Mapping Keccak -> DbAddress of the storage tree.
         /// </summary>
-        [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size)]
-        private DbAddress StoragePayload;
-
-        public FanOutList<StorageFanOutPage<DataPage>, StandardType> Storage => new(MemoryMarshal.CreateSpan(ref StoragePayload, FanOutList.FanOut));
-
-        /// <summary>
-        /// Identifiers
-        /// </summary>
-        [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + FanOutList.Size)]
+        [FieldOffset(DbAddress.Size * 2 + Metadata.Size)]
         private DbAddress IdsPayload;
 
-        public FanOutList<FanOutPage, IdentityType> Ids => new(MemoryMarshal.CreateSpan(ref IdsPayload, FanOutList.FanOut));
+        public FanOutList<FanOutPage, IdentityType> StorageTrees =>
+            new(MemoryMarshal.CreateSpan(ref IdsPayload, FanOutList.FanOut));
 
         public const int AbandonedStart =
-            DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + FanOutList.Size * 2;
+            DbAddress.Size * 2 + Metadata.Size + FanOutList.Size;
 
         /// <summary>
         /// The start of the abandoned pages.
@@ -101,7 +89,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
             using var scope = visitor.On(data, Data.StateRoot);
         }
 
-        Data.Storage.Accept(visitor, resolver);
+        // Data.Storage.Accept(visitor, resolver);
 
         // Data.AbandonedList.Accept(visitor, resolver);
     }
@@ -124,30 +112,25 @@ public readonly unsafe struct RootPage(Page root) : IPage
             return new DataPage(batch.GetAt(Data.StateRoot)).TryGet(batch, key.Path, out result);
         }
 
-        Span<byte> idSpan = stackalloc byte[sizeof(uint)];
-
-        ReadOnlySpan<byte> id;
-        var cache = batch.IdCache;
+        var cache = batch.StorageTreeCache;
         var keccak = key.Path.UnsafeAsKeccak;
 
-        if (cache.TryGetValue(keccak, out var cachedId))
+        if (cache.TryGetValue(keccak, out var id))
         {
-            if (cachedId == 0)
+            if (id == 0)
             {
                 result = default;
                 return false;
             }
-
-            WriteId(idSpan, cachedId);
-            id = idSpan;
         }
         else
         {
-            if (Data.Ids.TryGet(batch, key.Path, out id))
+            if (Data.StorageTrees.TryGet(batch, key.Path, out var existing))
             {
+                id = ReadId(existing);
                 if (cache.Count < IdCacheLimit)
                 {
-                    cache[keccak] = ReadId(id);
+                    cache[keccak] = ReadId(existing);
                 }
             }
             else
@@ -159,13 +142,13 @@ public readonly unsafe struct RootPage(Page root) : IPage
             }
         }
 
-        var path = NibblePath.FromKey(id).Append(key.StoragePath, stackalloc byte[StorageKeySize]);
-
-        return Data.Storage.TryGet(batch, path, out result);
+        return batch.GetAt(id).GetPageWithData(batch, key.StoragePath, out result);
     }
 
-    private static uint ReadId(ReadOnlySpan<byte> id) => BinaryPrimitives.ReadUInt32LittleEndian(id);
-    private static void WriteId(Span<byte> idSpan, uint cachedId) => BinaryPrimitives.WriteUInt32LittleEndian(idSpan, cachedId);
+    private static DbAddress ReadId(ReadOnlySpan<byte> id) => new(BinaryPrimitives.ReadUInt32LittleEndian(id));
+
+    private static void WriteId(Span<byte> span, DbAddress address) =>
+        BinaryPrimitives.WriteUInt32LittleEndian(span, address);
 
 
     public void SetRaw(in Key key, IBatchContext batch, ReadOnlySpan<byte> rawData)
@@ -176,55 +159,63 @@ public readonly unsafe struct RootPage(Page root) : IPage
         }
         else
         {
-            scoped NibblePath id;
-            Span<byte> idSpan = stackalloc byte[sizeof(uint)];
-
+            Span<byte> span = stackalloc byte[4];
             var keccak = key.Path.UnsafeAsKeccak;
+            var cache = batch.StorageTreeCache;
 
-            if (batch.IdCache.TryGetValue(keccak, out var cachedId))
+            if (cache.TryGetValue(keccak, out var addr) == false)
             {
-                WriteId(idSpan, cachedId);
-                id = NibblePath.FromKey(idSpan);
-            }
-            else
-            {
-                // try fetch existing first
-                if (Data.Ids.TryGet(batch, key.Path, out var existingId) == false)
+                if (Data.StorageTrees.TryGet(batch, NibblePath.FromKey(keccak), out var existing))
                 {
-                    Data.AccountCounter++;
-                    WriteId(idSpan, Data.AccountCounter);
-
-                    // memoize in cache
-                    batch.IdCache[keccak] = Data.AccountCounter;
-
-                    // update root
-                    Data.Ids.Set(key.Path, idSpan, batch);
-
-                    id = NibblePath.FromKey(idSpan);
+                    // exists, read and cache
+                    addr = ReadId(existing);
+                    cache[keccak] = addr;
                 }
                 else
                 {
-                    // memoize in cache
-                    batch.IdCache[keccak] = ReadId(existingId);
-                    id = NibblePath.FromKey(existingId);
+                    // doest not exist, create first, memoize
+                    var p = batch.GetNewPage(out addr, true);
+                    p.Header.BatchId = batch.BatchId;
+                    p.Header.PaprikaVersion = PageHeader.CurrentVersion;
+                    p.Header.PageType = PageType.Leaf;
+                    p.Header.Level = 0;
+
+                    // set in trees and in cache
+                    WriteId(span, addr);
+                    Data.StorageTrees.Set(NibblePath.FromKey(keccak), span, batch);
+                    cache[keccak] = addr;
                 }
             }
 
-            var path = id.Append(key.StoragePath, stackalloc byte[StorageKeySize]);
-            Data.Storage.Set(path, rawData, batch);
+            // perform set
+            var page = batch.GetAt(addr);
+            var updated = page.SetPageWithData(key.StoragePath, rawData, batch);
+
+            if (updated.Equals(page))
+            {
+                // nothing to memoize
+                return;
+            }
+
+            addr = batch.GetAddress(updated);
+
+            // update in cache and set back
+            cache[keccak] = addr;
+            WriteId(span, addr);
+            Data.StorageTrees.Set(NibblePath.FromKey(keccak), span, batch);
         }
     }
 
     public void Destroy(IBatchContext batch, in NibblePath account)
     {
         // Destroy the Id entry about it
-        Data.Ids.Set(account, ReadOnlySpan<byte>.Empty, batch);
+        Data.StorageTrees.Set(account, ReadOnlySpan<byte>.Empty, batch);
 
         // Destroy the account entry
         SetAtRoot<DataPage>(batch, account, ReadOnlySpan<byte>.Empty, ref Data.StateRoot);
 
         // Remove the cached
-        batch.IdCache.Remove(account.UnsafeAsKeccak);
+        batch.StorageTreeCache.Remove(account.UnsafeAsKeccak);
 
         // TODO: there' no garbage collection for storage
         // It should not be hard. Walk down by the mapped path, then remove all the pages underneath.

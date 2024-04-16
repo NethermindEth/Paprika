@@ -44,7 +44,7 @@ abstract class BatchContextBase(uint batchId) : IBatchContext
 
     public abstract void RegisterForFutureReuse(Page page);
 
-    public abstract IDictionary<Keccak, uint> IdCache { get; }
+    public abstract IDictionary<Keccak, DbAddress> StorageTreeCache { get; }
 
     /// <summary>
     /// Assigns the batch identifier to a given page, marking it writable by this batch.

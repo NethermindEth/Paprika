@@ -49,6 +49,26 @@ public static class PageExtensions
 
     public static TPage Cast<TPage>(this Page page) where TPage : unmanaged, IPage =>
         Unsafe.As<Page, TPage>(ref page);
+
+    public static Page SetPageWithData(this Page page, in NibblePath key, ReadOnlySpan<byte> data, IBatchContext batch)
+    {
+        return page.Header.PageType switch
+        {
+            PageType.Leaf => new LeafPage(page).Set(key, data, batch),
+            PageType.Standard => new DataPage(page).Set(key, data, batch),
+            _ => throw new ArgumentException($"Page type {page.Header.PageType} not handled")
+        };
+    }
+
+    public static bool GetPageWithData(this Page page, IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
+    {
+        return page.Header.PageType switch
+        {
+            PageType.Leaf => new LeafPage(page).TryGet(batch, key, out result),
+            PageType.Standard => new DataPage(page).TryGet(batch, key, out result),
+            _ => throw new ArgumentException($"Page type {page.Header.PageType} not handled")
+        };
+    }
 }
 
 /// <summary>

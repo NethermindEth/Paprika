@@ -74,7 +74,7 @@ public abstract class BasePageTests
             return older;
         }
 
-        public override Dictionary<Keccak, uint> IdCache { get; } = new();
+        public override Dictionary<Keccak, DbAddress> StorageTreeCache { get; } = new();
 
         public override string ToString() => $"Batch context used {_pageCount} pages to write the data";
 

@@ -73,7 +73,7 @@ public interface IReadOnlyBatchContext : IPageResolver
     /// </summary>
     uint BatchId { get; }
 
-    IDictionary<Keccak, uint> IdCache { get; }
+    IDictionary<Keccak, DbAddress> StorageTreeCache { get; }
 }
 
 public static class ReadOnlyBatchContextExtensions
