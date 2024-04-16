@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Diagnostics.Contracts;
 using System.Runtime.CompilerServices;
 using System.Diagnostics.Metrics;
 using System.Runtime.InteropServices;
@@ -48,6 +47,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     private readonly Histogram<long> _totalMerkle;
     private readonly BufferPool _pool;
 
+    private static ParallelOptions s_parallelOptions = new()
+    {
+        // default to the number of processors
+        MaxDegreeOfParallelism = Environment.ProcessorCount
+    };
+
     /// <summary>
     /// Initializes the Merkle.
     /// </summary>
@@ -55,6 +60,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     public ComputeMerkleBehavior(int maxDegreeOfParallelism = ParallelismUnlimited)
     {
         _maxDegreeOfParallelism = maxDegreeOfParallelism;
+        s_parallelOptions = new()
+        {
+            // Override default with setting
+            MaxDegreeOfParallelism = maxDegreeOfParallelism <= 0 ? Environment.ProcessorCount : maxDegreeOfParallelism
+        };
 
         // Metrics
         _meter = new Meter(MeterName);
@@ -250,7 +260,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
 
         var children = new ConcurrentQueue<IChildCommit>();
-        Parallel.For(0, workItems.Length,
+        Parallel.For(0, workItems.Length, s_parallelOptions,
             commit.GetChild,
             (i, _, child) =>
             {
@@ -585,7 +595,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             var budget = ctx.Budget;
 
             // parallel calculation
-            Parallel.For((long)0, NibbleSet.NibbleCount, nibble =>
+            Parallel.For((long)0, NibbleSet.NibbleCount, s_parallelOptions, nibble =>
             {
                 var childPath = NibblePath.Single((byte)nibble, 0);
 
