@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace Paprika.Store.PageManagers;
 
-public unsafe class NativeMemoryPageManager : PointerPageManager
+public sealed unsafe class NativeMemoryPageManager : PointerPageManager
 {
     private readonly void* _ptr;
 

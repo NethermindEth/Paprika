@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using System.Runtime.Intrinsics.X86;
 
 namespace Paprika.Store.PageManagers;
 
@@ -9,6 +10,21 @@ public abstract unsafe class PointerPageManager(long size) : IPageManager
     public int MaxPage { get; } = (int)(size / Page.PageSize);
 
     protected abstract void* Ptr { get; }
+
+    public void Prefetch(DbAddress address)
+    {
+        if (Sse.IsSupported)
+        {
+            if (address.IsNull || address.Raw > (uint)MaxPage)
+            {
+                return;
+            }
+
+            // Fetch to L2 cache as we don't know if will need it
+            // So don't pollute L1 cache
+            Sse.Prefetch1((byte*)Ptr + address.FileOffset);
+        }
+    }
 
     public Page GetAt(DbAddress address)
     {
