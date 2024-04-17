@@ -1,4 +1,5 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -21,7 +22,7 @@ public readonly unsafe struct StorageRootPage(Page page)
 
     public bool TryGet(scoped in Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
-        var index = Data.Buckets.IndexOf(key.Path.UnsafeAsKeccak);
+        var index = FindIndex(key);
         if (index == NotFound)
         {
             result = default;
@@ -31,9 +32,27 @@ public readonly unsafe struct StorageRootPage(Page page)
         return Data.Slots[index].TryGet(in key.StoragePath, batch, out result);
     }
 
+    private int FindIndex(in Key key) => Data.Buckets.IndexOf(key.Path.UnsafeAsKeccak);
+
     public Page Set(scoped in Key key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
-        throw new NotImplementedException();
+        if (Header.BatchId != batch.BatchId)
+        {
+            return new StorageRootPage(batch.GetWritableCopy(page)).Set(key, data, batch);
+        }
+
+        var index = FindIndex(key);
+        if (index == NotFound)
+        {
+            index = Data.Buckets.IndexOf(Keccak.Zero);
+
+            Debug.Assert(index != NotFound);
+            Data.Buckets[index] = key.Path.UnsafeAsKeccak;
+        }
+
+        Data.Slots[index].Set(key.StoragePath, data, batch);
+
+        return page;
     }
 
     public void Report(IReporter reporter, IPageResolver resolver, int pageLevel, int trimmedNibbles)
@@ -81,7 +100,7 @@ public readonly unsafe struct StorageRootPage(Page page)
             [FieldOffset(0)]
             private byte DataStart;
 
-            public SlottedArray Data => new(MemoryMarshal.CreateSpan(ref DataStart, DataLength));
+            private SlottedArray Data => new(MemoryMarshal.CreateSpan(ref DataStart, DataLength));
 
             [FieldOffset(DataLength)]
             public DbAddress Tree;
@@ -99,6 +118,32 @@ public readonly unsafe struct StorageRootPage(Page page)
                 }
 
                 return batch.GetAt(Tree).GetPageWithData(batch, path, out result);
+            }
+
+            public void Set(in NibblePath path, in ReadOnlySpan<byte> data, IBatchContext batch)
+            {
+                if (Data.TrySet(path, data))
+                    return;
+
+                if (Tree.IsNull)
+                {
+                    batch.GetNewLeaf(0, out Tree);
+                }
+
+                foreach (var item in Data.EnumerateAll())
+                {
+                    var page = batch.GetAt(Tree);
+                    var updated = page.SetPageWithData(item.Key, item.RawData, batch);
+
+                    if (page.Equals(updated) == false)
+                    {
+                        Tree = batch.GetAddress(updated);
+                    }
+
+                    Data.Delete(item);
+                }
+
+                Set(in path, in data, batch);
             }
         }
     }

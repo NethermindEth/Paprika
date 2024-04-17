@@ -79,9 +79,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         if (address.IsNull)
         {
             // Create child as leaf page
-            child = batch.GetNewPage(out address, true);
-            child.Header.PageType = PageType.Leaf;
-            child.Header.Level = (byte)(Header.Level + 1);
+            child = batch.GetNewLeaf((byte)(Header.Level + 1), out _);
         }
         else
         {

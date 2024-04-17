@@ -94,6 +94,18 @@ public static class ReadOnlyBatchContextExtensions
     }
 }
 
+public static class BatchContextExtensions
+{
+    public static Page GetNewLeaf(this IBatchContext batch, byte level, out DbAddress addr)
+    {
+        var child = batch.GetNewPage(out addr, true);
+        child.Header.PageType = PageType.Leaf;
+        child.Header.Level = level;
+        child.Header.PaprikaVersion = PageHeader.CurrentVersion;
+        return child;
+    }
+}
+
 /// <summary>
 /// Provides a capability to resolve a page by its page address.
 /// </summary>

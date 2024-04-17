@@ -163,17 +163,21 @@ public readonly unsafe struct RootPage(Page root) : IPage
                 }
                 else
                 {
+                    ref var last = ref Data.LastStorageRootPage;
+
                     // The key is not cached and is not mapped in the storage trees. Requires allocating a new place.
                     // Let's start with the lats memoized storage root and check if it has some place left.
 
                     // If the last storage root is null or has no more space, allocate new
-                    if (Data.LastStorageRootPage.IsNull || new StorageRootPage(batch.GetAt(Data.LastStorageRootPage)).HasEmptySlot == false)
+                    if (last.IsNull || new StorageRootPage(batch.GetAt(last)).HasEmptySlot == false)
                     {
-                        batch.GetNewPage(out addr, true);
+                        var storageRoot = batch.GetNewPage(out addr, true);
+                        storageRoot.Header.PageType = PageType.StorageRoot;
+                        storageRoot.Header.Level = 0;
                     }
 
                     // The last storage root is not null and has some empty places
-                    Data.LastStorageRootPage = batch.GetAddress(new StorageRootPage(batch.GetAt(addr)).Set(key, rawData, batch));
+                    last = batch.GetAddress(new StorageRootPage(batch.GetAt(addr)).Set(key, rawData, batch));
 
                     // Set in trees and in cache
                     WriteId(span, addr);
@@ -190,13 +194,12 @@ public readonly unsafe struct RootPage(Page root) : IPage
 
             if (updated.Equals(page))
             {
-                // nothing to memoize
+                // nothing to update, we wrote at the given page
                 return;
             }
 
-            // write updated mapping
+            // The page was different, it requires to update all the entries in cache and storage tries so that they point to the same
             WriteId(span, addr);
-
             foreach (var k in storage.Keys)
             {
                 if (k != Keccak.Zero)

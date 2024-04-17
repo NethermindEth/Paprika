@@ -28,6 +28,11 @@ public enum PageType : byte
     /// The overflow of the leaf, storing all the data.
     /// </summary>
     LeafOverflow = 5,
+
+    /// <summary>
+    /// <see cref="StorageRootPage"/>
+    /// </summary>
+    StorageRoot = 6,
 }
 
 public interface IPageTypeProvider
