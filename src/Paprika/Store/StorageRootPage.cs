@@ -10,13 +10,16 @@ namespace Paprika.Store;
 /// Represents a set of root pages for storage
 /// </summary>
 /// <param name="page"></param>
-public readonly unsafe struct StorageRootPage(Page page)
+public readonly unsafe struct StorageRootPage(Page page) : IPage
 {
-    public ref PageHeader Header => ref page.Header;
-    public ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
-    public bool HasEmptySlot => Data.Buckets.IndexOf(Keccak.Zero) != NotFound;
+    private ref PageHeader Header => ref page.Header;
 
-    public ReadOnlySpan<Keccak> Keys => Data.Buckets;
+    private ref byte Count => ref page.Header.Metadata;
+    
+    private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
+    public bool HasEmptySlot => Count < Payload.BucketCount;
+
+    public ReadOnlySpan<Keccak> Keys => Data.Buckets[..Count];
 
     private const int NotFound = -1;
 
@@ -32,7 +35,7 @@ public readonly unsafe struct StorageRootPage(Page page)
         return Data.Slots[index].TryGet(in key.StoragePath, batch, out result);
     }
 
-    private int FindIndex(in Key key) => Data.Buckets.IndexOf(key.Path.UnsafeAsKeccak);
+    private int FindIndex(in Key key) => Data.Buckets[..Count].IndexOf(key.Path.UnsafeAsKeccak);
 
     public Page Set(scoped in Key key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
@@ -44,9 +47,8 @@ public readonly unsafe struct StorageRootPage(Page page)
         var index = FindIndex(key);
         if (index == NotFound)
         {
-            index = Data.Buckets.IndexOf(Keccak.Zero);
-
-            Debug.Assert(index != NotFound);
+            index = Count;
+            Count++;
             Data.Buckets[index] = key.Path.UnsafeAsKeccak;
         }
 
@@ -69,7 +71,7 @@ public readonly unsafe struct StorageRootPage(Page page)
     public struct Payload
     {
         private const int Size = Page.PageSize - PageHeader.Size;
-        private const int BucketCount = 4;
+        public const int BucketCount = 4;
         private const int BucketsSize = BucketCount * Keccak.Size;
 
         /// <summary>
@@ -91,8 +93,10 @@ public readonly unsafe struct StorageRootPage(Page page)
         [StructLayout(LayoutKind.Explicit, Size = SlotSize)]
         public struct Slot
         {
+            private const int Alignment = SlottedArray.Alignment;
+            
             // start is long aligned for SlottedArray
-            private const int SlotSize = Page.PageSize / BucketCount - Keccak.Size;
+            private const int SlotSize = ((Page.PageSize - PageHeader.Size) / BucketCount - Keccak.Size) / Alignment * Alignment;
 
             // Should be enough to keep the full branch of the Merkle
             private const int DataLength = SlotSize - DbAddress.Size;
@@ -125,23 +129,15 @@ public readonly unsafe struct StorageRootPage(Page page)
                 if (Data.TrySet(path, data))
                     return;
 
-                if (Tree.IsNull)
-                {
-                    batch.GetNewLeaf(0, out Tree);
-                }
+                var page = Tree.IsNull ? batch.GetNewLeaf(0, out Tree) : batch.GetAt(Tree);
 
                 foreach (var item in Data.EnumerateAll())
                 {
-                    var page = batch.GetAt(Tree);
-                    var updated = page.SetPageWithData(item.Key, item.RawData, batch);
-
-                    if (page.Equals(updated) == false)
-                    {
-                        Tree = batch.GetAddress(updated);
-                    }
-
+                    page = page.SetPageWithData(item.Key, item.RawData, batch);
                     Data.Delete(item);
                 }
+                
+                Tree = batch.GetAddress(page);
 
                 Set(in path, in data, batch);
             }

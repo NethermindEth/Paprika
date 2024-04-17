@@ -639,6 +639,8 @@ public readonly ref struct SlottedArray
 
     public override string ToString() => $"{nameof(Count)}: {Count}, {nameof(CapacityLeft)}: {CapacityLeft}";
 
+    public const int Alignment = Header.Size;
+    
     [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     private struct Header
     {

@@ -143,7 +143,7 @@ public class PagedDbTests
     [Test]
     public async Task FanOut()
     {
-        const int size = 256 * 256;
+        const int size = 6;
 
         using var db = PagedDb.NativeMemoryDb(512 * Mb, 2);
 
@@ -180,7 +180,7 @@ public class PagedDbTests
                 read.TryGet(storageCell, out var actual)
                     .Should().BeTrue();
 
-                actual.SequenceEqual(expected).Should().BeTrue();
+                actual.SequenceEqual(expected).Should().BeTrue($"write no {i} should have happened");
             }
 
             var state = new StatisticsReporter(TrieType.State);

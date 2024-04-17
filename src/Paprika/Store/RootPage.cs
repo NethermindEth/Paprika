@@ -149,7 +149,6 @@ public readonly unsafe struct RootPage(Page root) : IPage
         }
         else
         {
-            Span<byte> span = stackalloc byte[4];
             var keccak = key.Path.UnsafeAsKeccak;
             var cache = batch.StorageTreeCache;
 
@@ -161,58 +160,58 @@ public readonly unsafe struct RootPage(Page root) : IPage
                     addr = ReadId(existing);
                     cache[keccak] = addr;
                 }
-                else
-                {
-                    ref var last = ref Data.LastStorageRootPage;
-
-                    // The key is not cached and is not mapped in the storage trees. Requires allocating a new place.
-                    // Let's start with the lats memoized storage root and check if it has some place left.
-
-                    // If the last storage root is null or has no more space, allocate new
-                    if (last.IsNull || new StorageRootPage(batch.GetAt(last)).HasEmptySlot == false)
-                    {
-                        var storageRoot = batch.GetNewPage(out addr, true);
-                        storageRoot.Header.PageType = PageType.StorageRoot;
-                        storageRoot.Header.Level = 0;
-                    }
-                    else
-                    {
-                        // use the last as the address to write to
-                        addr = last;
-                    }
-
-                    // The last storage root is not null and has some empty places
-                    last = batch.GetAddress(new StorageRootPage(batch.GetAt(addr)).Set(key, rawData, batch));
-
-                    // Set in trees and in cache
-                    WriteId(span, last);
-                    Data.StorageTrees.Set(NibblePath.FromKey(keccak), span, batch);
-                    cache[keccak] = last;
-                    return;
-                }
             }
 
-            // perform set
-            var page = batch.GetAt(addr);
-            var storage = new StorageRootPage(page);
-            var updated = storage.Set(key, rawData, batch);
-
-            if (updated.Equals(page))
+            if (addr.IsNull == false)
             {
-                // nothing to update, we wrote at the given page
+                // The account was previously mapped, set in the tree
+                var original = new StorageRootPage(batch.GetAt(addr));
+                var updated = original.Set(key, rawData, batch);
+
+                FlushMappings(updated, batch);
                 return;
             }
 
-            // The page was different, it requires to update all the entries in cache and storage tries so that they point to the same
-            WriteId(span, addr);
-            foreach (var k in storage.Keys)
+            // This account has not been set before. Try to put it in the existing page last storage root page.
             {
-                if (k != Keccak.Zero)
+                ref var last = ref Data.LastStorageRootPage;
+                if (last.IsNull || new StorageRootPage(batch.GetAt(last)).HasEmptySlot == false)
                 {
-                    cache[keccak] = addr;
-                    Data.StorageTrees.Set(NibblePath.FromKey(k), span, batch);
+                    // Last not set, allocate, then set
+                    var page = batch.GetNewPage(out last, true);
+                    page.Header.PageType = PageType.StorageRoot;
+                    page.Header.Level = 0;
+
+                    var storage = new StorageRootPage(page);
+                    storage.Set(key, rawData, batch);
+                    
+                    Span<byte> span = stackalloc byte[DbAddress.Size];
+                    WriteId(span, last);
+                    cache[keccak] = last;
+                    Data.StorageTrees.Set(NibblePath.FromKey(keccak), span, batch);
+                    return;
                 }
+                
+                // There's room left in this page, use it for the new
+                var original = new StorageRootPage(batch.GetAt(last));
+                var updated = original.Set(key, rawData, batch);
+                last = batch.GetAddress(updated.AsPage());
+                
+                FlushMappings(updated, batch);
             }
+        }
+    }
+
+    private void FlushMappings(Page updated, IBatchContext batch)
+    {
+        Span<byte> span = stackalloc byte[DbAddress.Size];
+        var addr = batch.GetAddress(updated);
+        WriteId(span, addr);
+        
+        foreach (ref readonly var keccak in new StorageRootPage(updated).Keys)
+        {
+            Data.StorageTrees.Set(NibblePath.FromKey(keccak), span, batch);
+            batch.StorageTreeCache[keccak] = addr;
         }
     }
 
