@@ -16,6 +16,7 @@ public class DbTests
     private const int MB64 = 64 * MB;
     private const int MB128 = 128 * MB;
     private const int MB256 = 256 * MB;
+    private const int MB512 = 512 * MB;
 
     [Test]
     public async Task Simple()
@@ -191,7 +192,7 @@ public class DbTests
     {
         var account = Keccak.EmptyTreeHash;
 
-        const int size = MB256;
+        const int size = MB512;
         using var db = PagedDb.NativeMemoryDb(size);
 
         const int batches = 25;

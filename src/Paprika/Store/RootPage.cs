@@ -120,7 +120,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
                 id = ReadId(existing);
                 if (cache.Count < IdCacheLimit)
                 {
-                    cache[keccak] = ReadId(existing);
+                    cache[keccak] = id;
                 }
             }
             else
@@ -175,14 +175,19 @@ public readonly unsafe struct RootPage(Page root) : IPage
                         storageRoot.Header.PageType = PageType.StorageRoot;
                         storageRoot.Header.Level = 0;
                     }
+                    else
+                    {
+                        // use the last as the address to write to
+                        addr = last;
+                    }
 
                     // The last storage root is not null and has some empty places
                     last = batch.GetAddress(new StorageRootPage(batch.GetAt(addr)).Set(key, rawData, batch));
 
                     // Set in trees and in cache
-                    WriteId(span, addr);
+                    WriteId(span, last);
                     Data.StorageTrees.Set(NibblePath.FromKey(keccak), span, batch);
-                    cache[keccak] = addr;
+                    cache[keccak] = last;
                     return;
                 }
             }
