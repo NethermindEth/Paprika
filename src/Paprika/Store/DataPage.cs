@@ -257,6 +257,15 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         do
         {
             batch.AssertRead(page.Header);
+            DbAddress bucket = default;
+            if (!sliced.IsEmpty)
+            {
+                // As the CPU does not auto-prefetch across page boundaries
+                // Prefetch child page in case we go there next to reduce CPU stalls
+                bucket = page.Data.Buckets[sliced.FirstNibble];
+                batch.Prefetch(bucket);
+            }
+
             // try regular map
             if (page.Map.TryGet(sliced, out result))
             {
@@ -269,7 +278,6 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
                 break;
             }
 
-            var bucket = page.Data.Buckets[sliced.FirstNibble];
             if (bucket.IsNull)
             {
                 break;
