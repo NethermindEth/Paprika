@@ -17,7 +17,7 @@ namespace Paprika.Store;
 /// <remarks>
 /// Assumes a continuous memory allocation as it provides addressing based on the pointers.
 /// </remarks>
-public class PagedDb : IPageResolver, IDb, IDisposable
+public sealed class PagedDb : IPageResolver, IDb, IDisposable
 {
     /// <summary>
     /// The number of roots kept in the history.
@@ -104,6 +104,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
         new(
             new MemoryMappedPageManager(size, historyDepth, directory,
                 flushToDisk ? PersistenceOptions.FlushFile : PersistenceOptions.MMapOnly), historyDepth);
+
+    public void Prefetch(DbAddress address) => _manager.Prefetch(address);
 
     private void ReportReads(long number) => _reads.Add(number);
 
@@ -385,7 +387,7 @@ public class PagedDb : IPageResolver, IDb, IDisposable
     private void CommitNewRoot() => _lastRoot += 1;
 
 
-    private class ReadOnlyBatch(PagedDb db, RootPage root, string name) : IReportingReadOnlyBatch, IReadOnlyBatchContext
+    private sealed class ReadOnlyBatch(PagedDb db, RootPage root, string name) : IReportingReadOnlyBatch, IReadOnlyBatchContext
     {
         [ThreadStatic]
         private static ConcurrentDictionary<Keccak, uint>? s_cache;
@@ -452,6 +454,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
                 return _idCache;
             }
         }
+
+        public void Prefetch(DbAddress address) => db.Prefetch(address);
 
         public Page GetAt(DbAddress address) => db._manager.GetAt(address);
 
@@ -597,6 +601,8 @@ public class PagedDb : IPageResolver, IDb, IDisposable
             var page = _db.GetAt(address);
             return page;
         }
+
+        public override void Prefetch(DbAddress address) => _db.Prefetch(address);
 
         public override DbAddress GetAddress(Page page) => _db.GetAddress(page);
 
