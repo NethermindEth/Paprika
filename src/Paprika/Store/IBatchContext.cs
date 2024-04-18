@@ -115,4 +115,5 @@ public interface IPageResolver
     /// Gets the page at given address.
     /// </summary>
     Page GetAt(DbAddress address);
+    void Prefetch(DbAddress address);
 }

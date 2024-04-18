@@ -6,7 +6,7 @@ using Paprika.Utils;
 
 namespace Paprika.Store.PageManagers;
 
-public class MemoryMappedPageManager : PointerPageManager
+public sealed class MemoryMappedPageManager : PointerPageManager
 {
     private readonly PersistenceOptions _options;
 
