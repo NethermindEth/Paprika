@@ -201,9 +201,8 @@ public readonly unsafe struct RootPage(Page root) : IPage
 
     private void FlushMappings(Page updated, IBatchContext batch)
     {
-        Span<byte> span = stackalloc byte[DbAddress.Size];
         var addr = batch.GetAddress(updated);
-        WriteId(span, addr);
+        var span = WriteId(stackalloc byte[DbAddress.Size], addr);
 
         foreach (ref readonly var keccak in new StorageRootPage(updated).Keys)
         {
