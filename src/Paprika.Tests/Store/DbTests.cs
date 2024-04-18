@@ -192,10 +192,10 @@ public class DbTests
     {
         var account = Keccak.EmptyTreeHash;
 
-        const int size = MB512;
+        const int size = MB256;
         using var db = PagedDb.NativeMemoryDb(size);
 
-        const int batches = 20;
+        const int batches = 25;
         const int storageSlots = 10_000;
         const int storageKeyLength = 32;
 

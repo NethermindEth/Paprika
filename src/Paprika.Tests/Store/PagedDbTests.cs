@@ -143,7 +143,7 @@ public class PagedDbTests
     [Test]
     public async Task FanOut()
     {
-        const int size = 6;
+        const int size = 256 * 256;
 
         using var db = PagedDb.NativeMemoryDb(512 * Mb, 2);
 
