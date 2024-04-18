@@ -7,14 +7,34 @@ namespace Paprika.Tests.Store;
 
 public abstract class BasePageTests
 {
-    protected static unsafe Page AllocPage()
+    private static unsafe Page AllocPage()
     {
         var memory = (byte*)NativeMemory.AlignedAlloc(Page.PageSize, sizeof(long));
         new Span<byte>(memory, Page.PageSize).Clear();
         return new Page(memory);
     }
 
-    internal class TestBatchContext(uint batchId, Stack<DbAddress>? reusable = null) : BatchContextBase(batchId)
+    private static unsafe Page AllocGuardedPage()
+    {
+        var aligned = (byte*)NativeMemory.AlignedAlloc(Page.PageSize * 3, Page.PageSize);
+        NoAccess(aligned);
+        NoAccess(aligned + 2 * Page.PageSize);
+
+        return new Page(aligned + Page.PageSize);
+    }
+
+    private static unsafe void NoAccess(byte* aligned)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            ProtectMemory.Win.VirtualProtect(aligned, Page.PageSize, ProtectMemory.Win.MemoryProtection.NOACCESS, out var previous);
+        }
+        else
+        {
+            throw new PlatformNotSupportedException("This OS is not supported");
+        }
+    }
+    internal class TestBatchContext(uint batchId, Stack<DbAddress>? reusable = null, bool protect = false) : BatchContextBase(batchId)
     {
         private readonly Dictionary<DbAddress, Page> _address2Page = new();
         private readonly Dictionary<UIntPtr, DbAddress> _page2Address = new();
@@ -41,7 +61,7 @@ public abstract class BasePageTests
             }
             else
             {
-                page = AllocPage();
+                page = protect ? AllocGuardedPage() : AllocPage();
                 addr = DbAddress.Page(_pageCount++);
 
                 _address2Page[addr] = page;
@@ -52,6 +72,7 @@ public abstract class BasePageTests
                 page.Clear();
 
             page.Header.BatchId = BatchId;
+            page.Header.PaprikaVersion = PageHeader.CurrentVersion;
 
             return page;
         }
