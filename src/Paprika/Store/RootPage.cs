@@ -52,7 +52,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         [FieldOffset(DbAddress.Size * 3 + Metadata.Size)]
         private DbAddress IdsPayload;
 
-        public FanOutList<FanOutPage, IdentityType> StorageTrees =>
+        public FanOutList<FanOutPage, StorageMapping> StorageTrees =>
             new(MemoryMarshal.CreateSpan(ref IdsPayload, FanOutList.FanOut));
 
         public const int AbandonedStart =

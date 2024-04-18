@@ -9,7 +9,6 @@ namespace Paprika.Store;
 /// <summary>
 /// Represents a set of root pages for storage
 /// </summary>
-/// <param name="page"></param>
 public readonly unsafe struct StorageRootPage(Page page) : IPage
 {
     private ref PageHeader Header => ref page.Header;

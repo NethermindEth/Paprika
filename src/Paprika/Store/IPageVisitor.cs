@@ -10,8 +10,6 @@ public interface IPageVisitor
 
     IDisposable On(FanOutPage page, DbAddress addr);
     IDisposable On(LeafPage page, DbAddress addr);
-    IDisposable On<TNext>(StorageFanOutPage<TNext> page, DbAddress addr)
-        where TNext : struct, IPageWithData<TNext>;
 
     IDisposable On(LeafOverflowPage page, DbAddress addr);
 }

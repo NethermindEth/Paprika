@@ -1,3 +1,5 @@
+using Paprika.Crypto;
+
 namespace Paprika.Store;
 
 public enum PageType : byte
@@ -10,9 +12,10 @@ public enum PageType : byte
     Standard = 1,
 
     /// <summary>
-    /// A page that is a Standard page but holds the account identity mapping.
+    /// <see cref="FanOutPage"/> that stores the mapping between <see cref="Keccak"/> and <see cref="DbAddress"/>
+    /// where the storage belongs to.
     /// </summary>
-    Identity = 2,
+    StorageMapping = 2,
 
     /// <summary>
     /// Represents <see cref="AbandonedPage"/>
@@ -45,7 +48,7 @@ public readonly struct StandardType : IPageTypeProvider
     public static PageType Type => PageType.Standard;
 }
 
-public readonly struct IdentityType : IPageTypeProvider
+public readonly struct StorageMapping : IPageTypeProvider
 {
-    public static PageType Type => PageType.Identity;
+    public static PageType Type => PageType.StorageMapping;
 }
