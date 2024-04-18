@@ -400,7 +400,7 @@ public class BlockchainTests
         const int blockCount = 10;
         const int perBlock = 1_000;
 
-        using var db = PagedDb.NativeMemoryDb(256 * Mb, 2);
+        using var db = PagedDb.NativeMemoryDb(64 * Mb, 2);
         var counter = 0;
 
         var behavior = new ComputeMerkleBehavior();

@@ -15,7 +15,7 @@ public readonly unsafe struct StorageRootPage(Page page) : IPage
     private ref PageHeader Header => ref page.Header;
 
     private ref byte Count => ref page.Header.Metadata;
-    
+
     private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
     public bool HasEmptySlot => Count < Payload.BucketCount;
 
@@ -94,7 +94,7 @@ public readonly unsafe struct StorageRootPage(Page page) : IPage
         public struct Slot
         {
             private const int Alignment = SlottedArray.Alignment;
-            
+
             // start is long aligned for SlottedArray
             private const int SlotSize = ((Page.PageSize - PageHeader.Size) / BucketCount - Keccak.Size) / Alignment * Alignment;
 
@@ -136,7 +136,7 @@ public readonly unsafe struct StorageRootPage(Page page) : IPage
                     page = page.SetPageWithData(item.Key, item.RawData, batch);
                     Data.Delete(item);
                 }
-                
+
                 Tree = batch.GetAddress(page);
 
                 Set(in path, in data, batch);

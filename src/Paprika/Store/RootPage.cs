@@ -56,7 +56,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
             new(MemoryMarshal.CreateSpan(ref IdsPayload, FanOutList.FanOut));
 
         public const int AbandonedStart =
-            DbAddress.Size * 2 + Metadata.Size + FanOutList.Size;
+            DbAddress.Size * 3 + Metadata.Size + FanOutList.Size;
 
         /// <summary>
         /// The start of the abandoned pages.
@@ -184,19 +184,19 @@ public readonly unsafe struct RootPage(Page root) : IPage
 
                     var storage = new StorageRootPage(page);
                     storage.Set(key, rawData, batch);
-                    
+
                     Span<byte> span = stackalloc byte[DbAddress.Size];
                     WriteId(span, last);
                     cache[keccak] = last;
                     Data.StorageTrees.Set(NibblePath.FromKey(keccak), span, batch);
                     return;
                 }
-                
+
                 // There's room left in this page, use it for the new
                 var original = new StorageRootPage(batch.GetAt(last));
                 var updated = original.Set(key, rawData, batch);
                 last = batch.GetAddress(updated.AsPage());
-                
+
                 FlushMappings(updated, batch);
             }
         }
@@ -207,7 +207,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         Span<byte> span = stackalloc byte[DbAddress.Size];
         var addr = batch.GetAddress(updated);
         WriteId(span, addr);
-        
+
         foreach (ref readonly var keccak in new StorageRootPage(updated).Keys)
         {
             Data.StorageTrees.Set(NibblePath.FromKey(keccak), span, batch);
