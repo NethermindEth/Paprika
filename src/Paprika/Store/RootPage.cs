@@ -135,11 +135,9 @@ public readonly unsafe struct RootPage(Page root) : IPage
         return new StorageRootPage(batch.GetAt(id)).TryGet(in key, batch, out result);
     }
 
-    private static DbAddress ReadId(ReadOnlySpan<byte> id) => new(BinaryPrimitives.ReadUInt32LittleEndian(id));
+    private static DbAddress ReadId(ReadOnlySpan<byte> id) => DbAddress.Read(id);
 
-    private static void WriteId(Span<byte> span, DbAddress address) =>
-        BinaryPrimitives.WriteUInt32LittleEndian(span, address);
-
+    private static ReadOnlySpan<byte> WriteId(Span<byte> span, DbAddress address) => address.Write(span);
 
     public void SetRaw(in Key key, IBatchContext batch, ReadOnlySpan<byte> rawData)
     {
@@ -185,8 +183,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
                     var storage = new StorageRootPage(page);
                     storage.Set(key, rawData, batch);
 
-                    Span<byte> span = stackalloc byte[DbAddress.Size];
-                    WriteId(span, last);
+                    var span = WriteId(stackalloc byte[DbAddress.Size], last);
                     cache[keccak] = last;
                     Data.StorageTrees.Set(NibblePath.FromKey(keccak), span, batch);
                     return;
