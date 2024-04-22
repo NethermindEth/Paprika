@@ -146,14 +146,22 @@ if (dbExists == false)
 
         var visit = Task.Run(() =>
         {
-            trie.Accept(visitor, trie.RootHash, new VisitingOptions
+            try
             {
-                ExpectAccounts = true,
-                MaxDegreeOfParallelism = 8,
-                //FullScanMemoryBudget = 1L * 1024 * 1024 * 1024
-            });
+                trie.Accept(visitor, trie.RootHash, new VisitingOptions
+                {
+                    ExpectAccounts = true,
+                    MaxDegreeOfParallelism = 8,
+                    //FullScanMemoryBudget = 1L * 1024 * 1024 * 1024
+                });
 
-            visitor.Finish();
+                visitor.Finish();
+            }
+            catch
+            {
+                spectre.Cancel();
+                throw;
+            }
         });
 
         var copy = visitor.Copy();

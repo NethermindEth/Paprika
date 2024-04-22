@@ -99,6 +99,10 @@ abstract class Measurement : JustInTimeRenderable, IMeasurement
                 }
             }
 
+            if (_histogram.TotalCount == 0)
+            {
+                return new Text(" N/A yet");
+            }
             try
             {
                 var p50 = _histogram.GetValueAtPercentile(50).ToString().PadLeft(5);
