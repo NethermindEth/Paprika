@@ -631,6 +631,11 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
                 Debug.Assert(page.Header.BatchId <= BatchId - _db._historyDepth,
                     $"The page at {addr} is reused at batch {BatchId} even though it was recently written at {page.Header.BatchId}");
             }
+            else if (CanAmendPagesInMemory)
+            {
+                // this is a new page, write down the meta
+                page.Header.PageTracking = Tracking.UsedForTheFirstTime;
+            }
 
             if (clear)
             {
