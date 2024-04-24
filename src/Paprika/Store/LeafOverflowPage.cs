@@ -36,7 +36,7 @@ public readonly unsafe struct LeafOverflowPage(Page page)
     {
         get
         {
-            Debug.Assert(Header.PageType == PageType.LeafOverflow);
+            Debug.Assert(Header.PageType == PageType.LeafOverflow, $"{nameof(Header.PageType)} is {Header.PageType} but should be LeafOverflow");
             return new(Data.DataSpan);
         }
     }

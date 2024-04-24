@@ -20,6 +20,8 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
+        Debug.Assert(Header.PageType == PageType.Leaf, $"{nameof(Header.PageType)} is {Header.PageType} but should be Leaf");
+
         if (Header.BatchId != batch.BatchId)
         {
             // the page is from another batch, meaning, it's readonly. Copy
@@ -126,6 +128,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             if (bucket.IsNull == false)
             {
                 var resolved = batch.GetAt(bucket);
+                Debug.Assert(resolved.Header.PageType == PageType.LeafOverflow, $"{nameof(resolved.Header.PageType)} is {resolved.Header.PageType} but should be LeafOverflow");
 
                 var overflow = new LeafOverflowPage(resolved);
                 foreach (var item in overflow.Map.EnumerateAll())
@@ -178,6 +181,8 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         {
             // the page is from another batch, meaning, it's readonly. Copy
             var writable = batch.GetWritableCopy(page);
+            Debug.Assert(writable.Header.PageType == PageType.Leaf, $"{nameof(writable.Header.PageType)} is {writable.Header.PageType} but should be Leaf");
+
             return new LeafPage(writable).TrySet(key, data, batch);
         }
 
@@ -198,7 +203,10 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         {
             if (bucket.IsNull == false)
             {
-                if (new LeafOverflowPage(batch.GetAt(bucket)).Map.TryGet(key, out result))
+                var page = batch.GetAt(bucket);
+                Debug.Assert(page.Header.PageType == PageType.LeafOverflow, $"{nameof(page.Header.PageType)} is {page.Header.PageType} but should be LeafOverflow");
+
+                if (new LeafOverflowPage(page).Map.TryGet(key, out result))
                 {
                     return true;
                 }
@@ -212,7 +220,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
     {
         get
         {
-            Debug.Assert(Header.PageType == PageType.Leaf);
+            Debug.Assert(Header.PageType == PageType.Leaf, $"{nameof(page.Header.PageType)} is {page.Header.PageType} but should be Leaf");
             return new(Data.DataSpan);
         }
     }
@@ -228,7 +236,10 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         {
             if (bucket.IsNull == false)
             {
-                new LeafOverflowPage(resolver.GetAt(bucket)).Report(reporter, resolver, pageLevel + 1, trimmedNibbles);
+                var page = resolver.GetAt(bucket);
+                Debug.Assert(page.Header.PageType == PageType.LeafOverflow, $"{nameof(page.Header.PageType)} is {page.Header.PageType} but should be LeafOverflow");
+
+                new LeafOverflowPage(page).Report(reporter, resolver, pageLevel + 1, trimmedNibbles);
             }
         }
     }
@@ -242,6 +253,10 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             if (bucket.IsNull == false)
             {
                 new LeafOverflowPage(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
+                var page = resolver.GetAt(bucket);
+                Debug.Assert(page.Header.PageType == PageType.LeafOverflow, $"{nameof(page.Header.PageType)} is {page.Header.PageType} but should be LeafOverflow");
+
+                new LeafOverflowPage(page).Accept(visitor, resolver, bucket);
             }
         }
     }

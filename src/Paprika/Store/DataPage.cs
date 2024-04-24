@@ -30,6 +30,8 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
+        Debug.Assert(Header.PageType == PageType.Standard, $"{nameof(Header.PageType)} is {Header.PageType} but should be Standard");
+
         if (Header.BatchId != batch.BatchId)
         {
             // the page is from another batch, meaning, it's readonly. Copy
@@ -37,7 +39,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             return new DataPage(writable).Set(key, data, batch);
         }
 
-        var map = new SlottedArray(Data.DataSpan);
+        var map = Map;
         var isDelete = data.IsEmpty;
 
         if (isDelete)
@@ -146,7 +148,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
                 }
                 else
                 {
-                    Debug.Assert(child.Header.PageType == PageType.Standard);
+                    Debug.Assert(child.Header.PageType == PageType.Standard, $"{nameof(Header.PageType)} is {child.Header.PageType} but should be Standard");
                     var data = new DataPage(child);
                     @new = data.Set(sliced, item.RawData, batch);
                 }
@@ -182,7 +184,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             }
             else
             {
-                Debug.Assert(destination.Header.PageType == PageType.Standard);
+                Debug.Assert(destination.Header.PageType == PageType.Standard, $"{nameof(Header.PageType)} is {destination.Header.PageType} but should be Standard");
                 destination = new DataPage(destination).Set(sliced, item.RawData, batch);
             }
 
@@ -293,7 +295,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
                 return Unsafe.As<Page, LeafPage>(ref child).TryGet(batch, sliced, out result);
             }
 
-            Debug.Assert(child.Header.PageType == PageType.Standard);
+            Debug.Assert(child.Header.PageType == PageType.Standard, $"{nameof(Header.PageType)} is {child.Header.PageType} but should be Standard");
             page = Unsafe.As<Page, DataPage>(ref child);
         } while (true);
 
@@ -304,7 +306,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
     {
         get
         {
-            Debug.Assert(Header.PageType == PageType.Standard);
+            Debug.Assert(Header.PageType == PageType.Standard, $"{nameof(Header.PageType)} is {Header.PageType} but should be Standard");
             return new(Data.DataSpan);
         }
     }
@@ -322,7 +324,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
                 }
                 else
                 {
-                    Debug.Assert(child.Header.PageType == PageType.Standard);
+                    Debug.Assert(child.Header.PageType == PageType.Standard, $"{nameof(Header.PageType)} is {child.Header.PageType} but should be Standard");
                     new DataPage(child).Report(reporter, resolver, pageLevel + 1, trimmedNibbles + 1);
                 }
             }
@@ -350,7 +352,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
                 }
                 else
                 {
-                    Debug.Assert(child.Header.PageType == PageType.Standard);
+                    Debug.Assert(child.Header.PageType == PageType.Standard, $"{nameof(Header.PageType)} is {child.Header.PageType} but should be Standard");
                     new DataPage(child).Accept(visitor, resolver, bucket);
                 }
             }
