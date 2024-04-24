@@ -123,13 +123,13 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             {
                 var resolved = batch.GetAt(bucket);
 
-                batch.RegisterForFutureReuse(resolved);
-
                 var overflow = new LeafOverflowPage(resolved);
                 foreach (var item in overflow.Map.EnumerateAll())
                 {
                     dataPage = new DataPage(dataPage.Set(item.Key, item.RawData, batch));
                 }
+
+                batch.RegisterForFutureReuse(resolved);
             }
         }
 
