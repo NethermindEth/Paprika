@@ -656,16 +656,46 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
         private bool TryGetNoLongerUsedPage(out DbAddress found)
         {
-            return _root.Data.AbandonedList.TryGet(out found, _reusePagesOlderThanBatchId, this);
+            var claimed = _root.Data.AbandonedList.TryGet(out found, _reusePagesOlderThanBatchId, this);
+
+            if (CanAmendPagesInMemory && claimed)
+            {
+                ref var tracking = ref GetAt(found).Header.PageTracking;
+
+                Debug.Assert(tracking == Tracking.RegisteredForFutureReuse);
+                tracking = Tracking.ReusedAsNew;
+            }
+
+            return claimed;
         }
 
         public override bool WasWritten(DbAddress addr) => _written.Contains(addr);
 
+        private static class Tracking
+        {
+            public const byte UsedForTheFirstTime = 0;
+            public const byte RegisteredForFutureReuse = 1;
+            public const byte ReusedAsNew = 2;
+        }
+
         public override void RegisterForFutureReuse(Page page)
         {
             var addr = _db.GetAddress(page);
+
+            if (CanAmendPagesInMemory)
+            {
+                ref var tracking = ref page.Header.PageTracking;
+
+                Debug.Assert(tracking == Tracking.UsedForTheFirstTime || tracking == Tracking.ReusedAsNew,
+                    $"The page should be either {nameof(Tracking.ReusedAsNew)} or {nameof(Tracking.UsedForTheFirstTime)}");
+
+                tracking = Tracking.RegisteredForFutureReuse;
+            }
+
             _abandoned.Add(addr);
         }
+
+        private bool CanAmendPagesInMemory => _db._manager.UsesPersistentPaging == false;
 
         public override Dictionary<Keccak, uint> IdCache { get; }
 

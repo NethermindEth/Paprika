@@ -82,9 +82,9 @@ public struct PageHeader
     public byte Level;
 
     /// <summary>
-    /// Internal metadata of the given page.
+    /// Don't use unless for the <see cref="PagedDb.Batch"/> tracking.
     /// </summary>
-    public byte Metadata;
+    public byte PageTracking;
 }
 
 /// <summary>

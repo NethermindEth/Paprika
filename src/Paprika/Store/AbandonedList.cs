@@ -117,7 +117,6 @@ public struct AbandonedList
 
         // Nothing in the current, register the page for reuse and retry
         // Previously, it was the page that was reused again, but it led to hard to assert error of page requse
-
         batch.RegisterForFutureReuse(current.AsPage());
         Current = DbAddress.Null;
 
