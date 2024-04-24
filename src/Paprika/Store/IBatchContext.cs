@@ -1,8 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-
 using Paprika.Crypto;
-using Paprika.Utils;
 
 namespace Paprika.Store;
 
@@ -73,11 +71,12 @@ public interface IReadOnlyBatchContext : IPageResolver
     /// </summary>
     uint BatchId { get; }
 
-    IDictionary<Keccak, uint> IdCache { get; }
+    IDictionary<Keccak, DbAddress> StorageTreeCache { get; }
 }
 
 public static class ReadOnlyBatchContextExtensions
 {
+    [Conditional("DEBUG")]
     public static void AssertRead(this IReadOnlyBatchContext batch, in PageHeader header)
     {
         if (header.BatchId > batch.BatchId)
@@ -91,6 +90,18 @@ public static class ReadOnlyBatchContextExtensions
         {
             throw new Exception($"The page that is at batch {header.BatchId} should not be read by a batch with lower batch number {header.BatchId}.");
         }
+    }
+}
+
+public static class BatchContextExtensions
+{
+    public static Page GetNewLeaf(this IBatchContext batch, byte level, out DbAddress addr)
+    {
+        var child = batch.GetNewPage(out addr, true);
+        child.Header.PageType = PageType.Leaf;
+        child.Header.Level = level;
+        child.Header.PaprikaVersion = PageHeader.CurrentVersion;
+        return child;
     }
 }
 

@@ -180,7 +180,7 @@ public class PagedDbTests
                 read.TryGet(storageCell, out var actual)
                     .Should().BeTrue();
 
-                actual.SequenceEqual(expected).Should().BeTrue();
+                actual.SequenceEqual(expected).Should().BeTrue($"write no {i} should have happened");
             }
 
             var state = new StatisticsReporter(TrieType.State);
@@ -189,6 +189,8 @@ public class PagedDbTests
             read.Report(state, storage);
         }
     }
+
+
 
     [Test]
     public async Task HasState_queries_state_properly()

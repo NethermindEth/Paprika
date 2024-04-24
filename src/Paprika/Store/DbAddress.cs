@@ -61,7 +61,19 @@ public readonly struct DbAddress : IEquatable<DbAddress>
 
     public override int GetHashCode() => (int)_value;
 
-    public static DbAddress Read(ReadOnlySpan<byte> data) => new(BinaryPrimitives.ReadUInt32LittleEndian(data));
+    private const int ShortLength = 3;
+    private const uint ShortLengthMaxValue = (1U << (ShortLength * 8)) - 1;
 
-    public void Write(Span<byte> destination) => BinaryPrimitives.WriteUInt32LittleEndian(destination, _value);
+    public static DbAddress Read(ReadOnlySpan<byte> data)
+    {
+        return data.Length != ShortLength
+            ? new DbAddress(BinaryPrimitives.ReadUInt32LittleEndian(data))
+            : new DbAddress((uint)(BinaryPrimitives.ReadUInt16LittleEndian(data) + (data[ShortLength - 1] << 16)));
+    }
+
+    public Span<byte> Write(Span<byte> destination)
+    {
+        BinaryPrimitives.WriteUInt32LittleEndian(destination, _value);
+        return _value <= ShortLengthMaxValue ? destination[..ShortLength] : destination;
+    }
 }

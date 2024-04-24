@@ -1,10 +1,7 @@
 using System.Diagnostics;
-using System.Reflection.PortableExecutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
-
-using static Paprika.Merkle.Node;
 
 namespace Paprika.Store;
 
@@ -33,6 +30,8 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
+        Debug.Assert(Header.PageType == PageType.Standard, $"{nameof(Header.PageType)} is {Header.PageType} but should be Standard");
+
         if (Header.BatchId != batch.BatchId)
         {
             // the page is from another batch, meaning, it's readonly. Copy
@@ -40,7 +39,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             return new DataPage(writable).Set(key, data, batch);
         }
 
-        var map = new SlottedArray(Data.DataSpan);
+        var map = Map;
         var isDelete = data.IsEmpty;
 
         if (isDelete)
@@ -79,19 +78,17 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         if (address.IsNull)
         {
             // Create child as leaf page
-            child = batch.GetNewPage(out address, true);
-            child.Header.PageType = PageType.Leaf;
-            child.Header.Level = (byte)(Header.Level + 1);
+            child = batch.GetNewLeaf((byte)(Header.Level + 1), out _);
         }
         else
         {
             // The child page is not-null, retrieve it
             child = batch.GetAt(address);
+            Debug.Assert(child.Header.PageType is PageType.Standard or PageType.Leaf);
         }
 
         child = FlushDown(map, nibble, child, batch);
         address = batch.GetAddress(child);
-
 
         // The page has some of the values flushed down, try to add again.
         return Set(key, data, batch);
@@ -151,6 +148,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
                 }
                 else
                 {
+                    Debug.Assert(child.Header.PageType == PageType.Standard, $"{nameof(Header.PageType)} is {child.Header.PageType} but should be Standard");
                     var data = new DataPage(child);
                     @new = data.Set(sliced, item.RawData, batch);
                 }
@@ -180,9 +178,15 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
             var sliced = key.SliceFrom(ConsumedNibbles);
 
-            destination = destination.Header.PageType == PageType.Leaf
-                ? new LeafPage(destination).Set(sliced, item.RawData, batch)
-                : new DataPage(destination).Set(sliced, item.RawData, batch);
+            if (destination.Header.PageType == PageType.Leaf)
+            {
+                destination = new LeafPage(destination).Set(sliced, item.RawData, batch);
+            }
+            else
+            {
+                Debug.Assert(destination.Header.PageType == PageType.Standard, $"{nameof(Header.PageType)} is {destination.Header.PageType} but should be Standard");
+                destination = new DataPage(destination).Set(sliced, item.RawData, batch);
+            }
 
             // Use the special delete for the item that is much faster than map.Delete(item.Key);
             map.Delete(item);
@@ -291,13 +295,21 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
                 return Unsafe.As<Page, LeafPage>(ref child).TryGet(batch, sliced, out result);
             }
 
+            Debug.Assert(child.Header.PageType == PageType.Standard, $"{nameof(Header.PageType)} is {child.Header.PageType} but should be Standard");
             page = Unsafe.As<Page, DataPage>(ref child);
         } while (true);
 
         return returnValue;
     }
 
-    private SlottedArray Map => new(Data.DataSpan);
+    private SlottedArray Map
+    {
+        get
+        {
+            Debug.Assert(Header.PageType == PageType.Standard, $"{nameof(Header.PageType)} is {Header.PageType} but should be Standard");
+            return new(Data.DataSpan);
+        }
+    }
 
     public void Report(IReporter reporter, IPageResolver resolver, int pageLevel, int trimmedNibbles)
     {
@@ -307,9 +319,14 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             {
                 var child = resolver.GetAt(bucket);
                 if (child.Header.PageType == PageType.Leaf)
+                {
                     new LeafPage(child).Report(reporter, resolver, pageLevel + 1, trimmedNibbles + 1);
+                }
                 else
+                {
+                    Debug.Assert(child.Header.PageType == PageType.Standard, $"{nameof(Header.PageType)} is {child.Header.PageType} but should be Standard");
                     new DataPage(child).Report(reporter, resolver, pageLevel + 1, trimmedNibbles + 1);
+                }
             }
         }
 
@@ -330,9 +347,14 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
                 var child = resolver.GetAt(bucket);
                 if (child.Header.PageType == PageType.Leaf)
+                {
                     new LeafPage(child).Accept(visitor, resolver, bucket);
+                }
                 else
+                {
+                    Debug.Assert(child.Header.PageType == PageType.Standard, $"{nameof(Header.PageType)} is {child.Header.PageType} but should be Standard");
                     new DataPage(child).Accept(visitor, resolver, bucket);
+                }
             }
         }
     }

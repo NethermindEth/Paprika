@@ -41,10 +41,6 @@ public class TreeView : IPageVisitor, IDisposable
 
     public IDisposable On(LeafPage page, DbAddress addr) => Build(nameof(LeafPage), addr, page.CapacityLeft);
 
-    public IDisposable On<TNext>(StorageFanOutPage<TNext> page, DbAddress addr)
-        where TNext : struct, IPageWithData<TNext> =>
-        Build(nameof(StorageFanOutPage), addr);
-
     public IDisposable On(LeafOverflowPage page, DbAddress addr) => Build(nameof(LeafOverflowPage), addr, page.CapacityLeft);
 
     public void Dispose() => _nodes.TryPop(out _);

@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
@@ -49,6 +51,46 @@ public static class PageExtensions
 
     public static TPage Cast<TPage>(this Page page) where TPage : unmanaged, IPage =>
         Unsafe.As<Page, TPage>(ref page);
+
+    public static Page SetPageWithData(this Page page, in NibblePath key, ReadOnlySpan<byte> data, IBatchContext batch)
+    {
+        return page.Header.PageType switch
+        {
+            PageType.Leaf => new LeafPage(page).Set(key, data, batch),
+            PageType.Standard => new DataPage(page).Set(key, data, batch),
+            _ => PageTypeNotHandled(page.Header.PageType)
+        };
+
+        static Page PageTypeNotHandled(PageType pageType)
+        {
+            ThrowPageTypeNotHandled(pageType);
+            return default;
+        }
+    }
+
+    public static bool GetPageWithData(this Page page, IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
+    {
+        return page.Header.PageType switch
+        {
+            PageType.Leaf => new LeafPage(page).TryGet(batch, key, out result),
+            PageType.Standard => new DataPage(page).TryGet(batch, key, out result),
+            _ => PageTypeNotHandled(page.Header.PageType, out result)
+        };
+
+        static bool PageTypeNotHandled(PageType pageType, out ReadOnlySpan<byte> result)
+        {
+            ThrowPageTypeNotHandled(pageType);
+            result = default;
+            return false;
+        }
+    }
+
+    [DoesNotReturn]
+    [StackTraceHidden]
+    private static void ThrowPageTypeNotHandled(PageType pageType)
+    {
+        throw new ArgumentException($"Page type {pageType} not handled");
+    }
 }
 
 /// <summary>
