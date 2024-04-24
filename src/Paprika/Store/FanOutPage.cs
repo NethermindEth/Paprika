@@ -100,7 +100,7 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
         if (addr.IsNull)
         {
             var newPage = batch.GetNewPage(out addr, true);
-            newPage.Header.PageType = Header.PageType;
+            newPage.Header.PageType = PageType.Standard;
             newPage.Header.Level = 2;
 
             new DataPage(newPage).Set(sliced, data, batch);
