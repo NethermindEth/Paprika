@@ -100,15 +100,15 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             return Set(key, data, batch);
         }
 
-        // This page is filled, move everything down. Start by registering for the reuse all the pages.
-        batch.RegisterForFutureReuse(page);
-
         // Not enough space, transform into a data page.
         var @new = batch.GetNewPage(out _, true);
 
         ref var header = ref @new.Header;
         header.PageType = PageType.Standard;
         header.Level = page.Header.Level; // same level
+
+        // This page is filled, move everything down. Start by registering for the reuse all the pages.
+        batch.RegisterForFutureReuse(page);
 
         var dataPage = new DataPage(@new);
 
