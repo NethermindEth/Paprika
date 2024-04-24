@@ -252,7 +252,6 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         {
             if (bucket.IsNull == false)
             {
-                new LeafOverflowPage(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
                 var page = resolver.GetAt(bucket);
                 Debug.Assert(page.Header.PageType == PageType.LeafOverflow, $"{nameof(page.Header.PageType)} is {page.Header.PageType} but should be LeafOverflow");
 
