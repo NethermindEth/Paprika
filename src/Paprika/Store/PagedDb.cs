@@ -634,12 +634,14 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             else if (CanAmendPagesInMemory)
             {
                 // this is a new page, write down the meta
-                page.Header.PageTracking = Tracking.UsedForTheFirstTime;
+                page.Header.Tracking = PageTracking.UsedForTheFirstTime;
             }
 
             if (clear)
             {
+                var tracking = page.Header.Tracking;
                 page.Clear();
+                page.Header.Tracking = tracking;
             }
 
             _written.Add(addr);
@@ -665,10 +667,10 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
             if (CanAmendPagesInMemory && claimed)
             {
-                ref var tracking = ref GetAt(found).Header.PageTracking;
+                ref var tracking = ref GetAt(found).Header.Tracking;
 
-                Debug.Assert(tracking == Tracking.RegisteredForFutureReuse);
-                tracking = Tracking.ReusedAsNew;
+                Debug.Assert(tracking == PageTracking.RegisteredForFutureReuse);
+                tracking = PageTracking.ReusedAsNew;
             }
 
             return claimed;
@@ -676,25 +678,18 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
         public override bool WasWritten(DbAddress addr) => _written.Contains(addr);
 
-        private static class Tracking
-        {
-            public const byte UsedForTheFirstTime = 0;
-            public const byte RegisteredForFutureReuse = 1;
-            public const byte ReusedAsNew = 2;
-        }
-
         public override void RegisterForFutureReuse(Page page)
         {
             var addr = _db.GetAddress(page);
 
             if (CanAmendPagesInMemory)
             {
-                ref var tracking = ref page.Header.PageTracking;
+                ref var tracking = ref page.Header.Tracking;
 
-                Debug.Assert(tracking == Tracking.UsedForTheFirstTime || tracking == Tracking.ReusedAsNew,
-                    $"The page should be either {nameof(Tracking.ReusedAsNew)} or {nameof(Tracking.UsedForTheFirstTime)}");
+                Debug.Assert(tracking is PageTracking.UsedForTheFirstTime or PageTracking.ReusedAsNew,
+                    $"The page should be either {nameof(PageTracking.ReusedAsNew)} or {nameof(PageTracking.UsedForTheFirstTime)}");
 
-                tracking = Tracking.RegisteredForFutureReuse;
+                tracking = PageTracking.RegisteredForFutureReuse;
             }
 
             _abandoned.Add(addr);
