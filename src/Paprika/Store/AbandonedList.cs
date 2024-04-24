@@ -27,6 +27,8 @@ public struct AbandonedList
     [FieldOffset(MaxCount * sizeof(uint) + EntriesStart)]
     private DbAddress AddressStart;
 
+    private const int NotFound = -1;
+
     private Span<DbAddress> Addresses => MemoryMarshal.CreateSpan(ref AddressStart, MaxCount);
 
     /// <summary>
@@ -43,9 +45,10 @@ public struct AbandonedList
                 return false;
             }
 
+            // find first batch matching the range
             var i = BatchIds.IndexOfAnyInRange<uint>(1, minBatchId - 1);
 
-            if (i > -1 && minBatchId > 2)
+            if (i > NotFound && minBatchId > 2)
             {
                 var at = Addresses[i];
 
@@ -105,17 +108,20 @@ public struct AbandonedList
             }
         }
 
-        Debug.Assert(current.BatchId == batch.BatchId);
+        Debug.Assert(current.BatchId == batch.BatchId, "Abandoned page should have been COWed properly");
 
         if (current.TryPop(out reused))
         {
             return true;
         }
 
-        // nothing in the current, use current as it has been COWed already
-        reused = batch.GetAddress(current.AsPage());
+        // Nothing in the current, register the page for reuse and retry
+        // Previously, it was the page that was reused again, but it led to hard to assert error of page requse
+
+        batch.RegisterForFutureReuse(current.AsPage());
         Current = DbAddress.Null;
-        return true;
+
+        return TryGet(out reused, minBatchId, batch);
 
         [DoesNotReturn]
         [StackTraceHidden]

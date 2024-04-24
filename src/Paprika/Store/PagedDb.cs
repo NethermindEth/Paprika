@@ -387,12 +387,13 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     private void CommitNewRoot() => _lastRoot += 1;
 
 
-    private sealed class ReadOnlyBatch(PagedDb db, RootPage root, string name) : IReportingReadOnlyBatch, IReadOnlyBatchContext
+    private sealed class ReadOnlyBatch(PagedDb db, RootPage root, string name)
+        : IReportingReadOnlyBatch, IReadOnlyBatchContext
     {
-        [ThreadStatic]
-        private static ConcurrentDictionary<Keccak, uint>? s_cache;
+        [ThreadStatic] private static ConcurrentDictionary<Keccak, uint>? s_cache;
 
-        private ConcurrentDictionary<Keccak, uint> _idCache = Interlocked.Exchange(ref s_cache, null) ?? new(Environment.ProcessorCount,
+        private ConcurrentDictionary<Keccak, uint> _idCache = Interlocked.Exchange(ref s_cache, null) ?? new(
+            Environment.ProcessorCount,
             RootPage.IdCacheLimit);
 
         public RootPage Root => root;
@@ -624,6 +625,13 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             }
 
             var page = _db.GetAtForWriting(addr, reused);
+
+            if (reused)
+            {
+                Debug.Assert(page.Header.BatchId <= BatchId - _db._historyDepth,
+                    $"The page at {addr} is reused at batch {BatchId} even though it was recently written at {page.Header.BatchId}");
+            }
+
             if (clear)
             {
                 page.Clear();
