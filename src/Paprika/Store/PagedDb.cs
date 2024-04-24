@@ -687,7 +687,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
                 ref var tracking = ref page.Header.Tracking;
 
                 Debug.Assert(tracking is PageTracking.UsedForTheFirstTime or PageTracking.ReusedAsNew,
-                    $"The page should be either {nameof(PageTracking.ReusedAsNew)} or {nameof(PageTracking.UsedForTheFirstTime)}");
+                    $"The page is {tracking} but should be either {nameof(PageTracking.ReusedAsNew)} or {nameof(PageTracking.UsedForTheFirstTime)}");
 
                 tracking = PageTracking.RegisteredForFutureReuse;
             }
