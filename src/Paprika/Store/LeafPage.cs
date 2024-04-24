@@ -208,7 +208,14 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         return false;
     }
 
-    private SlottedArray Map => new(Data.DataSpan);
+    private SlottedArray Map
+    {
+        get
+        {
+            Debug.Assert(Header.PageType == PageType.Leaf);
+            return new(Data.DataSpan);
+        }
+    }
 
     public int CapacityLeft => Map.CapacityLeft;
 

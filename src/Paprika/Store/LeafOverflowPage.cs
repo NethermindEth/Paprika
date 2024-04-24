@@ -32,7 +32,14 @@ public readonly unsafe struct LeafOverflowPage(Page page)
         public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, Size);
     }
 
-    public SlottedArray Map => new(Data.DataSpan);
+    public SlottedArray Map
+    {
+        get
+        {
+            Debug.Assert(Header.PageType == PageType.LeafOverflow);
+            return new(Data.DataSpan);
+        }
+    }
 
     public int CapacityLeft => Map.CapacityLeft;
 
