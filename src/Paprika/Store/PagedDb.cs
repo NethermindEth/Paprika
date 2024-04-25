@@ -58,6 +58,9 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     private Context? _ctx;
     private readonly BufferPool _pooledRoots;
 
+    // reuse tracking
+    private readonly Dictionary<DbAddress, uint> _registeredForReuse = new();
+
     /// <summary>
     /// Initializes the paged db.
     /// </summary>
@@ -631,17 +634,10 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
                 Debug.Assert(page.Header.BatchId <= BatchId - _db._historyDepth,
                     $"The page at {addr} is reused at batch {BatchId} even though it was recently written at {page.Header.BatchId}");
             }
-            else if (CanAmendPagesInMemory)
-            {
-                // this is a new page, write down the meta
-                page.Header.Tracking = PageTracking.UsedForTheFirstTime;
-            }
 
             if (clear)
             {
-                var tracking = page.Header.Tracking;
                 page.Clear();
-                page.Header.Tracking = tracking;
             }
 
             _written.Add(addr);
@@ -665,12 +661,13 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         {
             var claimed = _root.Data.AbandonedList.TryGet(out found, _reusePagesOlderThanBatchId, this);
 
-            if (CanAmendPagesInMemory && claimed)
+            if (claimed)
             {
-                ref var tracking = ref GetAt(found).Header.Tracking;
-
-                Debug.Assert(tracking == PageTracking.RegisteredForFutureReuse);
-                tracking = PageTracking.ReusedAsNew;
+                if (_db._registeredForReuse.Remove(found) == false)
+                {
+                    throw new Exception(
+                        $"The page {found} is not registered as reusable. Must have been taken before. It's tried to be reused again");
+                }
             }
 
             return claimed;
@@ -682,20 +679,10 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         {
             var addr = _db.GetAddress(page);
 
-            if (CanAmendPagesInMemory)
-            {
-                ref var tracking = ref page.Header.Tracking;
-
-                Debug.Assert(tracking is PageTracking.UsedForTheFirstTime or PageTracking.ReusedAsNew,
-                    $"The page is {tracking} but should be either {nameof(PageTracking.ReusedAsNew)} or {nameof(PageTracking.UsedForTheFirstTime)}");
-
-                tracking = PageTracking.RegisteredForFutureReuse;
-            }
-
+            // register at this batch
+            _db._registeredForReuse.Add(addr, BatchId);
             _abandoned.Add(addr);
         }
-
-        private bool CanAmendPagesInMemory => _db._manager.UsesPersistentPaging == false;
 
         public override Dictionary<Keccak, uint> IdCache { get; }
 

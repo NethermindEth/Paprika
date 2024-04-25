@@ -25,13 +25,4 @@ public interface IPageManager : IDisposable, IPageResolver
     /// Forces to flush the underlying no matter what flags they are
     /// </summary>
     void ForceFlush();
-
-    /// <summary>
-    /// Provides information whether the page manager uses the persistent paging using
-    /// actual IO methods (<see cref="RandomAccess"/> and others).
-    ///
-    /// If it uses paging not based on the actual IO, this means that pages are never flushed manually and
-    /// can be altered just like they were in memory. 
-    /// </summary>
-    bool UsesPersistentPaging { get; }
 }

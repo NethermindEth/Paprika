@@ -56,7 +56,6 @@ public struct AbandonedList
 
                 Current = at;
                 var page = batch.GetAt(at);
-                Debug.Assert(page.Header.Tracking is not PageTracking.RegisteredForFutureReuse, $"The page is {PageTracking.RegisteredForFutureReuse} but should not be");
                 var abandoned = new AbandonedPage(page);
                 if (abandoned.Next.IsNull)
                 {
@@ -81,8 +80,6 @@ public struct AbandonedList
 
         var pageAt = batch.GetAt(Current);
         var current = new AbandonedPage(pageAt);
-        Debug.Assert(pageAt.Header.Tracking is not PageTracking.RegisteredForFutureReuse, $"The page is {PageTracking.RegisteredForFutureReuse} but should not be");
-
         if (current.BatchId != batch.BatchId)
         {
             // The current came from the previous batch.

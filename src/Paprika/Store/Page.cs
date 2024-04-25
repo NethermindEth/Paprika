@@ -81,18 +81,7 @@ public struct PageHeader
     /// </summary>
     public byte Level;
 
-    public PageTracking Tracking;
-}
-
-/// <summary>
-/// Used for tracking purposes.
-/// </summary>
-public enum PageTracking : byte
-{
-    NotSet = 0,
-    UsedForTheFirstTime = 1,
-    RegisteredForFutureReuse = 2,
-    ReusedAsNew = 3,
+    public byte Metadata;
 }
 
 /// <summary>
