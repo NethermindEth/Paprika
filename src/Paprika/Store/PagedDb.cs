@@ -680,7 +680,14 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             var addr = _db.GetAddress(page);
 
             // register at this batch
-            _db._registeredForReuse.Add(addr, BatchId);
+            ref var batchId = ref CollectionsMarshal.GetValueRefOrAddDefault(_db._registeredForReuse, addr, out var exists);
+            if (exists)
+            {
+                throw new Exception(
+                    $"The page {addr} that is tried to be registered for reuse at batch {BatchId} has already been registered at batch {batchId}");
+            }
+
+            batchId = BatchId;
             _abandoned.Add(addr);
         }
 
