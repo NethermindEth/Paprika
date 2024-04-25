@@ -117,12 +117,10 @@ public struct AbandonedList
             return true;
         }
 
-        // Nothing in the current, register the page for reuse and retry
-        // Previously, it was the page that was reused again, but it led to hard to assert error of page requse
-        batch.RegisterForFutureReuse(current.AsPage());
+        // Nothing in the current. It has been COWed already so can be used as a reusable one
+        reused = batch.GetAddress(current.AsPage());
         Current = DbAddress.Null;
-
-        return TryGet(out reused, minBatchId, batch);
+        return true;
 
         [DoesNotReturn]
         [StackTraceHidden]
