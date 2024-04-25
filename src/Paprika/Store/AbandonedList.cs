@@ -80,6 +80,7 @@ public struct AbandonedList
 
         var pageAt = batch.GetAt(Current);
         var current = new AbandonedPage(pageAt);
+
         if (current.BatchId != batch.BatchId)
         {
             // The current came from the previous batch.
@@ -88,6 +89,15 @@ public struct AbandonedList
 
             if (current.TryPeek(out var newAt))
             {
+                if (current.Count == 1)
+                {
+                    // Special case as the current has only one page. 
+                    // There's no use in COWing the page. Just return the page and clean the current
+                    reused = newAt;
+                    Current = DbAddress.Null;
+                    return true;
+                }
+
                 // If current has a child, we can use the child and COW to it
                 var dest = batch.GetAt(newAt);
                 batch.NoticeAbandonedPageReused(dest);
@@ -99,7 +109,7 @@ public struct AbandonedList
                 Current = newAt;
                 if (current.TryPop(out _) == false)
                 {
-                    // We getting what was peeked above.
+                    // This should pop the one that was Peeked above.
                     ThrowPageEmpty();
                 }
             }
@@ -118,10 +128,11 @@ public struct AbandonedList
             return true;
         }
 
-        // Nothing in the current. It has been COWed already so can be used as a reusable one
-        reused = batch.GetAddress(current.AsPage());
+        // Nothing in the current.
+        // Register as ready to be reused for sake of bookkeeping and retry the get.
+        batch.RegisterForFutureReuse(current.AsPage());
         Current = DbAddress.Null;
-        return true;
+        return TryGet(out reused, minBatchId, batch);
 
         [DoesNotReturn]
         [StackTraceHidden]
