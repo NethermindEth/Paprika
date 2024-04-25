@@ -83,13 +83,14 @@ public struct AbandonedList
         if (current.BatchId != batch.BatchId)
         {
             // The current came from the previous batch.
-            // Try to use its own data to copy it over.
-            // But first, register it for reuse
+            // First, register it for reuse
             batch.RegisterForFutureReuse(current.AsPage());
 
             if (current.TryPeek(out var newAt))
             {
+                // If current has a child, we can use the child and COW to it
                 var dest = batch.GetAt(newAt);
+                batch.NoticeAbandonedPageReused(dest);
                 current.CopyTo(dest);
                 batch.AssignBatchId(dest);
 

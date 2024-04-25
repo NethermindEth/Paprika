@@ -46,6 +46,8 @@ abstract class BatchContextBase(uint batchId) : IBatchContext
 
     public abstract void RegisterForFutureReuse(Page page);
 
+    public virtual void NoticeAbandonedPageReused(Page page) { }
+
     public abstract IDictionary<Keccak, uint> IdCache { get; }
 
     /// <summary>

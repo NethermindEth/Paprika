@@ -667,7 +667,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
                 if (_db._registeredForReuse.Remove(found) == false)
                 {
                     throw new Exception(
-                        $"The page {found} is not registered as reusable. Must have been taken before. It's tried to be reused again");
+                        $"The page {found} is not registered as reusable. Must have been taken before. It's tried to be reused again at batch {BatchId}.");
                 }
             }
 
@@ -690,6 +690,15 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
             batchId = BatchId;
             _abandoned.Add(addr);
+        }
+
+        public override void NoticeAbandonedPageReused(Page page)
+        {
+            var addr = _db.GetAddress(page);
+            if (_db._registeredForReuse.Remove(addr) == false)
+            {
+                throw new Exception($"The page {addr} should have been registered as registered for the reuse but it has not.");
+            }
         }
 
         public override Dictionary<Keccak, uint> IdCache { get; }
