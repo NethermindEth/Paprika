@@ -631,8 +631,9 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
             if (reused)
             {
-                Debug.Assert(page.Header.BatchId <= BatchId - _db._historyDepth,
-                    $"The page at {addr} is reused at batch {BatchId} even though it was recently written at {page.Header.BatchId}");
+                Debug.Assert(page.Header.PageType == PageType.Abandoned || page.Header.BatchId <= BatchId - _db._historyDepth,
+                    $"The page at {addr} is reused at batch {BatchId} even though it was recently written at {page.Header.BatchId}. " +
+                    $"Only {nameof(PageType.Abandoned)} can be reused in that manner.");
             }
 
             if (clear)
