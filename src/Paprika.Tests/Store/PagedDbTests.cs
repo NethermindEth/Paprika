@@ -10,6 +10,7 @@ namespace Paprika.Tests.Store;
 
 public class PagedDbTests
 {
+    private const long Gb = 1024 * 1024 * 1024;
     private const int Mb = 1024 * 1024;
     private const int Seed = 17;
 
@@ -98,7 +99,7 @@ public class PagedDbTests
         const int accounts = 512 * 1024;
         const int size = 10_000;
 
-        using var db = PagedDb.NativeMemoryDb(1024 * Mb, 2);
+        using var db = PagedDb.NativeMemoryDb(2 * Gb, 2);
 
         var value = new byte[1] { 13 };
 
@@ -145,7 +146,7 @@ public class PagedDbTests
     {
         const int size = 256 * 256;
 
-        using var db = PagedDb.NativeMemoryDb(512 * Mb, 2);
+        using var db = PagedDb.NativeMemoryDb(1024 * Mb, 2);
 
         var value = new byte[4];
 
