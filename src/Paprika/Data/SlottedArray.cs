@@ -21,6 +21,8 @@ namespace Paprika.Data;
 /// </remarks>
 public readonly ref struct SlottedArray
 {
+    public const int Alignment = 8;
+
     private readonly ref Header _header;
     private readonly Span<byte> _data;
 
@@ -372,6 +374,14 @@ public readonly ref struct SlottedArray
 
         data = default;
         return false;
+    }
+
+    /// <summary>
+    /// Clears the map.
+    /// </summary>
+    public void Clear()
+    {
+        _header = default;
     }
 
     [OptimizationOpportunity(OptimizationType.CPU,
