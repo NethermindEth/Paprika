@@ -1,5 +1,6 @@
 ﻿using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
@@ -153,14 +154,15 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
             var slot = item.Key.FirstNibble % count;
             var overflow = batch.EnsureWritableCopy(ref Data.Buckets[slot]);
+            var map = new LeafOverflowPage(overflow).Map;
 
             var isDelete = item.RawData.IsEmpty;
             if (isDelete)
             {
-                new LeafOverflowPage(overflow).Map.Delete(item.Key);
+                map.Delete(item.Key);
                 Map.Delete(item);
             }
-            else if (new LeafOverflowPage(overflow).Map.TrySet(item.Key, item.RawData))
+            else if (map.TrySet(item.Key, item.RawData))
             {
                 Map.Delete(item);
             }
