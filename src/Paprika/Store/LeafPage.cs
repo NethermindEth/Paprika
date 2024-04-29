@@ -76,25 +76,25 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
         var dataPage = new DataPage(@new);
 
+        foreach (var bucket in Data.Buckets)
+        {
+            if (bucket.IsNull)
+                continue;
+
+            var resolved = batch.GetAt(bucket);
+
+            batch.RegisterForFutureReuse(resolved);
+
+            var overflow = new LeafOverflowPage(resolved);
+            foreach (var item in overflow.Map.EnumerateAll())
+            {
+                dataPage = new DataPage(dataPage.Set(item.Key, item.RawData, batch));
+            }
+        }
+
         foreach (var item in Map.EnumerateAll())
         {
             dataPage = new DataPage(dataPage.Set(item.Key, item.RawData, batch));
-        }
-
-        foreach (var bucket in Data.Buckets)
-        {
-            if (bucket.IsNull == false)
-            {
-                var resolved = batch.GetAt(bucket);
-
-                batch.RegisterForFutureReuse(resolved);
-
-                var overflow = new LeafOverflowPage(resolved);
-                foreach (var item in overflow.Map.EnumerateAll())
-                {
-                    dataPage = new DataPage(dataPage.Set(item.Key, item.RawData, batch));
-                }
-            }
         }
 
         // Set this value and return data page
