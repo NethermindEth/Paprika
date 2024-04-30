@@ -22,6 +22,8 @@ public readonly struct AbandonedPage(Page page) : IPage
     public uint BatchId => Header.BatchId;
     public DbAddress Next => Data.Next;
 
+    public int Count => Data.Count;
+
     private unsafe ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
 
     [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]

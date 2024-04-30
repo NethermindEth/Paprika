@@ -27,6 +27,8 @@ public struct AbandonedList
     [FieldOffset(MaxCount * sizeof(uint) + EntriesStart)]
     private DbAddress AddressStart;
 
+    private const int NotFound = -1;
+
     private Span<DbAddress> Addresses => MemoryMarshal.CreateSpan(ref AddressStart, MaxCount);
 
     /// <summary>
@@ -43,17 +45,19 @@ public struct AbandonedList
                 return false;
             }
 
+            // find first batch matching the range
             var i = BatchIds.IndexOfAnyInRange<uint>(1, minBatchId - 1);
 
-            if (i > -1 && minBatchId > 2)
+            if (i > NotFound && minBatchId > 2)
             {
                 var at = Addresses[i];
 
                 Debug.Assert(at.IsNull == false);
 
                 Current = at;
-                var page = new AbandonedPage(batch.GetAt(at));
-                if (page.Next.IsNull)
+                var page = batch.GetAt(at);
+                var abandoned = new AbandonedPage(page);
+                if (abandoned.Next.IsNull)
                 {
                     // no next, clear the slot
                     Addresses[i] = default;
@@ -63,7 +67,7 @@ public struct AbandonedList
                 }
                 else
                 {
-                    Addresses[i] = page.Next;
+                    Addresses[i] = abandoned.Next;
                 }
             }
         }
@@ -74,17 +78,29 @@ public struct AbandonedList
             return false;
         }
 
-        var current = new AbandonedPage(batch.GetAt(Current));
+        var pageAt = batch.GetAt(Current);
+        var current = new AbandonedPage(pageAt);
+
         if (current.BatchId != batch.BatchId)
         {
             // The current came from the previous batch.
-            // Try to use its own data to copy it over.
-            // But first, register it for reuse
+            // First, register it for reuse
             batch.RegisterForFutureReuse(current.AsPage());
 
             if (current.TryPeek(out var newAt))
             {
+                if (current.Count == 1)
+                {
+                    // Special case as the current has only one page. 
+                    // There's no use in COWing the page. Just return the page and clean the current
+                    reused = newAt;
+                    Current = DbAddress.Null;
+                    return true;
+                }
+
+                // If current has a child, we can use the child and COW to it
                 var dest = batch.GetAt(newAt);
+                batch.NoticeAbandonedPageReused(dest);
                 current.CopyTo(dest);
                 batch.AssignBatchId(dest);
 
@@ -93,7 +109,7 @@ public struct AbandonedList
                 Current = newAt;
                 if (current.TryPop(out _) == false)
                 {
-                    // We getting what was peeked above.
+                    // This should pop the one that was Peeked above.
                     ThrowPageEmpty();
                 }
             }
@@ -105,17 +121,18 @@ public struct AbandonedList
             }
         }
 
-        Debug.Assert(current.BatchId == batch.BatchId);
+        Debug.Assert(current.BatchId == batch.BatchId, "Abandoned page should have been COWed properly");
 
         if (current.TryPop(out reused))
         {
             return true;
         }
 
-        // nothing in the current, use current as it has been COWed already
-        reused = batch.GetAddress(current.AsPage());
+        // Nothing in the current.
+        // Register as ready to be reused for sake of bookkeeping and retry the get.
+        batch.RegisterForFutureReuse(current.AsPage());
         Current = DbAddress.Null;
-        return true;
+        return TryGet(out reused, minBatchId, batch);
 
         [DoesNotReturn]
         [StackTraceHidden]

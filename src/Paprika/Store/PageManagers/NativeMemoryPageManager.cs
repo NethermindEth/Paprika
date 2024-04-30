@@ -27,6 +27,8 @@ public sealed unsafe class NativeMemoryPageManager : PointerPageManager
     {
     }
 
+    public override bool UsesPersistentPaging => false;
+
     public override void Dispose() => NativeMemory.AlignedFree(_ptr);
 
     public override ValueTask FlushPages(ICollection<DbAddress> addresses, CommitOptions options) =>

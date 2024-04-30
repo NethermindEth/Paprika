@@ -27,11 +27,12 @@ abstract class BatchContextBase(uint batchId) : IBatchContext
         if (page.Header.BatchId == BatchId)
             return page;
 
-        RegisterForFutureReuse(page);
-
         var @new = GetNewPage(out _, false);
         page.CopyTo(@new);
         AssignBatchId(@new);
+
+        // register as the last because registering can amend the tracking 
+        RegisterForFutureReuse(page);
 
         return @new;
     }
@@ -44,6 +45,8 @@ abstract class BatchContextBase(uint batchId) : IBatchContext
     /// <param name="page">The page to be analyzed and registered for future GC.</param>
 
     public abstract void RegisterForFutureReuse(Page page);
+
+    public virtual void NoticeAbandonedPageReused(Page page) { }
 
     public abstract IDictionary<Keccak, uint> IdCache { get; }
 
