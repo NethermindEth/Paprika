@@ -1,6 +1,4 @@
-﻿using System.Buffers.Binary;
-using System.Diagnostics;
-using System.Numerics;
+﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
@@ -237,18 +235,15 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             return true;
         }
 
-        foreach (var bucket in Data.Buckets)
+        if (key.IsEmpty)
         {
-            if (bucket.IsNull == false)
-            {
-                if (new LeafOverflowPage(batch.GetAt(bucket)).Map.TryGet(key, out result))
-                {
-                    return true;
-                }
-            }
+            return false;
         }
 
-        return false;
+        var count = Data.CountOverflowPages();
+        var bucket = Data.Buckets[key.FirstNibble % count];
+
+        return new LeafOverflowPage(batch.GetAt(bucket)).Map.TryGet(key, out result);
     }
 
     private SlottedArray Map => new(Data.DataSpan);
