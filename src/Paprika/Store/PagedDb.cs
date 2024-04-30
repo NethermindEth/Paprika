@@ -1,3 +1,5 @@
+//#define TRACKING_REUSED_PAGES
+
 using NonBlocking;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
@@ -58,6 +60,12 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     private Context? _ctx;
     private readonly BufferPool _pooledRoots;
 
+#if TRACKING_REUSED_PAGES
+    // reuse tracking
+    private readonly Dictionary<DbAddress, uint> _registeredForReuse = new();
+    private readonly MetricsExtensions.IAtomicIntGauge _reusablePages;
+#endif
+
     /// <summary>
     /// Initializes the paged db.
     /// </summary>
@@ -93,6 +101,11 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         _commitPageCountNewlyAllocated = _meter.CreateHistogram<int>("Commit page count (new)", "pages",
             "The number of pages flushed during the commit");
 
+#if TRACKING_REUSED_PAGES        
+        // Reuse tracking
+        _reusablePages = _meter.CreateAtomicObservableGauge("Pages registered for reuse", "count",
+            "The number of pages registered to be reused");
+#endif
         // Pool
         _pooledRoots = new BufferPool(16, true, _meter);
     }
@@ -387,12 +400,13 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     private void CommitNewRoot() => _lastRoot += 1;
 
 
-    private sealed class ReadOnlyBatch(PagedDb db, RootPage root, string name) : IReportingReadOnlyBatch, IReadOnlyBatchContext
+    private sealed class ReadOnlyBatch(PagedDb db, RootPage root, string name)
+        : IReportingReadOnlyBatch, IReadOnlyBatchContext
     {
-        [ThreadStatic]
-        private static ConcurrentDictionary<Keccak, uint>? s_cache;
+        [ThreadStatic] private static ConcurrentDictionary<Keccak, uint>? s_cache;
 
-        private ConcurrentDictionary<Keccak, uint> _idCache = Interlocked.Exchange(ref s_cache, null) ?? new(Environment.ProcessorCount,
+        private ConcurrentDictionary<Keccak, uint> _idCache = Interlocked.Exchange(ref s_cache, null) ?? new(
+            Environment.ProcessorCount,
             RootPage.IdCacheLimit);
 
         public RootPage Root => root;
@@ -573,6 +587,10 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             _db.ReportReads(_metrics.Reads);
             _db.ReportWrites(_metrics.Writes);
 
+#if TRACKING_REUSED_PAGES
+            _db._reusablePages.Set(_db._registeredForReuse.Count);
+#endif
+
             await _db._manager.FlushPages(_written, options);
 
             var newRootPage = _db.SetNewRoot(_root);
@@ -624,6 +642,14 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             }
 
             var page = _db.GetAtForWriting(addr, reused);
+
+            if (reused)
+            {
+                Debug.Assert(page.Header.PageType == PageType.Abandoned || page.Header.BatchId <= BatchId - _db._historyDepth,
+                    $"The page at {addr} is reused at batch {BatchId} even though it was recently written at {page.Header.BatchId}. " +
+                    $"Only {nameof(PageType.Abandoned)} can be reused in that manner.");
+            }
+
             if (clear)
             {
                 page.Clear();
@@ -648,7 +674,20 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
         private bool TryGetNoLongerUsedPage(out DbAddress found)
         {
-            return _root.Data.AbandonedList.TryGet(out found, _reusePagesOlderThanBatchId, this);
+            var claimed = _root.Data.AbandonedList.TryGet(out found, _reusePagesOlderThanBatchId, this);
+
+#if TRACKING_REUSED_PAGES
+            if (claimed)
+            {
+                if (_db._registeredForReuse.Remove(found) == false)
+                {
+                    throw new Exception(
+                        $"The page {found} is not registered as reusable. Must have been taken before. It's tried to be reused again at batch {BatchId}.");
+                }
+            }
+#endif
+
+            return claimed;
         }
 
         public override bool WasWritten(DbAddress addr) => _written.Contains(addr);
@@ -656,7 +695,30 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         public override void RegisterForFutureReuse(Page page)
         {
             var addr = _db.GetAddress(page);
+
+#if TRACKING_REUSED_PAGES
+            // register at this batch
+            ref var batchId = ref CollectionsMarshal.GetValueRefOrAddDefault(_db._registeredForReuse, addr, out var exists);
+            if (exists)
+            {
+                throw new Exception(
+                    $"The page {addr} that is tried to be registered for reuse at batch {BatchId} has already been registered at batch {batchId}");
+            }
+
+            batchId = BatchId;
+#endif
             _abandoned.Add(addr);
+        }
+
+        public override void NoticeAbandonedPageReused(Page page)
+        {
+#if TRACKING_REUSED_PAGES
+            var addr = _db.GetAddress(page);
+            if (_db._registeredForReuse.Remove(addr) == false)
+            {
+                throw new Exception($"The page {addr} should have been registered as registered for the reuse but it has not.");
+            }
+#endif
         }
 
         public override Dictionary<Keccak, uint> IdCache { get; }
