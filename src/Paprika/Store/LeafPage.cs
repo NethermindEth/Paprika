@@ -90,7 +90,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         if (count == 0)
         {
             var overflow = AllocOverflow(batch, out Data.Buckets[0]);
-            Map.MoveTo(overflow.Map);
+            Map.MoveNonEmptyKeysTo(overflow.Map);
             return true;
         }
 
@@ -122,7 +122,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             foreach (var item in new LeafOverflowPage(p).Map.EnumerateAll())
             {
                 Debug.Assert(item.Key.IsEmpty == false, "The key in overflow cannot be empty!");
-                
+
                 var at = item.Key.FirstNibble % newCount;
                 if (overflows[at].Map.TrySet(item.Key, item.RawData) == false)
                 {

@@ -213,18 +213,23 @@ public readonly ref struct SlottedArray
     /// <summary>
     /// Moves all the items to the <paramref name="destination"/>, throwing on failure.
     /// </summary>
-    public void MoveTo(in SlottedArray destination)
+    public void MoveNonEmptyKeysTo(in SlottedArray destination)
     {
         foreach (var item in EnumerateAll())
         {
-            // try copy all, even if one is not copyable the other might
-            if (destination.TrySet(item.Key, item.RawData) == false)
+            if (item.Key.IsEmpty)
             {
-                throw new Exception("Not enough space in the destination map");
+                continue;
+            }
+
+            if (destination.TrySet(item.Key, item.RawData))
+            {
+                // Delete, postponing the tombstone collection till the end
+                DeleteImpl(item.Index, false);
             }
         }
 
-        Clear();
+        CollectTombstones();
     }
 
     public const int BucketCount = 16;
@@ -279,14 +284,16 @@ public readonly ref struct SlottedArray
 
     public void Delete(in Enumerator.Item item) => DeleteImpl(item.Index);
 
-    private void DeleteImpl(int index)
+    private void DeleteImpl(int index, bool collectTombstones = true)
     {
         // mark as deleted first
         this[index].MarkAsDeleted();
         _header.Deleted++;
 
-        // always try to compact after delete
-        CollectTombstones();
+        if (collectTombstones)
+        {
+            CollectTombstones();
+        }
     }
 
     private void Deframent()
