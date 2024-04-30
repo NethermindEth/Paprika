@@ -28,44 +28,21 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             return new LeafPage(writable).Set(key, data, batch);
         }
 
+        var (success, cow) = TrySet(key, data, batch);
+        if (success)
+            return cow;
+
+        // No place in the existing map, no place in the overflows, time to grow.
+        TryAllocateOverflowsAndFlushDown(batch);
+
         // Try set in-map first
         if (Map.TrySet(key, data))
         {
             return page;
         }
 
-        // The map is full, try flush to the existing buckets
-        var count = Data.Buckets.LastIndexOfAnyExcept(DbAddress.Null) + 1;
-
-        if (count == 0)
-        {
-            // No overflow, create one
-            var overflow = AllocOverflow(batch, out Data.Buckets[0]);
-            Map.MoveTo(overflow.Map);
-
-            if (Map.TrySet(key, data))
-            {
-                return page;
-            }
-
-            Debug.Fail("Should have moved to the first overflow successfully");
-        }
-
-        // Flush down to existing
-        TryFlushDownToExisting(batch, count);
-
-        // After flushing down, try to set again
-        if (Map.TrySet(key, data))
-        {
-            return page;
-        }
-
-        if (count < BucketCount)
-        {
-            return DoubleSizeAndSet(key, data, batch);
-        }
-
-        // This page is filled, move everything down. Start by registering for the reuse all the pages.
+        // It was not possible to set the value in the page. 
+        // This page is filled, move everything down and create a DataPage in this place
         batch.RegisterForFutureReuse(page);
 
         // Not enough space, transform into a data page.
@@ -102,25 +79,38 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         return dataPage.Set(key, data, batch);
     }
 
-    private Page DoubleSizeAndSet(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
+    private bool TryAllocateOverflowsAndFlushDown(IBatchContext batch)
     {
-        var count = Data.Buckets.LastIndexOfAnyExcept(DbAddress.Null) + 1;
-        Debug.Assert(count < BucketCount);
-
-        // Create an empty copy
-        var copy = new LeafPage(batch.GetNewPage(out _, true));
-        copy.Header.Level = Header.Level;
-        copy.Header.PageType = Header.PageType;
-
-        // Double the size, allocate overflows in the copy
-        count *= 2;
-        for (var i = 0; i < count; i++)
+        var count = Data.CountOverflowPages();
+        if (count == BucketCount)
         {
-            AllocOverflow(batch, out copy.Data.Buckets[i]);
+            return false;
         }
 
-        // Reuse existing overflows and move to the copy
-        var existing = Data.Buckets[..(count / 2)]; // the previous
+        if (count == 0)
+        {
+            var overflow = AllocOverflow(batch, out Data.Buckets[0]);
+            Map.MoveTo(overflow.Map);
+            return true;
+        }
+
+        // We don't COW this Leaf. It is much harder to reason and implement.
+        // What we do is that we allocate overflows first, then redistribute and flush down.
+        // This has the same behavior as a COW but requires no juggling with the page.
+
+        Span<DbAddress> existing = stackalloc DbAddress[count];
+        Data.Buckets[..count].CopyTo(existing);
+
+        // Double the size, allocate overflows in the copy
+        var newCount = count * 2;
+        Span<LeafOverflowPage> overflows = stackalloc LeafOverflowPage[newCount];
+
+        for (var i = 0; i < newCount; i++)
+        {
+            overflows[i] = AllocOverflow(batch, out Data.Buckets[i]);
+        }
+
+        // Redistribute the overflows
         foreach (var overflow in existing)
         {
             var p = batch.GetAt(overflow);
@@ -131,20 +121,30 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
             foreach (var item in new LeafOverflowPage(p).Map.EnumerateAll())
             {
-                copy = new LeafPage(copy.Set(item.Key, item.RawData, batch));
+                Debug.Assert(item.Key.IsEmpty == false, "The key in overflow cannot be empty!");
+                
+                var at = item.Key.FirstNibble % newCount;
+                if (overflows[at].Map.TrySet(item.Key, item.RawData) == false)
+                {
+                    Debug.Fail("Overflow should be able to copy to overflow");
+                }
             }
         }
 
-        foreach (var item in Map.EnumerateAll())
-        {
-            copy = new LeafPage(copy.Set(item.Key, item.RawData, batch));
-        }
+        TryFlushDownToExisting(batch);
 
-        return copy.Set(key, data, batch);
+        return true;
     }
 
-    private void TryFlushDownToExisting(IBatchContext batch, int count)
+    private bool TryFlushDownToExisting(IBatchContext batch)
     {
+        var count = Data.CountOverflowPages();
+
+        if (count == 0)
+        {
+            return false;
+        }
+
         foreach (var item in Map.EnumerateAll())
         {
             if (item.Key.IsEmpty)
@@ -167,6 +167,8 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
                 Map.Delete(item);
             }
         }
+
+        return true;
     }
 
     private LeafOverflowPage AllocOverflow(IBatchContext batch, out DbAddress addr)
@@ -189,6 +191,8 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         [FieldOffset(0)] private DbAddress BucketStart;
         public Span<DbAddress> Buckets => MemoryMarshal.CreateSpan(ref BucketStart, BucketCount);
 
+        public int CountOverflowPages() => Buckets.LastIndexOfAnyExcept(DbAddress.Null) + 1;
+
         /// <summary>
         /// The first item of map of frames to allow ref to it.
         /// </summary>
@@ -209,7 +213,18 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             return new LeafPage(writable).TrySet(key, data, batch);
         }
 
-        // Try set in-situ and return cowed page
+        // Try set in-map first
+        if (Map.TrySet(key, data))
+        {
+            return (true, page);
+        }
+
+        // The map is full, try flush to the existing buckets, then retry
+        if (TryFlushDownToExisting(batch) == false)
+        {
+            return (false, page);
+        }
+
         return (Map.TrySet(key, data), page);
     }
 

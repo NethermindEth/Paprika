@@ -211,26 +211,20 @@ public readonly ref struct SlottedArray
     }
 
     /// <summary>
-    /// Tries to move as many items as possible from this map to the destination map.
+    /// Moves all the items to the <paramref name="destination"/>, throwing on failure.
     /// </summary>
-    /// <remarks>
-    /// Returns how many items were moved.
-    /// </remarks>
-    public int MoveTo(in SlottedArray destination)
+    public void MoveTo(in SlottedArray destination)
     {
-        var count = 0;
-
         foreach (var item in EnumerateAll())
         {
             // try copy all, even if one is not copyable the other might
-            if (destination.TrySet(item.Key, item.RawData))
+            if (destination.TrySet(item.Key, item.RawData) == false)
             {
-                count++;
-                Delete(item);
+                throw new Exception("Not enough space in the destination map");
             }
         }
 
-        return count;
+        Clear();
     }
 
     public const int BucketCount = 16;
