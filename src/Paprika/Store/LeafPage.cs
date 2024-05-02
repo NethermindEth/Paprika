@@ -134,6 +134,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         return true;
     }
 
+    [SkipLocalsInit]
     private bool TryFlushDownToExisting(IBatchContext batch)
     {
         var count = Data.CountOverflowPages();
@@ -143,33 +144,45 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             return false;
         }
 
+        var o0 = GetOverflowWritableMap(batch, 0);
 
-
-        foreach (var item in Map.EnumerateAll())
+        MapSource source;
+        if (count == 1)
         {
-            if (item.Key.IsEmpty)
+            source = new MapSource(o0);
+        }
+        else
+        {
+            var o1 = GetOverflowWritableMap(batch, 1);
+            if (count == 2)
             {
-                continue;
+                source = new MapSource(o0, o1);
             }
-
-            var slot = item.Key.FirstNibble % count;
-            var overflow = batch.EnsureWritableCopy(ref Data.Buckets[slot]);
-            var map = new LeafOverflowPage(overflow).Map;
-
-            var isDelete = item.RawData.IsEmpty;
-            if (isDelete)
+            else
             {
-                map.Delete(item.Key);
-                Map.Delete(item);
-            }
-            else if (map.TrySet(item.Key, item.RawData))
-            {
-                Map.Delete(item);
+                var o2 = GetOverflowWritableMap(batch, 2);
+                var o3 = GetOverflowWritableMap(batch, 3);
+                if (count == 4)
+                {
+                    source = new MapSource(o0, o1, o2, o3);
+                }
+                else
+                {
+                    var o4 = GetOverflowWritableMap(batch, 4);
+                    var o5 = GetOverflowWritableMap(batch, 5);
+                    var o6 = GetOverflowWritableMap(batch, 6);
+                    var o7 = GetOverflowWritableMap(batch, 7);
+                    source = new MapSource(o0, o1, o2, o3, o4, o5, o6, o7);
+                }
             }
         }
 
+        Map.MoveNonEmptyKeysTo(source);
         return true;
     }
+
+    private SlottedArray GetOverflowWritableMap(IBatchContext batch, int index) =>
+        new LeafOverflowPage(batch.EnsureWritableCopy(ref Data.Buckets[index])).Map;
 
     private LeafOverflowPage AllocOverflow(IBatchContext batch, out DbAddress addr)
     {
