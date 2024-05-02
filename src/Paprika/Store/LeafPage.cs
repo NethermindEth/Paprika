@@ -88,7 +88,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         if (count == 0)
         {
             var overflow = AllocOverflow(batch, out Data.Buckets[0]);
-            Map.MoveNonEmptyKeysTo(overflow.Map);
+            Map.MoveNonEmptyKeysTo(new MapSource(overflow.Map));
             return true;
         }
 
@@ -142,6 +142,8 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         {
             return false;
         }
+
+
 
         foreach (var item in Map.EnumerateAll())
         {
