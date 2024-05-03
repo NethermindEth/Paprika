@@ -331,8 +331,11 @@ public readonly ref struct SlottedArray
         var array = ArrayPool<byte>.Shared.Rent(size);
         var span = array.AsSpan(0, size);
 
-        span.Clear();
+        // Create the slotted array over the dirty span and then clear it.
+        // It's much cheaper than clearing the whole span itself.
         var copy = new SlottedArray(span);
+        copy.Clear();
+
         var count = _header.Low / Slot.Size;
 
         for (int i = 0; i < count; i++)
