@@ -45,7 +45,7 @@ public class AbandonedTests : BasePageTests
 
         byte[] value = [13];
 
-        using var db = PagedDb.NativeMemoryDb(16 * Page.PageSize);
+        using var db = PagedDb.NativeMemoryDb(24 * Page.PageSize);
 
         for (var i = 0; i < repeats; i++)
         {

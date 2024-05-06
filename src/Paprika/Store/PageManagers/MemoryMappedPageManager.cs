@@ -173,6 +173,8 @@ public sealed class MemoryMappedPageManager : PointerPageManager
         _file.Flush(true);
     }
 
+    public override bool UsesPersistentPaging => _options == PersistenceOptions.FlushFile;
+
     public override void Dispose()
     {
         _meter.Dispose();

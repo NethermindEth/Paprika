@@ -59,6 +59,7 @@ public abstract unsafe class PointerPageManager(long size) : IPageManager
     public abstract void Flush();
 
     public abstract void ForceFlush();
+    public abstract bool UsesPersistentPaging { get; }
 
     public abstract void Dispose();
 }

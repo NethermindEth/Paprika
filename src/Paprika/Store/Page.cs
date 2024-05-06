@@ -81,9 +81,6 @@ public struct PageHeader
     /// </summary>
     public byte Level;
 
-    /// <summary>
-    /// Internal metadata of the given page.
-    /// </summary>
     public byte Metadata;
 }
 

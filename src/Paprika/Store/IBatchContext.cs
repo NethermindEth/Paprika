@@ -43,6 +43,12 @@ public interface IBatchContext : IReadOnlyBatchContext
     }
 
     /// <summary>
+    /// Informs the batch, that the given page was abandoned before and is manually reused.
+    /// </summary>
+    /// <param name="page">The page that will be reused.</param>
+    public void NoticeAbandonedPageReused(Page page);
+
+    /// <summary>
     /// Checks whether the page was written during this batch.
     /// </summary>
     bool WasWritten(DbAddress addr);

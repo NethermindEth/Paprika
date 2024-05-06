@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Contracts;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Store;
@@ -21,6 +22,8 @@ namespace Paprika.Data;
 /// </remarks>
 public readonly ref struct SlottedArray
 {
+    public const int Alignment = 8;
+
     private readonly ref Header _header;
     private readonly Span<byte> _data;
 
@@ -54,7 +57,11 @@ public readonly ref struct SlottedArray
     public bool TrySet(in NibblePath key, ReadOnlySpan<byte> data)
     {
         var hash = Slot.PrepareKey(key, out var preamble, out var trimmed);
+        return TrySetImpl(hash, preamble, trimmed, data);
+    }
 
+    private bool TrySetImpl(ushort hash, byte preamble, in NibblePath trimmed, ReadOnlySpan<byte> data)
+    {
         if (TryGetImpl(trimmed, hash, preamble, out var existingData, out var index))
         {
             // same size, copy in place
@@ -80,7 +87,7 @@ public readonly ref struct SlottedArray
             }
 
             // there are some deleted entries, run defragmentation of the buffer and try again
-            Deframent();
+            Defragment();
 
             // re-evaluate again
             if (_header.Taken + total + Slot.Size > _data.Length)
@@ -124,7 +131,7 @@ public readonly ref struct SlottedArray
     public int Count => _header.Low / Slot.Size;
 
     public int CapacityLeft => _data.Length - _header.Taken;
-    public int CapacityTotal => _data.Length;
+
 
     public Enumerator EnumerateAll() =>
         new(this);
@@ -208,27 +215,49 @@ public readonly ref struct SlottedArray
         public readonly Enumerator GetEnumerator() => this;
     }
 
-    /// <summary>
-    /// Tries to move as many items as possible from this map to the destination map.
-    /// </summary>
-    /// <remarks>
-    /// Returns how many items were moved.
-    /// </remarks>
-    public int MoveTo(in SlottedArray destination)
+    public void MoveNonEmptyKeysTo(in MapSource destination)
     {
-        var count = 0;
+        var to = Count;
+        var moved = 0;
 
-        foreach (var item in EnumerateAll())
+        for (int i = 0; i < to; i++)
         {
-            // try copy all, even if one is not copyable the other might
-            if (destination.TrySet(item.Key, item.RawData))
+            ref var slot = ref this[i];
+            if (slot.IsDeleted)
+                continue;
+
+            if (slot.HasAtLeastOneNibble == false)
+                continue;
+
+            var nibble = Slot.GetFirstNibble(slot.Hash);
+            var map = destination.GetMap(nibble);
+            var payload = GetSlotPayload(ref slot);
+
+            Span<byte> data;
+
+            NibblePath trimmed;
+            if (slot.HasKeyBytes)
             {
-                count++;
-                Delete(item);
+                data = NibblePath.ReadFrom(payload, out trimmed);
+            }
+            else
+            {
+                trimmed = default;
+                data = payload;
+            }
+
+            if (map.TrySetImpl(slot.Hash, slot.KeyPreamble, trimmed, data))
+            {
+                slot.MarkAsDeleted();
+                moved++;
             }
         }
 
-        return count;
+        if (moved > 0)
+        {
+            CollectTombstones();
+            Defragment();
+        }
     }
 
     public const int BucketCount = 16;
@@ -283,25 +312,30 @@ public readonly ref struct SlottedArray
 
     public void Delete(in Enumerator.Item item) => DeleteImpl(item.Index);
 
-    private void DeleteImpl(int index)
+    private void DeleteImpl(int index, bool collectTombstones = true)
     {
         // mark as deleted first
         this[index].MarkAsDeleted();
         _header.Deleted++;
 
-        // always try to compact after delete
-        CollectTombstones();
+        if (collectTombstones)
+        {
+            CollectTombstones();
+        }
     }
 
-    private void Deframent()
+    private void Defragment()
     {
         // As data were fitting before, the will fit after so all the checks can be skipped
         var size = Header.Size + _data.Length;
         var array = ArrayPool<byte>.Shared.Rent(size);
         var span = array.AsSpan(0, size);
 
-        span.Clear();
+        // Create the slotted array over the dirty span and then clear it.
+        // It's much cheaper than clearing the whole span itself.
         var copy = new SlottedArray(span);
+        copy.Clear();
+
         var count = _header.Low / Slot.Size;
 
         for (int i = 0; i < count; i++)
@@ -372,6 +406,14 @@ public readonly ref struct SlottedArray
 
         data = default;
         return false;
+    }
+
+    /// <summary>
+    /// Clears the map.
+    /// </summary>
+    public void Clear()
+    {
+        _header = default;
     }
 
     [OptimizationOpportunity(OptimizationType.CPU,
@@ -600,7 +642,8 @@ public readonly ref struct SlottedArray
         }
 
         [SkipLocalsInit]
-        public static NibblePath UnPrepareKey(ushort hash, byte preamble, ReadOnlySpan<byte> input, Span<byte> workingSet, out ReadOnlySpan<byte> data)
+        public static NibblePath UnPrepareKey(ushort hash, byte preamble, ReadOnlySpan<byte> input,
+            Span<byte> workingSet, out ReadOnlySpan<byte> data)
         {
             var count = preamble >> KeyPreambleLengthShift;
             if (count == 0)
@@ -616,7 +659,7 @@ public readonly ref struct SlottedArray
             else
             {
                 Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(workingSet))
-                   = (ushort)((hash >> HashByteShift) | (hash << HashByteShift));
+                    = (ushort)((hash >> HashByteShift) | (hash << HashByteShift));
             }
 
             NibblePath prefix = NibblePath.FromKey(workingSet, 0, count > 4 ? KeySlice : count);
@@ -635,7 +678,14 @@ public readonly ref struct SlottedArray
             data = NibblePath.ReadFrom(input, out var trimmed);
             return prefix.Append(trimmed, hash, workingSet[limit..]);
         }
+
+        public static byte GetFirstNibble(ushort hash)
+        {
+            const int shift = NibblePath.NibbleShift;
+            return (byte)(hash >> (shift + HashByteShift));
+        }
     }
+
 
     public override string ToString() => $"{nameof(Count)}: {Count}, {nameof(CapacityLeft)}: {CapacityLeft}";
 
@@ -660,5 +710,69 @@ public readonly ref struct SlottedArray
         public ushort Deleted;
 
         public readonly ushort Taken => (ushort)(Low + High);
+    }
+}
+
+public readonly ref struct MapSource
+{
+    private readonly SlottedArray _map0;
+    private readonly SlottedArray _map1;
+    private readonly SlottedArray _map2;
+    private readonly SlottedArray _map3;
+    private readonly SlottedArray _map4;
+    private readonly SlottedArray _map5;
+    private readonly SlottedArray _map6;
+    private readonly SlottedArray _map7;
+    private readonly int _count;
+
+    public MapSource(SlottedArray map)
+    {
+        _map0 = map;
+        _count = 1;
+    }
+
+    public MapSource(SlottedArray map0, SlottedArray map1)
+    {
+        _map0 = map0;
+        _map1 = map1;
+        _count = 2;
+    }
+
+    public MapSource(SlottedArray map0, SlottedArray map1, SlottedArray map2, SlottedArray map3)
+    {
+        _map0 = map0;
+        _map1 = map1;
+        _map2 = map2;
+        _map3 = map3;
+        _count = 4;
+    }
+
+    public MapSource(SlottedArray map0, SlottedArray map1, SlottedArray map2, SlottedArray map3, SlottedArray map4,
+        SlottedArray map5, SlottedArray map6, SlottedArray map7)
+    {
+        _map0 = map0;
+        _map1 = map1;
+        _map2 = map2;
+        _map3 = map3;
+        _map4 = map4;
+        _map5 = map5;
+        _map6 = map6;
+        _map7 = map7;
+        _count = 8;
+    }
+
+    public SlottedArray GetMap(int nibble)
+    {
+        return (nibble % _count) switch
+        {
+            0 => _map0,
+            1 => _map1,
+            2 => _map2,
+            3 => _map3,
+            4 => _map4,
+            5 => _map5,
+            6 => _map6,
+            _ => _map7
+        };
     }
 }
