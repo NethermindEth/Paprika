@@ -18,6 +18,9 @@ public class SlottedArrayBenchmarks
     private readonly int _hashCollisionsLength;
     private static readonly byte[] HashCollisionValue = new byte[13];
 
+    private readonly byte[] _copy0 = new byte[Page.PageSize];
+    private readonly byte[] _copy1 = new byte[Page.PageSize];
+
     public SlottedArrayBenchmarks()
     {
         var little = new SlottedArray(_writtenLittleEndian);
@@ -175,5 +178,21 @@ public class SlottedArrayBenchmarks
         }
 
         return length;
+    }
+
+    [Benchmark]
+    public int Move_to_keys()
+    {
+        var map = new SlottedArray(_writtenLittleEndian);
+
+        _copy0.AsSpan().Clear();
+        _copy1.AsSpan().Clear();
+
+        var map0 = new SlottedArray(_copy0);
+        var map1 = new SlottedArray(_copy1);
+
+        map.MoveNonEmptyKeysTo(new MapSource(map0, map1));
+
+        return map.Count + map0.Count + map1.Count;
     }
 }

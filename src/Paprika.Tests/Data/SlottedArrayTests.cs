@@ -218,6 +218,250 @@ public class SlottedArrayTests
         return Verify(span.ToArray());
     }
 
+    private static ReadOnlySpan<byte> Data(byte key) => new[] { key };
+
+    [Test]
+    public void Move_to_1()
+    {
+        var original = new SlottedArray(stackalloc byte[256]);
+        var copy0 = new SlottedArray(stackalloc byte[256]);
+
+        var key1 = NibblePath.Parse("1");
+        var key2 = NibblePath.Parse("23");
+        var key3 = NibblePath.Parse("345");
+        var key4 = NibblePath.Parse("4567");
+        var key5 = NibblePath.Parse("56789");
+
+        original.SetAssert(NibblePath.Empty, Data(0));
+        original.SetAssert(key1, Data(1));
+        original.SetAssert(key2, Data(2));
+        original.SetAssert(key3, Data(3));
+        original.SetAssert(key4, Data(4));
+        original.SetAssert(key5, Data(5));
+
+        original.MoveNonEmptyKeysTo(new(copy0));
+
+        // original should have only empty
+        original.Count.Should().Be(1);
+        original.GetAssert(NibblePath.Empty, Data(0));
+        original.GetShouldFail(key1);
+        original.GetShouldFail(key2);
+        original.GetShouldFail(key3);
+        original.GetShouldFail(key4);
+        original.GetShouldFail(key5);
+
+        // copy should have all but empty
+        copy0.Count.Should().Be(5);
+        copy0.GetShouldFail(NibblePath.Empty);
+        copy0.GetAssert(key1, Data(1));
+        copy0.GetAssert(key2, Data(2));
+        copy0.GetAssert(key3, Data(3));
+        copy0.GetAssert(key4, Data(4));
+        copy0.GetAssert(key5, Data(5));
+    }
+
+    [Test]
+    public void Move_to_2()
+    {
+        var original = new SlottedArray(stackalloc byte[256]);
+        var copy0 = new SlottedArray(stackalloc byte[256]);
+        var copy1 = new SlottedArray(stackalloc byte[256]);
+
+        var key0 = NibblePath.Empty;
+        var key1 = NibblePath.Parse("1");
+        var key2 = NibblePath.Parse("23");
+        var key3 = NibblePath.Parse("345");
+        var key4 = NibblePath.Parse("4567");
+        var key5 = NibblePath.Parse("56789");
+
+        original.SetAssert(key0, Data(0));
+        original.SetAssert(key1, Data(1));
+        original.SetAssert(key2, Data(2));
+        original.SetAssert(key3, Data(3));
+        original.SetAssert(key4, Data(4));
+        original.SetAssert(key5, Data(5));
+
+        original.MoveNonEmptyKeysTo(new(copy0, copy1));
+
+        // original should have only empty
+        original.Count.Should().Be(1);
+        original.GetAssert(key0, Data(0));
+        original.GetShouldFail(key1);
+        original.GetShouldFail(key2);
+        original.GetShouldFail(key3);
+        original.GetShouldFail(key4);
+        original.GetShouldFail(key5);
+
+        // copy0 should have key2 and key4 and nothing else
+        copy0.Count.Should().Be(2);
+        copy0.GetShouldFail(key0);
+        copy0.GetShouldFail(key1);
+        copy0.GetAssert(key2, Data(2));
+        copy0.GetShouldFail(key3);
+        copy0.GetAssert(key4, Data(4));
+        copy0.GetShouldFail(key5);
+
+        // copy1 should have key1 and key3 and key5 and nothing else
+        copy1.Count.Should().Be(3);
+        copy1.GetShouldFail(key0);
+        copy1.GetAssert(key1, Data(1));
+        copy1.GetShouldFail(key2);
+        copy1.GetAssert(key3, Data(3));
+        copy1.GetShouldFail(key4);
+        copy1.GetAssert(key5, Data(5));
+    }
+
+    [Test]
+    public void Move_to_4()
+    {
+        var original = new SlottedArray(stackalloc byte[256]);
+        var copy0 = new SlottedArray(stackalloc byte[256]);
+        var copy1 = new SlottedArray(stackalloc byte[256]);
+        var copy2 = new SlottedArray(stackalloc byte[256]);
+        var copy3 = new SlottedArray(stackalloc byte[256]);
+
+        var key0 = NibblePath.Empty;
+        var key1 = NibblePath.Parse("1");
+        var key2 = NibblePath.Parse("23");
+        var key3 = NibblePath.Parse("345");
+        var key4 = NibblePath.Parse("4567");
+        var key5 = NibblePath.Parse("56789");
+
+        original.SetAssert(key0, Data(0));
+        original.SetAssert(key1, Data(1));
+        original.SetAssert(key2, Data(2));
+        original.SetAssert(key3, Data(3));
+        original.SetAssert(key4, Data(4));
+        original.SetAssert(key5, Data(5));
+
+        original.MoveNonEmptyKeysTo(new(copy0, copy1, copy2, copy3));
+
+        // original should have only empty
+        original.Count.Should().Be(1);
+        original.GetAssert(key0, Data(0));
+        original.GetShouldFail(key1);
+        original.GetShouldFail(key2);
+        original.GetShouldFail(key3);
+        original.GetShouldFail(key4);
+        original.GetShouldFail(key5);
+
+        // copy0 should have key4
+        copy0.Count.Should().Be(1);
+        copy0.GetShouldFail(key0);
+        copy0.GetShouldFail(key1);
+        copy0.GetShouldFail(key2);
+        copy0.GetShouldFail(key3);
+        copy0.GetAssert(key4, Data(4));
+        copy0.GetShouldFail(key5);
+
+        // copy1 should have key1 and key5 and nothing else
+        copy1.Count.Should().Be(2);
+        copy1.GetShouldFail(key0);
+        copy1.GetAssert(key1, Data(1));
+        copy1.GetShouldFail(key2);
+        copy1.GetShouldFail(key3);
+        copy1.GetShouldFail(key4);
+        copy1.GetAssert(key5, Data(5));
+
+        // copy1 should have key2 and nothing else
+        copy2.Count.Should().Be(1);
+        copy2.GetShouldFail(key0);
+        copy2.GetShouldFail(key1);
+        copy2.GetAssert(key2, Data(2));
+        copy2.GetShouldFail(key3);
+        copy2.GetShouldFail(key4);
+        copy2.GetShouldFail(key5);
+
+        // copy1 should have key2 and nothing else
+        copy3.Count.Should().Be(1);
+        copy3.GetShouldFail(key0);
+        copy3.GetShouldFail(key1);
+        copy3.GetShouldFail(key2);
+        copy3.GetAssert(key3, Data(3));
+        copy3.GetShouldFail(key4);
+        copy3.GetShouldFail(key5);
+    }
+
+    [Test]
+    public void Move_to_8()
+    {
+        var original = new SlottedArray(stackalloc byte[512]);
+        var copy0 = new SlottedArray(stackalloc byte[64]);
+        var copy1 = new SlottedArray(stackalloc byte[64]);
+        var copy2 = new SlottedArray(stackalloc byte[64]);
+        var copy3 = new SlottedArray(stackalloc byte[64]);
+        var copy4 = new SlottedArray(stackalloc byte[64]);
+        var copy5 = new SlottedArray(stackalloc byte[64]);
+        var copy6 = new SlottedArray(stackalloc byte[64]);
+        var copy7 = new SlottedArray(stackalloc byte[64]);
+
+        var key0 = NibblePath.Empty;
+        var key1 = NibblePath.Parse("1");
+        var key2 = NibblePath.Parse("23");
+        var key3 = NibblePath.Parse("345");
+        var key4 = NibblePath.Parse("4567");
+        var key5 = NibblePath.Parse("56789");
+        var key6 = NibblePath.Parse("6789AB");
+        var key7 = NibblePath.Parse("789ABCD");
+        var key8 = NibblePath.Parse("89ABCDEF");
+
+        original.SetAssert(key0, Data(0));
+        original.SetAssert(key1, Data(1));
+        original.SetAssert(key2, Data(2));
+        original.SetAssert(key3, Data(3));
+        original.SetAssert(key4, Data(4));
+        original.SetAssert(key5, Data(5));
+        original.SetAssert(key6, Data(6));
+        original.SetAssert(key7, Data(7));
+        original.SetAssert(key8, Data(8));
+
+        original.MoveNonEmptyKeysTo(new(copy0, copy1, copy2, copy3, copy4, copy5, copy6, copy7));
+
+        // original should have only empty
+        HasOnly(original, 0);
+
+        HasOnly(copy0, 8);
+        HasOnly(copy1, 1);
+        HasOnly(copy2, 2);
+        HasOnly(copy3, 3);
+        HasOnly(copy4, 4);
+        HasOnly(copy5, 5);
+        HasOnly(copy6, 6);
+        HasOnly(copy7, 7);
+
+        return;
+
+        static void HasOnly(in SlottedArray map, int key)
+        {
+            map.Count.Should().Be(1);
+
+            for (byte i = 0; i < 8; i++)
+            {
+                var k = i switch
+                {
+                    0 => NibblePath.Empty,
+                    1 => NibblePath.Parse("1"),
+                    2 => NibblePath.Parse("23"),
+                    3 => NibblePath.Parse("345"),
+                    4 => NibblePath.Parse("4567"),
+                    5 => NibblePath.Parse("56789"),
+                    6 => NibblePath.Parse("6789AB"),
+                    7 => NibblePath.Parse("789ABCD"),
+                    _ => NibblePath.Parse("89ABCDEF")
+                };
+
+                if (i == key)
+                {
+                    map.GetAssert(k, Data(i));
+                }
+                else
+                {
+                    map.GetShouldFail(k);
+                }
+            }
+        }
+    }
+
     [Test]
     public void Hashing()
     {
@@ -306,6 +550,11 @@ file static class FixedMapTestExtensions
 
     public static void GetShouldFail(this SlottedArray map, in ReadOnlySpan<byte> key)
     {
-        map.TryGet(NibblePath.FromKey(key), out var actual).Should().BeFalse("The key should not exist");
+        map.TryGet(NibblePath.FromKey(key), out _).Should().BeFalse("The key should not exist");
+    }
+
+    public static void GetShouldFail(this SlottedArray map, in NibblePath key)
+    {
+        map.TryGet(key, out _).Should().BeFalse("The key should not exist");
     }
 }
