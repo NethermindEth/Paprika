@@ -245,24 +245,28 @@ public sealed class KeccakHash
             }
         }
 
-        Span<byte> temp = stackalloc byte[roundSize];
-        temp.Clear();
-        input.CopyTo(temp);
-        temp[input.Length] = 1;
-        temp[roundSize - 1] |= 0x80;
+        TempBuffer temp = default;
+        var tempSpan = MemoryMarshal.AsBytes(MemoryMarshal.CreateSpan(ref temp, 1));
+        input.CopyTo(tempSpan);
+        tempSpan[input.Length] = 1;
+        tempSpan[roundSize - 1] |= 0x80;
 
-        Span<ulong> tempU64 = MemoryMarshal.Cast<byte, ulong>(temp);
-        for (int i = 0; i < tempU64.Length; i++)
+        var ulongSpan = MemoryMarshal.CreateSpan(ref As<TempBuffer, ulong>(ref temp), TempBuffer.TempBufferCount);
+        for (int i = 0; i < ulongSpan.Length; i++)
         {
-            state[i] ^= tempU64[i];
+            state[i] ^= ulongSpan[i];
         }
 
         KeccakF(ref state);
         output = As<KeccakBuffer, Keccak>(ref state);
     }
+}
 
-    [DoesNotReturn]
-    private static void ThrowBadKeccak() => throw new ArgumentException("Bad Keccak use");
+[InlineArray(TempBufferCount)]
+public struct TempBuffer
+{
+    public const int TempBufferCount = 17;
+    private ulong st;
 }
 
 [InlineArray(KeccakBufferCount)]
