@@ -230,7 +230,7 @@ public readonly ref struct SlottedArray
                 continue;
 
             var nibble = Slot.GetFirstNibble(slot.Hash);
-            var map = destination.GetMap(nibble);
+            var map = MapSource.GetMap(destination, nibble);
             var payload = GetSlotPayload(ref slot);
 
             Span<byte> data;
@@ -761,18 +761,27 @@ public readonly ref struct MapSource
         _count = 8;
     }
 
-    public SlottedArray GetMap(int nibble)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ref readonly SlottedArray GetMap(in MapSource source, int nibble)
     {
-        return (nibble % _count) switch
+        switch (nibble % source._count)
         {
-            0 => _map0,
-            1 => _map1,
-            2 => _map2,
-            3 => _map3,
-            4 => _map4,
-            5 => _map5,
-            6 => _map6,
-            _ => _map7
-        };
+            case 0:
+                return ref source._map0;
+            case 1:
+                return ref source._map1;
+            case 2:
+                return ref source._map2;
+            case 3:
+                return ref source._map3;
+            case 4:
+                return ref source._map4;
+            case 5:
+                return ref source._map5;
+            case 6:
+                return ref source._map6;
+            default:
+                return ref source._map7;
+        }
     }
 }
