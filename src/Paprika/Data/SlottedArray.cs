@@ -230,7 +230,7 @@ public readonly ref struct SlottedArray
                 continue;
 
             var nibble = Slot.GetFirstNibble(slot.Hash);
-            var map = MapSource.GetMap(destination, nibble);
+            ref readonly var map = ref MapSource.GetMap(destination, nibble);
             var payload = GetSlotPayload(ref slot);
 
             Span<byte> data;
