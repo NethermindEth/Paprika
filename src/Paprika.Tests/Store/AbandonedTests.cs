@@ -41,7 +41,7 @@ public class AbandonedTests : BasePageTests
 
     [TestCase(18, 1, 10_000)]
     [TestCase(641, 100, 10_000)]
-    [TestCase(200_000, 4000, 20,
+    [TestCase(26875, 4000, 200,
         Description = "2000 to breach AbandonedPage capacity",
         Category = Categories.LongRunning)]
     public async Task Reuse_in_limited_environment(int pageCount, int accounts, int repeats)
