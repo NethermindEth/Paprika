@@ -65,24 +65,8 @@ public class Blockchain : IAsyncDisposable
         _minFlushDelay = minFlushDelay ?? DefaultFlushDelay;
         _beforeMetricsDisposed = beforeMetricsDisposed;
 
-        if (finalizationQueueLimit == null)
-        {
-            _finalizedChannel = Channel.CreateUnbounded<CommittedBlockState>(new UnboundedChannelOptions
-            {
-                SingleReader = true,
-                SingleWriter = true,
-            });
-        }
-        else
-        {
-            _finalizedChannel = Channel.CreateBounded<CommittedBlockState>(
-                new BoundedChannelOptions(finalizationQueueLimit.Value)
-                {
-                    SingleReader = true,
-                    SingleWriter = true,
-                    FullMode = BoundedChannelFullMode.Wait,
-                });
-        }
+        _finalizedChannel = CreateChannel(finalizationQueueLimit);
+        Debug.Assert(_finalizedChannel.Reader is { CanCount: true, CanPeek: true }, "Should be able to peek and count");
 
         _flusher = FlusherTask();
 
@@ -109,6 +93,27 @@ public class Blockchain : IAsyncDisposable
 
         using var batch = _db.BeginReadOnlyBatch();
         _lastFinalized = batch.Metadata.BlockNumber;
+    }
+
+    private static Channel<CommittedBlockState> CreateChannel(int? finalizationQueueLimit)
+    {
+        if (finalizationQueueLimit == null)
+        {
+            return Channel.CreateUnbounded<CommittedBlockState>(new UnboundedChannelOptions
+            {
+                // Don't make the single reader to allow counting
+                // SingleReader = true,
+                SingleWriter = true,
+            });
+        }
+
+        return Channel.CreateBounded<CommittedBlockState>(
+            new BoundedChannelOptions(finalizationQueueLimit.Value)
+            {
+                SingleReader = true,
+                SingleWriter = true,
+                FullMode = BoundedChannelFullMode.Wait,
+            });
     }
 
     /// <summary>
@@ -171,8 +176,6 @@ public class Blockchain : IAsyncDisposable
                             removedBlock.Dispose();
                         }
                     }
-
-                    _flusherQueueCount.Subtract(1);
                 }
 
                 timer.Stop();
@@ -185,6 +188,8 @@ public class Blockchain : IAsyncDisposable
                     // nothing
                     continue;
                 }
+
+                _flusherQueueCount.Set(reader.Count);
 
                 var flushWatch = Stopwatch.StartNew();
                 _db.Flush();
@@ -400,9 +405,6 @@ public class Blockchain : IAsyncDisposable
 
             _lastFinalized += count;
         }
-
-        // report count before actual writing to do no
-        _flusherQueueCount.Add((int)count);
 
         // push them!
         var writer = _finalizedChannel.Writer;
