@@ -153,6 +153,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
                 {
                     var data = new DataPage(child);
                     @new = data.Set(sliced, item.RawData, batch);
+                    map.Delete(item);
                 }
 
                 // Check if the page requires the update, if yes, update
