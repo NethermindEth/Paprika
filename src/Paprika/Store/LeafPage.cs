@@ -39,7 +39,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             return page;
         }
 
-        // It was not possible to set the value in the page. 
+        // It was not possible to set the value in the page.
         // This page is filled, move everything down and create a DataPage in this place
         batch.RegisterForFutureReuse(page);
 
@@ -256,6 +256,12 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         }
 
         var count = Data.CountOverflowPages();
+
+        if (count == 0)
+        {
+            return false;
+        }
+
         var bucket = Data.Buckets[key.FirstNibble % count];
 
         return new LeafOverflowPage(batch.GetAt(bucket)).Map.TryGet(key, out result);
