@@ -37,21 +37,46 @@ public class AbandonedTests : BasePageTests
         }
     }
 
-    [Test]
-    public async Task Reuse_in_limited_environment()
+    private const int HistoryDepth = 2;
+
+    [TestCase(18, 1, 10_000)]
+    [TestCase(641, 100, 10_000)]
+    [TestCase(200_000, 4000, 20,
+        Description = "2000 to breach AbandonedPage capacity",
+        Category = Categories.LongRunning)]
+    public async Task Reuse_in_limited_environment(int pageCount, int accounts, int repeats)
     {
-        const int repeats = 10_000;
-        var account = Keccak.EmptyTreeHash;
+        var keccaks = Initialize(accounts);
 
-        byte[] value = [13];
+        // set big value
+        var value = new byte[3000];
+        new Random(17).NextBytes(value);
 
-        using var db = PagedDb.NativeMemoryDb(24 * Page.PageSize);
+        using var db = PagedDb.NativeMemoryDb(pageCount * Page.PageSize, HistoryDepth);
 
         for (var i = 0; i < repeats; i++)
         {
             using var block = db.BeginNextBatch();
-            block.SetAccount(account, value);
+            foreach (var keccak in keccaks)
+            {
+                block.SetAccount(keccak, value);
+            }
+
             await block.Commit(CommitOptions.FlushDataAndRoot);
+        }
+
+        db.NextFreePage.Should().Be((uint)pageCount,
+            "Ensure that the page count is minimal. " +
+            "After running the test they should mach the allocated space.");
+
+        return;
+
+        static Keccak[] Initialize(int accounts)
+        {
+            var keccaks = new Keccak[accounts];
+            const int seed = 13;
+            new Random(seed).NextBytes(MemoryMarshal.Cast<Keccak, byte>(keccaks.AsSpan()));
+            return keccaks;
         }
     }
 
