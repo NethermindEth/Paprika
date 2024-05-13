@@ -39,18 +39,24 @@ public class AbandonedTests : BasePageTests
 
     private const int HistoryDepth = 2;
 
-    [TestCase(18, 1, 10_000)]
-    [TestCase(641, 100, 10_000)]
-    [TestCase(26875, 4000, 200,
-        Description = "2000 to breach AbandonedPage capacity",
+    [TestCase(18, 1, 10_000, false, TestName = "Accounts - 1")]
+    [TestCase(641, 100, 10_000, false, TestName = "Accounts - 100")]
+    [TestCase(26875, 4000, 200, false,
+        TestName = "Accounts - 4000 to get a bit reuse",
         Category = Categories.LongRunning)]
-    public async Task Reuse_in_limited_environment(int pageCount, int accounts, int repeats)
+    [TestCase(70765, 10_000, 50, false,
+        TestName = "Accounts - 10000 to breach the AbandonedPage",
+        Category = Categories.LongRunning)]
+    [TestCase(98577, 20_000, 50, true,
+        TestName = "Storage - 20_000 accounts with a single storage slot",
+        Category = Categories.LongRunning)]
+    public async Task Reuse_in_limited_environment(int pageCount, int accounts, int repeats, bool isStorage)
     {
         var keccaks = Initialize(accounts);
 
         // set big value
-        var value = new byte[3000];
-        new Random(17).NextBytes(value);
+        var accountValue = new byte[3000];
+        new Random(17).NextBytes(accountValue);
 
         using var db = PagedDb.NativeMemoryDb(pageCount * Page.PageSize, HistoryDepth);
 
@@ -59,7 +65,14 @@ public class AbandonedTests : BasePageTests
             using var block = db.BeginNextBatch();
             foreach (var keccak in keccaks)
             {
-                block.SetAccount(keccak, value);
+                if (isStorage)
+                {
+                    block.SetStorage(keccak, keccak, accountValue);
+                }
+                else
+                {
+                    block.SetAccount(keccak, accountValue);
+                }
             }
 
             await block.Commit(CommitOptions.FlushDataAndRoot);
