@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using FluentAssertions;
 using NUnit.Framework;
@@ -81,6 +82,47 @@ public class AbandonedTests : BasePageTests
         db.NextFreePage.Should().Be((uint)pageCount,
             "Ensure that the page count is minimal. " +
             "After running the test they should mach the allocated space.");
+
+        var oldPages = new List<uint>();
+
+        for (uint at = 0; at < db.NextFreePage; at++)
+        {
+            var page = db.GetAt(DbAddress.Page(at));
+            if (page.Header.BatchId < (uint)(repeats - HistoryDepth - 1))
+            {
+                oldPages.Add(at);
+            }
+        }
+
+        if (oldPages.Count > 0)
+        {
+            var counters = new int[byte.MaxValue];
+
+            var ages = new Dictionary<uint, uint>();
+
+            foreach (var addr in oldPages)
+            {
+                var page = db.GetAt(DbAddress.Page(addr));
+
+                if (page.Header.PageType == PageType.Abandoned)
+                {
+                    ages[addr] = page.Header.BatchId;
+                }
+
+                counters[(int)page.Header.PageType]++;
+            }
+
+            Console.WriteLine("Abandoned addr->batch: ");
+            foreach (var age in ages)
+            {
+                Console.WriteLine($"  @{age.Key}: {age.Value}");
+            }
+
+            foreach (var type in Enum.GetValues<PageType>())
+            {
+                Console.WriteLine($"{type}: {counters[(int)type]}");
+            }
+        }
 
         return;
 
