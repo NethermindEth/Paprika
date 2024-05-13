@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using FluentAssertions;
 using NUnit.Framework;
@@ -37,21 +38,100 @@ public class AbandonedTests : BasePageTests
         }
     }
 
-    [Test]
-    public async Task Reuse_in_limited_environment()
+    private const int HistoryDepth = 2;
+
+    [TestCase(18, 1, 10_000, false, TestName = "Accounts - 1")]
+    [TestCase(641, 100, 10_000, false, TestName = "Accounts - 100")]
+    [TestCase(26875, 4000, 200, false,
+        TestName = "Accounts - 4000 to get a bit reuse",
+        Category = Categories.LongRunning)]
+    [TestCase(70765, 10_000, 50, false,
+        TestName = "Accounts - 10000 to breach the AbandonedPage",
+        Category = Categories.LongRunning)]
+    [TestCase(98577, 20_000, 50, true,
+        TestName = "Storage - 20_000 accounts with a single storage slot",
+        Category = Categories.LongRunning)]
+    public async Task Reuse_in_limited_environment(int pageCount, int accounts, int repeats, bool isStorage)
     {
-        const int repeats = 10_000;
-        var account = Keccak.EmptyTreeHash;
+        var keccaks = Initialize(accounts);
 
-        byte[] value = [13];
+        // set big value
+        var accountValue = new byte[3000];
+        new Random(17).NextBytes(accountValue);
 
-        using var db = PagedDb.NativeMemoryDb(24 * Page.PageSize);
+        using var db = PagedDb.NativeMemoryDb(pageCount * Page.PageSize, HistoryDepth);
 
         for (var i = 0; i < repeats; i++)
         {
             using var block = db.BeginNextBatch();
-            block.SetAccount(account, value);
+            foreach (var keccak in keccaks)
+            {
+                if (isStorage)
+                {
+                    block.SetStorage(keccak, keccak, accountValue);
+                }
+                else
+                {
+                    block.SetAccount(keccak, accountValue);
+                }
+            }
+
             await block.Commit(CommitOptions.FlushDataAndRoot);
+        }
+
+        db.NextFreePage.Should().Be((uint)pageCount,
+            "Ensure that the page count is minimal. " +
+            "After running the test they should mach the allocated space.");
+
+        var oldPages = new List<uint>();
+
+        for (uint at = 0; at < db.NextFreePage; at++)
+        {
+            var page = db.GetAt(DbAddress.Page(at));
+            if (page.Header.BatchId < (uint)(repeats - HistoryDepth - 1))
+            {
+                oldPages.Add(at);
+            }
+        }
+
+        if (oldPages.Count > 0)
+        {
+            var counters = new int[byte.MaxValue];
+
+            var ages = new Dictionary<uint, uint>();
+
+            foreach (var addr in oldPages)
+            {
+                var page = db.GetAt(DbAddress.Page(addr));
+
+                if (page.Header.PageType == PageType.Abandoned)
+                {
+                    ages[addr] = page.Header.BatchId;
+                }
+
+                counters[(int)page.Header.PageType]++;
+            }
+
+            Console.WriteLine("Abandoned addr->batch: ");
+            foreach (var age in ages)
+            {
+                Console.WriteLine($"  @{age.Key}: {age.Value}");
+            }
+
+            foreach (var type in Enum.GetValues<PageType>())
+            {
+                Console.WriteLine($"{type}: {counters[(int)type]}");
+            }
+        }
+
+        return;
+
+        static Keccak[] Initialize(int accounts)
+        {
+            var keccaks = new Keccak[accounts];
+            const int seed = 13;
+            new Random(seed).NextBytes(MemoryMarshal.Cast<Keccak, byte>(keccaks.AsSpan()));
+            return keccaks;
         }
     }
 
@@ -100,7 +180,7 @@ public class AbandonedTests : BasePageTests
 
         byte[] value = [13];
 
-        using var db = PagedDb.NativeMemoryDb(1024 * Page.PageSize);
+        using var db = PagedDb.NativeMemoryDb(2048 * Page.PageSize);
 
         for (var i = 0; i < repeats; i++)
         {
