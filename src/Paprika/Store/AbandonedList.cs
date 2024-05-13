@@ -46,11 +46,10 @@ public struct AbandonedList
             }
 
             // find first batch matching the range
-            var i = BatchIds.IndexOfAnyInRange<uint>(1, minBatchId - 1);
-
-            if (i > NotFound && minBatchId > 2)
+            var id = BatchIds[0];
+            if (minBatchId > 2 && id < minBatchId)
             {
-                var at = Addresses[i];
+                var at = Addresses[0];
 
                 Debug.Assert(at.IsNull == false);
 
@@ -59,15 +58,30 @@ public struct AbandonedList
                 var abandoned = new AbandonedPage(page);
                 if (abandoned.Next.IsNull)
                 {
-                    // no next, clear the slot
-                    Addresses[i] = default;
-                    BatchIds[i] = default;
+                    if (EntriesCount == 1)
+                    {
+                        // empty all
+                        Addresses[0] = default;
+                        BatchIds[0] = default;
+                        EntriesCount = 0;
+                    }
+                    else
+                    {
+                        var resized = (int)EntriesCount - 1;
 
-                    EntriesCount--;
+                        // at least two entries, copy slices to move
+                        Addresses.Slice(1, resized).CopyTo(Addresses.Slice(0, resized));
+                        BatchIds.Slice(1, resized).CopyTo(BatchIds.Slice(0, resized));
+
+                        Addresses[resized] = default;
+                        BatchIds[resized] = default;
+
+                        EntriesCount--;
+                    }
                 }
                 else
                 {
-                    Addresses[i] = abandoned.Next;
+                    Addresses[0] = abandoned.Next;
                 }
             }
         }
@@ -169,7 +183,7 @@ public struct AbandonedList
         else
         {
             // find first 0th and store there
-            var at = BatchIds.IndexOf(0u);
+            var at = (int)EntriesCount;
 
             Debug.Assert(Addresses[at] == DbAddress.Null);
 
