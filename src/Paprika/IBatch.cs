@@ -26,6 +26,19 @@ public interface IBatch : IReadOnlyBatch
     /// <param name="options">How to commit.</param>
     /// <returns>The state root hash.</returns>
     ValueTask Commit(CommitOptions options);
+
+    /// <summary>
+    /// Gets the low levels stats of the given batch.
+    /// </summary>
+    IBatchStats? Stats { get; }
+}
+
+public interface IBatchStats
+{
+    public int DataPageNewLeafsAllocated { get; }
+    public int LeafPageTurnedIntoDataPage { get; }
+
+    public int LeafPageAllocatedOverflows { get; }
 }
 
 public enum CommitOptions
