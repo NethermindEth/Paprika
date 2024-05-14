@@ -1,8 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-
 using Paprika.Crypto;
-using Paprika.Utils;
 
 namespace Paprika.Store;
 
@@ -70,6 +68,22 @@ public interface IBatchContext : IReadOnlyBatchContext
     /// <param name="pageType">The page type to assign.</param>
     /// <returns>The page either allocated or get.</returns>
     Page TryGetPageAlloc(ref DbAddress addr, PageType pageType);
+
+    BatchStats? Stats { get; }
+}
+
+public class BatchStats
+{
+    public int DataPageNewLeafsAllocated { get; private set; }
+    public int LeafPageTurnedIntoDataPage { get; private set; }
+
+    public int LeafPageAllocatedOverflows { get; private set; }
+
+    public void DataPageAllocatesNewLeaf() => DataPageNewLeafsAllocated++;
+
+    public void LeafPageTurnsIntoDataPage() => LeafPageTurnedIntoDataPage++;
+
+    public void LeafPageAllocatesOverflows(int count) => LeafPageAllocatedOverflows += count;
 }
 
 public interface IReadOnlyBatchContext : IPageResolver

@@ -16,7 +16,7 @@ namespace Paprika.Store;
 /// This means that for small amount of data no creation of further layers is required.
 ///
 /// The page preserves locality of the data though. It's either all the children with a given nibble stored
-/// in the parent page, or they are flushed underneath. 
+/// in the parent page, or they are flushed underneath.
 /// </remarks>
 [method: DebuggerStepThrough]
 public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
@@ -78,6 +78,8 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
         if (address.IsNull)
         {
+            batch.Stats?.DataPageAllocatesNewLeaf();
+
             // Create child as leaf page
             child = batch.GetNewPage(out address, true);
             child.Header.PageType = PageType.Leaf;
@@ -91,7 +93,6 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
         child = FlushDown(map, nibble, child, batch);
         address = batch.GetAddress(child);
-
 
         // The page has some of the values flushed down, try to add again.
         return Set(key, data, batch);
@@ -166,8 +167,6 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         }
     }
 
-    public int CapacityLeft => Map.CapacityLeft;
-
     private static Page FlushDown(in SlottedArray map, byte nibble, Page destination, IBatchContext batch)
     {
         foreach (var item in map.EnumerateAll())
@@ -215,7 +214,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
     /// <summary>
     /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
     /// These buckets is used to store up to <see cref="DataSize"/> entries before flushing them down as other pages
-    /// like page split. 
+    /// like page split.
     /// </summary>
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     public struct Payload

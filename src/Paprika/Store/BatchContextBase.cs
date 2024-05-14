@@ -31,7 +31,7 @@ abstract class BatchContextBase(uint batchId) : IBatchContext
         page.CopyTo(@new);
         AssignBatchId(@new);
 
-        // register as the last because registering can amend the tracking 
+        // register as the last because registering can amend the tracking
         RegisterForFutureReuse(page);
 
         return @new;
@@ -74,4 +74,6 @@ abstract class BatchContextBase(uint batchId) : IBatchContext
 
         return page;
     }
+
+    public BatchStats? Stats { get; } = new();
 }

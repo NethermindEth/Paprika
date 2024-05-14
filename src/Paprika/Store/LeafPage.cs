@@ -43,6 +43,8 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         // This page is filled, move everything down and create a DataPage in this place
         batch.RegisterForFutureReuse(page);
 
+        batch.Stats?.LeafPageTurnsIntoDataPage();
+
         // Not enough space, transform into a data page.
         var @new = batch.GetNewPage(out _, true);
 
@@ -87,6 +89,8 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
         if (count == 0)
         {
+            batch.Stats?.LeafPageAllocatesOverflows(1);
+
             var overflow = AllocOverflow(batch, out Data.Buckets[0]);
             Map.MoveNonEmptyKeysTo(new MapSource(overflow.Map));
             return true;
@@ -101,6 +105,9 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
         // Double the size, allocate overflows in the copy
         var newCount = count * 2;
+
+        batch.Stats?.LeafPageAllocatesOverflows(newCount);
+
         Span<LeafOverflowPage> overflows = stackalloc LeafOverflowPage[newCount];
 
         for (var i = 0; i < newCount; i++)
