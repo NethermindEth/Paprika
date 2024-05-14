@@ -299,6 +299,8 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
     private SlottedArray Map => new(Data.DataSpan);
 
+    public int CapacityLeft => Map.CapacityLeft;
+
     public void Report(IReporter reporter, IPageResolver resolver, int pageLevel, int trimmedNibbles)
     {
         foreach (var bucket in Data.Buckets)

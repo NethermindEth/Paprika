@@ -614,6 +614,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             _db.ReportCommit(watch.Elapsed);
         }
 
+        IBatchStats? IBatch.Stats => Stats;
+
         [DebuggerStepThrough]
         public override Page GetAt(DbAddress address)
         {

@@ -72,7 +72,7 @@ public interface IBatchContext : IReadOnlyBatchContext
     BatchStats? Stats { get; }
 }
 
-public class BatchStats
+public class BatchStats : IBatchStats
 {
     public int DataPageNewLeafsAllocated { get; private set; }
     public int LeafPageTurnedIntoDataPage { get; private set; }
