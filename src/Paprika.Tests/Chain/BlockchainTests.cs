@@ -548,6 +548,37 @@ public class BlockchainTests
     }
 
     [Test]
+    public async Task Uses_batching_when_appropriate()
+    {
+        var none = CacheBudget.Options.None;
+        const byte historyDepth = 64;
+
+        using var db = PagedDb.NativeMemoryDb(256 * Mb, historyDepth);
+
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(), TimeSpan.MaxValue);
+
+        var parent = Keccak.Zero;
+
+        uint account = 0;
+        for (uint i = 0; i < blockchain.BlockCountForMaxCatchingUp; i++)
+        {
+            using var block = blockchain.StartNew(parent);
+
+            for (int j = 0; j < 1000; j++)
+            {
+                Keccak k = default;
+                BinaryPrimitives.WriteUInt32LittleEndian(k.BytesAsSpan, account++);
+                block.SetAccount(k, new Account(i, i), true);
+            }
+            parent = block.Commit(i + 1);
+        }
+
+        var task = blockchain.WaitTillFlush(parent);
+        blockchain.Finalize(parent);
+        await task;
+    }
+
+    [Test]
     public async Task Reports_ancestor_blocks()
     {
         using var db = PagedDb.NativeMemoryDb(1 * Mb);

@@ -17,6 +17,8 @@ public sealed unsafe class NativeMemoryPageManager : PointerPageManager
         }
     }
 
+    public void Clear() => NativeMemory.Clear(_ptr, (UIntPtr)DbAddress.Page((uint)MaxPage).FileOffset);
+
     protected override void* Ptr => _ptr;
 
     public override void Flush()

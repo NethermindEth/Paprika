@@ -30,4 +30,9 @@ public interface IDb
     /// Whether there's a state with the given keccak.
     /// </summary>
     bool HasState(in Keccak keccak);
+
+    /// <summary>
+    /// Gets the history depth for the given db.
+    /// </summary>
+    int HistoryDepth { get; }
 }

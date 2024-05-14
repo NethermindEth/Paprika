@@ -123,6 +123,11 @@ public class Blockchain : IAsyncDisposable
     {
         var reader = _finalizedChannel.Reader;
 
+        // The task works in a few tested loops
+        // 1. Awaiting something to flush with: reader.WaitToReadAsync()
+        // 2. Loop over items to flush: while (timer.Elapsed < _minFlushDelay && reader.TryPeek(out _))
+        // 3. Batching writes if there are more than _db.HistoryDepth awaiting in the queue
+
         try
         {
             while (await reader.WaitToReadAsync())
@@ -134,26 +139,35 @@ public class Blockchain : IAsyncDisposable
 
                 while (timer.Elapsed < _minFlushDelay && reader.TryRead(out var block))
                 {
-                    last = (block.BlockNumber, block.Hash);
-
                     using var batch = _db.BeginNextBatch();
+                    uint flushedTo;
 
-                    // apply
-                    var application = Stopwatch.StartNew();
+                    var batchSize = 0;
 
-                    flushed.Add(block.BlockNumber);
+                    do
+                    {
+                        last = (block.BlockNumber, block.Hash);
 
-                    var flushedTo = block.BlockNumber;
+                        // apply
+                        var application = Stopwatch.StartNew();
 
-                    batch.SetMetadata(block.BlockNumber, block.Hash);
+                        flushed.Add(block.BlockNumber);
 
-                    block.Apply(batch);
+                        flushedTo = block.BlockNumber;
 
-                    // only for debugging if needed
-                    //block.Assert(batch);
+                        batch.SetMetadata(block.BlockNumber, block.Hash);
 
-                    application.Stop();
-                    _flusherBlockApplicationInMs.Record((int)application.ElapsedMilliseconds);
+                        block.Apply(batch);
+
+                        // only for debugging if needed
+                        //block.Assert(batch);
+
+                        application.Stop();
+                        _flusherBlockApplicationInMs.Record((int)application.ElapsedMilliseconds);
+                        batchSize++;
+                    } while (reader.Count > _db.HistoryDepth &&
+                             batchSize < MaxBlockCountForCatchingUp &&
+                             reader.TryRead(out block)); // TryRead should be last to read only if the previous are met
 
                     // If there's something in the queue, don't flush. Flush here only where there's nothing to read from the reader.
                     var level = reader.TryPeek(out _) ? CommitOptions.DangerNoFlush : CommitOptions.FlushDataOnly;
@@ -217,6 +231,17 @@ public class Blockchain : IAsyncDisposable
             throw new Exception($"Missing blocks at block number {flushedTo}");
         }
     }
+
+
+    /// <summary>
+    /// A simple heuristic depending on the db depth
+    /// </summary>
+    private int MaxBlockCountForCatchingUp => _db.HistoryDepth / 4;
+
+    /// <summary>
+    /// Gives the lowest count to observe full catch up.
+    /// </summary>
+    public int BlockCountForMaxCatchingUp => _db.HistoryDepth + MaxBlockCountForCatchingUp;
 
     /// <summary>
     /// Announces the last block number that was flushed to disk.
@@ -375,7 +400,6 @@ public class Blockchain : IAsyncDisposable
     public void Finalize(Keccak keccak)
     {
         Stack<CommittedBlockState> finalized;
-        uint count;
 
         // gather all the blocks to finalize
         lock (_blockLock)
@@ -390,7 +414,7 @@ public class Blockchain : IAsyncDisposable
 
             // gather all the blocks between last finalized and this.
 
-            count = block.BlockNumber - _lastFinalized;
+            var count = block.BlockNumber - _lastFinalized;
 
             finalized = new((int)count);
             for (var blockNumber = block.BlockNumber; blockNumber > _lastFinalized; blockNumber--)

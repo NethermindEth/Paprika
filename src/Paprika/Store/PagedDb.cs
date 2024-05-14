@@ -298,6 +298,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         return false;
     }
 
+    public int HistoryDepth => _historyDepth;
+
     public void Accept(IPageVisitor visitor)
     {
         var i = 0U;
