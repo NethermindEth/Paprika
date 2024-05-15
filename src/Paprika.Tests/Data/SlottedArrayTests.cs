@@ -2,6 +2,7 @@ using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Merkle;
 
 namespace Paprika.Tests.Data;
 
@@ -257,6 +258,48 @@ public class SlottedArrayTests
         copy0.GetAssert(key2, Data(2));
         copy0.GetAssert(key3, Data(3));
         copy0.GetAssert(key4, Data(4));
+        copy0.GetAssert(key5, Data(5));
+    }
+
+    [Test]
+    public void Move_to_respects_tombstones()
+    {
+        const int size = 256;
+
+        var original = new SlottedArray(stackalloc byte[size]);
+        var copy0 = new SlottedArray(stackalloc byte[size]);
+
+        var key1 = NibblePath.Parse("1");
+        var key2 = NibblePath.Parse("23");
+        var key3 = NibblePath.Parse("345");
+        var key4 = NibblePath.Parse("4567");
+        var key5 = NibblePath.Parse("56789");
+
+        var tombstone = ReadOnlySpan<byte>.Empty;
+
+        original.SetAssert(key1, tombstone);
+        original.SetAssert(key2, tombstone);
+        original.SetAssert(key3, tombstone);
+        original.SetAssert(key4, tombstone);
+        original.SetAssert(key5, Data(5));
+
+        original.MoveNonEmptyKeysTo(new(copy0), true);
+
+        // original should have only empty
+        original.Count.Should().Be(0);
+        original.CapacityLeft.Should().Be(size - SlottedArray.HeaderSize);
+        original.GetShouldFail(key1);
+        original.GetShouldFail(key2);
+        original.GetShouldFail(key3);
+        original.GetShouldFail(key4);
+        original.GetShouldFail(key5);
+
+        // copy should have all but empty
+        copy0.Count.Should().Be(1);
+        copy0.GetShouldFail(key1);
+        copy0.GetShouldFail(key2);
+        copy0.GetShouldFail(key3);
+        copy0.GetShouldFail(key4);
         copy0.GetAssert(key5, Data(5));
     }
 

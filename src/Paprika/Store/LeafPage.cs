@@ -92,7 +92,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             batch.Stats?.LeafPageAllocatesOverflows(1);
 
             var overflow = AllocOverflow(batch, out Data.Buckets[0]);
-            Map.MoveNonEmptyKeysTo(new MapSource(overflow.Map));
+            Map.MoveNonEmptyKeysTo(new MapSource(overflow.Map), true);
             return true;
         }
 
@@ -184,7 +184,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             }
         }
 
-        Map.MoveNonEmptyKeysTo(source);
+        Map.MoveNonEmptyKeysTo(source, true);
         return true;
     }
 
