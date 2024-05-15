@@ -22,6 +22,7 @@ namespace Paprika.Data;
 public readonly ref struct SlottedArray
 {
     public const int Alignment = 8;
+    public const int HeaderSize = Header.Size;
 
     private readonly ref Header _header;
     private readonly Span<byte> _data;
@@ -214,7 +215,7 @@ public readonly ref struct SlottedArray
         public readonly Enumerator GetEnumerator() => this;
     }
 
-    public void MoveNonEmptyKeysTo(in MapSource destination)
+    public void MoveNonEmptyKeysTo(in MapSource destination, bool treatEmptyAsTombstone = false)
     {
         var to = Count;
         var moved = 0;
@@ -245,7 +246,16 @@ public readonly ref struct SlottedArray
                 data = payload;
             }
 
-            if (map.TrySetImpl(slot.Hash, slot.KeyPreamble, trimmed, data))
+            if (data.IsEmpty && treatEmptyAsTombstone)
+            {
+                // special case for tombstones in overflows
+                if (map.TryGetImpl(trimmed, slot.Hash, slot.KeyPreamble, out _, out var index))
+                {
+                    map.DeleteImpl(index);
+                }
+                slot.MarkAsDeleted();
+            }
+            else if (map.TrySetImpl(slot.Hash, slot.KeyPreamble, trimmed, data))
             {
                 slot.MarkAsDeleted();
                 moved++;
