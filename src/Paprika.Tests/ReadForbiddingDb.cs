@@ -17,6 +17,7 @@ public class ReadForbiddingDb(IDb db) : IDb
         new ReadOnlyBatch(db.BeginReadOnlyBatchOrLatest(in stateHash, name), this);
 
     public bool HasState(in Keccak keccak) => db.HasState(in keccak);
+    public int HistoryDepth => db.HistoryDepth;
 
     private class ReadOnlyBatch(IReadOnlyBatch batch, ReadForbiddingDb parent) : IReadOnlyBatch
     {
