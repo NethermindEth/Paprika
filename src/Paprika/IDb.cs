@@ -35,4 +35,6 @@ public interface IDb
     /// Gets the history depth for the given db.
     /// </summary>
     int HistoryDepth { get; }
+
+    void ForceFlush();
 }

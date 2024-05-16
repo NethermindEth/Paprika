@@ -82,8 +82,6 @@ public sealed class MemoryMappedPageManager : PointerPageManager
         if (_options == PersistenceOptions.MMapOnly)
             return;
 
-        int writes;
-
         if (options != CommitOptions.DangerNoWrite)
         {
             ScheduleWrites(dbAddresses);

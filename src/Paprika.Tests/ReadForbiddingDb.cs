@@ -18,6 +18,7 @@ public class ReadForbiddingDb(IDb db) : IDb
 
     public bool HasState(in Keccak keccak) => db.HasState(in keccak);
     public int HistoryDepth => db.HistoryDepth;
+    public void ForceFlush() => db.ForceFlush();
 
     private class ReadOnlyBatch(IReadOnlyBatch batch, ReadForbiddingDb parent) : IReadOnlyBatch
     {
