@@ -132,6 +132,8 @@ public class Blockchain : IAsyncDisposable
 
                 (uint _blocksByNumber, Keccak blockHash) last = default;
 
+                bool requiresForceFlush = false;
+
                 while (timer.Elapsed < _minFlushDelay && reader.TryRead(out var block))
                 {
                     last = (block.BlockNumber, block.Hash);
@@ -156,7 +158,17 @@ public class Blockchain : IAsyncDisposable
                     _flusherBlockApplicationInMs.Record((int)application.ElapsedMilliseconds);
 
                     // If there's something in the queue, don't flush. Flush here only where there's nothing to read from the reader.
-                    var level = reader.TryPeek(out _) ? CommitOptions.DangerNoFlush : CommitOptions.FlushDataOnly;
+                    var readerCount = reader.Count;
+                    var level = readerCount switch
+                    {
+                        0 => CommitOptions.FlushDataOnly, // see: CommitOptions.FlushDataOnly
+                        1 => CommitOptions.FlushDataOnly, // see: CommitOptions.FlushDataOnly
+                        _ when readerCount <= _db.HistoryDepth => CommitOptions.DangerNoFlush, // see: CommitOptions.DangerNoFlush 
+                        _ => CommitOptions.DangerNoWrite
+                    };
+
+                    // If at least one write is no write, require flush
+                    requiresForceFlush |= level == CommitOptions.DangerNoWrite;
 
                     // commit but no flush here, it's too heavy, the flush will come later
                     await batch.Commit(level);
@@ -192,7 +204,16 @@ public class Blockchain : IAsyncDisposable
                 _flusherQueueCount.Set(reader.Count);
 
                 var flushWatch = Stopwatch.StartNew();
-                _db.Flush();
+
+                if (requiresForceFlush)
+                {
+                    _db.ForceFlush();
+                }
+                else
+                {
+                    _db.Flush();
+                }
+
                 _flusherFlushInMs.Record((int)flushWatch.ElapsedMilliseconds);
 
                 Flushed?.Invoke(this, last);
