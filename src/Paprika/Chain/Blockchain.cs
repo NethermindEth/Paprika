@@ -163,7 +163,8 @@ public class Blockchain : IAsyncDisposable
                     {
                         0 => CommitOptions.FlushDataOnly, // see: CommitOptions.FlushDataOnly
                         1 => CommitOptions.FlushDataOnly, // see: CommitOptions.FlushDataOnly
-                        _ when readerCount <= _db.HistoryDepth => CommitOptions.DangerNoFlush, // see: CommitOptions.DangerNoFlush 
+                        _ when readerCount <= _db.HistoryDepth => CommitOptions
+                            .DangerNoFlush, // see: CommitOptions.DangerNoFlush 
                         _ => CommitOptions.DangerNoWrite
                     };
 
@@ -319,11 +320,8 @@ public class Blockchain : IAsyncDisposable
 
     public IWorldState StartNew(Keccak parentKeccak)
     {
-        lock (_blockLock)
-        {
-            var (batch, ancestors) = BuildBlockDataDependencies(parentKeccak);
-            return new BlockState(parentKeccak, batch, ancestors, this);
-        }
+        var (batch, ancestors) = BuildBlockDataDependencies(parentKeccak);
+        return new BlockState(parentKeccak, batch, ancestors, this);
     }
 
     public IRawState StartRaw()
@@ -333,11 +331,8 @@ public class Blockchain : IAsyncDisposable
 
     public IReadOnlyWorldState StartReadOnly(Keccak keccak)
     {
-        lock (_blockLock)
-        {
-            var (batch, ancestors) = BuildBlockDataDependencies(keccak);
-            return new ReadOnlyState(keccak, batch, ancestors);
-        }
+        var (batch, ancestors) = BuildBlockDataDependencies(keccak);
+        return new ReadOnlyState(keccak, batch, ancestors);
     }
 
     public IReadOnlyWorldState StartReadOnlyLatestFromDb()
@@ -355,28 +350,31 @@ public class Blockchain : IAsyncDisposable
             return (EmptyReadOnlyBatch.Instance, Array.Empty<CommittedBlockState>());
         }
 
-        // the most recent finalized batch
-        var batch = _db.BeginReadOnlyBatchOrLatest(parentKeccak, "Blockchain dependency");
-
-        // batch matches the parent, return
-        if (batch.Metadata.StateHash == parentKeccak)
-            return (batch, Array.Empty<CommittedBlockState>());
-
-        // no match, find chain
-        var ancestors = new List<CommittedBlockState>();
-        while (batch.Metadata.StateHash != parentKeccak)
+        lock (_blockLock)
         {
-            if (_blocksByHash.TryGetValue(parentKeccak, out var ancestor) == false)
+            // the most recent finalized batch
+            var batch = _db.BeginReadOnlyBatchOrLatest(parentKeccak, "Blockchain dependency");
+
+            // batch matches the parent, return
+            if (batch.Metadata.StateHash == parentKeccak)
+                return (batch, Array.Empty<CommittedBlockState>());
+
+            // no match, find chain
+            var ancestors = new List<CommittedBlockState>();
+            while (batch.Metadata.StateHash != parentKeccak)
             {
-                ThrowParentStateNotFound(parentKeccak);
+                if (_blocksByHash.TryGetValue(parentKeccak, out var ancestor) == false)
+                {
+                    ThrowParentStateNotFound(parentKeccak);
+                }
+
+                ancestor.AcquireLease(); // lease it!
+                ancestors.Add(ancestor);
+                parentKeccak = Normalize(ancestor.ParentHash);
             }
 
-            ancestor.AcquireLease(); // lease it!
-            ancestors.Add(ancestor);
-            parentKeccak = Normalize(ancestor.ParentHash);
+            return (batch, ancestors.ToArray());
         }
-
-        return (batch, ancestors.ToArray());
 
         static Keccak Normalize(in Keccak keccak)
         {
