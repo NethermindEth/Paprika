@@ -25,7 +25,7 @@ public class Blockchain : IAsyncDisposable
     // allocate 1024 pages (4MB) at once
     private readonly BufferPool _pool;
 
-    private readonly object _blockLock = new();
+    private readonly ReaderWriterLockSlim _blockLock = new();
     private readonly Dictionary<uint, List<CommittedBlockState>> _blocksByNumber = new();
     private readonly Dictionary<Keccak, CommittedBlockState> _blocksByHash = new();
 
@@ -175,20 +175,7 @@ public class Blockchain : IAsyncDisposable
                     await batch.Commit(level);
 
                     // inform blocks about flushing
-                    lock (_blockLock)
-                    {
-                        if (!_blocksByNumber.TryGetValue(flushedTo, out var removedBlocks))
-                        {
-                            ThrowMissingBlocks(flushedTo);
-                        }
-
-                        var cloned = removedBlocks.ToArray();
-                        foreach (var removedBlock in cloned)
-                        {
-                            // dispose one to allow leases to do the count
-                            removedBlock.Dispose();
-                        }
-                    }
+                    InformBlocks(flushedTo);
                 }
 
                 timer.Stop();
@@ -238,6 +225,26 @@ public class Blockchain : IAsyncDisposable
         {
             throw new Exception($"Missing blocks at block number {flushedTo}");
         }
+
+        void InformBlocks(uint flushedTo)
+        {
+            CommittedBlockState[] cloned;
+            using (_blockLock.Read())
+            {
+                if (!_blocksByNumber.TryGetValue(flushedTo, out var removedBlocks))
+                {
+                    ThrowMissingBlocks(flushedTo);
+                }
+
+                cloned = removedBlocks.ToArray();
+            }
+
+            foreach (var removedBlock in cloned)
+            {
+                // dispose one to allow leases to do the count
+                removedBlock.Dispose();
+            }
+        }
     }
 
     /// <summary>
@@ -255,60 +262,58 @@ public class Blockchain : IAsyncDisposable
         // allocate before lock
         var list = new List<CommittedBlockState> { state };
 
-        lock (_blockLock)
+        using var write = _blockLock.Write();
+
+        if (_blocksByHash.TryGetValue(state.Hash, out var committed))
         {
-            if (_blocksByHash.TryGetValue(state.Hash, out var committed))
+            if (committed.BlockNumber == state.BlockNumber)
             {
-                if (committed.BlockNumber == state.BlockNumber)
-                {
-                    // There is an already existing state at the same block number.
-                    // Just accept it and dispose the added. 
-                    state.MakeDiscardable();
+                // There is an already existing state at the same block number.
+                // Just accept it and dispose the added. 
+                state.MakeDiscardable();
 
-                    state.Dispose();
-                    return;
-                }
+                state.Dispose();
+                return;
             }
-
-            // blocks by number first
-            ref var blocks =
-                ref CollectionsMarshal.GetValueRefOrAddDefault(_blocksByNumber, state.BlockNumber, out var exists);
-
-            if (exists == false)
-            {
-                blocks = list;
-            }
-            else
-            {
-                blocks!.Add(state);
-            }
-
-            // blocks by hash
-            _blocksByHash.Add(state.Hash, state);
         }
+
+        // blocks by number first
+        ref var blocks =
+            ref CollectionsMarshal.GetValueRefOrAddDefault(_blocksByNumber, state.BlockNumber, out var exists);
+
+        if (exists == false)
+        {
+            blocks = list;
+        }
+        else
+        {
+            blocks!.Add(state);
+        }
+
+        // blocks by hash
+        _blocksByHash.Add(state.Hash, state);
     }
 
     private void Remove(CommittedBlockState blockState)
     {
-        lock (_blockLock)
+        using var write = _blockLock.Write();
+
+        // blocks by number, use remove first as usually it should be the case
+        if (!_blocksByNumber.Remove(blockState.BlockNumber, out var blocks))
         {
-            // blocks by number, use remove first as usually it should be the case
-            if (!_blocksByNumber.Remove(blockState.BlockNumber, out var blocks))
-            {
-                ThrowBlocksNotFound(blockState);
-                return;
-            }
-
-            blocks.Remove(blockState);
-            if (blocks.Count > 0)
-            {
-                // re-add only if not empty
-                _blocksByNumber.Add(blockState.BlockNumber, blocks);
-            }
-
-            // blocks by hash
-            _blocksByHash.Remove(blockState.Hash);
+            ThrowBlocksNotFound(blockState);
+            return;
         }
+
+        blocks.Remove(blockState);
+        if (blocks.Count > 0)
+        {
+            // re-add only if not empty
+            _blocksByNumber.Add(blockState.BlockNumber, blocks);
+        }
+
+        // blocks by hash
+        _blocksByHash.Remove(blockState.Hash);
 
         [DoesNotReturn]
         [StackTraceHidden]
@@ -350,31 +355,30 @@ public class Blockchain : IAsyncDisposable
             return (EmptyReadOnlyBatch.Instance, Array.Empty<CommittedBlockState>());
         }
 
-        lock (_blockLock)
+        using var read = _blockLock.Read();
+
+        // the most recent finalized batch
+        var batch = _db.BeginReadOnlyBatchOrLatest(parentKeccak, "Blockchain dependency");
+
+        // batch matches the parent, return
+        if (batch.Metadata.StateHash == parentKeccak)
+            return (batch, Array.Empty<CommittedBlockState>());
+
+        // no match, find chain
+        var ancestors = new List<CommittedBlockState>();
+        while (batch.Metadata.StateHash != parentKeccak)
         {
-            // the most recent finalized batch
-            var batch = _db.BeginReadOnlyBatchOrLatest(parentKeccak, "Blockchain dependency");
-
-            // batch matches the parent, return
-            if (batch.Metadata.StateHash == parentKeccak)
-                return (batch, Array.Empty<CommittedBlockState>());
-
-            // no match, find chain
-            var ancestors = new List<CommittedBlockState>();
-            while (batch.Metadata.StateHash != parentKeccak)
+            if (_blocksByHash.TryGetValue(parentKeccak, out var ancestor) == false)
             {
-                if (_blocksByHash.TryGetValue(parentKeccak, out var ancestor) == false)
-                {
-                    ThrowParentStateNotFound(parentKeccak);
-                }
-
-                ancestor.AcquireLease(); // lease it!
-                ancestors.Add(ancestor);
-                parentKeccak = Normalize(ancestor.ParentHash);
+                ThrowParentStateNotFound(parentKeccak);
             }
 
-            return (batch, ancestors.ToArray());
+            ancestor.AcquireLease(); // lease it!
+            ancestors.Add(ancestor);
+            parentKeccak = Normalize(ancestor.ParentHash);
         }
+
+        return (batch, ancestors.ToArray());
 
         static Keccak Normalize(in Keccak keccak)
         {
@@ -394,10 +398,9 @@ public class Blockchain : IAsyncDisposable
     public void Finalize(Keccak keccak)
     {
         Stack<CommittedBlockState> finalized;
-        uint count;
 
         // gather all the blocks to finalize
-        lock (_blockLock)
+        using (_blockLock.Read())
         {
             if (_blocksByHash.TryGetValue(keccak, out var block) == false)
             {
@@ -409,7 +412,7 @@ public class Blockchain : IAsyncDisposable
 
             // gather all the blocks between last finalized and this.
 
-            count = block.BlockNumber - _lastFinalized;
+            var count = block.BlockNumber - _lastFinalized;
 
             finalized = new((int)count);
             for (var blockNumber = block.BlockNumber; blockNumber > _lastFinalized; blockNumber--)
@@ -1212,16 +1215,15 @@ public class Blockchain : IAsyncDisposable
 
     public bool HasState(in Keccak keccak)
     {
-        lock (_blockLock)
-        {
-            if (_blocksByHash.ContainsKey(keccak))
-                return true;
+        using var read = _blockLock.Read();
 
-            if (_db.HasState(keccak))
-                return true;
+        if (_blocksByHash.ContainsKey(keccak))
+            return true;
 
-            return false;
-        }
+        if (_db.HasState(keccak))
+            return true;
+
+        return false;
     }
 
     /// <summary>
