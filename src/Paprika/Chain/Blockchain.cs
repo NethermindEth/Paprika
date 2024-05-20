@@ -29,7 +29,16 @@ public class Blockchain : IAsyncDisposable
     private readonly Dictionary<uint, List<CommittedBlockState>> _blocksByNumber = new();
     private readonly Dictionary<Keccak, CommittedBlockState> _blocksByHash = new();
 
+    // by root hash
+    //private readonly ReaderWriterLockSlim _readLock = new();
+    // private readonly Dictionary<Keccak, ReadOnlyState> _reader = new();
+
+    // finalization
     private readonly Channel<CommittedBlockState> _finalizedChannel;
+    private readonly Task _flusher;
+    private readonly TimeSpan _minFlushDelay;
+    private uint _lastFinalized;
+    private static readonly TimeSpan DefaultFlushDelay = TimeSpan.FromSeconds(1);
 
     // metrics
     private readonly Meter _meter;
@@ -45,13 +54,7 @@ public class Blockchain : IAsyncDisposable
     private readonly IPreCommitBehavior _preCommit;
     private readonly CacheBudget.Options _cacheBudgetStateAndStorage;
     private readonly CacheBudget.Options _cacheBudgetPreCommit;
-    private readonly TimeSpan _minFlushDelay;
     private readonly Action? _beforeMetricsDisposed;
-    private readonly Task _flusher;
-
-    private uint _lastFinalized;
-
-    private static readonly TimeSpan DefaultFlushDelay = TimeSpan.FromSeconds(1);
 
     public Blockchain(IDb db, IPreCommitBehavior preCommit, TimeSpan? minFlushDelay = null,
         CacheBudget.Options cacheBudgetStateAndStorage = default,
@@ -286,6 +289,8 @@ public class Blockchain : IAsyncDisposable
             // blocks by hash
             _blocksByHash.Add(state.Hash, state);
         }
+
+        BuildBlockDataDependencies()
     }
 
     private void Remove(CommittedBlockState blockState)
