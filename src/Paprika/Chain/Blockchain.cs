@@ -1560,6 +1560,8 @@ public class Blockchain : IAsyncDisposable
         // await the flushing task
         await _flusher;
 
+        _accessor?.Dispose();
+
         // dispose all memoized blocks to please the ref-counting
         foreach (var (_, block) in _blocksByHash)
         {
@@ -1742,10 +1744,15 @@ public class Blockchain : IAsyncDisposable
             {
                 foreach (var (key, _) in blockchain._blocksByHash)
                 {
+                    ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(dict, key, out var exists);
+
+                    if (exists)
+                        continue;
+
                     var ancestors = blockchain.FindAncestors(key, latest);
 
                     latest.AcquireLease(); // lease: +1
-                    dict.Add(key, new ReadOnlyState(key, latest, ancestors));
+                    slot = new ReadOnlyState(key, latest, ancestors);
                 }
 
                 _readersLock.EnterWriteLock();
@@ -1858,6 +1865,11 @@ public class Blockchain : IAsyncDisposable
         public void Dispose()
         {
             _readersLock.Dispose();
+            foreach (var (key, state) in _readers)
+            {
+                state.Dispose();
+            }
+            _readers.Clear();
         }
     }
 }

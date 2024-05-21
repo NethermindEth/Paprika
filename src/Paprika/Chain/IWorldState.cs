@@ -61,7 +61,7 @@ public interface IReadOnlyWorldState : IReadOnlyCommit, IDisposable
 /// <summary>
 /// Provides the access to the state similar to <see cref="IReadOnlyWorldState"/> but accepting the root hash that it should be searched for.
 /// </summary>
-public interface IReadOnlyWorldStateAccessor : IDisposable
+public interface IReadOnlyWorldStateAccessor
 {
     bool HasState(in Keccak rootHash);
 
