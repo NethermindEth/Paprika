@@ -27,7 +27,20 @@ public interface IDb
     IReadOnlyBatch BeginReadOnlyBatchOrLatest(in Keccak stateHash, string name = "");
 
     /// <summary>
+    /// Performs a snapshot of all the valid roots in the database.
+    /// </summary>
+    /// <returns>An array of roots.</returns>
+    IReadOnlyBatch[] SnapshotAll();
+
+    /// <summary>
     /// Whether there's a state with the given keccak.
     /// </summary>
     bool HasState(in Keccak keccak);
+
+    /// <summary>
+    /// Gets the history depth for the given db.
+    /// </summary>
+    int HistoryDepth { get; }
+
+    void ForceFlush();
 }

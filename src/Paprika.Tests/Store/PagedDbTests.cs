@@ -274,4 +274,49 @@ public class PagedDbTests
         stats.LeafPageTurnedIntoDataPage.Should().BeGreaterThan(0);
         stats.DataPageNewLeafsAllocated.Should().BeGreaterThan(0);
     }
+
+    [Test]
+    public async Task Snapshotting()
+    {
+        const byte historyDepth = 16;
+
+        var data = new byte[32];
+
+        using var db = PagedDb.NativeMemoryDb(32 * Mb, historyDepth);
+
+        for (uint i = 0; i < historyDepth * 2; i++)
+        {
+            var keccak = default(Keccak);
+
+            BinaryPrimitives.WriteUInt32LittleEndian(keccak.BytesAsSpan, i);
+
+            using var batch = db.BeginNextBatch();
+
+            // account first & data
+            batch.SetRaw(Key.Account(keccak), data);
+            batch.SetRaw(Key.StorageCell(NibblePath.FromKey(keccak), keccak), data);
+
+            batch.SetMetadata(i, Keccak.Compute(keccak.BytesAsSpan));
+
+            await batch.Commit(CommitOptions.FlushDataAndRoot);
+        }
+
+        // Asserts
+        var snapshot = db.SnapshotAll();
+
+        snapshot.Length.Should().Be(historyDepth);
+
+        Array.Sort(snapshot, (a, b) => a.Metadata.BlockNumber.CompareTo(b.Metadata.BlockNumber));
+        var start = snapshot[0].Metadata.BlockNumber;
+
+        for (uint i = 0; i < historyDepth; i++)
+        {
+            snapshot[i].Metadata.BlockNumber.Should().Be(start + i);
+        }
+
+        foreach (var batch in snapshot)
+        {
+            batch.Dispose();
+        }
+    }
 }

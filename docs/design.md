@@ -253,21 +253,7 @@ public struct PageHeader
 
 ### SlottedArray
 
-The `SlottedArray` component is responsible for storing data in-page. It does it by using path-based addressing based on the functionality provided by `NibblePath`. The path is not the only discriminator for the values though. The other part required to create a `Key` is the `type` of entry. Currently, there are the following types of entries:
-
-1. `Account` - identifies `(balance, nonce, codeHash, storageRootHash)` of a given account. The entry type is aligned with `Account` of Ethereum. It uses a more efficient encoding though that requires to be translated to RLP later.
-1. `StorageCell` - identifies that the given entry is a storage cell that is kept in-page, alongside other account attributes. To make it unique, the storage cell address is stored as the first 32 bytes of its raw data. It is used for comparisons whenever needed.
-1. `Merkle` - identifies a Merkle entry
-
-For example:
-
-> To store an update of a `nonce` of a given contract, `[address, Type.Account]` pair is used as a `Key` to store the serialized `(balance, nonce, codeHash, storageRootHash)` pair.
-
-and
-
-> To store a storage cell with the given `index` for the given `address`, `[address, Type.StorageCell]` is used as a `Key` with addition of additional bytes of `index`.
-
-The addition of additional bytes breaks the uniform addressing that is based on the path only. It allows at the same time for auto optimization of the tree and much more dense packaging of pages.
+The `SlottedArray` component is responsible for storing data in-page. It is capable of mapping a `NibblePath` to a value represented by `ReadOnlySpan<byte>`. Empyt values are allowed.
 
 #### SlottedArray layout
 
@@ -283,28 +269,55 @@ The first direction, from `0` is used for fixed-size structures that represent s
 In Paprika, each page level represents a cutoff in the nibble path to make it aligned to the Merkle construct. The key management could be extracted out of the `SlottedArray` component, but it would make it less self-contained. `SlottedArray` then provides `TrySet` and `TryGet` methods that accept nibble paths. This impacts the design of the slot, which is as follows:
 
 ```csharp
-[StructLayout(LayoutKind.Explicit, Size = Size)]
 private struct Slot
 {
     public const int Size = 4;
 
-    // The address of this item.
-    public ushort ItemAddress { /* bitwise magic */ }
+    /// <summary>
+    /// The address currently requires 12 bits [0-11] to address whole page. 
+    /// </summary>
+    private const ushort AddressMask = Page.PageSize - 1;
 
-    // Whether the slot is deleted
-    public bool IsDeleted { /* bitwise magic */ }
+    /// <summary>
+    /// The address of this item.
+    /// </summary>
+    public ushort ItemAddress { /* bitwise magic */ } 
+    
+    /// <summary>
+    /// Whether the given entry is deleted or not
+    /// </summary>
+    public bool IsDeleted => KeyPreamble == KeyPreambleDelete;
 
-    // the type of the entry
-    public DataType Type { /* bitwise magic */ }
+    public byte KeyPreamble { /* bitwise magic */ } 
 
-    [FieldOffset(0)] private ushort Raw;
+    private ushort Raw;
 
-    // First 4 nibbles extracted as ushort.
-    [FieldOffset(2)] public ushort Prefix;
+    /// <summary>
+    /// Used for vectorized search
+    /// </summary>
+    public const int HashShiftForSearch = 1;
+
+    /// <summary>
+    /// The memorized result of <see cref="PrepareKey"/> of this item.
+    /// </summary>
+    public ushort Hash;
+
+    /// <summary>
+    /// Prepares the key for the search. 
+    /// </summary>
+    public static ushort PrepareKey(/* ... */)
+    {
+        // ...
+    }
+
+    public static NibblePath UnPrepareKey(/* ... */)
+    {
+        // ...
+    }
 }
 ```
 
-The slot is 4 bytes long. It extracts 4 first nibbles as a prefix for fast comparisons. It has a pointer to the item. The length of the item is calculated by subtracting the address from the previous slot address. The drawback of this design is a linear search across all the slots when an item must be found. With the expected number of items per page, which should be no bigger than 100, it gives 400 bytes of slots to search through. This should be ok-ish with modern processors. The code is marked with an optimization opportunity.
+The slot is 4 bytes long. Using the `PrepareKey` method, some of the nibbles are extrated from the key as a `Hash` for fast comparisons. It has the actual `ItemAddress` that points to the beginning of the payload. The length of the item is calculated by subtracting the address from the previous slot address. The drawback of this design is a linear search across all the slots when an item must be found. With the expected number of items per page, which should be no bigger than 100, it gives 400 bytes of slots to search through. This should be ok-ish with modern processors as the search uses the vectorized index search. Additionally, it adds some checks for the preamble so that the collissions should not be that likely. 
 
 With this, the `SlottedArray` memory representation looks like the following.
 
@@ -334,6 +347,14 @@ With this, the `SlottedArray` memory representation looks like the following.
 ```
 
 The `SlottedArray` can wrap an arbitrary span of memory so it can be used for any page that wants to store data by key.
+
+#### Deletion and tombstones
+
+`SlottedArray` uses a tombstoning to mark the given entry as deleted. It's much cheaper to mark something as deleted and collect garbage from time to time than to compress it every single time. The marker of deleteion is frequently called a `tombstone`. To decide whether or not a GC should be called when there's not enough place to just append data, a counter of tombstones is held. If non zero, GC can be used to reclaim memory.
+
+#### Iteration
+
+`SlottedArray` allows an efficient iteration over each entries using the `map.EnumerateAll()` method. It provides the caller with a `ref struct Enumerator` that does not allocate and allows traversing the map. It's worth to mention that the enumerator allows to delete an entry when enumerating by calling the delete method with the item from the enumerator `map.Delete(item)`. Again, it's based on the tombstoning mentioned above and just marks the data as deleted.
 
 ### Merkle construct
 

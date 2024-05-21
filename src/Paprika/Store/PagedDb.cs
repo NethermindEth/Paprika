@@ -274,6 +274,28 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
+    public IReadOnlyBatch[] SnapshotAll()
+    {
+        var batches = new List<IReadOnlyBatch>();
+
+        lock (_batchLock)
+        {
+            for (var back = 0; back < _historyDepth; back++)
+            {
+                if (_lastRoot - back < 0)
+                {
+                    break;
+                }
+
+                var at = (_lastRoot - back) % _historyDepth;
+
+                batches.Add(BeginReadOnlyBatch(nameof(SnapshotAll), _roots[at]));
+            }
+        }
+
+        return batches.ToArray();
+    }
+
     public bool HasState(in Keccak stateHash)
     {
         lock (_batchLock)
@@ -297,6 +319,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
         return false;
     }
+
+    public int HistoryDepth => _historyDepth;
 
     public void Accept(IPageVisitor visitor)
     {
