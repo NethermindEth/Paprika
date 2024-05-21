@@ -29,7 +29,14 @@ public class Blockchain : IAsyncDisposable
     private readonly Dictionary<uint, List<CommittedBlockState>> _blocksByNumber = new();
     private readonly Dictionary<Keccak, CommittedBlockState> _blocksByHash = new();
 
+    private volatile ReadOnlyWorldStateAccessor? _accessor;
+
+    // finalization
     private readonly Channel<CommittedBlockState> _finalizedChannel;
+    private readonly Task _flusher;
+    private readonly TimeSpan _minFlushDelay;
+    private uint _lastFinalized;
+    private static readonly TimeSpan DefaultFlushDelay = TimeSpan.FromSeconds(1);
 
     // metrics
     private readonly Meter _meter;
@@ -45,13 +52,7 @@ public class Blockchain : IAsyncDisposable
     private readonly IPreCommitBehavior _preCommit;
     private readonly CacheBudget.Options _cacheBudgetStateAndStorage;
     private readonly CacheBudget.Options _cacheBudgetPreCommit;
-    private readonly TimeSpan _minFlushDelay;
     private readonly Action? _beforeMetricsDisposed;
-    private readonly Task _flusher;
-
-    private uint _lastFinalized;
-
-    private static readonly TimeSpan DefaultFlushDelay = TimeSpan.FromSeconds(1);
 
     public Blockchain(IDb db, IPreCommitBehavior preCommit, TimeSpan? minFlushDelay = null,
         CacheBudget.Options cacheBudgetStateAndStorage = default,
@@ -163,7 +164,8 @@ public class Blockchain : IAsyncDisposable
                     {
                         0 => CommitOptions.FlushDataOnly, // see: CommitOptions.FlushDataOnly
                         1 => CommitOptions.FlushDataOnly, // see: CommitOptions.FlushDataOnly
-                        _ when readerCount <= _db.HistoryDepth => CommitOptions.DangerNoFlush, // see: CommitOptions.DangerNoFlush 
+                        _ when readerCount <= _db.HistoryDepth => CommitOptions
+                            .DangerNoFlush, // see: CommitOptions.DangerNoFlush 
                         _ => CommitOptions.DangerNoWrite
                     };
 
@@ -188,6 +190,8 @@ public class Blockchain : IAsyncDisposable
                             removedBlock.Dispose();
                         }
                     }
+
+                    _accessor?.RebuildAll();
                 }
 
                 timer.Stop();
@@ -284,6 +288,8 @@ public class Blockchain : IAsyncDisposable
 
             // blocks by hash
             _blocksByHash.Add(state.Hash, state);
+
+            _accessor?.RebuildOne(state.Hash);
         }
     }
 
@@ -319,11 +325,8 @@ public class Blockchain : IAsyncDisposable
 
     public IWorldState StartNew(Keccak parentKeccak)
     {
-        lock (_blockLock)
-        {
-            var (batch, ancestors) = BuildBlockDataDependencies(parentKeccak);
-            return new BlockState(parentKeccak, batch, ancestors, this);
-        }
+        var (batch, ancestors) = BuildBlockDataDependencies(parentKeccak);
+        return new BlockState(parentKeccak, batch, ancestors, this);
     }
 
     public IRawState StartRaw()
@@ -333,17 +336,14 @@ public class Blockchain : IAsyncDisposable
 
     public IReadOnlyWorldState StartReadOnly(Keccak keccak)
     {
-        lock (_blockLock)
-        {
-            var (batch, ancestors) = BuildBlockDataDependencies(keccak);
-            return new ReadOnlyState(keccak, batch, ancestors);
-        }
+        var (batch, ancestors) = BuildBlockDataDependencies(keccak);
+        return new ReadOnlyState(keccak, new ReadOnlyBatchCountingRefs(batch), ancestors);
     }
 
     public IReadOnlyWorldState StartReadOnlyLatestFromDb()
     {
         var batch = _db.BeginReadOnlyBatch($"Blockchain dependency LATEST");
-        return new ReadOnlyState(batch.Metadata.StateHash, batch, Array.Empty<CommittedBlockState>());
+        return new ReadOnlyState(batch.Metadata.StateHash, new ReadOnlyBatchCountingRefs(batch), []);
     }
 
     private (IReadOnlyBatch batch, CommittedBlockState[] ancestors) BuildBlockDataDependencies(Keccak parentKeccak)
@@ -352,37 +352,43 @@ public class Blockchain : IAsyncDisposable
 
         if (parentKeccak == Keccak.Zero)
         {
-            return (EmptyReadOnlyBatch.Instance, Array.Empty<CommittedBlockState>());
+            return (EmptyReadOnlyBatch.Instance, []);
         }
 
-        // the most recent finalized batch
-        var batch = _db.BeginReadOnlyBatchOrLatest(parentKeccak, "Blockchain dependency");
+        lock (_blockLock)
+        {
+            // the most recent finalized batch
+            var batch = _db.BeginReadOnlyBatchOrLatest(parentKeccak, "Blockchain dependency");
 
-        // batch matches the parent, return
-        if (batch.Metadata.StateHash == parentKeccak)
-            return (batch, Array.Empty<CommittedBlockState>());
+            // batch matches the parent, return
+            return (batch, FindAncestors(parentKeccak, batch));
+        }
+    }
+
+    private CommittedBlockState[] FindAncestors(in Keccak keccak, IReadOnlyBatch batch)
+    {
+        if (batch.Metadata.StateHash == keccak)
+        {
+            return [];
+        }
+
+        var parent = keccak;
 
         // no match, find chain
         var ancestors = new List<CommittedBlockState>();
-        while (batch.Metadata.StateHash != parentKeccak)
+        while (batch.Metadata.StateHash != parent)
         {
-            if (_blocksByHash.TryGetValue(parentKeccak, out var ancestor) == false)
+            if (_blocksByHash.TryGetValue(parent, out var ancestor) == false)
             {
-                ThrowParentStateNotFound(parentKeccak);
+                ThrowParentStateNotFound(parent);
             }
 
             ancestor.AcquireLease(); // lease it!
             ancestors.Add(ancestor);
-            parentKeccak = Normalize(ancestor.ParentHash);
+            parent = Normalize(ancestor.ParentHash);
         }
 
-        return (batch, ancestors.ToArray());
-
-        static Keccak Normalize(in Keccak keccak)
-        {
-            // pages are zeroed before, return zero on empty tree
-            return keccak == Keccak.EmptyTreeHash ? Keccak.Zero : keccak;
-        }
+        return ancestors.ToArray();
 
         [DoesNotReturn]
         [StackTraceHidden]
@@ -391,6 +397,12 @@ public class Blockchain : IAsyncDisposable
             throw new Exception(
                 $"Failed to build dependencies. Parent state with hash {parentKeccak} was not found");
         }
+    }
+
+    private static Keccak Normalize(in Keccak keccak)
+    {
+        // pages are zeroed before, return zero on empty tree
+        return keccak == Keccak.EmptyTreeHash ? Keccak.Zero : keccak;
     }
 
     public void Finalize(Keccak keccak)
@@ -1428,9 +1440,16 @@ public class Blockchain : IAsyncDisposable
         private readonly ReadOnlyBatchCountingRefs _batch;
         private readonly CommittedBlockState[] _ancestors;
 
-        public ReadOnlyState(Keccak stateRoot, IReadOnlyBatch batch, CommittedBlockState[] ancestors)
+        public ReadOnlyState(ReadOnlyBatchCountingRefs batch)
         {
-            _batch = new ReadOnlyBatchCountingRefs(batch);
+            _batch = batch;
+            _ancestors = [];
+            Hash = batch.Metadata.StateHash;
+        }
+
+        public ReadOnlyState(Keccak stateRoot, ReadOnlyBatchCountingRefs batch, CommittedBlockState[] ancestors)
+        {
+            _batch = batch;
             _ancestors = ancestors;
             Hash = stateRoot;
         }
@@ -1540,6 +1559,8 @@ public class Blockchain : IAsyncDisposable
 
         // await the flushing task
         await _flusher;
+
+        _accessor?.Dispose();
 
         // dispose all memoized blocks to please the ref-counting
         foreach (var (_, block) in _blocksByHash)
@@ -1685,5 +1706,170 @@ public class Blockchain : IAsyncDisposable
         }
 
         public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) => ((IReadOnlyWorldState)_current).Get(key);
+    }
+
+    public IReadOnlyWorldStateAccessor BuildReadOnlyAccessor()
+    {
+        var accessor = new ReadOnlyWorldStateAccessor(this);
+        accessor.RebuildAll();
+        _accessor = accessor;
+        return accessor;
+    }
+
+    private class ReadOnlyWorldStateAccessor(Blockchain blockchain) : IReadOnlyWorldStateAccessor
+    {
+        private readonly ReaderWriterLockSlim _readersLock = new();
+        private Dictionary<Keccak, ReadOnlyState> _readers = new();
+
+        public void RebuildAll()
+        {
+            // This part is lock free as it should be called right after applying the last batch
+            var snapshot = blockchain._db.SnapshotAll();
+            var latest = new ReadOnlyBatchCountingRefs(snapshot.MaxBy(t => t.Metadata.BlockNumber)); // lease: 1
+
+            var dict = new Dictionary<Keccak, ReadOnlyState>();
+            foreach (var batch in snapshot)
+            {
+                var state = batch.Metadata.BlockNumber == latest.Metadata.BlockNumber
+                    ? new ReadOnlyState(latest)
+                    : new ReadOnlyState(new ReadOnlyBatchCountingRefs(batch));
+
+                dict.Add(batch.Metadata.StateHash, state);
+            }
+
+            // All batches are captured, time to build the blocks
+            Dictionary<Keccak, ReadOnlyState> previous;
+
+            lock (blockchain._blockLock)
+            {
+                foreach (var (key, _) in blockchain._blocksByHash)
+                {
+                    ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(dict, key, out var exists);
+
+                    if (exists)
+                        continue;
+
+                    var ancestors = blockchain.FindAncestors(key, latest);
+
+                    latest.AcquireLease(); // lease: +1
+                    slot = new ReadOnlyState(key, latest, ancestors);
+                }
+
+                _readersLock.EnterWriteLock();
+                try
+                {
+                    previous = _readers;
+                    _readers = dict;
+                }
+                finally
+                {
+                    _readersLock.ExitWriteLock();
+                }
+            }
+
+            // Dispose the previous
+            foreach (var (_, value) in previous)
+            {
+                value.Dispose();
+            }
+        }
+
+        public void RebuildOne(in Keccak stateHash)
+        {
+            Debug.Assert(Monitor.IsEntered(blockchain._blockLock), "Should be called only under the lock");
+
+            var state = blockchain.StartReadOnly(stateHash);
+
+            _readersLock.EnterWriteLock();
+            try
+            {
+                _readers.Add(state.Hash, (ReadOnlyState)state);
+            }
+            finally
+            {
+                _readersLock.ExitWriteLock();
+            }
+        }
+
+        public bool HasState(in Keccak keccak)
+        {
+            _readersLock.EnterReadLock();
+            try
+            {
+                return _readers.ContainsKey(keccak);
+            }
+            finally
+            {
+                _readersLock.ExitReadLock();
+            }
+        }
+
+        public Account GetAccount(in Keccak rootHash, in Keccak address)
+        {
+            if (!TryGetLeasedState(rootHash, out var state))
+            {
+                return default;
+            }
+
+            try
+            {
+                return state.GetAccount(address);
+            }
+            finally
+            {
+                // Release
+                state.Dispose();
+            }
+        }
+
+        public Span<byte> GetStorage(in Keccak rootHash, in Keccak address, in Keccak storage, Span<byte> destination)
+        {
+            if (!TryGetLeasedState(rootHash, out var state))
+            {
+                return default;
+            }
+
+            try
+            {
+                return state.GetStorage(address, storage, destination);
+            }
+            finally
+            {
+                // Release
+                state.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Finds the state in the dictionary under the read lock, acquires the lease on it and returns as soon as possible the leased state.
+        /// </summary>
+        private bool TryGetLeasedState(in Keccak rootHash, out ReadOnlyState state)
+        {
+            _readersLock.EnterReadLock();
+            try
+            {
+                if (_readers.TryGetValue(rootHash, out state))
+                {
+                    state.AcquireLease();
+                    return true;
+                }
+
+                return false;
+            }
+            finally
+            {
+                _readersLock.ExitReadLock();
+            }
+        }
+
+        public void Dispose()
+        {
+            _readersLock.Dispose();
+            foreach (var (key, state) in _readers)
+            {
+                state.Dispose();
+            }
+            _readers.Clear();
+        }
     }
 }

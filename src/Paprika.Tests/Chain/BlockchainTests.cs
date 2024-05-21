@@ -580,7 +580,58 @@ public class BlockchainTests
         }
     }
 
-    private static Account GetAccount(int i) => new((UInt256)i, (UInt256)i);
+    [Test]
+    public async Task Read_accessor()
+    {
+        const byte historyDepth = 16;
+        using var db = PagedDb.NativeMemoryDb(16 * Mb, historyDepth);
+
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
+
+        var accessor = blockchain.BuildReadOnlyAccessor();
+
+        const int count = 128;
+
+        var parent = Keccak.EmptyTreeHash;
+
+        var hashes = new Keccak[count + 1];
+        hashes[0] = parent;
+
+        for (uint i = 0; i < count; i++)
+        {
+            using var block = blockchain.StartNew(parent);
+            block.SetAccount(Key(i), Value(i));
+            parent = hashes[i + 1] = block.Commit(i + 1);
+        }
+
+        var h = hashes[historyDepth];
+
+        var task = blockchain.WaitTillFlush(h);
+        blockchain.Finalize(h);
+        await task;
+
+        // omit 0th
+        for (uint i = 10; i < count; i++)
+        {
+            var root = hashes[i + 1];
+
+            accessor.HasState(root).Should().BeTrue();
+            accessor.GetAccount(root, Key(i)).Should().Be(Value(i));
+        }
+
+        return;
+
+        static Keccak Key(uint i)
+        {
+            Keccak k = default;
+            BinaryPrimitives.WriteUInt32LittleEndian(k.BytesAsSpan, i + 3);
+            return k;
+        }
+
+        static Account Value(uint i) => new(i, i);
+    }
+
+    private static Account GetAccount(int i) => new((UInt256)i + 1, (UInt256)i + 1);
 
     private static Keccak BuildKey(int i)
     {
