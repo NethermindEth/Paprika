@@ -5,6 +5,9 @@
         <Nullable>enable</Nullable>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
+    <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+      <DefineConstants>$(DefineConstants);SNAP_SYNC_SUPPORT</DefineConstants>
+    </PropertyGroup>
 
     <ItemGroup>
       <PackageReference Include="HdrHistogram" Version="2.5.0" />
