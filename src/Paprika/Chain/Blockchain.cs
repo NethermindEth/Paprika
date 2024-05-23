@@ -602,7 +602,6 @@ public class Blockchain : IAsyncDisposable
         {
             _prefetcher?.BlockFurtherPrefetching();
 
-            EnsureHash();
             //TODO - solve differently
             //allow raw state to not re-calculate root hash
             //performance killer for storage ranges sync
