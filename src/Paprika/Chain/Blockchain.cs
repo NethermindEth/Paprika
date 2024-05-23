@@ -473,7 +473,7 @@ public class Blockchain : IAsyncDisposable
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload.
     /// </summary>
-    private class BlockState : RefCountingDisposable, IWorldState, ICommit, IProvideDescription, IStateStats
+    private class BlockState : RefCountingDisposable, IWorldState, ICommit, IProvideDescription, IStateStats, IReadOnlyWorldState
     {
         [ThreadStatic] private static HashSet<ulong>? s_bloomCache;
 
@@ -614,6 +614,13 @@ public class Blockchain : IAsyncDisposable
             _prefetcher?.BlockFurtherPrefetching();
 
             EnsureHash();
+            //TODO - solve differently
+            //allow raw state to not re-calculate root hash
+            //performance killer for storage ranges sync
+            if (!raw)
+                EnsureHash();
+            else
+                _hash ??= Keccak.EmptyTreeHash;
 
             var hash = _hash!.Value;
 
@@ -798,6 +805,14 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
+        /// <summary>
+        /// Run merkle behaviour for storage tries only
+        /// </summary>
+        public void RecalculateStorageTries()
+        {
+            ((ComputeMerkleBehavior)_blockchain._preCommit).RecalculateStorageTries(this, _cacheBudgetPreCommit);
+        }
+
         private BufferPool Pool => _blockchain._pool;
 
         [SkipLocalsInit]
@@ -855,6 +870,46 @@ public class Blockchain : IAsyncDisposable
             return destination.Slice(0, data.Length);
         }
 
+        public bool IsNonBoundaryHash(in NibblePath path, out Keccak existingHash)
+        {
+            var key = Key.Merkle(path);
+            using var owner = Get(key);
+            existingHash = Keccak.Zero;
+            if (!owner.Span.IsEmpty)
+            {
+                Node.ReadFrom(out var type, out var leaf, out var ext, out var branch, owner.Span);
+                switch (type)
+                {
+                    case Node.Type.Leaf:
+                        if (leaf.Path.Length > 64) return false;
+                        existingHash = ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateHash(path, this);
+                        return true;
+                    default:
+                        existingHash = ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateHash(path, this);
+                        return true;
+                }
+            }
+            return false;
+        }
+
+        public bool IsNonBoundaryHash(in NibblePath accountPath, in NibblePath storagePath)
+        {
+            var key = Key.Raw(accountPath, DataType.Merkle, storagePath);
+            using var owner = Get(key);
+            if (!owner.Span.IsEmpty)
+            {
+                Node.ReadFrom(out var type, out var leaf, out var ext, out var branch, owner.Span);
+                switch (type)
+                {
+                    case Node.Type.Leaf:
+                        return leaf.Path.Length <= 64;
+                    default:
+                        return true;
+                }
+            }
+            return false;
+        }
+
         /// <summary>
         /// Decides to whether put the value in a transient cache or in a persistent cache to speed
         /// up queries in next executions.
@@ -894,7 +949,7 @@ public class Blockchain : IAsyncDisposable
             SetAccountRaw(address, payload, newAccountHint);
         }
 
-        private void SetAccountRaw(in Keccak address, Span<byte> payload, bool newAccountHint)
+        public void SetAccountRaw(in Keccak address, Span<byte> payload, bool newAccountHint)
         {
             var path = NibblePath.FromKey(address);
             var key = Key.Account(path);
@@ -907,6 +962,15 @@ public class Blockchain : IAsyncDisposable
             }
 
             _stats!.RegisterSetAccount(address);
+        }
+
+        public void SetKeyForProof(in Key key, Span<byte> payLoad)
+        {
+            SetImpl(key, payLoad, EntryType.Persistent, key.Type == DataType.Account ? _state : _storage);
+        }
+        public void RemoveMerkle(in Key key)
+        {
+            SetImpl(key, Span<byte>.Empty, EntryType.Persistent, _preCommit);
         }
 
         public void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value)
@@ -1058,7 +1122,7 @@ public class Blockchain : IAsyncDisposable
         }
 
         [SkipLocalsInit]
-        private ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
+        public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
         {
             var hash = GetHash(key);
             var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
@@ -1637,19 +1701,31 @@ public class Blockchain : IAsyncDisposable
         public void SetBoundary(in NibblePath account, in Keccak boundaryNodeKeccak)
         {
 #if SNAP_SYNC_SUPPORT
-            var path = SnapSync.CreateKey(account, stackalloc byte[NibblePath.FullKeccakByteLength]);
+
+            if (_current.IsNonBoundaryHash(account, out Keccak existingHash) && existingHash == boundaryNodeKeccak)
+                return;
+
             var payload = SnapSync.WriteBoundaryValue(boundaryNodeKeccak, stackalloc byte[SnapSync.BoundaryValueSize]);
 
-            _current.SetAccountRaw(path.UnsafeAsKeccak, payload);
+            _current.RemoveMerkle(Key.Merkle(account));
+            _current.SetKeyForProof(Key.Account(account), payload);
 #endif
         }
 
         public void SetBoundary(in Keccak account, in NibblePath storage, in Keccak boundaryNodeKeccak)
         {
 #if SNAP_SYNC_SUPPORT
-            var path = SnapSync.CreateKey(storage, stackalloc byte[NibblePath.FullKeccakByteLength]);
+
+            var path = NibblePath.FromKey(account);
+            //if (_current.IsNonBoundaryHash(path, storage, out Keccak existingHash) && existingHash == boundaryNodeKeccak)
+            //    return;
+            if (_current.IsNonBoundaryHash(path, storage))
+                return;
+
             var payload = SnapSync.WriteBoundaryValue(boundaryNodeKeccak, stackalloc byte[SnapSync.BoundaryValueSize]);
-            _current.SetStorage(account, path.UnsafeAsKeccak, payload);
+
+            //_current.RemoveMerkle(Key.Raw(path, DataType.Merkle, storage));
+            _current.SetKeyForProof(Key.StorageCell(path, storage), payload);
 #endif
         }
 
@@ -1661,7 +1737,7 @@ public class Blockchain : IAsyncDisposable
 
         public void DestroyAccount(in Keccak address) => _current.DestroyAccount(address);
 
-        public void Commit()
+        public void Commit(bool ensureHash)
         {
             ThrowOnFinalized();
 
@@ -1673,7 +1749,9 @@ public class Blockchain : IAsyncDisposable
 
             var read = _db.BeginReadOnlyBatch();
 
-            Hash = _current.Hash;
+            //commit without hash recalc - useful for storage ranges in snap sync
+            if (ensureHash)
+                Hash = _current.Hash;
 
             using var batch = _db.BeginNextBatch();
 
@@ -1699,6 +1777,23 @@ public class Blockchain : IAsyncDisposable
             batch.Commit(CommitOptions.DangerNoWrite);
 
             _finalized = true;
+        }
+
+        public Keccak RefreshRootHash()
+        {
+            Hash = _current.Hash;
+            return Hash;
+        }
+
+        public void Discard()
+        {
+            _current.Reset();
+        }
+
+        public Keccak RecalculateStorageRoot(in Keccak accountAddress)
+        {
+            _current.RecalculateStorageTries();
+            return _current.GetAccount(accountAddress).StorageRootHash;
         }
 
         private void ThrowOnFinalized()
