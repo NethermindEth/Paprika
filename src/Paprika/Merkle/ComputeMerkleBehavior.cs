@@ -1116,7 +1116,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             var valueKey = Key.Raw(slice, keyType, NibblePath.Empty);
 
                                 // delete memoized keccak
-                            //commit.Set(valueKey, ReadOnlySpan<byte>.Empty);
+                                commit.Set(valueKey, ReadOnlySpan<byte>.Empty);
 
                             var newDataKey = Key.Raw(path, keyType, NibblePath.Empty);
                             var newData = commit.Get(newDataKey);

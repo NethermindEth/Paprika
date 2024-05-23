@@ -856,6 +856,14 @@ public class Blockchain : IAsyncDisposable
             ((ComputeMerkleBehavior)_blockchain._preCommit).RecalculateStorageTries(this, _cacheBudgetPreCommit);
         }
 
+        /// <summary>
+        /// Run merkle behaviour for storage tries only
+        /// </summary>
+        public void RecalculateStorageTries()
+        {
+            ((ComputeMerkleBehavior)_blockchain._preCommit).RecalculateStorageTries(this, _cacheBudgetPreCommit);
+        }
+
         private BufferPool Pool => _blockchain._pool;
 
         [SkipLocalsInit]
@@ -1844,6 +1852,7 @@ public class Blockchain : IAsyncDisposable
 
             var payload = SnapSync.WriteBoundaryValue(boundaryNodeKeccak, stackalloc byte[SnapSync.BoundaryValueSize]);
 
+            _current.RemoveMerkle(Key.Merkle(account));
             _current.SetKeyForProof(Key.Account(account), payload);
 #endif
         }
