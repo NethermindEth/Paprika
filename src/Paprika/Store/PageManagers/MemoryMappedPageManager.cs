@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
@@ -31,6 +32,7 @@ public sealed class MemoryMappedPageManager : PointerPageManager
 
     private readonly Meter _meter;
     private readonly Histogram<int> _fileWrites;
+    private readonly Histogram<int> _writeTime;
 
     public unsafe MemoryMappedPageManager(long size, byte historyDepth, string dir,
         PersistenceOptions options = PersistenceOptions.FlushFile) : base(size)
@@ -69,6 +71,7 @@ public sealed class MemoryMappedPageManager : PointerPageManager
 
         _meter = new Meter("Paprika.Store.PageManager");
         _fileWrites = _meter.CreateHistogram<int>("File writes", "Syscall", "Actual numbers of file writes issued");
+        _writeTime = _meter.CreateHistogram<int>("Write time", "ms", "Time spent in writing");
     }
 
     public static string GetPaprikaFilePath(string dir) => System.IO.Path.Combine(dir, PaprikaFileName);
@@ -134,9 +137,13 @@ public sealed class MemoryMappedPageManager : PointerPageManager
 
     private async Task AwaitWrites()
     {
+        var writes = Stopwatch.StartNew();
+
         await Task.WhenAll(_pendingWrites);
         ReleaseOwners();
         _pendingWrites.Clear();
+
+        _writeTime.Record((int)writes.ElapsedMilliseconds);
     }
 
     public override Page GetAtForWriting(DbAddress address, bool reused) => GetAt(address);
