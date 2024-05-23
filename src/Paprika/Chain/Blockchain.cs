@@ -1852,24 +1852,25 @@ public class Blockchain : IAsyncDisposable
                 // enqueue the batch for cleanup later
                 _queue.Enqueue(readOnly);
 
-                // dequeue the oldest batch
-                ReadOnlyState oldestBatch = _queue.Dequeue();
-                toDispose.Add(oldestBatch);
+                // dequeue the oldest batch if the history is beyond depth
+                if (_queue.Count > _blockchain._db.HistoryDepth)
+                {
+                    ReadOnlyState oldestBatch = _queue.Dequeue();
+                    toDispose.Add(oldestBatch);
 
-                var removed = _readers.Remove(oldestBatch.Hash);
-                Debug.Assert(removed);
+                    var removed = _readers.Remove(oldestBatch.Hash);
+                    Debug.Assert(removed);
+                }
 
                 foreach (CommittedBlockState b in blocksWithSameNumber)
                 {
                     if (b.Hash != committed.Hash)
                     {
-                        removed = _readers.Remove(b.Hash, out ReadOnlyState? state);
+                        var removed = _readers.Remove(b.Hash, out ReadOnlyState? state);
                         Debug.Assert(removed);
                         toDispose.Add(state);
                     }
                 }
-
-                Debug.Assert(_queue.Count == _blockchain._db.HistoryDepth);
             }
             finally
             {
