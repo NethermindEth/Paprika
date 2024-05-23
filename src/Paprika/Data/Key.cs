@@ -48,6 +48,9 @@ public readonly ref partial struct Key
     public static Key StorageCell(NibblePath path, in Keccak keccak) =>
         new(path, DataType.StorageCell, NibblePath.FromKey(keccak));
 
+    public static Key StorageCell(NibblePath path, NibblePath storagePath) =>
+        new(path, DataType.StorageCell, storagePath);
+
     /// <summary>
     /// Builds the key for <see cref="DataType.StorageCell"/>.
     /// </summary>
