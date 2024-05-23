@@ -1,5 +1,3 @@
-using System;
-using System.Buffers;
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -640,6 +638,56 @@ public readonly ref struct NibblePath
         }
 
         return new string(path);
+    }
+
+    public void WriteToKeccak(Span<byte> keccak)
+    {
+        if (IsOdd)
+        {
+            int ki = 0;
+            for (int i = 0; i < Length / 2; i++)
+            {
+                var highByte = Unsafe.Add(ref _span, i);
+                var lowByte = Unsafe.Add(ref _span, i + 1);
+                var nibbleH = highByte & 0x0F;
+                var nibbleL = (lowByte & 0xF0) >> 4;
+
+                keccak[ki++] = (byte)((nibbleH << 4) | nibbleL);
+            }
+        }
+        else
+        {
+            RawSpan.CopyTo(keccak);
+        }
+    }
+
+    //TODO - unnecessary allocation !!!
+    public NibblePath GetAligned()
+    {
+        if ((_odd + Length) % 2 == 0)
+            return this;
+        if (_odd == 1 && Length % 2 == 0)
+        {
+            var span = new byte[(Length + 1) / 2];
+            var copy = new NibblePath(span, 0, Length);
+
+            for (int i = 0; i < Length; i++)
+            {
+                copy.UnsafeSetAt(i, 0, GetAt(i));
+            }
+            return copy;
+        }
+
+        if (_odd == 0 && Length % 2 == 1)
+        {
+            var span = new byte[(Length + 1) / 2];
+            RawSpan.CopyTo(span);
+            var copy = new NibblePath(span, 0, Length);
+            copy.UnsafeMakeOdd();
+            return copy;
+        }
+
+        return this;
     }
 
     private static readonly char[] Hex = "0123456789ABCDEF".ToArray();
