@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Numerics;
 using BenchmarkDotNet.Attributes;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -6,11 +7,13 @@ using Paprika.Store;
 
 namespace Paprika.Benchmarks;
 
-[DisassemblyDiagnoser(maxDepth: 2)]
+[DisassemblyDiagnoser(maxDepth: 1)]
 public class SlottedArrayBenchmarks
 {
     private readonly byte[] _writtenLittleEndian = new byte[Page.PageSize];
     private readonly byte[] _writtenBigEndian = new byte[Page.PageSize];
+    private readonly byte[] _writtenIncreasingKeys = new byte[Page.PageSize];
+    private readonly byte[] _writtenIncreasingOddKeys = new byte[Page.PageSize];
     private readonly byte[] _writable = new byte[Page.PageSize];
     private readonly int _to;
 
@@ -48,6 +51,9 @@ public class SlottedArrayBenchmarks
             _to++;
         }
 
+        BuildIncreasing();
+        BuildIncreasingOdd();
+
         // Hash collisions tests
         var zeroes = NibblePath.FromKey(Keccak.Zero);
         var hashCollisions = new SlottedArray(_hashCollisions);
@@ -57,6 +63,44 @@ public class SlottedArrayBenchmarks
         while (hashCollisions.TrySet(zeroes.SliceTo(_hashCollisionsLength), HashCollisionValue))
         {
             _hashCollisionsLength++;
+        }
+    }
+
+    private void BuildIncreasing()
+    {
+        Span<byte> key = stackalloc byte[4];
+        
+        var map = new SlottedArray(_writtenIncreasingKeys);
+        map.TrySet(NibblePath.Empty, key);
+        for (byte i = 0; i < 16; i++)
+        {
+            map.TrySet(NibblePath.Single(i, 0), key);
+        }
+
+        for (int i = 0; i <= byte.MaxValue; i++)
+        {
+            key[0] = (byte)i;
+            map.TrySet(NibblePath.FromKey(key, 0, 2), key);
+        }
+    }
+
+    private void BuildIncreasingOdd()
+    {
+        Span<byte> key = stackalloc byte[4];
+        
+        var map = new SlottedArray(_writtenIncreasingOddKeys);
+        map.TrySet(NibblePath.Empty, key);
+        for (byte i = 0; i < 16; i++)
+        {
+            map.TrySet(NibblePath.Single(i, 1), key);
+        }
+
+        for (var i = 0; i <= byte.MaxValue; i++)
+        {
+            key[0] = (byte)(i & 0x0F);
+            key[1] = (byte)(i & 0xF0);
+            
+            map.TrySet(NibblePath.FromKey(key, 1, 2), key);
         }
     }
 
@@ -166,9 +210,39 @@ public class SlottedArrayBenchmarks
     }
 
     [Benchmark]
-    public int EnumerateAll()
+    public int Enumerate_little_endian()
     {
         var map = new SlottedArray(_writtenLittleEndian);
+
+        var length = 0;
+        foreach (var item in map.EnumerateAll())
+        {
+            length += item.Key.Length;
+            length += item.RawData.Length;
+        }
+
+        return length;
+    }
+    
+    [Benchmark]
+    public int Enumerate_increasing()
+    {
+        var map = new SlottedArray(_writtenIncreasingKeys);
+
+        var length = 0;
+        foreach (var item in map.EnumerateAll())
+        {
+            length += item.Key.Length;
+            length += item.RawData.Length;
+        }
+
+        return length;
+    }
+    
+    [Benchmark]
+    public int Enumerate_increasing_odd()
+    {
+        var map = new SlottedArray(_writtenIncreasingOddKeys);
 
         var length = 0;
         foreach (var item in map.EnumerateAll())
