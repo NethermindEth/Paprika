@@ -15,6 +15,7 @@ public class SlottedArrayTests
 
     private static ReadOnlySpan<byte> Data3 => new byte[] { 31, 41 };
     private static ReadOnlySpan<byte> Data4 => new byte[] { 23, 24, 25 };
+    private static ReadOnlySpan<byte> Data5 => new byte[] { 23, 24, 64 };
 
     [Test]
     public Task Set_Get_Delete_Get_AnotherSet()
@@ -50,7 +51,7 @@ public class SlottedArrayTests
         var key2 = NibblePath.FromKey(stackalloc byte[2] { 7, 13 }).SliceFrom(odd);
         var key3 = NibblePath.FromKey(stackalloc byte[3] { 7, 13, 31 }).SliceFrom(odd);
         var key4 = NibblePath.FromKey(stackalloc byte[4] { 7, 13, 31, 41 }).SliceFrom(odd);
-
+        
         map.SetAssert(key0, Data0);
         map.SetAssert(key1, Data1);
         map.SetAssert(key2, Data2);
@@ -82,7 +83,31 @@ public class SlottedArrayTests
 
         e.MoveNext().Should().BeTrue();
         e.Current.Key.Equals(key4).Should().BeTrue();
-        e.Current.RawData.SequenceEqual(Data4).Should().BeTrue();
+        e.Current.RawData.SequenceEqual(Data4).Should().BeTrue(); 
+
+        e.MoveNext().Should().BeFalse();
+
+        // verify
+        return Verify(span.ToArray());
+    }
+    
+    [Test]
+    public Task Enumerate_long_key([Values(0, 1)] int oddStart, [Values(0, 1)] int lengthCutOff)
+    {
+        Span<byte> span = stackalloc byte[128];
+        var map = new SlottedArray(span);
+
+        var key = NibblePath.FromKey(Keccak.EmptyTreeHash).SliceFrom(oddStart)
+            .SliceTo(NibblePath.KeccakNibbleCount - oddStart - lengthCutOff);
+
+        map.SetAssert(key, Data0);
+        map.GetAssert(key, Data0);
+
+        using var e = map.EnumerateAll();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Equals(key).Should().BeTrue();
+        e.Current.RawData.SequenceEqual(Data0).Should().BeTrue();
 
         e.MoveNext().Should().BeFalse();
 
