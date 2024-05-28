@@ -2,14 +2,25 @@ using Paprika.Data;
 
 namespace Paprika.Store;
 
-public static class FanOutList
+public interface ISize
 {
-    public const int Size = FanOut * DbAddress.Size;
+    static abstract int GetIndex(scoped in NibblePath key);
 
-    /// <summary>
-    /// The number of buckets to fan out to.
-    /// </summary>
-    public const int FanOut = 256;
+    static abstract int ConsumedNibbles { get; }
+}
+
+public static class FanOut
+{
+    public struct Of2Nibbles : ISize
+    {
+        public static int GetIndex(scoped in NibblePath key) => (key.GetAt(0) << NibblePath.NibbleShift) + key.GetAt(1);
+
+        public static int ConsumedNibbles => 2;
+
+        public const int FanOut = 256;
+
+        public const int Size = FanOut * DbAddress.Size;
+    }
 }
 
 /// <summary>
@@ -19,16 +30,16 @@ public static class FanOutList
 /// <remarks>
 /// The main idea is to limit the depth of the tree by 1 or two and use the space in <see cref="RootPage"/> more.
 /// </remarks>
-public readonly ref struct FanOutList<TPage, TPageType>(Span<DbAddress> addresses)
+public readonly ref struct FanOutList<TPage, TPageType, TSize>(Span<DbAddress> addresses)
     where TPage : struct, IPageWithData<TPage>
     where TPageType : IPageTypeProvider
+    where TSize : struct, ISize
 {
     private readonly Span<DbAddress> _addresses = addresses;
-    private const int ConsumedNibbles = 2;
 
     public bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
     {
-        var index = GetIndex(key);
+        var index = TSize.GetIndex(key);
 
         var addr = _addresses[index];
         if (addr.IsNull)
@@ -37,15 +48,13 @@ public readonly ref struct FanOutList<TPage, TPageType>(Span<DbAddress> addresse
             return false;
         }
 
-        return TPage.Wrap(batch.GetAt(addr)).TryGet(batch, key.SliceFrom(ConsumedNibbles), out result);
+        return TPage.Wrap(batch.GetAt(addr)).TryGet(batch, key.SliceFrom(TSize.ConsumedNibbles), out result);
     }
-
-    private static int GetIndex(scoped in NibblePath key) => (key.GetAt(0) << NibblePath.NibbleShift) + key.GetAt(1);
 
     public void Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
-        var index = GetIndex(key);
-        var sliced = key.SliceFrom(ConsumedNibbles);
+        var index = TSize.GetIndex(key);
+        var sliced = key.SliceFrom(TSize.ConsumedNibbles);
 
         ref var addr = ref _addresses[index];
 
@@ -66,7 +75,7 @@ public readonly ref struct FanOutList<TPage, TPageType>(Span<DbAddress> addresse
 
     public void Report(IReporter reporter, IPageResolver resolver, int level, int trimmedNibbles)
     {
-        var consumedNibbles = trimmedNibbles + ConsumedNibbles;
+        var consumedNibbles = trimmedNibbles + TSize.ConsumedNibbles;
 
         foreach (var bucket in _addresses)
         {

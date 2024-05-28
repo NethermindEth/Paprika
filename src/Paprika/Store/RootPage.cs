@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Drawing;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
@@ -67,18 +68,18 @@ public readonly unsafe struct RootPage(Page root) : IPage
         [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size)]
         private DbAddress StoragePayload;
 
-        public FanOutList<StorageFanOutPage<DataPage>, StandardType> Storage => new(MemoryMarshal.CreateSpan(ref StoragePayload, FanOutList.FanOut));
+        public FanOutList<StorageFanOutPage<DataPage>, StandardType, FanOut.Of2Nibbles> Storage => new(MemoryMarshal.CreateSpan(ref StoragePayload, FanOut.Of2Nibbles.FanOut));
 
         /// <summary>
         /// Identifiers
         /// </summary>
-        [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + FanOutList.Size)]
+        [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + FanOut.Of2Nibbles.Size)]
         private DbAddress IdsPayload;
 
-        public FanOutList<FanOutPage, IdentityType> Ids => new(MemoryMarshal.CreateSpan(ref IdsPayload, FanOutList.FanOut));
+        public FanOutList<FanOutPage, IdentityType, FanOut.Of2Nibbles> Ids => new(MemoryMarshal.CreateSpan(ref IdsPayload, FanOut.Of2Nibbles.FanOut));
 
         public const int AbandonedStart =
-            DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + FanOutList.Size * 2;
+            DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + FanOut.Of2Nibbles.Size * 2;
 
         /// <summary>
         /// The start of the abandoned pages.
@@ -237,6 +238,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         root = batch.GetAddress(updated);
     }
 }
+
 
 [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
 public struct Metadata
