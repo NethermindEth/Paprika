@@ -14,4 +14,5 @@ public interface IPageVisitor
         where TNext : struct, IPageWithData<TNext>;
 
     IDisposable On(LeafOverflowPage page, DbAddress addr);
+    IDisposable On(Merkle.StateRootPage data, DbAddress addr);
 }
