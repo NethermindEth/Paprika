@@ -60,7 +60,8 @@ public class PrefetchingTests
             p.PrefetchAccount(keccak);
 
             // forbid reads
-            db.ForbidReads((in Key key) => key.Type == DataType.Merkle);
+            db.ForbidReads((in Key key) => key.Type == DataType.Merkle &&
+                                           key.Path.Length > ComputeMerkleBehavior.SkipRlpMemoizationForTopLevelsCount);
 
             block.SetAccount(keccak, new Account(i, i));
             parent = block.Commit(i);
