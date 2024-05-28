@@ -203,7 +203,7 @@ public class SlottedArrayBenchmarks
     [Arguments(62)]
     [Arguments(63)]
     [Arguments(64)]
-    public int Prepare_UnPrepare_long_even_key(int sliceFrom)
+    public int UnPrepareKey(int sliceFrom)
     {
         var key = NibblePath.FromKey(Keccak.EmptyTreeHash).SliceFrom(sliceFrom);
         
