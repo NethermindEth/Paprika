@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Runtime.CompilerServices;
 using BenchmarkDotNet.Attributes;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -194,5 +195,43 @@ public class SlottedArrayBenchmarks
         map.MoveNonEmptyKeysTo(new MapSource(map0, map1));
 
         return map.Count + map0.Count + map1.Count;
+    }
+
+    [Benchmark(OperationsPerInvoke = 4)]
+    [Arguments(0)]
+    [Arguments(1)]
+    [Arguments(62)]
+    [Arguments(63)]
+    [Arguments(64)]
+    public int UnPrepareKey(int sliceFrom)
+    {
+        var key = NibblePath.FromKey(Keccak.EmptyTreeHash).SliceFrom(sliceFrom);
+
+        var map = new SlottedArray(stackalloc byte[256]);
+        map.TrySet(key, ReadOnlySpan<byte>.Empty);
+
+        var length = 0;
+
+        foreach (var item in map.EnumerateAll())
+        {
+            length += item.Key.Length;
+        }
+
+        foreach (var item in map.EnumerateAll())
+        {
+            length += item.Key.Length;
+        }
+
+        foreach (var item in map.EnumerateAll())
+        {
+            length += item.Key.Length;
+        }
+
+        foreach (var item in map.EnumerateAll())
+        {
+            length += item.Key.Length;
+        }
+
+        return length;
     }
 }
