@@ -76,7 +76,7 @@ public readonly ref struct NibblePath
 
         for (var i = 0; i < hex.Length; i++)
         {
-            path.UnsafeSetAt(i, 0, byte.Parse(hex.AsSpan(i, 1), NumberStyles.HexNumber));
+            path.UnsafeSetAt(i, byte.Parse(hex.AsSpan(i, 1), NumberStyles.HexNumber));
         }
 
         return path;
@@ -103,7 +103,7 @@ public readonly ref struct NibblePath
 
         for (int i = 0; i < nibbles.Length; i++)
         {
-            copy.UnsafeSetAt(i, 0, nibbles[i]);
+            copy.UnsafeSetAt(i, nibbles[i]);
         }
 
         return copy;
@@ -133,6 +133,7 @@ public readonly ref struct NibblePath
                 var overflow = ((s & 0xf000) >> (NibbleShift * 2));
                 Unsafe.Add(ref _span, 2) = (byte)overflow;
             }
+
             Unsafe.AsRef(in _odd) = OddBit;
         }
         else
@@ -146,8 +147,9 @@ public readonly ref struct NibblePath
     {
         for (var i = (int)Length; i > 0; i--)
         {
-            UnsafeSetAt(i, 0, GetAt(i - 1));
+            UnsafeSetAt(i, GetAt(i - 1));
         }
+
         Unsafe.AsRef(in _odd) = OddBit;
     }
 
@@ -297,10 +299,10 @@ public readonly ref struct NibblePath
     /// Sets a <paramref name="value"/> of the nibble at the given <paramref name="nibble"/> location.
     /// This is unsafe. Use only for owned memory. 
     /// </summary>
-    private void UnsafeSetAt(int nibble, byte countOdd, byte value)
+    private void UnsafeSetAt(int nibble, byte value)
     {
         ref var b = ref GetRefAt(nibble);
-        var shift = GetShift(nibble + countOdd);
+        var shift = GetShift(nibble);
         var mask = NibbleMask << shift;
 
         b = (byte)((b & ~mask) | (value << shift));
@@ -327,7 +329,7 @@ public readonly ref struct NibblePath
         WriteTo(workingSet);
 
         var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(Length + 1));
-        appended.UnsafeSetAt(Length, 0, nibble);
+        appended.UnsafeSetAt(Length, nibble);
         return appended;
     }
 
@@ -348,7 +350,7 @@ public readonly ref struct NibblePath
         var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(length + other.Length));
         for (int i = 0; i < other.Length; i++)
         {
-            appended.UnsafeSetAt(length + i, 0, other[i]);
+            appended.UnsafeSetAt(length + i, other[i]);
         }
 
         return appended;
@@ -357,6 +359,7 @@ public readonly ref struct NibblePath
     /// <summary>
     /// Appends the <see cref="other1"/> and then <see cref="other2"/> path using the <paramref name="workingSet"/> as the working memory.
     /// </summary>
+    [SkipLocalsInit]
     public NibblePath Append(scoped in NibblePath other1, int hash, Span<byte> workingSet)
     {
         if (workingSet.Length <= MaxByteLength)
@@ -364,20 +367,48 @@ public readonly ref struct NibblePath
             ThrowNotEnoughMemory();
         }
 
-        // TODO: do a ref comparison with Unsafe, if the same, no need to copy!
-        WriteTo(workingSet);
+        WriteImpl(workingSet);
 
         var length = (int)Length;
         var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(length + other1.Length + 2));
 
-        for (var i = 0; i < other1.Length; i++)
+        if (other1.IsEmpty == false)
         {
-            appended.UnsafeSetAt(length + i, 0, other1[i]);
+            var alignment = (_odd + Length) ^ other1._odd;
+            if ((alignment & OddBit) == 0)
+            {
+                // oddity aligned
+                if (_odd == OddBit)
+                {
+                    // it's odd, set odd first
+                    appended.UnsafeSetAt(length, other1[0]);
+                }
+
+                // unrolled version to copy byte by byte instead of nibbles
+                var i = 0;
+                for (; i < other1.Length - 1; i += 2)
+                {
+                    appended.GetRefAt(length + i + _odd) = other1.GetRefAt(i + _odd);
+                }
+
+                if (i < other1.Length)
+                {
+                    // it's odd, set odd first
+                    appended.UnsafeSetAt(length + other1.Length - 1, other1[other1.Length - 1]);
+                }
+            }
+            else
+            {
+                for (var i = 0; i < other1.Length; i++)
+                {
+                    appended.UnsafeSetAt(length + i, other1[i]);
+                }
+            }
         }
 
         var start = length + other1.Length;
-        appended.UnsafeSetAt(start + 0, 0, (byte)((hash & 0xf0) >> NibbleShift));
-        appended.UnsafeSetAt(start + 1, 0, (byte)(hash & 0xf));
+        appended.UnsafeSetAt(start + 0, (byte)((hash & 0xf0) >> NibbleShift));
+        appended.UnsafeSetAt(start + 1, (byte)(hash & 0xf));
 
         return appended;
     }
