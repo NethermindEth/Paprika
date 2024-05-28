@@ -206,27 +206,27 @@ public class SlottedArrayBenchmarks
     public int UnPrepareKey(int sliceFrom)
     {
         var key = NibblePath.FromKey(Keccak.EmptyTreeHash).SliceFrom(sliceFrom);
-        
+
         var map = new SlottedArray(stackalloc byte[256]);
         map.TrySet(key, ReadOnlySpan<byte>.Empty);
 
         var length = 0;
-        
+
         foreach (var item in map.EnumerateAll())
         {
             length += item.Key.Length;
         }
-        
+
         foreach (var item in map.EnumerateAll())
         {
             length += item.Key.Length;
         }
-        
+
         foreach (var item in map.EnumerateAll())
         {
             length += item.Key.Length;
         }
-        
+
         foreach (var item in map.EnumerateAll())
         {
             length += item.Key.Length;

@@ -51,7 +51,7 @@ public class SlottedArrayTests
         var key2 = NibblePath.FromKey(stackalloc byte[2] { 7, 13 }).SliceFrom(odd);
         var key3 = NibblePath.FromKey(stackalloc byte[3] { 7, 13, 31 }).SliceFrom(odd);
         var key4 = NibblePath.FromKey(stackalloc byte[4] { 7, 13, 31, 41 }).SliceFrom(odd);
-        
+
         map.SetAssert(key0, Data0);
         map.SetAssert(key1, Data1);
         map.SetAssert(key2, Data2);
@@ -83,14 +83,14 @@ public class SlottedArrayTests
 
         e.MoveNext().Should().BeTrue();
         e.Current.Key.Equals(key4).Should().BeTrue();
-        e.Current.RawData.SequenceEqual(Data4).Should().BeTrue(); 
+        e.Current.RawData.SequenceEqual(Data4).Should().BeTrue();
 
         e.MoveNext().Should().BeFalse();
 
         // verify
         return Verify(span.ToArray());
     }
-    
+
     [Test]
     public Task Enumerate_long_key([Values(0, 1)] int oddStart, [Values(0, 1)] int lengthCutOff)
     {

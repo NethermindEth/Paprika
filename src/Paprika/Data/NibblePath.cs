@@ -386,7 +386,7 @@ public readonly ref struct NibblePath
 
                 // unrolled version to copy byte by byte instead of nibbles
                 var i = 0;
-                for (; i < other1.Length - 1; i+= 2)
+                for (; i < other1.Length - 1; i += 2)
                 {
                     appended.GetRefAt(length + i + _odd) = other1.GetRefAt(i + _odd);
                 }
