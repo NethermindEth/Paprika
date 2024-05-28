@@ -239,7 +239,6 @@ public readonly unsafe struct RootPage(Page root) : IPage
     }
 }
 
-
 [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
 public struct Metadata
 {
