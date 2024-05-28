@@ -46,6 +46,7 @@ public class TreeView : IPageVisitor, IDisposable
         Build(nameof(StorageFanOutPage), addr);
 
     public IDisposable On(LeafOverflowPage page, DbAddress addr) => Build(nameof(LeafOverflowPage), addr, page.CapacityLeft);
+    public IDisposable On(Paprika.Store.Merkle.StateRootPage data, DbAddress addr) => Build(nameof(LeafOverflowPage), addr);
 
     public void Dispose() => _nodes.TryPop(out _);
 }

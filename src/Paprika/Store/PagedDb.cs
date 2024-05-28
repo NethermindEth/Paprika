@@ -480,7 +480,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         {
             if (root.Data.StateRoot.IsNull == false)
             {
-                new DataPage(GetAt(root.Data.StateRoot)).Report(state, this, 0, 0);
+                new Merkle.StateRootPage(GetAt(root.Data.StateRoot)).Report(state, this, 0, 0);
             }
 
             root.Data.Storage.Report(storage, this, 0, 0);

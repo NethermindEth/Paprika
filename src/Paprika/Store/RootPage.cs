@@ -97,7 +97,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
     {
         if (Data.StateRoot.IsNull == false)
         {
-            var data = new DataPage(resolver.GetAt(Data.StateRoot));
+            var data = new Merkle.StateRootPage(resolver.GetAt(Data.StateRoot));
             using var scope = visitor.On(data, Data.StateRoot);
         }
 
@@ -121,7 +121,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
                 return false;
             }
 
-            return new DataPage(batch.GetAt(Data.StateRoot)).TryGet(batch, key.Path, out result);
+            return new Merkle.StateRootPage(batch.GetAt(Data.StateRoot)).TryGet(batch, key.Path, out result);
         }
 
         Span<byte> idSpan = stackalloc byte[sizeof(uint)];
@@ -172,7 +172,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
     {
         if (key.IsState)
         {
-            SetAtRoot<DataPage>(batch, key.Path, rawData, ref Data.StateRoot);
+            SetAtRoot(batch, key.Path, rawData, ref Data.StateRoot);
         }
         else
         {
@@ -221,7 +221,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         Data.Ids.Set(account, ReadOnlySpan<byte>.Empty, batch);
 
         // Destroy the account entry
-        SetAtRoot<DataPage>(batch, account, ReadOnlySpan<byte>.Empty, ref Data.StateRoot);
+        SetAtRoot(batch, account, ReadOnlySpan<byte>.Empty, ref Data.StateRoot);
 
         // Remove the cached
         batch.IdCache.Remove(account.UnsafeAsKeccak);
@@ -230,12 +230,10 @@ public readonly unsafe struct RootPage(Page root) : IPage
         // It should not be hard. Walk down by the mapped path, then remove all the pages underneath.
     }
 
-    private static void SetAtRoot<TPage>(IBatchContext batch, in NibblePath path, in ReadOnlySpan<byte> rawData,
-        ref DbAddress root)
-        where TPage : struct, IPageWithData<TPage>
+    private static void SetAtRoot(IBatchContext batch, in NibblePath path, in ReadOnlySpan<byte> rawData, ref DbAddress root)
     {
         var data = batch.TryGetPageAlloc(ref root, PageType.Standard);
-        var updated = TPage.Wrap(data).Set(path, rawData, batch);
+        var updated = new Merkle.StateRootPage(data).Set(path, rawData, batch);
         root = batch.GetAddress(updated);
     }
 }
