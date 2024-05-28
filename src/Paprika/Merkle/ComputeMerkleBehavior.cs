@@ -304,6 +304,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             .ToArray();
     }
 
+    public const int SkipRlpMemoizationForTopLevelsCount = 2;
+
     public ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data, Span<byte> workingSet)
     {
         if (data.IsEmpty)
@@ -318,6 +320,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         {
             // Return data as is, either the node is not a branch or the memoization is not set for branches.
             return data;
+        }
+
+        if (key.Path.Length < SkipRlpMemoizationForTopLevelsCount)
+        {
+            // For State branches, omit top levels of RLP memoization
+            return Node.Branch.GetOnlyBranchData(data);
         }
 
         var memoizedRlp = Node.Branch.ReadFrom(data, out var branch);
