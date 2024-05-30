@@ -108,6 +108,8 @@ public readonly ref struct SlottedArray
         // write item: length_key, key, data
         var dest = _data.Slice(slot.ItemAddress, total);
 
+
+
         if (HasKeyBytes(preamble))
         {
             var dest2 = trimmed.WriteToWithLeftover(dest);
@@ -141,7 +143,7 @@ public readonly ref struct SlottedArray
         [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
         private ref struct Chunk
         {
-            public const int Size = 64;
+            private const int Size = 64;
 
             private byte _start;
 
@@ -236,7 +238,7 @@ public readonly ref struct SlottedArray
             Span<byte> data;
 
             NibblePath trimmed;
-            if (slot.HasKeyBytes)
+            if (slot.GetHasKeyBytes())
             {
                 data = NibblePath.ReadFrom(payload, out trimmed);
             }
@@ -284,7 +286,8 @@ public readonly ref struct SlottedArray
             ref var slot = ref this[i];
 
             // extract only not deleted and these which have at least one nibble
-            if (slot.IsDeleted == false && slot.HasAtLeastOneNibble)
+            // if (slot.IsDeleted == false && slot.HasAtLeastOneNibble)
+            if (slot is { IsDeleted: false, HasAtLeastOneNibble: true }) // Just trying this out, unrelated change in syntax only, no relation to PR
             {
                 buckets[slot.Nibble0Th] += 1;
             }
@@ -293,15 +296,55 @@ public readonly ref struct SlottedArray
 
     private const int KeyLengthLength = 1;
 
+
+    /// <summary>
+    /// Determines the total space required for the key and data, taking into account specific length conditions.
+    /// </summary>
+    /// <param name="preamble">The preamble byte that contains key length and oddity information.</param>
+    /// <param name="key">The NibblePath key.</param>
+    /// <param name="data">The data associated with the key.</param>
+    /// <returns>The total space required in bytes.</returns>
     private static int GetTotalSpaceRequired(byte preamble, in NibblePath key, ReadOnlySpan<byte> data)
     {
-        return (HasKeyBytes(preamble) ? KeyLengthLength + key.RawSpanLength : 0) + data.Length;
+        if (IsLengthFourToSix(preamble))
+        {
+            // Length is 4, 5, or 6; no additional byte for length metadata
+            return key.RawSpanLength + data.Length;
+        }
+        else if (HasKeyBytes(preamble))
+        {
+            // Length is 7 or more; an additional byte for length metadata
+            return KeyLengthLength + key.RawSpanLength + data.Length;
+        }
+        else
+        {
+            // Length is 1, 2, or 3; no additional byte for length metadata
+            return key.RawSpanLength + data.Length;
+        }
     }
+    // private static int GetTotalSpaceRequired(byte preamble, in NibblePath key, ReadOnlySpan<byte> data)
+    // {
+    //     return (HasKeyBytes(preamble) ? KeyLengthLength + key.RawSpanLength : 0) + data.Length;
+    // }
 
     /// <summary>
     /// Checks whether the preamble point that the key might have more data.
     /// </summary>
     private static bool HasKeyBytes(byte preamble) => preamble >= Slot.KeyPreambleWithBytes;
+
+    /// <summary>
+    /// Checks whether the preamble signifies that the length of the NibblePath key is 4, 5, or 6.
+    /// </summary>
+    private static bool IsLengthFourToSix(byte preamble)
+    {
+        // Extract the length marker from the preamble
+        byte lengthMarker = (byte)(preamble >> 1); // Remove the oddity bit
+
+        // Check if the length marker matches 4, 5, or 6 (0b100, 0b101, 0b110)
+        // return lengthMarker == 0b100 || lengthMarker == 0b101 || lengthMarker == 0b110;
+
+        return lengthMarker is >= 4 and <= 5;
+    }
 
     /// <summary>
     /// Warning! This does not set any tombstone so the reader won't be informed about a delete,
@@ -420,7 +463,7 @@ public readonly ref struct SlottedArray
     /// <summary>
     /// Clears the map.
     /// </summary>
-    public void Clear()
+    private void Clear() // IDE suggestion, not related to PR
     {
         _header = default;
     }
@@ -461,7 +504,7 @@ public readonly ref struct SlottedArray
                 {
                     var actual = GetSlotPayload(ref slot);
 
-                    if (slot.HasKeyBytes)
+                    if (slot.GetHasKeyBytes())
                     {
                         if (NibblePath.TryReadFrom(actual, key, out var leftover))
                         {
@@ -537,15 +580,15 @@ public readonly ref struct SlottedArray
         /// <summary>
         /// The address currently requires 12 bits [0-11] to address whole page. 
         /// </summary>
-        private const ushort AddressMask = Page.PageSize - 1;
+        private const ushort AddressMask = Page.PageSize - 1; // 0xFFF = 0b1111_1111_1111
 
         /// <summary>
         /// The address of this item.
         /// </summary>
         public ushort ItemAddress
         {
-            readonly get => (ushort)(Raw & AddressMask);
-            set => Raw = (ushort)((Raw & ~AddressMask) | value);
+            readonly get => (ushort)(Raw & AddressMask);  // ItemAddress = 0b0000_0000_0000_xxxx & 0b0000_1111_1111_1111 = 0b0000_0000_0000_xxxx
+            set => Raw = (ushort)((Raw & ~AddressMask) | value); // ItemAddress = 0b1111_1111_1111_xxxx
         }
 
         /// <summary>
@@ -559,10 +602,17 @@ public readonly ref struct SlottedArray
         public void MarkAsDeleted() => KeyPreamble = KeyPreambleDelete;
 
         // Preamble uses all bits that AddressMask does not
-        private const ushort KeyPreambleMask = unchecked((ushort)~AddressMask);
+        private const ushort KeyPreambleMask = unchecked((ushort)~AddressMask); // 0b1111_0000_0000_0000
         private const ushort KeyPreambleShift = 12;
 
-        private const byte KeyPreambleBeyond = 0b101; // Some key nibbles are stored along data, this is the marker.
+        private const byte KeyPreambleLen4 = 0b0100; // 4 nibbles
+        private const byte KeyPreambleLen5 = 0b101; // 5 nibbles
+        private const byte KeyPreambleLen6 = 0b110; // 6 nibbles
+
+        // The new (temporary KeyPreambleBeyond) is used for 7 and more nibbles, instead of 5 and more.
+        // private const byte KeyPreambleLen7AndMore = 0b111; // 7 and more nibbles
+
+        private const byte KeyPreambleBeyond = 0b111; // Some key nibbles are stored along data, this is the marker.
         private const byte KeyPreambleEmpty = 0b000; // Empty, no key's nibbles encoded.
         private const byte KeyPreambleOddBit = 0b001; // The bit used for odd-starting paths.
         private const byte KeyPreambleDelete = KeyPreambleOddBit; // Empty cannot be odd, odd is used as deleted marker.
@@ -581,13 +631,14 @@ public readonly ref struct SlottedArray
 
         public byte KeyPreamble
         {
-            readonly get => (byte)((Raw & KeyPreambleMask) >> KeyPreambleShift);
-            set => Raw = (ushort)((Raw & ~KeyPreambleMask) | (value << KeyPreambleShift));
+            // KeyPreambleMask = 0b1111_0000_0000_0000
+            readonly get => (byte)((Raw & KeyPreambleMask) >> KeyPreambleShift); // KeyPreamble = 0bxxxx_0000_0000_0000 >> 12
+            set => Raw = (ushort)((Raw & ~KeyPreambleMask) | (value << KeyPreambleShift)); // KeyPreamble = 0bxxxx_0000_0000_0000 | (value << 12)
         }
 
         public readonly byte Nibble0Th => (byte)(Hash >> (HashByteShift + NibblePath.NibbleShift) & 0xF);
 
-        public bool HasKeyBytes => KeyPreamble >= KeyPreambleWithBytes;
+        public bool GetHasKeyBytes() => KeyPreamble >= KeyPreambleWithBytes;
 
         private ushort Raw;
 
