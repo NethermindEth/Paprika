@@ -236,7 +236,8 @@ public readonly ref struct NibblePath
         var length = (int)Length;
         var spanLength = GetSpanLength(_odd, length);
 
-        destination[0] = (byte)(odd | (length << LengthShift));
+        destination[0] = (byte)(odd | (length << LengthShift)); // The first byte is used for oddity and length
+        // But, if we store length up to 6 in the preamble, we can directly store the remaining trimmed nibbles here.
 
         ref var destStart = ref Unsafe.Add(ref MemoryMarshal.GetReference(destination), PreambleLength);
         if (spanLength == sizeof(byte))
