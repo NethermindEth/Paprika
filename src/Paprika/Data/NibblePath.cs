@@ -209,9 +209,9 @@ public readonly ref struct NibblePath
     /// </summary>
     /// <param name="destination">The destination to write to.</param>
     /// <returns>The leftover that other writers can write to.</returns>
-    public Span<byte> WriteToWithLeftover(Span<byte> destination)
+    public Span<byte> WriteToWithLeftover(Span<byte> destination, bool includeLengthAndOddity = true)
     {
-        var length = WriteImpl(destination);
+        var length = WriteImpl(destination, includeLengthAndOddity);
         return destination.Slice(length);
     }
 
@@ -220,24 +220,28 @@ public readonly ref struct NibblePath
     /// </summary>
     /// <param name="destination"></param>
     /// <returns>The actual bytes written.</returns>
-    public Span<byte> WriteTo(Span<byte> destination)
+    public Span<byte> WriteTo(Span<byte> destination, bool includeLengthAndOddity = true)
     {
-        var length = WriteImpl(destination);
+        var length = WriteImpl(destination, includeLengthAndOddity);
         return destination.Slice(0, length);
     }
 
     public byte RawPreamble => (byte)((_odd & OddBit) | (Length << LengthShift));
 
-    private int WriteImpl(Span<byte> destination)
+    private int WriteImpl(Span<byte> destination, bool includeLengthAndOddity = true)
     {
         var odd = _odd & OddBit;
         var length = (int)Length;
         var spanLength = GetSpanLength(_odd, length);
 
-        destination[0] = (byte)(odd | (length << LengthShift)); // The first byte is used for oddity and length
-        // But, if we store length up to 6 in the preamble, we can directly store the remaining trimmed nibbles here.
+        if (includeLengthAndOddity)
+        {
+            destination[0] = (byte)(odd | (length << LengthShift));
+        }
 
-        ref var destStart = ref Unsafe.Add(ref MemoryMarshal.GetReference(destination), PreambleLength);
+        int offset = includeLengthAndOddity ? PreambleLength : 0;
+        ref var destStart = ref Unsafe.Add(ref MemoryMarshal.GetReference(destination), offset);
+
         if (spanLength == sizeof(byte))
         {
             destStart = _span;
@@ -253,18 +257,16 @@ public readonly ref struct NibblePath
         }
         else if (!Unsafe.AreSame(ref _span, ref destStart))
         {
-            MemoryMarshal.CreateSpan(ref _span, spanLength).CopyTo(destination.Slice(PreambleLength));
+            MemoryMarshal.CreateSpan(ref _span, spanLength).CopyTo(destination.Slice(offset));
         }
 
-        // clearing the oldest nibble, if needed
-        // yes, it can be branch free
         if (((odd + length) & 1) != 0)
         {
-            ref var oldest = ref destination[spanLength];
+            ref var oldest = ref destination[spanLength + offset];
             oldest = (byte)(oldest & 0b1111_0000);
         }
 
-        return spanLength + PreambleLength;
+        return spanLength + offset;
     }
 
     /// <summary>

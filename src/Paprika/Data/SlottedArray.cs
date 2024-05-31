@@ -111,6 +111,8 @@ public readonly ref struct SlottedArray
         if (HasLengthFourToSix(preamble))
         {
             // Length is already encoded in preamble, so take the data as is
+            var dest2 = trimmed.WriteToWithLeftover(dest, false);
+            data.CopyTo(dest2);
         }
         else if (HasKeyBytes(preamble)) // Len >= 7
         {
