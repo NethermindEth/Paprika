@@ -26,6 +26,7 @@ public static class CommitExtensions
         }
 
         var leaf = new Node.Leaf(leafPath);
+        //Console.WriteLine($"{Environment.CurrentManagedThreadId}: Setting leaf {key.ToString()} - key: {leafPath.ToString()}");
         commit.Set(key, leaf.WriteTo(stackalloc byte[leaf.MaxByteLength]), type);
     }
 
@@ -34,6 +35,7 @@ public static class CommitExtensions
         EntryType type = EntryType.Persistent)
     {
         var branch = new Node.Branch(children);
+        //Console.WriteLine($"{Environment.CurrentManagedThreadId}: Setting branch {key.ToString()} - {children.ToString()}");
         commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), RlpMemo.Empty, type);
     }
 
@@ -53,4 +55,5 @@ public static class CommitExtensions
     }
 
     public static void DeleteKey(this ICommit commit, in Key key) => commit.Set(key, ReadOnlySpan<byte>.Empty);
+    public static void DeleteProofKey(this ICommit commit, in Key key) => commit.Set(key, ReadOnlySpan<byte>.Empty, EntryType.Proof);
 }
