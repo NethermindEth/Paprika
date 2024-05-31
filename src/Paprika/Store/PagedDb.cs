@@ -207,6 +207,14 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
+    public int CountReadOnlyBatches()
+    {
+        lock (_batchLock)
+        {
+            return _batchesReadOnly.Count;
+        }
+    }
+
     private ReadOnlyBatch BeginReadOnlyBatch(string name, in RootPage root)
     {
         var copy = new RootPage(_pooledRoots.Rent(false));
