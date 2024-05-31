@@ -53,4 +53,5 @@ public static class CommitExtensions
     }
 
     public static void DeleteKey(this ICommit commit, in Key key) => commit.Set(key, ReadOnlySpan<byte>.Empty);
+    public static void DeleteProofKey(this ICommit commit, in Key key) => commit.Set(key, ReadOnlySpan<byte>.Empty, EntryType.Proof);
 }
