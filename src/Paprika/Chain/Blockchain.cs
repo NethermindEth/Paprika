@@ -362,7 +362,16 @@ public class Blockchain : IAsyncDisposable
             var batch = _db.BeginReadOnlyBatchOrLatest(parentKeccak, "Blockchain dependency");
 
             // batch matches the parent, return
-            return (batch, FindAncestors(parentKeccak, batch));
+            try
+            {
+                var ancestors = FindAncestors(parentKeccak, batch);
+                return (batch, ancestors);
+            }
+            catch
+            {
+                batch.Dispose();
+                throw;
+            }
         }
     }
 
