@@ -112,12 +112,12 @@ public readonly ref struct SlottedArray
         {
             // Length is already encoded in preamble, so take the data as is
         }
-        else if (HasKeyBytes(preamble))
+        else if (HasKeyBytes(preamble)) // Len >= 7
         {
             var dest2 = trimmed.WriteToWithLeftover(dest);
             data.CopyTo(dest2);
         }
-        else
+        else // Len < 4
         {
             data.CopyTo(dest);
         }
@@ -240,7 +240,14 @@ public readonly ref struct SlottedArray
             Span<byte> data;
 
             NibblePath trimmed;
-            if (slot.GetHasKeyBytes())
+
+            if (slot.GetHasMidLength())
+            {
+                int len = slot.KeyPreamble >> 1;
+                bool isOdd = (slot.KeyPreamble & 1) != 0;
+                data = NibblePath.ReadFromWithLength(payload, len, isOdd, out trimmed);
+            }
+            else if (slot.GetHasKeyBytes())
             {
                 data = NibblePath.ReadFrom(payload, out trimmed);
             }
@@ -298,7 +305,6 @@ public readonly ref struct SlottedArray
 
     private const int KeyLengthLength = 1;
 
-
     /// <summary>
     /// Determines the total space required for the key and data, taking into account specific length conditions.
     /// </summary>
@@ -311,10 +317,6 @@ public readonly ref struct SlottedArray
         return data.Length + (HasLengthFourToSix(preamble) ? key.RawSpanLength : 0) +
                (HasKeyBytes(preamble) ? KeyLengthLength + key.RawSpanLength : 0);
     }
-    // private static int GetTotalSpaceRequired(byte preamble, in NibblePath key, ReadOnlySpan<byte> data)
-    // {
-    // return (HasKeyBytes(preamble) ? KeyLengthLength + key.RawSpanLength : 0) + data.Length;
-    // }
 
     /// <summary>
     /// Checks whether the preamble point that the key might have more data.
@@ -491,7 +493,23 @@ public readonly ref struct SlottedArray
                 ref var slot = ref this[i];
                 if (slot.IsDeleted == false && slot.KeyPreamble == preamble)
                 {
-                    var actual = GetSlotPayload(ref slot);
+                    Span<byte> actual;
+                    if (slot.GetHasMidLength())
+                    {
+                        // No need to check payload, can directly take the remaining key as length is provided.
+                        var isOdd = (slot.KeyPreamble & 1) != 0;
+                        var len = slot.KeyPreamble >> 1;
+
+                        actual = GetSlotPayloadWithLength(ref slot, isOdd, len);
+
+                        if (NibblePath.TryReadFromWithLength(actual, key, len, isOdd, out var leftover))
+                        {
+                            data = leftover;
+                            slotIndex = i;
+                            return true;
+                        }
+                    }
+                    actual = GetSlotPayload(ref slot);
 
                     if (slot.GetHasKeyBytes())
                     {
@@ -544,6 +562,18 @@ public readonly ref struct SlottedArray
 
         var length = previousSlotAddress - slot.ItemAddress;
         return _data.Slice(slot.ItemAddress, length);
+    }
+
+    /// <summary>
+    /// Gets the payload pointed to by the given slot with the specified length.
+    /// </summary>
+    private Span<byte> GetSlotPayloadWithLength(ref Slot slot, bool isOdd, int length)
+    {
+        // Determine the actual length of the payload using the provided length
+        var payloadLength = (length + (isOdd ? 1 : 0)) / 2;
+
+        // Return the slice of _data representing the payload for the current slot
+        return _data.Slice(slot.ItemAddress, payloadLength);
     }
 
     /// <summary>
@@ -629,6 +659,8 @@ public readonly ref struct SlottedArray
         public readonly byte Nibble0Th => (byte)(Hash >> (HashByteShift + NibblePath.NibbleShift) & 0xF);
 
         public bool GetHasKeyBytes() => KeyPreamble >= KeyPreambleWithBytes;
+
+        public bool GetHasMidLength() => KeyPreamble is >= KeyPreambleLen5 and <= KeyPreambleLen6;
 
         private ushort Raw;
 

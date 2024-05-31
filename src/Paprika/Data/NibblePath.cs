@@ -475,6 +475,21 @@ public readonly ref struct NibblePath
         return actualKey.Equals(expected);
     }
 
+    public static bool TryReadFromWithLength(Span<byte> source, in NibblePath expected, int length, bool isOdd, out Span<byte> leftover)
+    {
+        // Check if the length and oddity of the expected NibblePath match the provided length and isOdd
+        if (expected.Length != length || expected.IsOdd != isOdd)
+        {
+            leftover = default;
+            return false;
+        }
+
+        // Read the NibblePath from the source with the given length and oddity
+        leftover = ReadFromWithLength(source, length, isOdd, out var actualKey);
+        return actualKey.Equals(expected);
+    }
+
+
     public int FindFirstDifferentNibble(in NibblePath other)
     {
         var length = Math.Min(other.Length, Length);
