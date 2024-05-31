@@ -123,8 +123,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         UIntPtr stack = default;
         using var ctx = new ComputeContext(prefixed, TrieType.Storage, hint, CacheBudget.Options.None.Build(), _pool,
             ref stack);
-        Compute(in root, ctx, out var value, out _);
-        return value.Keccak;
+        Compute(in root, ctx, out KeccakOrRlp hash, out _);
+        return hash.Keccak;
     }
 
     class CommitWrapper : IChildCommit
@@ -740,7 +740,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// This component appends the prefix to all the commit operations.
     /// It's useful for storage operations, that have their key prefixed with the account.
     /// </summary>
-    private class PrefixingCommit : ICommit
+    public class PrefixingCommit : ICommit
     {
         private readonly ICommit _commit;
         private Keccak _keccak;
@@ -1108,7 +1108,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             var valueKey = Key.Raw(slice, keyType, NibblePath.Empty);
 
                                 // delete memoized keccak
-                                commit.Set(valueKey, ReadOnlySpan<byte>.Empty);
+                            //commit.Set(valueKey, ReadOnlySpan<byte>.Empty);
 
                             var newDataKey = Key.Raw(path, keyType, NibblePath.Empty);
                             var newData = commit.Get(newDataKey);
@@ -1318,7 +1318,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         if (leafPath.IsEmpty && SnapSync.IsBoundaryValue(readRawData.Span))
         {
             NibblePath pathWithKeccak = NibblePath.Single(0, 1).Append(NibblePath.FromKey(readRawData.Span.Slice(SnapSync.PreambleLength)), stackalloc byte[33]);
-            commit.DeleteKey(valueKey);
+            commit.DeleteProofKey(valueKey);
             commit.SetLeaf(key, pathWithKeccak, EntryType.UseOnce);
             return;
         }
@@ -1488,8 +1488,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 //see: https://sepolia.etherscan.io/tx/0xb3790025b59b7e31d6d8249e8962234217e0b5b02e47ecb2942b8c4d0f4a3cfe
                 // Contract is created and destroyed, then its values are destroyed
                 // The storage root should be empty, otherwise, it's wrong
-                Debug.Assert(keccakOrRlp.Keccak == Keccak.EmptyTreeHash,
-                    $"Non-existent account with hash of {keccak.ToString()} should have the storage root empty");
+                //TODO: remove assert for fast sync / healing implementation - storage tries saved before accounts
+                //Debug.Assert(keccakOrRlp.Keccak == Keccak.EmptyTreeHash,
+                //    $"Non-existent account with hash of {keccak.ToString()} should have the storage root empty");
             }
         }
     }

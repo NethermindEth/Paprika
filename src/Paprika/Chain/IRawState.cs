@@ -17,6 +17,8 @@ public interface IRawState : IReadOnlyWorldState
 
     void DestroyAccount(in Keccak address);
 
+    Keccak GetHash(in NibblePath path);
+
     /// <summary>
     /// Commits the pending changes.
     /// </summary>
@@ -44,4 +46,6 @@ public interface IRawState : IReadOnlyWorldState
     /// Cleans current data
     /// </summary>
     void Discard();
+
+    string DumpTrie();
 }

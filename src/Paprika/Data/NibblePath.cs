@@ -595,6 +595,32 @@ public readonly ref struct NibblePath
         return new string(path);
     }
 
+    /// <summary>
+    /// For tests
+    /// </summary>
+    /// <returns></returns>
+    public string ToHexByteString()
+    {
+        if (Length == 0)
+            return "";
+
+        Span<char> path = stackalloc char[Length * 2];
+        ref var ch = ref path[0];
+
+        for (int i = _odd; i < Length + _odd; i++)
+        {
+            var b = Unsafe.Add(ref _span, i / 2);
+            var nibble = (b >> ((1 - (i & OddBit)) * NibbleShift)) & NibbleMask;
+
+            ch = Hex[0];
+            ch = ref Unsafe.Add(ref ch, 1);
+            ch = Hex[nibble];
+            ch = ref Unsafe.Add(ref ch, 1);
+        }
+
+        return new string(path).ToLower();
+    }
+
     public void WriteToKeccak(Span<byte> keccak)
     {
         if (IsOdd)
