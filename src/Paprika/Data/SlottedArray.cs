@@ -108,9 +108,11 @@ public readonly ref struct SlottedArray
         // write item: length_key, key, data
         var dest = _data.Slice(slot.ItemAddress, total);
 
-
-
-        if (HasKeyBytes(preamble))
+        if (HasLengthFourToSix(preamble))
+        {
+            // Length is already encoded in preamble, so take the data as is
+        }
+        else if (HasKeyBytes(preamble))
         {
             var dest2 = trimmed.WriteToWithLeftover(dest);
             data.CopyTo(dest2);
@@ -306,25 +308,12 @@ public readonly ref struct SlottedArray
     /// <returns>The total space required in bytes.</returns>
     private static int GetTotalSpaceRequired(byte preamble, in NibblePath key, ReadOnlySpan<byte> data)
     {
-        if (IsLengthFourToSix(preamble))
-        {
-            // Length is 4, 5, or 6; no additional byte for length metadata
-            return key.RawSpanLength + data.Length;
-        }
-        else if (HasKeyBytes(preamble))
-        {
-            // Length is 7 or more; an additional byte for length metadata
-            return KeyLengthLength + key.RawSpanLength + data.Length;
-        }
-        else
-        {
-            // Length is 1, 2, or 3; no additional byte for length metadata
-            return key.RawSpanLength + data.Length;
-        }
+        return data.Length + (HasLengthFourToSix(preamble) ? key.RawSpanLength : 0) +
+               (HasKeyBytes(preamble) ? KeyLengthLength + key.RawSpanLength : 0);
     }
     // private static int GetTotalSpaceRequired(byte preamble, in NibblePath key, ReadOnlySpan<byte> data)
     // {
-    //     return (HasKeyBytes(preamble) ? KeyLengthLength + key.RawSpanLength : 0) + data.Length;
+    // return (HasKeyBytes(preamble) ? KeyLengthLength + key.RawSpanLength : 0) + data.Length;
     // }
 
     /// <summary>
@@ -335,7 +324,7 @@ public readonly ref struct SlottedArray
     /// <summary>
     /// Checks whether the preamble signifies that the length of the NibblePath key is 4, 5, or 6.
     /// </summary>
-    private static bool IsLengthFourToSix(byte preamble)
+    private static bool HasLengthFourToSix(byte preamble)
     {
         // Extract the length marker from the preamble
         byte lengthMarker = (byte)(preamble >> 1); // Remove the oddity bit
@@ -580,7 +569,7 @@ public readonly ref struct SlottedArray
         /// <summary>
         /// The address currently requires 12 bits [0-11] to address whole page. 
         /// </summary>
-        private const ushort AddressMask = Page.PageSize - 1; // 0xFFF = 0b1111_1111_1111
+        private const ushort AddressMask = Page.PageSize - 1; // 0x0FFF = 0b1111_1111_1111
 
         /// <summary>
         /// The address of this item.
@@ -623,6 +612,7 @@ public readonly ref struct SlottedArray
         private const byte KeyPreambleLengthShift = 1;
 
         private const byte KeyPreambleMaxEncodedLength = KeyPreambleBeyond - 1;
+        private const byte MaxLengthEncodedInHash = 4;
         private const byte KeySlice = 2;
 
         private const int HashByteShift = 8;
@@ -668,7 +658,7 @@ public readonly ref struct SlottedArray
             var length = key.Length;
             var oddBit = key.IsOdd ? 1 : 0;
 
-            if (length <= KeyPreambleMaxEncodedLength)
+            if (length <= MaxLengthEncodedInHash) // If len <= 4, we can fit the entire key in the hash, no trimmed
             {
                 preamble = (byte)((length << KeyPreambleLengthShift) | oddBit);
                 trimmed = NibblePath.Empty;
@@ -692,11 +682,14 @@ public readonly ref struct SlottedArray
                 }
             }
 
-            // The path is 4 nibbles or longer
-            preamble = (byte)(KeyPreambleWithBytes | oddBit);
-            trimmed = key.SliceFrom(KeySlice).SliceTo(length - KeyPreambleMaxEncodedLength);
+            // If len <= 6, we can fit the actual length in the preamble
+            preamble = (length <= KeyPreambleMaxEncodedLength)
+                ? (byte)((length << KeyPreambleLengthShift) | oddBit) // 0bxxx0 | oddBit
+                : (byte)(KeyPreambleBeyond | oddBit); // 0b111 | oddBit
 
-            // Extract first 4 nibbles as the hash
+            trimmed = key.SliceFrom(KeySlice).SliceTo(length - MaxLengthEncodedInHash); // 0xABCDEFGH => Hash = 0xABGH , trimmed = 0xCDEF
+
+            // Extract first 2 nibbles and last 2 nibbles as the hash to avoid collisions due to common prefixes
             return (ushort)((((key.GetAt(0) << shift) | key.GetAt(1)) << HashByteShift) |
                             (key.GetAt(length - 2) << shift) | key.GetAt(length - 1));
         }
@@ -712,16 +705,23 @@ public readonly ref struct SlottedArray
                 return default;
             }
 
-            if (count <= 2 || count > 4)
+            if (count <= 2 || count > 6)
             {
                 workingSet[0] = (byte)(hash >> HashByteShift);
             }
-            else
+            else  if (count <= 4) // For length 3,4 logic remains same
             {
                 Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(workingSet))
                     = (ushort)((hash >> HashByteShift) | (hash << HashByteShift));
             }
+            else // For length 5, 6, suppose hash = 0xABCD (2 bytes)
+            {
+                workingSet[0] = (byte)(hash >> HashByteShift); // 0x00AB = 0xAB
+                workingSet[1] = (byte)(hash & 0xFF); // 0x00CD = 0xCD
+            }
 
+            // If len <= 4, take the entire length as the key is entirely stored in the hash.
+            // If len > 4, just take the first 2 nibbles as prefix, we'll append the remaining 2 last nibbles later.
             NibblePath prefix = NibblePath.FromKey(workingSet, 0, count > 4 ? KeySlice : count);
             if ((preamble & KeyPreambleOddBit) != 0)
             {
@@ -735,8 +735,18 @@ public readonly ref struct SlottedArray
             }
 
             const int limit = 3;
-            data = NibblePath.ReadFrom(input, out var trimmed);
-            return prefix.Append(trimmed, hash, workingSet[limit..]);
+            // This function needs to be updated for length 5,6
+            if ( count <= KeyPreambleMaxEncodedLength) // If len <= 6, we can fit the actual length in the preamble
+            {
+                bool oddFlag = (preamble & KeyPreambleOddBit) != 0;
+                data = NibblePath.ReadFromWithLength(input, count, oddFlag, out var trimmed);
+                return prefix.Append(trimmed, hash, workingSet[limit..]);
+            }
+            else // Logic for >= 7 remains the same
+            {
+                data = NibblePath.ReadFrom(input, out var trimmed);
+                return prefix.Append(trimmed, hash, workingSet[limit..]);
+            }
         }
 
         public static byte GetFirstNibble(ushort hash)

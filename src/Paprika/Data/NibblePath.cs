@@ -425,6 +425,13 @@ public readonly ref struct NibblePath
 
     public int RawSpanLength => GetSpanLength(_odd, Length);
 
+    public static ReadOnlySpan<byte> ReadFromWithLength(ReadOnlySpan<byte> source, int length, bool isOdd, out NibblePath nibblePath)
+    {
+        var odd = isOdd ? OddBit : 0;
+        nibblePath = new NibblePath(source, odd, length);
+        return source.Slice(GetSpanLength(odd, length));
+    }
+
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out NibblePath nibblePath)
     {
         var b = (int)source[0];
@@ -438,6 +445,12 @@ public readonly ref struct NibblePath
         return source.Slice(GetSpanLength(odd, length));
     }
 
+    public static Span<byte> ReadFromWithLength(Span<byte> source, int length, bool isOdd, out NibblePath nibblePath)
+    {
+        var odd = isOdd ? OddBit : 0;
+        nibblePath = new NibblePath(source, odd, length);
+        return source.Slice(GetSpanLength(odd, length));
+    }
     public static Span<byte> ReadFrom(Span<byte> source, out NibblePath nibblePath)
     {
         var b = (int)source[0];
