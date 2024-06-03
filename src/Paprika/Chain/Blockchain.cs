@@ -160,6 +160,9 @@ public class Blockchain : IAsyncDisposable
 
                     // If there's something in the queue, don't flush. Flush here only where there's nothing to read from the reader.
                     var readerCount = reader.Count;
+
+                    _flusherQueueCount.Set(readerCount);
+
                     var level = readerCount switch
                     {
                         0 => CommitOptions.FlushDataOnly, // see: CommitOptions.FlushDataOnly
@@ -205,8 +208,6 @@ public class Blockchain : IAsyncDisposable
                     // nothing
                     continue;
                 }
-
-                _flusherQueueCount.Set(reader.Count);
 
                 var flushWatch = Stopwatch.StartNew();
 
