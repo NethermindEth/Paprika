@@ -60,6 +60,44 @@ public static partial class Node
         }
     }
 
+    [SkipLocalsInit]
+    public static Type ReadFrom(out Leaf leaf, out Extension extension, out Branch branch, ReadOnlySpan<byte> source)
+    {
+        leaf = default;
+        extension = default;
+        branch = default;
+
+        // TODO: It would be nice to not read the header twice:
+        // - Once to get the header
+        // - Again to read each Node type
+
+        var nodeType = Header.GetTypeFrom(source);
+        switch (nodeType)
+        {
+            case Type.Leaf:
+                Leaf.ReadFrom(source, out leaf);
+                break;
+            case Type.Extension:
+                Extension.ReadFrom(source, out extension);
+                break;
+            case Type.Branch:
+                Branch.ReadFrom(source, out branch);
+                break;
+            default:
+                ThrowUnknownNodeType(nodeType);
+                break;
+        }
+
+        return nodeType;
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowUnknownNodeType(Type nodeType)
+        {
+            throw new ArgumentOutOfRangeException($"Unacceptable extension type {nodeType}");
+        }
+    }
+
     public static ReadOnlySpan<byte> ReadFrom(out Type nodeType, out Leaf leaf, out Extension extension,
         out Branch branch, ReadOnlySpan<byte> source)
     {
