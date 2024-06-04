@@ -10,10 +10,8 @@ namespace Paprika.Data;
 
 public static class BitMapFilter
 {
-    public static BitMapFilter<Of1> CreateOf1(Page page) => new(new Of1(page));
     public static BitMapFilter<Of1> CreateOf1(BufferPool pool) => new(new Of1(pool.Rent(true)));
 
-    public static BitMapFilter<Of2> CreateOf2(Page page0, Page page1) => new(new Of2(page0, page1));
     public static BitMapFilter<Of2> CreateOf2(BufferPool pool) => new(new Of2(pool.Rent(true), pool.Rent(true)));
 
     public static BitMapFilter<OfN> CreateOfN(BufferPool pool, int n)
@@ -39,9 +37,12 @@ public static class BitMapFilter
         unsafe byte* GetBit(ulong hash, out byte bit);
 
         [Pure]
-        public void Return(BufferPool pool);
+        void Clear();
 
-        public int BucketCount { get; }
+        [Pure]
+        void Return(BufferPool pool);
+
+        int BucketCount { get; }
     }
 
     public readonly struct Of1(Page page) : IAccessor
@@ -53,6 +54,8 @@ public static class BitMapFilter
             bit = (byte)(1 << (int)(hash & IAccessor.BitMask));
             return (byte*)page.Raw.ToPointer() + ((hash >> IAccessor.BitsPerByteShift) & IAccessor.PageMask);
         }
+
+        public void Clear() => page.Clear();
 
         public void Return(BufferPool pool) => pool.Return(page);
         public int BucketCount => Page.PageSize * IAccessor.BitsPerByte;
@@ -73,6 +76,12 @@ public static class BitMapFilter
             h >>= PageMaskShift;
 
             return (byte*)page.Raw.ToPointer() + (h & IAccessor.PageMask);
+        }
+
+        public void Clear()
+        {
+            page0.Clear();
+            page1.Clear();
         }
 
         public void Return(BufferPool pool)
@@ -110,6 +119,14 @@ public static class BitMapFilter
             return (byte*)page.Raw.ToPointer() + (h & IAccessor.PageMask);
         }
 
+        public void Clear()
+        {
+            foreach (var page in _pages)
+            {
+                page.Clear();
+            }
+        }
+
         public void Return(BufferPool pool)
         {
             foreach (var page in _pages)
@@ -128,6 +145,12 @@ public static class BitMapFilter
 public readonly struct BitMapFilter<TAccessor>(TAccessor accessor)
     where TAccessor : struct, BitMapFilter.IAccessor
 {
+    public void Add(ulong hash) => this[hash] = true;
+
+    public bool MayContain(ulong hash) => this[hash];
+
+    public void Clear() => accessor.Clear();
+
     public unsafe bool this[ulong hash]
     {
         get

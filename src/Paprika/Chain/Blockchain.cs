@@ -2,7 +2,6 @@ using System.CodeDom.Compiler;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
-using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
@@ -12,6 +11,7 @@ using Paprika.Merkle;
 using Paprika.Store;
 using Paprika.Utils;
 
+using BitFilter = Paprika.Data.BitMapFilter<Paprika.Data.BitMapFilter.OfN>;
 namespace Paprika.Chain;
 
 /// <summary>
@@ -25,6 +25,11 @@ public class Blockchain : IAsyncDisposable
 {
     // allocate 1024 pages (4MB) at once
     private readonly BufferPool _pool;
+
+    /// <summary>
+    /// 512 kb gives 4 million buckets.
+    /// </summary>
+    private const int BitMapFilterSizePerBlock = 512 * 1024 / Page.PageSize;
 
     private readonly object _blockLock = new();
     private readonly Dictionary<uint, List<CommittedBlockState>> _blocksByNumber = new();
@@ -471,17 +476,17 @@ public class Blockchain : IAsyncDisposable
         }
     }
 
+    private BitFilter CreateBitFilter() => BitMapFilter.CreateOfN(_pool, BitMapFilterSizePerBlock);
+
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload.
     /// </summary>
     private class BlockState : RefCountingDisposable, IWorldState, ICommit, IProvideDescription, IStateStats
     {
-        [ThreadStatic] private static HashSet<ulong>? s_bloomCache;
-
         /// <summary>
-        /// A simple bloom filter to assert whether the given key was set in a given block, used to speed up getting the keys.
+        /// A simple set filter to assert whether the given key was set in a given block, used to speed up getting the keys.
         /// </summary>
-        private HashSet<ulong> _bloom;
+        private readonly BitFilter _set;
 
         private readonly Dictionary<Keccak, int>? _stats;
 
@@ -532,7 +537,7 @@ public class Blockchain : IAsyncDisposable
 
             ParentHash = parentStateRoot;
 
-            _bloom = Interlocked.Exchange(ref s_bloomCache, null) ?? new HashSet<ulong>();
+            _set = _blockchain.CreateBitFilter();
             _destroyed = null;
             _stats = new Dictionary<Keccak, int>();
 
@@ -639,20 +644,20 @@ public class Blockchain : IAsyncDisposable
 
             BlockNumber = blockNumber;
 
-            var xor = new Xor8(_bloom);
+            var filter = _blockchain.CreateBitFilter();
 
             // clean no longer used fields
             var data = new PooledSpanDictionary(Pool, false);
 
             // use append for faster copies as state and storage won't overwrite each other
-            _state.CopyTo(data, OmitUseOnce, true);
-            _storage.CopyTo(data, OmitUseOnce, true);
+            _state.CopyTo(data, OmitUseOnce, filter, true);
+            _storage.CopyTo(data, OmitUseOnce, filter, true);
 
             // TODO: apply InspectBeforeApply here to reduce memory usage?
-            _preCommit.CopyTo(data, OmitUseOnce);
+            _preCommit.CopyTo(data, OmitUseOnce, filter);
 
             // Creation acquires the lease
-            return new CommittedBlockState(xor, _destroyed, _blockchain, data, hash,
+            return new CommittedBlockState(filter, _destroyed, _blockchain, data, hash,
                 ParentHash,
                 blockNumber, raw);
 
@@ -674,7 +679,7 @@ public class Blockchain : IAsyncDisposable
         public void Reset()
         {
             _hash = ParentHash;
-            _bloom.Clear();
+            _set.Clear();
             _destroyed = null;
 
             CreateDictionaries();
@@ -767,7 +772,7 @@ public class Blockchain : IAsyncDisposable
 
                 foreach (var key in _cached)
                 {
-                    parent._bloom.Add(key);
+                    parent._set.Add(key);
                 }
             }
 
@@ -950,7 +955,7 @@ public class Blockchain : IAsyncDisposable
             _hash = null;
 
             var hash = GetHash(key);
-            _bloom.Add(hash);
+            _set.Add(hash);
 
             var k = key.WriteTo(stackalloc byte[key.MaxByteLength]);
             dict.Set(k, hash, payload, (byte)type);
@@ -964,7 +969,7 @@ public class Blockchain : IAsyncDisposable
             _hash = null;
 
             var hash = GetHash(key);
-            _bloom.Add(hash);
+            _set.Add(hash);
 
             var k = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
@@ -1147,7 +1152,7 @@ public class Blockchain : IAsyncDisposable
         private ReadOnlySpanOwner<byte> TryGetLocal(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
             ulong bloom, out bool succeeded)
         {
-            var mayHave = _bloom.Contains(bloom);
+            var mayHave = _set.MayContain(bloom);
 
             // check if the change is in the block
             if (!mayHave)
@@ -1222,27 +1227,12 @@ public class Blockchain : IAsyncDisposable
             _batch.Dispose();
             _xorMissed.Dispose();
             _prefetcher?.Dispose();
+            _set.Return(Pool);
 
             // release all the ancestors
             foreach (var ancestor in _ancestors)
             {
                 ancestor.Dispose();
-            }
-
-            ReturnCacheToPool();
-            return;
-
-            void ReturnCacheToPool()
-            {
-                var bloom = _bloom;
-                _bloom = null!;
-                ref var cache = ref s_bloomCache;
-                if (cache is null)
-                {
-                    // Return the cache to be reused
-                    bloom.Clear();
-                    cache = bloom;
-                }
             }
         }
 
@@ -1281,7 +1271,7 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// A faster filter constructed on block commit.
         /// </summary>
-        private readonly Xor8 _xor;
+        private readonly BitFilter _filter;
 
         /// <summary>
         /// Stores information about contracts that should have their previous incarnations destroyed.
@@ -1304,11 +1294,11 @@ public class Blockchain : IAsyncDisposable
         private bool _discardable;
         private readonly DelayedMetrics.DelayedCounter<long, DelayedMetrics.LongIncrement> _xorMissed;
 
-        public CommittedBlockState(Xor8 xor, HashSet<Keccak>? destroyed, Blockchain blockchain,
+        public CommittedBlockState(BitFilter filter, HashSet<Keccak>? destroyed, Blockchain blockchain,
             PooledSpanDictionary committed, Keccak hash, Keccak parentHash,
             uint blockNumber, bool raw)
         {
-            _xor = xor;
+            _filter = filter;
             _destroyed = destroyed;
             _destroyedXor = _destroyed != null
                 ? new Xor8(new HashSet<ulong>(_destroyed.Select(k => GetDestroyedHash(k))))
@@ -1354,7 +1344,7 @@ public class Blockchain : IAsyncDisposable
         public ReadOnlySpanOwner<byte> TryGetLocal(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
             ulong bloom, ulong destroyedHash, out bool succeeded)
         {
-            var mayHave = _xor.MayContain(bloom);
+            var mayHave = _filter.MayContain(bloom);
 
             // check if the change is in the block
             if (!mayHave)
@@ -1411,6 +1401,7 @@ public class Blockchain : IAsyncDisposable
         {
             _xorMissed.Dispose();
             _committed.Dispose();
+            _filter.Return(_blockchain._pool);
 
             if (_raw == false && _discardable == false)
             {
