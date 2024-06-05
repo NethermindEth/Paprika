@@ -2125,7 +2125,7 @@ public class Blockchain : IAsyncDisposable
 
             using var batch = _db.BeginNextBatch();
 
-            var committed = _current.CommitRaw();
+            using var committed = _current.CommitRaw();
             committed.Apply(batch);
             _current.Dispose();
 
@@ -2133,8 +2133,6 @@ public class Blockchain : IAsyncDisposable
 
             IReadOnlyBatch readOnly = _db.BeginReadOnlyBatch();
             _current = new BlockState(Keccak.Zero, readOnly, [], _blockchain);
-
-            Console.WriteLine($"{Environment.CurrentManagedThreadId}: Committed {((BatchContextBase)batch).BatchId}!");
         }
 
         public void Finalize(uint blockNumber)
