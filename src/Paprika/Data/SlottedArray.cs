@@ -247,7 +247,7 @@ public readonly ref struct SlottedArray
             {
                 int len = slot.KeyPreamble >> 1;
                 bool isOdd = (slot.KeyPreamble & 1) != 0;
-                data = NibblePath.ReadFromWithLength(payload, len, isOdd, out trimmed);
+                data = NibblePath.ReadFromWithLength(payload, len-4, isOdd, out trimmed);
             }
             else if (slot.GetHasKeyBytes())
             {
