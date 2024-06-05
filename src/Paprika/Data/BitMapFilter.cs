@@ -83,19 +83,19 @@ public static class BitMapFilter
             _page1 = page1;
         }
 
-        private const int PageMask = 1;
-        private const int PageMaskShift = 1;
-
         [Pure]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public unsafe byte* GetBit(ulong hash, out byte bit)
         {
+            const int pageMask = 1;
+            const int pageMaskShift = 1;
+
             bit = (byte)(1 << (int)(hash & BitMask));
             var h = hash >> BitsPerByteShift;
-            var page = (h & PageMask) == PageMask ? _page1 : _page0;
-            h >>= PageMaskShift;
+            var page = (h & pageMask) == pageMask ? _page1 : _page0;
+            h >>= pageMaskShift;
 
-            return (byte*)page.Raw.ToPointer() + (h & BitMapFilter.PageMask);
+            return (byte*)page.Raw.ToPointer() + (h & PageMask);
         }
 
         public void Clear()
