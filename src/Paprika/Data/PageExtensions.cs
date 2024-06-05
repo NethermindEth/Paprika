@@ -9,6 +9,7 @@ namespace Paprika.Data;
 /// </summary>
 public static class PageExtensions
 {
+    [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public static unsafe void OrWith(this Page @this, Page other)
     {
         ref var a = ref Unsafe.AsRef<byte>(@this.Raw.ToPointer());
@@ -17,37 +18,63 @@ public static class PageExtensions
         if (Vector512.IsHardwareAccelerated)
         {
             const int size = 512;
-            for (var i = 0; i < Page.PageSize / size; i++)
+            const int unroll = 2;
+
+            for (var i = 0; i < Page.PageSize / size / unroll; i += unroll)
             {
                 var va = Vector512.LoadUnsafe(ref Unsafe.Add(ref a, i * size));
                 var vb = Vector512.LoadUnsafe(ref Unsafe.Add(ref b, i * size));
 
                 var vc = Vector512.BitwiseOr(va, vb);
                 vc.StoreUnsafe(ref Unsafe.Add(ref a, i * size));
+
+                va = Vector512.LoadUnsafe(ref Unsafe.Add(ref a, (i + 1) * size));
+                vb = Vector512.LoadUnsafe(ref Unsafe.Add(ref b, (i + 1) * size));
+
+                vc = Vector512.BitwiseOr(va, vb);
+                vc.StoreUnsafe(ref Unsafe.Add(ref a, (i + 1) * size));
             }
         }
         else if (Vector256.IsHardwareAccelerated)
         {
             const int size = 256;
-            for (var i = 0; i < Page.PageSize / size; i++)
+            const int unroll = 2;
+            const int count = Page.PageSize / size / unroll;
+
+            for (var i = 0; i < count; i += unroll)
             {
                 var va = Vector256.LoadUnsafe(ref Unsafe.Add(ref a, i * size));
                 var vb = Vector256.LoadUnsafe(ref Unsafe.Add(ref b, i * size));
 
                 var vc = Vector256.BitwiseOr(va, vb);
                 vc.StoreUnsafe(ref Unsafe.Add(ref a, i * size));
+
+                va = Vector256.LoadUnsafe(ref Unsafe.Add(ref a, (i + 1) * size));
+                vb = Vector256.LoadUnsafe(ref Unsafe.Add(ref b, (i + 1) * size));
+
+                vc = Vector256.BitwiseOr(va, vb);
+                vc.StoreUnsafe(ref Unsafe.Add(ref a, (i + 1) * size));
             }
         }
         else if (Vector128.IsHardwareAccelerated)
         {
             const int size = 128;
-            for (var i = 0; i < Page.PageSize / size; i++)
+            const int unroll = 2;
+            const int count = Page.PageSize / size / unroll;
+
+            for (var i = 0; i < count; i += unroll)
             {
                 var va = Vector128.LoadUnsafe(ref Unsafe.Add(ref a, i * size));
                 var vb = Vector128.LoadUnsafe(ref Unsafe.Add(ref b, i * size));
 
                 var vc = Vector128.BitwiseOr(va, vb);
                 vc.StoreUnsafe(ref Unsafe.Add(ref a, i * size));
+
+                va = Vector128.LoadUnsafe(ref Unsafe.Add(ref a, (i + 1) * size));
+                vb = Vector128.LoadUnsafe(ref Unsafe.Add(ref b, (i + 1) * size));
+
+                vc = Vector128.BitwiseOr(va, vb);
+                vc.StoreUnsafe(ref Unsafe.Add(ref a, (i + 1) * size));
             }
         }
         else if (Vector64.IsHardwareAccelerated)
@@ -70,7 +97,7 @@ public static class PageExtensions
                 ref var va = ref Unsafe.As<byte, long>(ref Unsafe.Add(ref a, i * size));
                 var vb = Unsafe.As<byte, long>(ref Unsafe.Add(ref b, i * size));
 
-                va = va | vb;
+                va |= vb;
             }
         }
     }

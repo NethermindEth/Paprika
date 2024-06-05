@@ -23,31 +23,31 @@ public class BitMapFilterBenchmarks
     {
         var a = new BitMapFilter<BitMapFilter.Of1>(new BitMapFilter.Of1(_pages1A[0]));
         var b = new BitMapFilter<BitMapFilter.Of1>(new BitMapFilter.Of1(_pages1B[0]));
-        
-        a.OrWith(b);
-        a.OrWith(b);
-        a.OrWith(b);
-        a.OrWith(b);
-    }   
-    
-    [Benchmark(OperationsPerInvoke = 4)]
-    public void Or_BitMapFilter_Of2()
-    {
-        var a = new BitMapFilter<BitMapFilter.Of2>(new BitMapFilter.Of2(_pages2A[0], _pages2A[1]));
-        var b = new BitMapFilter<BitMapFilter.Of2>(new BitMapFilter.Of2(_pages2B[0], _pages2B[1]));
-        
+
         a.OrWith(b);
         a.OrWith(b);
         a.OrWith(b);
         a.OrWith(b);
     }
-    
+
+    [Benchmark(OperationsPerInvoke = 4)]
+    public void Or_BitMapFilter_Of2()
+    {
+        var a = new BitMapFilter<BitMapFilter.Of2>(new BitMapFilter.Of2(_pages2A[0], _pages2A[1]));
+        var b = new BitMapFilter<BitMapFilter.Of2>(new BitMapFilter.Of2(_pages2B[0], _pages2B[1]));
+
+        a.OrWith(b);
+        a.OrWith(b);
+        a.OrWith(b);
+        a.OrWith(b);
+    }
+
     [Benchmark(OperationsPerInvoke = 4)]
     public void Or_BitMapFilter_OfN_128()
     {
         var a = new BitMapFilter<BitMapFilter.OfN>(new BitMapFilter.OfN(_pages16A));
         var b = new BitMapFilter<BitMapFilter.OfN>(new BitMapFilter.OfN(_pages16B));
-        
+
         a.OrWith(b);
         a.OrWith(b);
         a.OrWith(b);
@@ -60,8 +60,8 @@ public class BitMapFilterBenchmarks
 
         for (int i = 0; i < pageCount; i++)
         {
-            pages[i] = new Page( (byte*)NativeMemory.AlignedAlloc( Page.PageSize, Page.PageSize));
-            
+            pages[i] = new Page((byte*)NativeMemory.AlignedAlloc(Page.PageSize, Page.PageSize));
+
             // make data more interesting
             pages[i].Span.Fill((byte)(1 << (i & 7)));
         }
