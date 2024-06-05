@@ -54,7 +54,7 @@ public class SlottedArrayTests
 
         map.GetAssert(key, Data0);
 
-        map.DeleteAssert(keySpan);
+        map.DeleteAssert(key);
         map.GetShouldFail(key);
 
         // should be ready to accept some data again
@@ -626,6 +626,11 @@ file static class FixedMapTestExtensions
     public static void DeleteAssert(this SlottedArray map, in ReadOnlySpan<byte> key)
     {
         map.Delete(NibblePath.FromKey(key)).Should().BeTrue("Delete should succeed");
+    }
+
+    public static void DeleteAssert(this SlottedArray map, in NibblePath key)
+    {
+        map.Delete(key).Should().BeTrue("Delete should succeed");
     }
 
     public static void GetAssert(this SlottedArray map, in ReadOnlySpan<byte> key, ReadOnlySpan<byte> expected)
