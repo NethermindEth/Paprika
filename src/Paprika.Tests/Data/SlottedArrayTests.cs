@@ -86,6 +86,7 @@ public class SlottedArrayTests
         map.GetAssert(key0, Data0);
         map.GetAssert(key1, Data1);
         map.GetAssert(key2, Data2);
+        map.GetAssert(key3, Data3);
         map.GetAssert(key4, Data4);
 
         using var e = map.EnumerateAll();
@@ -102,7 +103,7 @@ public class SlottedArrayTests
         e.Current.Key.Equals(key2).Should().BeTrue();
         e.Current.RawData.SequenceEqual(Data2).Should().BeTrue();
 
-        e.MoveNext().Should().BeTrue();
+            e.MoveNext().Should().BeTrue();
         e.Current.Key.Equals(key3).Should().BeTrue();
         e.Current.RawData.SequenceEqual(Data3).Should().BeTrue();
 
