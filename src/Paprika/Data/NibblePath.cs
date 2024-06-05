@@ -699,7 +699,7 @@ public readonly ref struct NibblePath
 
             for (int i = 0; i < Length; i++)
             {
-                copy.UnsafeSetAt(i, 0, GetAt(i));
+                copy.UnsafeSetAt(i, GetAt(i));
             }
             return copy;
         }
