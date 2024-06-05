@@ -150,7 +150,7 @@ public class PooledSpanDictionary : IDisposable
     }
 
     public void CopyTo<TAccessor>(PooledSpanDictionary destination, Predicate<byte> metadataWhere, in BitMapFilter<TAccessor> filter, bool append = false)
-        where TAccessor : struct, BitMapFilter.IAccessor
+        where TAccessor : struct, BitMapFilter.IAccessor<TAccessor>
     {
         foreach (var kvp in this)
         {

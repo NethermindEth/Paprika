@@ -5,7 +5,7 @@ using Paprika.Data;
 namespace Paprika.Tests.Data;
 
 public abstract class BitMapFilterTests<TAccessor> : IDisposable
-    where TAccessor : struct, BitMapFilter.IAccessor
+    where TAccessor : struct, BitMapFilter.IAccessor<TAccessor>
 {
     private readonly BufferPool _pool = new(32);
 
