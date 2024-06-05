@@ -41,6 +41,31 @@ public class SlottedArrayTests
     }
 
     [Test]
+    public Task Set_Get_Delete_Mid_Len_Key1([Values(0, 1)] int odd)
+    {
+        var origArray =  new byte[3] { 0, 1, 2, }; // 3 bytes = 6 nibbles
+        var keySpan = new ReadOnlySpan<byte>(origArray);
+        var key = NibblePath.FromKey(keySpan).SliceFrom(odd);
+
+        Span<byte> span = stackalloc byte[48];
+        var map = new SlottedArray(span);
+
+        map.SetAssert(key, Data0);
+
+        map.GetAssert(key, Data0);
+
+        map.DeleteAssert(keySpan);
+        map.GetShouldFail(key);
+
+        // should be ready to accept some data again
+        map.SetAssert(key, Data1, "Should have memory after previous delete");
+        map.GetAssert(key, Data1);
+
+        // verify
+        return Verify(span.ToArray());
+    }
+
+    [Test]
     public Task Enumerate_all([Values(0, 1)] int odd)
     {
         Span<byte> span = stackalloc byte[256];

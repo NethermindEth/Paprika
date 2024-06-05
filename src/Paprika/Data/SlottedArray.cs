@@ -108,7 +108,7 @@ public readonly ref struct SlottedArray
         // write item: length_key, key, data
         var dest = _data.Slice(slot.ItemAddress, total);
 
-        if (HasLengthFourToSix(preamble))
+        if (HasLengthFiveToSix(preamble))
         {
             // Length is already encoded in preamble, so take the data as is
             var dest2 = trimmed.WriteToWithLeftover(dest, false);
@@ -119,7 +119,7 @@ public readonly ref struct SlottedArray
             var dest2 = trimmed.WriteToWithLeftover(dest);
             data.CopyTo(dest2);
         }
-        else // Len < 4
+        else // Len <= 4
         {
             data.CopyTo(dest);
         }
@@ -316,7 +316,7 @@ public readonly ref struct SlottedArray
     /// <returns>The total space required in bytes.</returns>
     private static int GetTotalSpaceRequired(byte preamble, in NibblePath key, ReadOnlySpan<byte> data)
     {
-        return data.Length + (HasLengthFourToSix(preamble) ? key.RawSpanLength : 0) +
+        return data.Length + (HasLengthFiveToSix(preamble) ? key.RawSpanLength : 0) +
                (HasKeyBytes(preamble) ? KeyLengthLength + key.RawSpanLength : 0);
     }
 
@@ -328,7 +328,7 @@ public readonly ref struct SlottedArray
     /// <summary>
     /// Checks whether the preamble signifies that the length of the NibblePath key is 4, 5, or 6.
     /// </summary>
-    private static bool HasLengthFourToSix(byte preamble)
+    private static bool HasLengthFiveToSix(byte preamble)
     {
         // Extract the length marker from the preamble
         byte lengthMarker = (byte)(preamble >> 1); // Remove the oddity bit
@@ -336,7 +336,7 @@ public readonly ref struct SlottedArray
         // Check if the length marker matches 4, 5, or 6 (0b100, 0b101, 0b110)
         // return lengthMarker == 0b100 || lengthMarker == 0b101 || lengthMarker == 0b110;
 
-        return lengthMarker is >= 4 and <= 5;
+        return lengthMarker is >= 5 and <= 6;
     }
 
     /// <summary>
@@ -495,14 +495,12 @@ public readonly ref struct SlottedArray
                 ref var slot = ref this[i];
                 if (slot.IsDeleted == false && slot.KeyPreamble == preamble)
                 {
-                    Span<byte> actual;
+                    var actual = GetSlotPayload(ref slot);
+
                     if (slot.GetHasMidLength())
                     {
-                        // No need to check payload, can directly take the remaining key as length is provided.
-                        var isOdd = (slot.KeyPreamble & 1) != 0;
-                        var len = slot.KeyPreamble >> 1;
-
-                        actual = GetSlotPayloadWithLength(ref slot, isOdd, len);
+                        int len = (slot.KeyPreamble >> 1) - 4; // Length of trimmed path = length of key - length of hash
+                        bool isOdd = (slot.KeyPreamble & 1) != 0;
 
                         if (NibblePath.TryReadFromWithLength(actual, key, len, isOdd, out var leftover))
                         {
@@ -511,8 +509,6 @@ public readonly ref struct SlottedArray
                             return true;
                         }
                     }
-                    actual = GetSlotPayload(ref slot);
-
                     if (slot.GetHasKeyBytes())
                     {
                         if (NibblePath.TryReadFrom(actual, key, out var leftover))
@@ -569,14 +565,14 @@ public readonly ref struct SlottedArray
     /// <summary>
     /// Gets the payload pointed to by the given slot with the specified length.
     /// </summary>
-    private Span<byte> GetSlotPayloadWithLength(ref Slot slot, bool isOdd, int length)
-    {
-        // Determine the actual length of the payload using the provided length
-        var payloadLength = (length + (isOdd ? 1 : 0)) / 2;
-
-        // Return the slice of _data representing the payload for the current slot
-        return _data.Slice(slot.ItemAddress, payloadLength);
-    }
+    // private Span<byte> GetSlotPayloadWithLength(ref Slot slot, bool isOdd, int length)
+    // {
+    //     // Determine the actual length of the payload using the provided length
+    //     var payloadLength = (length + (isOdd ? 1 : 0));
+    //
+    //     // Return the slice of _data representing the payload for the current slot
+    //     return _data.Slice(slot.ItemAddress, payloadLength);
+    // }
 
     /// <summary>
     /// Exposes <see cref="Slot.PrepareKey"/> for tests only.
@@ -662,7 +658,7 @@ public readonly ref struct SlottedArray
 
         public bool GetHasKeyBytes() => KeyPreamble >= KeyPreambleWithBytes;
 
-        public bool GetHasMidLength() => KeyPreamble is >= KeyPreambleLen5 and <= KeyPreambleLen6;
+        public bool GetHasMidLength() => (KeyPreamble >> 1) is >= KeyPreambleLen5 and <= KeyPreambleLen6;
 
         private ushort Raw;
 
@@ -719,7 +715,7 @@ public readonly ref struct SlottedArray
             // If len <= 6, we can fit the actual length in the preamble
             preamble = (length <= KeyPreambleMaxEncodedLength)
                 ? (byte)((length << KeyPreambleLengthShift) | oddBit) // 0bxxx0 | oddBit
-                : (byte)(KeyPreambleBeyond | oddBit); // 0b111 | oddBit
+                : (byte)(KeyPreambleWithBytes | oddBit); // 0b111 | oddBit
 
             trimmed = key.SliceFrom(KeySlice).SliceTo(length - MaxLengthEncodedInHash); // 0xABCDEFGH => Hash = 0xABGH , trimmed = 0xCDEF
 
