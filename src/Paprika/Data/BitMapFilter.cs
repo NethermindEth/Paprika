@@ -44,6 +44,7 @@ public static class BitMapFilter
 
         int BucketCount { get; }
 
+        [Pure]
         void OrWith(in TAccessor other);
     }
 
