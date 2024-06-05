@@ -769,7 +769,7 @@ public readonly ref struct SlottedArray
             if ( count <= KeyPreambleMaxEncodedLength) // If len <= 6, we can fit the actual length in the preamble
             {
                 bool oddFlag = (preamble & KeyPreambleOddBit) != 0;
-                data = NibblePath.ReadFromWithLength(input, count, oddFlag, out var trimmed);
+                data = NibblePath.ReadFromWithLength(input, count-4, oddFlag, out var trimmed);
                 return prefix.Append(trimmed, hash, workingSet[limit..]);
             }
             else // Logic for >= 7 remains the same
