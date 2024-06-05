@@ -491,12 +491,14 @@ public readonly ref struct NibblePath
 
     public static bool TryReadFromWithLength(Span<byte> source, in NibblePath expected, int length, bool isOdd, out Span<byte> leftover)
     {
+        // var a = source[0];
+        // var b = expected.RawPreamble;
         // Check if the length and oddity of the expected NibblePath match the provided length and isOdd
-        if (expected.Length != length || expected.IsOdd != isOdd)
-        {
-            leftover = default;
-            return false;
-        }
+        // if (expected.Length != length || expected.IsOdd != isOdd)
+        // {
+        //     leftover = default;
+        //     return false;
+        // }
 
         // Read the NibblePath from the source with the given length and oddity
         leftover = ReadFromWithLength(source, length, isOdd, out var actualKey);
