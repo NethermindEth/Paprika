@@ -7,7 +7,7 @@ using Paprika.Data;
 namespace Paprika.Benchmarks;
 
 [MemoryDiagnoser]
-[DisassemblyDiagnoser]
+// [DisassemblyDiagnoser]
 public class SerializerBenchmarks
 {
     private static ReadOnlySpan<byte> SmallSpan => new byte[] { 0, 1, 2, 3 };
