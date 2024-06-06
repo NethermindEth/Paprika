@@ -273,14 +273,14 @@ public readonly ref struct NibblePath
                 Unsafe.Add(ref destStart, sizeof(ushort)) = Unsafe.Add(ref _span, sizeof(ushort));
                 break;
             default:
-            {
-                if (!Unsafe.AreSame(ref _span, ref destStart))
                 {
-                    MemoryMarshal.CreateSpan(ref _span, spanLength).CopyTo(destination.Slice(PreambleLength));
-                }
+                    if (!Unsafe.AreSame(ref _span, ref destStart))
+                    {
+                        MemoryMarshal.CreateSpan(ref _span, spanLength).CopyTo(destination.Slice(PreambleLength));
+                    }
 
-                break;
-            }
+                    break;
+                }
         }
 
         // clearing the oldest nibble, if needed
@@ -321,14 +321,14 @@ public readonly ref struct NibblePath
                 Unsafe.Add(ref destStart, sizeof(ushort)) = Unsafe.Add(ref _span, sizeof(ushort));
                 break;
             default:
-            {
-                if (!Unsafe.AreSame(ref _span, ref destStart))
                 {
-                    MemoryMarshal.CreateSpan(ref _span, spanLength).CopyTo(destination);
-                }
+                    if (!Unsafe.AreSame(ref _span, ref destStart))
+                    {
+                        MemoryMarshal.CreateSpan(ref _span, spanLength).CopyTo(destination);
+                    }
 
-                break;
-            }
+                    break;
+                }
         }
 
         if (((odd + length) & 1) == 0)

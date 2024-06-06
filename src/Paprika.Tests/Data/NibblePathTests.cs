@@ -207,7 +207,7 @@ public class NibblePathTests
         var path = NibblePath.FromKey(raw).SliceFrom(from).SliceTo(length);
 
         Span<byte> span = stackalloc byte[path.MaxByteLength + 1];
-        var written =  path.WriteToWithPreamble(span);
+        var written = path.WriteToWithPreamble(span);
         span[written.Length] = data;
 
         var left = NibblePath.ReadFrom(span.Slice(0, written.Length + 1), out var actual);
