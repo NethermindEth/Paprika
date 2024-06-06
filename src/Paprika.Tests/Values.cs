@@ -9,7 +9,7 @@ public static class Values
         { 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
 
     public static readonly Keccak KeyLen6 = Keccak.Compute(
-        new byte[] { 0, 1, 2, 3, 4, 5, }) ;
+        new byte[] { 0, 1, 2, 3, 4, 5, });
 
     public static readonly Keccak Key1A = new(new byte[]
         { 1, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
