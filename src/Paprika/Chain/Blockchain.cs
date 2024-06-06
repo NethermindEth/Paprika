@@ -497,6 +497,7 @@ public class Blockchain : IAsyncDisposable
 
         private readonly ReadOnlyBatchCountingRefs _batch;
         private readonly CommittedBlockState[] _ancestors;
+        private readonly BitFilter _ancestorsFilter;
 
         private readonly Blockchain _blockchain;
 
@@ -525,7 +526,6 @@ public class Blockchain : IAsyncDisposable
         private Keccak? _hash;
 
         private int _dbReads;
-        private BitFilter _ancestorsFilter;
 
         public BlockState(Keccak parentStateRoot, IReadOnlyBatch batch, CommittedBlockState[] ancestors,
             Blockchain blockchain)
@@ -535,7 +535,7 @@ public class Blockchain : IAsyncDisposable
             _ancestors = ancestors;
 
             // ancestors filter
-            _ancestorsFilter = _blockchain.CreateBitFilter();
+            _ancestorsFilter = blockchain.CreateBitFilter();
             foreach (var ancestor in ancestors)
             {
                 _ancestorsFilter.OrWith(ancestor.Filter);
