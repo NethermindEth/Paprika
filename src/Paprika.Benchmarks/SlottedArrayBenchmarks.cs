@@ -55,103 +55,97 @@ public class SlottedArrayBenchmarks
 
         _hashCollisionsLength = 0;
 
-        // while (hashCollisions.TrySet(zeroes.SliceTo(_hashCollisionsLength), HashCollisionValue))
-        // {
-        //     _hashCollisionsLength++;
-        // }
-
-        for (int i = 0; i < 128; i++) // Have a fixed value here
+        while (hashCollisions.TrySet(zeroes.SliceTo(_hashCollisionsLength), HashCollisionValue))
         {
-            hashCollisions.TrySet(zeroes.SliceTo(_hashCollisionsLength), HashCollisionValue);
             _hashCollisionsLength++;
         }
     }
 
-    // [Benchmark]
-    // public int Write_whole_page_of_data()
-    // {
-    //     _writable.AsSpan().Clear();
-    //     var map = new SlottedArray(_writable);
-    //
-    //     Span<byte> key = stackalloc byte[4];
-    //
-    //     int count = 0;
-    //
-    //     // fill
-    //     for (int i = 0; i < _to; i++)
-    //     {
-    //         BinaryPrimitives.WriteInt32LittleEndian(key, i);
-    //         if (map.TrySet(NibblePath.FromKey(key), key))
-    //         {
-    //             count++;
-    //         }
-    //     }
-    //
-    //     return count;
-    // }
+    [Benchmark]
+    public int Write_whole_page_of_data()
+    {
+        _writable.AsSpan().Clear();
+        var map = new SlottedArray(_writable);
 
-    // [Benchmark]
-    // public int Read_existing_keys_prefix_different()
-    // {
-    //     var map = new SlottedArray(_writtenLittleEndian);
-    //     Span<byte> key = stackalloc byte[4];
-    //
-    //     var result = 0;
-    //
-    //     // find all values
-    //     for (var i = 0; i < _to; i++)
-    //     {
-    //         BinaryPrimitives.WriteInt32LittleEndian(key, i);
-    //         if (map.TryGet(NibblePath.FromKey(key), out var data))
-    //         {
-    //             result += data.Length;
-    //         }
-    //     }
-    //
-    //     return result;
-    // }
+        Span<byte> key = stackalloc byte[4];
 
-    // [Benchmark]
-    // public int Read_existing_keys_suffix_different()
-    // {
-    //     var map = new SlottedArray(_writtenBigEndian);
-    //     Span<byte> key = stackalloc byte[4];
-    //
-    //     var result = 0;
-    //
-    //     // find all values
-    //     for (var i = 0; i < _to; i++)
-    //     {
-    //         BinaryPrimitives.WriteInt32BigEndian(key, i);
-    //         if (map.TryGet(NibblePath.FromKey(key), out var data))
-    //         {
-    //             result += data.Length;
-    //         }
-    //     }
-    //
-    //     return result;
-    // }
+        int count = 0;
 
-    // [Benchmark]
-    // public int Read_nonexistent_keys()
-    // {
-    //     var map = new SlottedArray(_writtenLittleEndian);
-    //     Span<byte> key = stackalloc byte[4];
-    //
-    //     var result = 0;
-    //
-    //     // miss all the next
-    //     for (int i = _to; i < _to * 2; i++)
-    //     {
-    //         BinaryPrimitives.WriteInt32LittleEndian(key, i);
-    //         if (map.TryGet(NibblePath.FromKey(key), out _) == false)
-    //         {
-    //             result += 1;
-    //         }
-    //     }
-    //
-    //     return result;
-    // }
+        // fill 
+        for (int i = 0; i < _to; i++)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(key, i);
+            if (map.TrySet(NibblePath.FromKey(key), key))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    [Benchmark]
+    public int Read_existing_keys_prefix_different()
+    {
+        var map = new SlottedArray(_writtenLittleEndian);
+        Span<byte> key = stackalloc byte[4];
+
+        var result = 0;
+
+        // find all values
+        for (var i = 0; i < _to; i++)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(key, i);
+            if (map.TryGet(NibblePath.FromKey(key), out var data))
+            {
+                result += data.Length;
+            }
+        }
+
+        return result;
+    }
+
+    [Benchmark]
+    public int Read_existing_keys_suffix_different()
+    {
+        var map = new SlottedArray(_writtenBigEndian);
+        Span<byte> key = stackalloc byte[4];
+
+        var result = 0;
+
+        // find all values
+        for (var i = 0; i < _to; i++)
+        {
+            BinaryPrimitives.WriteInt32BigEndian(key, i);
+            if (map.TryGet(NibblePath.FromKey(key), out var data))
+            {
+                result += data.Length;
+            }
+        }
+
+        return result;
+    }
+
+    [Benchmark]
+    public int Read_nonexistent_keys()
+    {
+        var map = new SlottedArray(_writtenLittleEndian);
+        Span<byte> key = stackalloc byte[4];
+
+        var result = 0;
+
+        // miss all the next
+        for (int i = _to; i < _to * 2; i++)
+        {
+            BinaryPrimitives.WriteInt32LittleEndian(key, i);
+            if (map.TryGet(NibblePath.FromKey(key), out _) == false)
+            {
+                result += 1;
+            }
+        }
+
+        return result;
+    }
 
     [Benchmark]
     public int Hash_collisions()
@@ -172,72 +166,72 @@ public class SlottedArrayBenchmarks
         return length;
     }
 
-    // [Benchmark]
-    // public int EnumerateAll()
-    // {
-    //     var map = new SlottedArray(_writtenLittleEndian);
-    //
-    //     var length = 0;
-    //     foreach (var item in map.EnumerateAll())
-    //     {
-    //         length += item.Key.Length;
-    //         length += item.RawData.Length;
-    //     }
-    //
-    //     return length;
-    // }
+    [Benchmark]
+    public int EnumerateAll()
+    {
+        var map = new SlottedArray(_writtenLittleEndian);
 
-    // [Benchmark]
-    // public int Move_to_keys()
-    // {
-    //     var map = new SlottedArray(_writtenLittleEndian);
-    //
-    //     _copy0.AsSpan().Clear();
-    //     _copy1.AsSpan().Clear();
-    //
-    //     var map0 = new SlottedArray(_copy0);
-    //     var map1 = new SlottedArray(_copy1);
-    //
-    //     map.MoveNonEmptyKeysTo(new MapSource(map0, map1));
-    //
-    //     return map.Count + map0.Count + map1.Count;
-    // }
+        var length = 0;
+        foreach (var item in map.EnumerateAll())
+        {
+            length += item.Key.Length;
+            length += item.RawData.Length;
+        }
 
-    // [Benchmark(OperationsPerInvoke = 4)]
-    // [Arguments(0)]
-    // [Arguments(1)]
-    // [Arguments(62)]
-    // [Arguments(63)]
-    // [Arguments(64)]
-    // public int UnPrepareKey(int sliceFrom)
-    // {
-    //     var key = NibblePath.FromKey(Keccak.EmptyTreeHash).SliceFrom(sliceFrom);
-    //
-    //     var map = new SlottedArray(stackalloc byte[256]);
-    //     map.TrySet(key, ReadOnlySpan<byte>.Empty);
-    //
-    //     var length = 0;
-    //
-    //     foreach (var item in map.EnumerateAll())
-    //     {
-    //         length += item.Key.Length;
-    //     }
-    //
-    //     foreach (var item in map.EnumerateAll())
-    //     {
-    //         length += item.Key.Length;
-    //     }
-    //
-    //     foreach (var item in map.EnumerateAll())
-    //     {
-    //         length += item.Key.Length;
-    //     }
-    //
-    //     foreach (var item in map.EnumerateAll())
-    //     {
-    //         length += item.Key.Length;
-    //     }
-    //
-    //     return length;
-    // }
+        return length;
+    }
+
+    [Benchmark]
+    public int Move_to_keys()
+    {
+        var map = new SlottedArray(_writtenLittleEndian);
+
+        _copy0.AsSpan().Clear();
+        _copy1.AsSpan().Clear();
+
+        var map0 = new SlottedArray(_copy0);
+        var map1 = new SlottedArray(_copy1);
+
+        map.MoveNonEmptyKeysTo(new MapSource(map0, map1));
+
+        return map.Count + map0.Count + map1.Count;
+    }
+
+    [Benchmark(OperationsPerInvoke = 4)]
+    [Arguments(0)]
+    [Arguments(1)]
+    [Arguments(62)]
+    [Arguments(63)]
+    [Arguments(64)]
+    public int UnPrepareKey(int sliceFrom)
+    {
+        var key = NibblePath.FromKey(Keccak.EmptyTreeHash).SliceFrom(sliceFrom);
+
+        var map = new SlottedArray(stackalloc byte[256]);
+        map.TrySet(key, ReadOnlySpan<byte>.Empty);
+
+        var length = 0;
+
+        foreach (var item in map.EnumerateAll())
+        {
+            length += item.Key.Length;
+        }
+
+        foreach (var item in map.EnumerateAll())
+        {
+            length += item.Key.Length;
+        }
+
+        foreach (var item in map.EnumerateAll())
+        {
+            length += item.Key.Length;
+        }
+
+        foreach (var item in map.EnumerateAll())
+        {
+            length += item.Key.Length;
+        }
+
+        return length;
+    }
 }
