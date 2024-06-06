@@ -121,26 +121,29 @@ public class SlottedArrayTests
     public Task Enumerate_Mid_lenKeys([Values(0, 1)] int odd)
     {
         // Minimum possible space which would fail before implementing the new change for mid-length keys
-        Span<byte> span = stackalloc byte[42];
+        Span<byte> span = stackalloc byte[50];
         var map = new SlottedArray(span);
 
         var key0 = NibblePath.Empty;
         var key1 = NibblePath.FromKey(stackalloc byte[1] { 7 }).SliceFrom(odd);
         var key2 = NibblePath.FromKey(stackalloc byte[2] { 7, 13 }).SliceFrom(odd);
         var key3 = NibblePath.FromKey(stackalloc byte[3] { 7, 13, 31 }).SliceFrom(odd);
-        var key4 = NibblePath.FromKey(stackalloc byte[4] { 7, 13, 31, 41 }).SliceFrom(odd);
+        var key4 = NibblePath.FromKey(stackalloc byte[3] { 14, 22, 38 }).SliceFrom(odd);
+        var key5 = NibblePath.FromKey(stackalloc byte[4] { 7, 13, 31, 41 }).SliceFrom(odd);
 
         map.SetAssert(key0, Data0);
         map.SetAssert(key1, Data1);
         map.SetAssert(key2, Data2);
         map.SetAssert(key3, Data3);
         map.SetAssert(key4, Data4);
+        map.SetAssert(key5, Data5);
 
         map.GetAssert(key0, Data0);
         map.GetAssert(key1, Data1);
         map.GetAssert(key2, Data2);
         map.GetAssert(key3, Data3);
         map.GetAssert(key4, Data4);
+        map.GetAssert(key5, Data5);
 
         using var e = map.EnumerateAll();
 
@@ -163,6 +166,10 @@ public class SlottedArrayTests
         e.MoveNext().Should().BeTrue();
         e.Current.Key.Equals(key4).Should().BeTrue();
         e.Current.RawData.SequenceEqual(Data4).Should().BeTrue();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Equals(key5).Should().BeTrue();
+        e.Current.RawData.SequenceEqual(Data5).Should().BeTrue();
 
         e.MoveNext().Should().BeFalse();
 
