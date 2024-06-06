@@ -19,7 +19,7 @@ public class NibblePathTests
         var path = NibblePath.FromKey(span, from);
 
         Span<byte> destination = stackalloc byte[path.MaxByteLength];
-        var leftover = path.WriteToWithLeftover(destination);
+        var leftover = path.WriteToWithLeftoverAndPreamble(destination);
 
         NibblePath.ReadFrom(destination, out var parsed);
 
@@ -207,7 +207,7 @@ public class NibblePathTests
         var path = NibblePath.FromKey(raw).SliceFrom(from).SliceTo(length);
 
         Span<byte> span = stackalloc byte[path.MaxByteLength + 1];
-        var written = path.WriteTo(span);
+        var written =  path.WriteToWithPreamble(span);
         span[written.Length] = data;
 
         var left = NibblePath.ReadFrom(span.Slice(0, written.Length + 1), out var actual);
@@ -227,8 +227,8 @@ public class NibblePathTests
         var pathA = NibblePath.FromKey(new byte[] { 0x12, 0x3A }).SliceTo(length);
         var pathB = NibblePath.FromKey(new byte[] { 0x12, 0x3B }).SliceTo(length);
 
-        var writtenA = pathA.WriteTo(stackalloc byte[pathA.MaxByteLength]);
-        var writtenB = pathB.WriteTo(stackalloc byte[pathB.MaxByteLength]);
+        var writtenA = pathA.WriteToNoPreamble(stackalloc byte[pathA.MaxByteLength]);
+        var writtenB = pathB.WriteToNoPreamble(stackalloc byte[pathB.MaxByteLength]);
 
         writtenA.SequenceEqual(writtenB).Should().BeTrue();
     }

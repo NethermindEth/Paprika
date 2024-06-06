@@ -117,7 +117,9 @@ public readonly ref struct SlottedArray
         }
         else
         {
-            var dest2 = trimmed.WriteToWithLeftover(dest, includeLengthAndOddity);
+            var dest2 = includeLengthAndOddity
+                ? trimmed.WriteToWithLeftoverAndPreamble(dest)
+                : trimmed.WriteToWithLeftoverNoPreamble(dest);
             data.CopyTo(dest2);
         }
 
@@ -222,6 +224,7 @@ public readonly ref struct SlottedArray
     {
         var to = Count;
         var moved = 0;
+        const int keyToTrimmedDiff = 4;
 
         for (int i = 0; i < to; i++)
         {
@@ -243,14 +246,9 @@ public readonly ref struct SlottedArray
             int len = slot.KeyPreamble >> 1;
             bool isOdd = (slot.KeyPreamble & 1) != 0;
 
-            if (len is >= 5 and <= 6)
+            if (len >= 5)
             {
-                len -= 4;
-                data = NibblePath.ReadFromWithLength(payload, len, isOdd, out trimmed);
-            }
-            else if (len >= 7)
-            {
-                data = NibblePath.ReadFrom(payload, out trimmed);
+                data = len <= 6 ? NibblePath.ReadFromWithLength(payload, len - keyToTrimmedDiff, isOdd, out trimmed) : NibblePath.ReadFrom(payload, out trimmed);
             }
             else
             {
@@ -470,6 +468,7 @@ public readonly ref struct SlottedArray
         // if the found index is odd -> found a slot to be queried
 
         const int notFound = -1;
+        const int keyToTrimmedDiff = 4;
         var span = MemoryMarshal.Cast<byte, ushort>(_data.Slice(0, to));
 
         var offset = 0;
@@ -498,7 +497,7 @@ public readonly ref struct SlottedArray
 
                     if (slot.GetHasMidLength())
                     {
-                        int len = (slot.KeyPreamble >> 1) - 4; // Length of trimmed path = length of key - length of hash
+                        int len = (slot.KeyPreamble >> 1) - keyToTrimmedDiff; // Length of trimmed path = length of key - length of hash
                         bool isOdd = (slot.KeyPreamble & 1) != 0;
 
                         if (NibblePath.TryReadFromWithLength(actual, key, len, isOdd, out var leftover))
@@ -738,7 +737,7 @@ public readonly ref struct SlottedArray
                 Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(workingSet))
                     = (ushort)((hash >> HashByteShift) | (hash << HashByteShift));
             }
-            else // count <= 2 || count > 4
+            else // count <= 2 OR count > 4
             {
                 workingSet[0] = (byte)(hash >> HashByteShift);
                 if (count <= 6)
@@ -746,21 +745,6 @@ public readonly ref struct SlottedArray
                     workingSet[1] = (byte)(hash & 0xFF);
                 }
             }
-
-            // if (count <= 2 || count > 6)
-            // {
-            //     workingSet[0] = (byte)(hash >> HashByteShift);
-            // }
-            // else  if (count <= 4) // For length 3,4 logic remains same
-            // {
-            //     Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(workingSet))
-            //         = (ushort)((hash >> HashByteShift) | (hash << HashByteShift));
-            // }
-            // else // For length 5, 6, suppose hash = 0xABCD (2 bytes)
-            // {
-            //     workingSet[0] = (byte)(hash >> HashByteShift); // 0x00AB = 0xAB
-            //     workingSet[1] = (byte)(hash & 0xFF); // 0x00CD = 0xCD
-            // }
 
             NibblePath prefix = NibblePath.FromKey(workingSet, 0, count > 4 ? KeySlice : count);
             if ((preamble & KeyPreambleOddBit) != 0)
@@ -775,10 +759,11 @@ public readonly ref struct SlottedArray
             }
 
             const int limit = 3;
+            const int keyToTrimmedDiff = 4;
             bool oddFlag = (preamble & KeyPreambleOddBit) != 0;
 
             data = count <= KeyPreambleMaxEncodedLength
-                ? NibblePath.ReadFromWithLength(input, count - 4, oddFlag, out var trimmed)
+                ? NibblePath.ReadFromWithLength(input, count - keyToTrimmedDiff, oddFlag, out var trimmed)
                 : NibblePath.ReadFrom(input, out trimmed);
 
             return prefix.Append(trimmed, hash, workingSet[limit..]);
