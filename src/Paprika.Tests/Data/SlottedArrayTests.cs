@@ -43,7 +43,7 @@ public class SlottedArrayTests
     [Test]
     public Task Set_Get_Delete_Mid_Len_Keys([Values(0, 1)] int odd)
     {
-        var origArray =  new byte[3] { 0, 1, 2, }; // 3 bytes = 6 nibbles
+        var origArray = new byte[3] { 0, 1, 2, }; // 3 bytes = 6 nibbles
         var keySpan = new ReadOnlySpan<byte>(origArray);
         var key = NibblePath.FromKey(keySpan).SliceFrom(odd);
 
@@ -103,7 +103,7 @@ public class SlottedArrayTests
         e.Current.Key.Equals(key2).Should().BeTrue();
         e.Current.RawData.SequenceEqual(Data2).Should().BeTrue();
 
-            e.MoveNext().Should().BeTrue();
+        e.MoveNext().Should().BeTrue();
         e.Current.Key.Equals(key3).Should().BeTrue();
         e.Current.RawData.SequenceEqual(Data3).Should().BeTrue();
 
