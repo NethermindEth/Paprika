@@ -41,7 +41,7 @@ public class SlottedArrayTests
     }
 
     [Test]
-    public Task Set_Get_Delete_Mid_Len_Key1([Values(0, 1)] int odd)
+    public Task Set_Get_Delete_Mid_Len_Keys([Values(0, 1)] int odd)
     {
         var origArray =  new byte[3] { 0, 1, 2, }; // 3 bytes = 6 nibbles
         var keySpan = new ReadOnlySpan<byte>(origArray);
@@ -104,6 +104,59 @@ public class SlottedArrayTests
         e.Current.RawData.SequenceEqual(Data2).Should().BeTrue();
 
             e.MoveNext().Should().BeTrue();
+        e.Current.Key.Equals(key3).Should().BeTrue();
+        e.Current.RawData.SequenceEqual(Data3).Should().BeTrue();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Equals(key4).Should().BeTrue();
+        e.Current.RawData.SequenceEqual(Data4).Should().BeTrue();
+
+        e.MoveNext().Should().BeFalse();
+
+        // verify
+        return Verify(span.ToArray());
+    }
+
+    [Test]
+    public Task Enumerate_Mid_lenKeys([Values(0, 1)] int odd)
+    {
+        // Minimum possible space which would fail before implementing the new change for mid-length keys
+        Span<byte> span = stackalloc byte[42];
+        var map = new SlottedArray(span);
+
+        var key0 = NibblePath.Empty;
+        var key1 = NibblePath.FromKey(stackalloc byte[1] { 7 }).SliceFrom(odd);
+        var key2 = NibblePath.FromKey(stackalloc byte[2] { 7, 13 }).SliceFrom(odd);
+        var key3 = NibblePath.FromKey(stackalloc byte[3] { 7, 13, 31 }).SliceFrom(odd);
+        var key4 = NibblePath.FromKey(stackalloc byte[4] { 7, 13, 31, 41 }).SliceFrom(odd);
+
+        map.SetAssert(key0, Data0);
+        map.SetAssert(key1, Data1);
+        map.SetAssert(key2, Data2);
+        map.SetAssert(key3, Data3);
+        map.SetAssert(key4, Data4);
+
+        map.GetAssert(key0, Data0);
+        map.GetAssert(key1, Data1);
+        map.GetAssert(key2, Data2);
+        map.GetAssert(key3, Data3);
+        map.GetAssert(key4, Data4);
+
+        using var e = map.EnumerateAll();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Equals(key0).Should().BeTrue();
+        e.Current.RawData.SequenceEqual(Data0).Should().BeTrue();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Equals(key1).Should().BeTrue();
+        e.Current.RawData.SequenceEqual(Data1).Should().BeTrue();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Equals(key2).Should().BeTrue();
+        e.Current.RawData.SequenceEqual(Data2).Should().BeTrue();
+
+        e.MoveNext().Should().BeTrue();
         e.Current.Key.Equals(key3).Should().BeTrue();
         e.Current.RawData.SequenceEqual(Data3).Should().BeTrue();
 
