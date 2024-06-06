@@ -12,6 +12,7 @@
     </ItemGroup>
 
     <ItemGroup>
+      <ProjectReference Include="..\Paprika.Runner\Paprika.Runner.csproj" />
       <ProjectReference Include="..\Paprika\Paprika.csproj" />
     </ItemGroup>
 
