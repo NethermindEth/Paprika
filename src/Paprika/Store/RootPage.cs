@@ -96,10 +96,10 @@ public readonly unsafe struct RootPage(Page root) : IPage
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver)
     {
-        if (Data.StateRoot.IsNull == false)
+        var stateRoot = Data.StateRoot;
+        if (stateRoot.IsNull == false)
         {
-            var data = new Merkle.StateRootPage(resolver.GetAt(Data.StateRoot));
-            using var scope = visitor.On(data, Data.StateRoot);
+            new Merkle.StateRootPage(resolver.GetAt(stateRoot)).Accept(visitor, resolver, stateRoot);
         }
 
         Data.Storage.Accept(visitor, resolver);

@@ -3,7 +3,6 @@ using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
 using Nethermind.Int256;
-using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Merkle;
@@ -629,6 +628,29 @@ public class BlockchainTests
         }
 
         static Account Value(uint i) => new(i, i);
+    }
+
+    [Test]
+    public async Task StartNew_when_throws_should_not_lock_db_readonly_batch()
+    {
+        using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
+
+        await using var blockchain = new Blockchain(db, new PreCommit());
+
+        const int none = 0;
+
+        db.CountReadOnlyBatches().Should().Be(none);
+
+        var nonExistentParent = new Random(13).NextKeccak();
+        try
+        {
+            var exception = Assert.Throws<Exception>(() => blockchain.StartNew(nonExistentParent));
+            exception.Message.Should().Contain("dependencies");
+        }
+        finally
+        {
+            db.CountReadOnlyBatches().Should().Be(none);
+        }
     }
 
     private static Account GetAccount(int i) => new((UInt256)i + 1, (UInt256)i + 1);
