@@ -733,24 +733,35 @@ public readonly ref struct SlottedArray
                 data = input;
                 return default;
             }
-
-            if (count <= 2 || count > 6)
-            {
-                workingSet[0] = (byte)(hash >> HashByteShift);
-            }
-            else  if (count <= 4) // For length 3,4 logic remains same
+            if (count is > 2 and <= 4)
             {
                 Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(workingSet))
                     = (ushort)((hash >> HashByteShift) | (hash << HashByteShift));
             }
-            else // For length 5, 6, suppose hash = 0xABCD (2 bytes)
+            else // count <= 2 || count > 4
             {
-                workingSet[0] = (byte)(hash >> HashByteShift); // 0x00AB = 0xAB
-                workingSet[1] = (byte)(hash & 0xFF); // 0x00CD = 0xCD
+                workingSet[0] = (byte)(hash >> HashByteShift);
+                if (count <= 6)
+                {
+                    workingSet[1] = (byte)(hash & 0xFF);
+                }
             }
 
-            // If len <= 4, take the entire length as the key is entirely stored in the hash.
-            // If len > 4, just take the first 2 nibbles as prefix, we'll append the remaining 2 last nibbles later.
+            // if (count <= 2 || count > 6)
+            // {
+            //     workingSet[0] = (byte)(hash >> HashByteShift);
+            // }
+            // else  if (count <= 4) // For length 3,4 logic remains same
+            // {
+            //     Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(workingSet))
+            //         = (ushort)((hash >> HashByteShift) | (hash << HashByteShift));
+            // }
+            // else // For length 5, 6, suppose hash = 0xABCD (2 bytes)
+            // {
+            //     workingSet[0] = (byte)(hash >> HashByteShift); // 0x00AB = 0xAB
+            //     workingSet[1] = (byte)(hash & 0xFF); // 0x00CD = 0xCD
+            // }
+
             NibblePath prefix = NibblePath.FromKey(workingSet, 0, count > 4 ? KeySlice : count);
             if ((preamble & KeyPreambleOddBit) != 0)
             {
@@ -764,18 +775,13 @@ public readonly ref struct SlottedArray
             }
 
             const int limit = 3;
-            // This function needs to be updated for length 5,6
-            if ( count <= KeyPreambleMaxEncodedLength) // If len <= 6, we can fit the actual length in the preamble
-            {
-                bool oddFlag = (preamble & KeyPreambleOddBit) != 0;
-                data = NibblePath.ReadFromWithLength(input, count-4, oddFlag, out var trimmed);
-                return prefix.Append(trimmed, hash, workingSet[limit..]);
-            }
-            else // Logic for >= 7 remains the same
-            {
-                data = NibblePath.ReadFrom(input, out var trimmed);
-                return prefix.Append(trimmed, hash, workingSet[limit..]);
-            }
+            bool oddFlag = (preamble & KeyPreambleOddBit) != 0;
+
+            data = count <= KeyPreambleMaxEncodedLength
+                ? NibblePath.ReadFromWithLength(input, count - 4, oddFlag, out var trimmed)
+                : NibblePath.ReadFrom(input, out trimmed);
+
+            return prefix.Append(trimmed, hash, workingSet[limit..]);
         }
 
         public static byte GetFirstNibble(ushort hash)
