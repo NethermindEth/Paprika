@@ -4,7 +4,7 @@ using Paprika.Crypto;
 namespace Paprika.Benchmarks;
 
 [MemoryDiagnoser]
-[DisassemblyDiagnoser]
+// [DisassemblyDiagnoser]
 public class AccountBenchmarks
 {
     private static readonly Keccak CodeHash = Keccak.Compute(new byte[] { 0, 1, 2, 3 });

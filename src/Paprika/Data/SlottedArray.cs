@@ -108,20 +108,17 @@ public readonly ref struct SlottedArray
         // write item: length_key, key, data
         var dest = _data.Slice(slot.ItemAddress, total);
 
-        if (HasLengthFiveToSix(preamble))
-        {
-            // Length is already encoded in preamble, so take the data as is
-            var dest2 = trimmed.WriteToWithLeftover(dest, false);
-            data.CopyTo(dest2);
-        }
-        else if (HasKeyBytes(preamble)) // Len >= 7
-        {
-            var dest2 = trimmed.WriteToWithLeftover(dest);
-            data.CopyTo(dest2);
-        }
-        else // Len <= 4
+        int len = preamble >> 1;
+        bool includeLengthAndOddity = HasKeyBytes(preamble);
+
+        if (len <= 4)
         {
             data.CopyTo(dest);
+        }
+        else
+        {
+            var dest2 = trimmed.WriteToWithLeftover(dest, includeLengthAndOddity);
+            data.CopyTo(dest2);
         }
 
         // commit low and high
@@ -243,13 +240,15 @@ public readonly ref struct SlottedArray
 
             NibblePath trimmed;
 
-            if (slot.GetHasMidLength())
+            int len = slot.KeyPreamble >> 1;
+            bool isOdd = (slot.KeyPreamble & 1) != 0;
+
+            if (len is >= 5 and <= 6)
             {
-                int len = slot.KeyPreamble >> 1;
-                bool isOdd = (slot.KeyPreamble & 1) != 0;
-                data = NibblePath.ReadFromWithLength(payload, len-4, isOdd, out trimmed);
+                len -= 4;
+                data = NibblePath.ReadFromWithLength(payload, len, isOdd, out trimmed);
             }
-            else if (slot.GetHasKeyBytes())
+            else if (len >= 7)
             {
                 data = NibblePath.ReadFrom(payload, out trimmed);
             }

@@ -5,7 +5,7 @@ using Paprika.RLP;
 namespace Paprika.Benchmarks;
 
 [MemoryDiagnoser]
-[DisassemblyDiagnoser]
+// [DisassemblyDiagnoser]
 public class KeccakOrRlpBenchmarks
 {
     private static ReadOnlySpan<byte> RlpSpan => new byte[] { 0, 1, 2, 3, 4, 5, 7, 8 };
