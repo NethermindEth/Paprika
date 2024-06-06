@@ -34,7 +34,7 @@ public static class BitMapFilter
         where TAccessor : struct, IAccessor<TAccessor>
     {
         [Pure]
-        unsafe byte* GetBit(ulong hash, out byte bit);
+        unsafe byte* GetBit(uint hash, out byte mask);
 
         [Pure]
         void Clear();
@@ -59,9 +59,9 @@ public static class BitMapFilter
 
         [Pure]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public unsafe byte* GetBit(ulong hash, out byte bit)
+        public unsafe byte* GetBit(uint hash, out byte mask)
         {
-            bit = (byte)(1 << (int)(hash & BitMask));
+            mask = (byte)(1 << (int)(hash & BitMask));
             return (byte*)_page.Raw.ToPointer() + ((hash >> BitsPerByteShift) & PageMask);
         }
 
@@ -86,12 +86,12 @@ public static class BitMapFilter
 
         [Pure]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public unsafe byte* GetBit(ulong hash, out byte bit)
+        public unsafe byte* GetBit(uint hash, out byte mask)
         {
             const int pageMask = 1;
             const int pageMaskShift = 1;
 
-            bit = (byte)(1 << (int)(hash & BitMask));
+            mask = (byte)(1 << (int)(hash & BitMask));
             var h = hash >> BitsPerByteShift;
             var page = (h & pageMask) == pageMask ? _page1 : _page0;
             h >>= pageMaskShift;
@@ -136,9 +136,9 @@ public static class BitMapFilter
 
         [Pure]
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public unsafe byte* GetBit(ulong hash, out byte bit)
+        public unsafe byte* GetBit(uint hash, out byte mask)
         {
-            bit = (byte)(1 << (int)(hash & BitMask));
+            mask = (byte)(1 << (int)(hash & BitMask));
             var h = hash >> BitsPerByteShift;
             var page = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_pages), (int)(h & _pageMask));
             h >>= _pageMaskShift;
@@ -184,7 +184,7 @@ public static class BitMapFilter
 }
 
 /// <summary>
-/// Represents a simple bitmap based filter.
+/// Represents a simple bitmap based filter for <see cref="ulong"/> hashes.
 /// </summary>
 public readonly struct BitMapFilter<TAccessor>
     where TAccessor : struct, BitMapFilter.IAccessor<TAccessor>
@@ -203,18 +203,30 @@ public readonly struct BitMapFilter<TAccessor>
 
     public bool MayContain(ulong hash) => this[hash];
 
+    /// <summary>
+    /// Checks whether the filter may contain any of the hashes.
+    /// </summary>
+    public bool MayContainAny(ulong hash0, ulong hash1)
+    {
+        // TODO: optimize
+        return this[hash0] || this[hash1];
+    }
+
     public void Clear() => _accessor.Clear();
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static uint Mix(ulong hash) => (uint)((hash >> 32) ^ hash);
 
     public unsafe bool this[ulong hash]
     {
         get
         {
-            var ptr = _accessor.GetBit(hash, out var bit);
+            var ptr = _accessor.GetBit(Mix(hash), out var bit);
             return (*ptr & bit) == bit;
         }
         set
         {
-            var ptr = _accessor.GetBit(hash, out var bit);
+            var ptr = _accessor.GetBit(Mix(hash), out var bit);
             if (value)
             {
                 *ptr = (byte)(*ptr | bit);
