@@ -1,15 +1,12 @@
-using System.Diagnostics;
-using Paprika.Chain;
-using Paprika.Merkle;
+using Paprika.Runner;
 using Paprika.Store;
-using Paprika.Store.PageManagers;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
 var app = new CommandApp();
 app.Configure(cfg =>
 {
-    cfg.AddCommand<ValidateRootHashesSettingsCommand>("validate");
+    cfg.AddCommand<GatherStatistics>("stats");
     cfg.SetExceptionHandler(ex =>
     {
         AnsiConsole.WriteException(ex, ExceptionFormats.ShortenEverything);
@@ -19,51 +16,35 @@ app.Configure(cfg =>
 
 await app.RunAsync(args);
 
-public class ValidateRootHashesSettings : CommandSettings
+public class StatisticsSettings : CommandSettings
 {
     [CommandArgument(0, "<path>")]
     public string Path { get; set; }
+
+    [CommandArgument(1, "<size>")]
+    public byte Size { get; set; }
 
     [CommandArgument(1, "<historyDepth>")]
     public byte HistoryDepth { get; set; }
 }
 
-public class ValidateRootHashesSettingsCommand : AsyncCommand<ValidateRootHashesSettings>
+public class GatherStatistics : Command<StatisticsSettings>
 {
-    public override async Task<int> ExecuteAsync(CommandContext context, ValidateRootHashesSettings settings)
+    public override int Execute(CommandContext context, StatisticsSettings settings)
     {
-        var file = MemoryMappedPageManager.GetPaprikaFilePath(settings.Path);
-        if (File.Exists(file) == false)
-            throw new FileNotFoundException("Paprika file was not found", file);
+        const long Gb = 1024 * 1024 * 1024;
 
-        var length = new FileInfo(file).Length;
+        using var db = PagedDb.MemoryMappedDb(settings.Size * Gb, settings.HistoryDepth, settings.Path, false);
+        using var read = db.BeginReadOnlyBatch();
 
-        using var db = PagedDb.MemoryMappedDb(length, settings.HistoryDepth, settings.Path);
+        var stats = new Layout("Stats");
 
-        // configure merkle to memoize none and recalculate all
-        const int none = int.MaxValue;
-        var merkle = new ComputeMerkleBehavior(none, none, false);
+        AnsiConsole.Write("Gathering stats...");
 
-        await using var blockchain = new Blockchain(db, merkle);
-        using var batch = blockchain.StartReadOnlyLatestFromDb();
+        StatisticsForPagedDb.Report(stats, read);
 
-        AnsiConsole.MarkupLine("[grey]Calculation in progress...[/]");
+        AnsiConsole.Write(stats);
 
-        var sw = Stopwatch.StartNew();
-        var hash = merkle.CalculateStateRootHash(batch);
-        var took = sw.Elapsed;
-
-        AnsiConsole.MarkupLine($"[grey]Calculation took: {took}[/]");
-
-        if (hash == batch.Hash)
-        {
-            AnsiConsole.MarkupLine($"[green]Recalculated hash matches the expected {hash.ToString(true)}[/]");
-            return 0;
-        }
-
-        AnsiConsole.MarkupLine($"[red] Recalculated hash {hash.ToString(true)} " +
-                                   $"is different than one memoized {batch.Hash.ToString(true)}[/]");
-
-        return -1;
+        return 0;
     }
 }
