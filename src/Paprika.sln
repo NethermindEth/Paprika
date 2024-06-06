@@ -34,6 +34,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nethermind.Serialization.Rl
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nethermind.Specs", "Nethermind\src\Nethermind\Nethermind.Specs\Nethermind.Specs.csproj", "{20C99460-C6B6-43FE-BD84-8BF81A2A05FA}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Paprika.Cli", "Paprika.Cli\Paprika.Cli.csproj", "{DD0B1FB7-6D29-47A1-B467-03F28B15FCAE}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -110,6 +112,10 @@ Global
 		{20C99460-C6B6-43FE-BD84-8BF81A2A05FA}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{20C99460-C6B6-43FE-BD84-8BF81A2A05FA}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{20C99460-C6B6-43FE-BD84-8BF81A2A05FA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DD0B1FB7-6D29-47A1-B467-03F28B15FCAE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DD0B1FB7-6D29-47A1-B467-03F28B15FCAE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DD0B1FB7-6D29-47A1-B467-03F28B15FCAE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DD0B1FB7-6D29-47A1-B467-03F28B15FCAE}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{E95BD608-D663-4103-A561-E6C7E1440B7A} = {C1CABFFA-4E4D-4A42-B40F-DC27FE50DFC6}
