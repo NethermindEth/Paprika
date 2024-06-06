@@ -227,8 +227,8 @@ public class NibblePathTests
         var pathA = NibblePath.FromKey(new byte[] { 0x12, 0x3A }).SliceTo(length);
         var pathB = NibblePath.FromKey(new byte[] { 0x12, 0x3B }).SliceTo(length);
 
-        var writtenA = pathA.WriteToNoPreamble(stackalloc byte[pathA.MaxByteLength]);
-        var writtenB = pathB.WriteToNoPreamble(stackalloc byte[pathB.MaxByteLength]);
+        var writtenA = pathA.WriteToWithPreamble(stackalloc byte[pathA.MaxByteLength]);
+        var writtenB = pathB.WriteToWithPreamble(stackalloc byte[pathB.MaxByteLength]);
 
         writtenA.SequenceEqual(writtenB).Should().BeTrue();
     }

@@ -259,9 +259,7 @@ public readonly ref struct NibblePath
 
         destination[0] = (byte)(odd | (length << LengthShift));
 
-        // var offset = includeLengthAndOddity ? PreambleLength : 0;
         ref var destStart = ref Unsafe.Add(ref MemoryMarshal.GetReference(destination), PreambleLength);
-
         switch (spanLength)
         {
             case sizeof(byte):
@@ -285,10 +283,12 @@ public readonly ref struct NibblePath
             }
         }
 
+        // clearing the oldest nibble, if needed
+        // yes, it can be branch free
         if (((odd + length) & 1) == 0)
             return spanLength + PreambleLength;
 
-        ref var oldest = ref destination[spanLength + PreambleLength];
+        ref var oldest = ref destination[spanLength];
         oldest = (byte)(oldest & 0b1111_0000);
 
         return spanLength + PreambleLength;
