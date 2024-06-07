@@ -76,8 +76,8 @@ public readonly ref partial struct Key
     public Span<byte> WriteTo(Span<byte> destination)
     {
         destination[0] = (byte)Type;
-        var leftover = Path.WriteToWithLeftoverAndPreamble(destination.Slice(1));
-        leftover = StoragePath.WriteToWithLeftoverAndPreamble(leftover);
+        var leftover = Path.WriteToWithLeftoverWithPreamble(destination.Slice(1));
+        leftover = StoragePath.WriteToWithLeftoverWithPreamble(leftover);
 
         var written = destination.Length - leftover.Length;
         return destination.Slice(0, written);
