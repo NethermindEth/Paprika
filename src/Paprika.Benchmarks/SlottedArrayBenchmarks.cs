@@ -53,17 +53,21 @@ public class SlottedArrayBenchmarks
         var zeroes = NibblePath.FromKey(Keccak.Zero);
         var hashCollisions = new SlottedArray(_hashCollisions);
 
-        _hashCollisionsLength = 0;
+        _hashCollisionsLength = 128;
 
         // while (hashCollisions.TrySet(zeroes.SliceTo(_hashCollisionsLength), HashCollisionValue))
         // {
         //     _hashCollisionsLength++;
         // }
 
-        for (int i = 0; i < 64; i++) // Have a fixed value here
+        for (int i = 0, j = 0 ; i < 128; i++, j++) // Have a fixed value here
         {
-            hashCollisions.TrySet(zeroes.SliceTo(_hashCollisionsLength), HashCollisionValue);
-            _hashCollisionsLength++;
+            if (j >= zeroes.Length)
+            {
+                zeroes = zeroes.SliceFrom(1);
+                j = 0;
+            }
+            hashCollisions.TrySet(zeroes.SliceTo(j), HashCollisionValue);
         }
     }
 
