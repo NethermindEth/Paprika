@@ -93,7 +93,7 @@ public static class BitMapFilter
 
             mask = (byte)(1 << (int)(hash & BitMask));
             var h = hash >> BitsPerByteShift;
-            var page = (h & pageMask) == pageMask ? _page1 : _page0;
+            var page = (h & pageMask) != pageMask ? _page0 : _page1;
             h >>= pageMaskShift;
 
             return (byte*)page.Raw.ToPointer() + (h & PageMask);

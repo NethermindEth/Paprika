@@ -1398,10 +1398,10 @@ public class Blockchain : IAsyncDisposable
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private bool IsAccountDestroyed(scoped in Key key, ulong destroyed)
         {
-            if (destroyed == NonDestroyable)
+            if (destroyed == NonDestroyable || _destroyed == null)
                 return false;
 
-            return Filter.MayContain(destroyed) && _destroyed!.Contains(key.Path.UnsafeAsKeccak);
+            return Filter.MayContain(destroyed) && _destroyed.Contains(key.Path.UnsafeAsKeccak);
         }
 
         protected override void CleanUp()

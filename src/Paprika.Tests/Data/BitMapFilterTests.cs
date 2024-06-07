@@ -28,6 +28,28 @@ public abstract class BitMapFilterTests<TAccessor> : IDisposable
         filter.Return(_pool);
     }
 
+    [Test]
+    public void Or_with()
+    {
+        var filter1 = Build(_pool);
+        var filter2 = Build(_pool);
+
+        const ulong v1 = 1;
+        const ulong v2 = 4213798855897314219;
+
+        filter1.Add(v1);
+        filter2.Add(v2);
+
+        filter1.OrWith(filter2);
+
+        filter1.MayContain(v1).Should().BeTrue();
+        filter1.MayContain(v2).Should().BeTrue();
+        filter1.MayContainAny(v1, v2).Should().BeTrue();
+
+        filter1.Return(_pool);
+        filter2.Return(_pool);
+    }
+
     public void Dispose() => _pool.Dispose();
 }
 
