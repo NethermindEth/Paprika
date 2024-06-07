@@ -55,12 +55,7 @@ public class SlottedArrayBenchmarks
 
         _hashCollisionsLength = 128;
 
-        // while (hashCollisions.TrySet(zeroes.SliceTo(_hashCollisionsLength), HashCollisionValue))
-        // {
-        //     _hashCollisionsLength++;
-        // }
-
-        for (int i = 0, j = 0 ; i < 128; i++, j++) // Have a fixed value here
+        for (int i = 0, j = 0 ; i < _hashCollisionsLength; i++, j++) // Have a fixed value here
         {
             if (j >= zeroes.Length)
             {

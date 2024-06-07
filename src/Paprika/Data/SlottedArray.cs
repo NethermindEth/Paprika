@@ -23,6 +23,7 @@ public readonly ref struct SlottedArray
 {
     public const int Alignment = 8;
     public const int HeaderSize = Header.Size;
+    private const int KeyToTrimmedDiff = 4;
 
     private readonly ref Header _header;
     private readonly Span<byte> _data;
@@ -118,7 +119,7 @@ public readonly ref struct SlottedArray
         else
         {
             var dest2 = includeLengthAndOddity
-                ? trimmed.WriteToWithLeftoverAndPreamble(dest)
+                ? trimmed.WriteToWithLeftoverWithPreamble(dest)
                 : trimmed.WriteToWithLeftoverNoPreamble(dest);
             data.CopyTo(dest2);
         }
@@ -224,7 +225,6 @@ public readonly ref struct SlottedArray
     {
         var to = Count;
         var moved = 0;
-        const int keyToTrimmedDiff = 4;
 
         for (int i = 0; i < to; i++)
         {
@@ -248,7 +248,7 @@ public readonly ref struct SlottedArray
 
             if (len >= 5)
             {
-                data = len <= 6 ? NibblePath.ReadFromWithLength(payload, len - keyToTrimmedDiff, isOdd, out trimmed) : NibblePath.ReadFrom(payload, out trimmed);
+                data = len <= 6 ? NibblePath.ReadFromWithLength(payload, len - KeyToTrimmedDiff, isOdd, out trimmed) : NibblePath.ReadFrom(payload, out trimmed);
             }
             else
             {
@@ -313,8 +313,7 @@ public readonly ref struct SlottedArray
     /// <returns>The total space required in bytes.</returns>
     private static int GetTotalSpaceRequired(byte preamble, in NibblePath key, ReadOnlySpan<byte> data)
     {
-        return data.Length + (HasLengthFiveToSix(preamble) ? key.RawSpanLength : 0) +
-               (HasKeyBytes(preamble) ? KeyLengthLength + key.RawSpanLength : 0);
+        return data.Length + (key.IsEmpty  ? 0 : key.RawSpanLength) + (HasKeyBytes(preamble) ? KeyLengthLength : 0);
     }
 
     /// <summary>
@@ -468,7 +467,6 @@ public readonly ref struct SlottedArray
         // if the found index is odd -> found a slot to be queried
 
         const int notFound = -1;
-        const int keyToTrimmedDiff = 4;
         var span = MemoryMarshal.Cast<byte, ushort>(_data.Slice(0, to));
 
         var offset = 0;
@@ -497,7 +495,7 @@ public readonly ref struct SlottedArray
 
                     if (slot.GetHasMidLength())
                     {
-                        int len = (slot.KeyPreamble >> 1) - keyToTrimmedDiff; // Length of trimmed path = length of key - length of hash
+                        int len = (slot.KeyPreamble >> 1) - KeyToTrimmedDiff; // Length of trimmed path = length of key - length of hash
                         bool isOdd = (slot.KeyPreamble & 1) != 0;
 
                         if (NibblePath.TryReadFromWithLength(actual, key, len, isOdd, out var leftover))
@@ -759,11 +757,10 @@ public readonly ref struct SlottedArray
             }
 
             const int limit = 3;
-            const int keyToTrimmedDiff = 4;
             bool oddFlag = (preamble & KeyPreambleOddBit) != 0;
 
             data = count <= KeyPreambleMaxEncodedLength
-                ? NibblePath.ReadFromWithLength(input, count - keyToTrimmedDiff, oddFlag, out var trimmed)
+                ? NibblePath.ReadFromWithLength(input, count - KeyToTrimmedDiff, oddFlag, out var trimmed)
                 : NibblePath.ReadFrom(input, out trimmed);
 
             return prefix.Append(trimmed, hash, workingSet[limit..]);

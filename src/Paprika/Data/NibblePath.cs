@@ -209,7 +209,7 @@ public readonly ref struct NibblePath
     /// </summary>
     /// <param name="destination">The destination to write to.</param>
     /// <returns>The leftover that other writers can write to.</returns>
-    public Span<byte> WriteToWithLeftoverAndPreamble(Span<byte> destination)
+    public Span<byte> WriteToWithLeftoverWithPreamble(Span<byte> destination)
     {
         var length = WriteImplWithPreamble(destination);
         return destination.Slice(length);

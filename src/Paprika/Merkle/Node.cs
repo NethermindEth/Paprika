@@ -296,7 +296,7 @@ public static partial class Node
         public Span<byte> WriteToWithLeftover(Span<byte> output)
         {
             var leftover = Header.WriteToWithLeftover(output);
-            leftover = Path.WriteToWithLeftoverAndPreamble(leftover);
+            leftover = Path.WriteToWithLeftoverWithPreamble(leftover);
 
             return leftover;
         }
