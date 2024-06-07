@@ -206,10 +206,12 @@ public readonly struct BitMapFilter<TAccessor>
     /// <summary>
     /// Checks whether the filter may contain any of the hashes.
     /// </summary>
-    public bool MayContainAny(ulong hash0, ulong hash1)
+    public unsafe bool MayContainAny(ulong hash0, ulong hash1)
     {
-        // TODO: optimize
-        return this[hash0] || this[hash1];
+        var ptr0 = _accessor.GetBit(Mix(hash0), out var bit0);
+        var ptr1 = _accessor.GetBit(Mix(hash1), out var bit1);
+
+        return ((*ptr0 & bit0) | (*ptr1 & bit1)) != 0;
     }
 
     public void Clear() => _accessor.Clear();

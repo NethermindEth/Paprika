@@ -1127,7 +1127,6 @@ public class Blockchain : IAsyncDisposable
             if (_ancestorsFilter.MayContainAny(keyHash, destroyedHash))
             {
                 // Walk through the ancestors only if the filter shows that they may contain the value
-
                 foreach (var ancestor in _ancestors)
                 {
                     var owner = ancestor.TryGetLocal(key, keyWritten, keyHash, destroyedHash, out var succeeded);

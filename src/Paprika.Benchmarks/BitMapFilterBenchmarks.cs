@@ -54,6 +54,17 @@ public class BitMapFilterBenchmarks
         a.OrWith(b);
     }
 
+    [Benchmark(OperationsPerInvoke = 4)]
+    public int MayContainAny_BitMapFilter_OfN_128()
+    {
+        var a = new BitMapFilter<BitMapFilter.OfN>(new BitMapFilter.OfN(_pages16A));
+
+        return (a.MayContainAny(13, 17) ? 1 : 0) +
+               (a.MayContainAny(2342, 2345) ? 1 : 0) +
+               (a.MayContainAny(3453453, 8789345) ? 1 : 0) +
+               (a.MayContainAny(2346345, 432509) ? 1 : 0);
+    }
+
     private static unsafe Page[] AlignedAlloc(int pageCount)
     {
         var pages = new Page[pageCount];
