@@ -17,7 +17,7 @@ public class SlottedArrayBenchmarks
 
     // hash collisions are fixed in size to make them comparable
     private readonly byte[] _hashCollisions = new byte[Page.PageSize];
-    private const int HashCollisionsCount = 96;
+    private const int HashCollisionsCount = NibblePath.KeccakNibbleCount;
     private static readonly byte[] HashCollisionValue = new byte[13];
 
     private readonly byte[] _copy0 = new byte[Page.PageSize];
@@ -54,7 +54,7 @@ public class SlottedArrayBenchmarks
         var zeroes = NibblePath.FromKey(Keccak.Zero);
         var hashCollisions = new SlottedArray(_hashCollisions);
 
-        for (var i = 0; i < HashCollisionsCount; i++)
+        for (var i = 0; i <= HashCollisionsCount; i++)
         {
             if (!hashCollisions.TrySet(zeroes.SliceTo(i), HashCollisionValue))
             {
