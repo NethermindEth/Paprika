@@ -285,7 +285,7 @@ public readonly ref struct NibblePath
 
         // clearing the oldest nibble, if needed
         // yes, it can be branch free
-        if (((odd + length) & 1) == 0)
+        if (((odd + length) & OddBit) == 0)
             return spanLength + PreambleLength;
 
         ref var oldest = ref destination[spanLength];
@@ -300,12 +300,6 @@ public readonly ref struct NibblePath
         var length = (int)Length;
         var spanLength = GetSpanLength(_odd, length);
 
-        // if (includeLengthAndOddity)
-        // {
-        //     destination[0] = (byte)(odd | (length << LengthShift));
-        // }
-
-        // var offset = includeLengthAndOddity ? PreambleLength : 0;
         ref var destStart = ref MemoryMarshal.GetReference(destination);
 
         switch (spanLength)
@@ -331,7 +325,7 @@ public readonly ref struct NibblePath
                 }
         }
 
-        if (((odd + length) & 1) == 0)
+        if (((odd + length) & OddBit) == 0)
             return spanLength;
 
         ref var oldest = ref destination[spanLength];
