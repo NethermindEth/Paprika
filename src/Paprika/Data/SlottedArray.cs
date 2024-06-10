@@ -244,11 +244,10 @@ public readonly ref struct SlottedArray
             NibblePath trimmed;
 
             int len = slot.KeyPreamble >> 1;
-            bool isOdd = (slot.KeyPreamble & 1) != 0;
 
             if (len >= 5)
             {
-                data = len <= 6 ? NibblePath.ReadFromWithLength(payload, len - KeyToTrimmedDiff, isOdd, out trimmed) : NibblePath.ReadFrom(payload, out trimmed);
+                data = len <= 6 ? NibblePath.ReadFromWithLength(payload, len - KeyToTrimmedDiff, (byte)(slot.KeyPreamble & 1), out trimmed) : NibblePath.ReadFrom(payload, out trimmed);
             }
             else
             {
@@ -313,7 +312,7 @@ public readonly ref struct SlottedArray
     /// <returns>The total space required in bytes.</returns>
     private static int GetTotalSpaceRequired(byte preamble, in NibblePath key, ReadOnlySpan<byte> data)
     {
-        return data.Length + (key.IsEmpty  ? 0 : key.RawSpanLength) + (HasKeyBytes(preamble) ? KeyLengthLength : 0);
+        return data.Length + (key.IsEmpty ? 0 : key.RawSpanLength) + (HasKeyBytes(preamble) ? KeyLengthLength : 0);
     }
 
     /// <summary>
@@ -493,19 +492,7 @@ public readonly ref struct SlottedArray
                 {
                     var actual = GetSlotPayload(ref slot);
 
-                    if (slot.GetHasMidLength())
-                    {
-                        int len = (slot.KeyPreamble >> 1) - KeyToTrimmedDiff; // Length of trimmed path = length of key - length of hash
-                        bool isOdd = (slot.KeyPreamble & 1) != 0;
-
-                        if (NibblePath.TryReadFromWithLength(actual, key, len, isOdd, out var leftover))
-                        {
-                            data = leftover;
-                            slotIndex = i;
-                            return true;
-                        }
-                    }
-                    if (slot.GetHasKeyBytes())
+                    if (slot.HasKeyBytes)
                     {
                         if (NibblePath.TryReadFrom(actual, key, out var leftover))
                         {
@@ -516,6 +503,19 @@ public readonly ref struct SlottedArray
                     }
                     else
                     {
+                        var lengthPreamble = slot.KeyPreamble >> 1;
+                        if (lengthPreamble is >= Slot.KeyPreambleLen5 and <= Slot.KeyPreambleLen6)
+                        {
+                            var len = lengthPreamble - KeyToTrimmedDiff; // Length of trimmed path = length of key - length of hash
+
+                            if (NibblePath.TryReadFromWithLength(actual, key, len, (byte)(slot.KeyPreamble & 1), out var leftover))
+                            {
+                                data = leftover;
+                                slotIndex = i;
+                                return true;
+                            }
+                        }
+
                         // The key is contained in the hash, all is equal and good to go!
                         data = actual;
                         slotIndex = i;
@@ -619,8 +619,8 @@ public readonly ref struct SlottedArray
         private const ushort KeyPreambleShift = 12;
 
         private const byte KeyPreambleLen4 = 0b0100; // 4 nibbles
-        private const byte KeyPreambleLen5 = 0b101; // 5 nibbles
-        private const byte KeyPreambleLen6 = 0b110; // 6 nibbles
+        public const byte KeyPreambleLen5 = 0b101; // 5 nibbles
+        public const byte KeyPreambleLen6 = 0b110; // 6 nibbles
 
         // The new (temporary KeyPreambleBeyond) is used for 7 and more nibbles, instead of 5 and more.
         // private const byte KeyPreambleLen7AndMore = 0b111; // 7 and more nibbles
@@ -652,7 +652,7 @@ public readonly ref struct SlottedArray
 
         public readonly byte Nibble0Th => (byte)(Hash >> (HashByteShift + NibblePath.NibbleShift) & 0xF);
 
-        public bool GetHasKeyBytes() => KeyPreamble >= KeyPreambleWithBytes;
+        public bool HasKeyBytes => KeyPreamble >= KeyPreambleWithBytes;
 
         public bool GetHasMidLength() => (KeyPreamble >> 1) is >= KeyPreambleLen5 and <= KeyPreambleLen6;
 
