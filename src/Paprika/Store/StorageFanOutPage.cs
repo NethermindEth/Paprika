@@ -108,6 +108,8 @@ public readonly unsafe struct StorageFanOutPage<TNext>(Page page) : IPageWithDat
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
+        resolver.Prefetch(Data.Addresses);
+
         using var scope = visitor.On(this, addr);
 
         foreach (var bucket in Data.Addresses)

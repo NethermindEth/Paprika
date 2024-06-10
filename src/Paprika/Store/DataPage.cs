@@ -303,6 +303,11 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
     public void Report(IReporter reporter, IPageResolver resolver, int pageLevel, int trimmedNibbles)
     {
+        resolver.Prefetch(Data.Buckets);
+
+        var slotted = new SlottedArray(Data.DataSpan);
+        reporter.ReportDataUsage(Header.PageType, pageLevel, trimmedNibbles, slotted);
+
         foreach (var bucket in Data.Buckets)
         {
             if (!bucket.IsNull)
@@ -315,8 +320,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             }
         }
 
-        var slotted = new SlottedArray(Data.DataSpan);
-        reporter.ReportDataUsage(Header.PageType, pageLevel, trimmedNibbles, slotted);
+
     }
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
