@@ -459,9 +459,8 @@ public readonly ref struct NibblePath
         return source.Slice(GetSpanLength(odd, length));
     }
 
-    public static Span<byte> ReadFromWithLength(Span<byte> source, int length, bool isOdd, out NibblePath nibblePath)
+    public static Span<byte> ReadFromWithLength(Span<byte> source, int length, byte odd, out NibblePath nibblePath)
     {
-        var odd = isOdd ? OddBit : 0;
         nibblePath = new NibblePath(source, odd, length);
         return source.Slice(GetSpanLength(odd, length));
     }
@@ -489,12 +488,11 @@ public readonly ref struct NibblePath
         return actualKey.Equals(expected);
     }
 
-    public static bool TryReadFromWithLength(Span<byte> source, in NibblePath expected, int length, bool isOdd, out Span<byte> leftover)
+    public static bool TryReadFromWithLength(Span<byte> source, in NibblePath expected, int length, byte isOdd, out Span<byte> leftover)
     {
         leftover = ReadFromWithLength(source, length, isOdd, out var actualKey);
         return actualKey.Equals(expected);
     }
-
 
     public int FindFirstDifferentNibble(in NibblePath other)
     {
