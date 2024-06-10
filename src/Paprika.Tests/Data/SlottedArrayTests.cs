@@ -19,48 +19,6 @@ public class SlottedArrayTests
     private static ReadOnlySpan<byte> Data4 => new byte[] { 23, 24, 25 };
     private static ReadOnlySpan<byte> Data5 => new byte[] { 23, 24, 64 };
 
-    // [Test]
-    // public Task Temp_TBD_Hash_collisions()
-    // {
-    //     Span<byte> span = stackalloc byte[4096];
-    //     const byte nibble = 0xF;
-    //     var zeroes = NibblePath.FromKey(Keccak.Zero);
-    //     var hashCollisions = new SlottedArray(span);
-    //     var hashCollisionValue = new byte[13];
-    //
-    //     var length = 0;
-    //     const int hashCollisionsLength = 128;
-    //     TestContext.WriteLine("NibblePath length = ");
-    //     TestContext.WriteLine(zeroes.Length);
-    //     TestContext.WriteLine("Space left = ");
-    //     TestContext.WriteLine(hashCollisions.CapacityLeft);
-    //
-    //     for (int i =1, j = 0; i <= hashCollisionsLength; i++, j++)
-    //     {
-    //         if (j >= zeroes.Length)
-    //         {
-    //             zeroes = zeroes.SliceFrom(1);
-    //             j = 0;
-    //         }
-    //         bool canFit  =hashCollisions.TrySet(zeroes.SliceTo(j), hashCollisionValue);
-    //         if (!canFit)
-    //         {
-    //             TestContext.WriteLine("Can't fit");
-    //             break;
-    //         }
-    //         length++;
-    //     }
-    //
-    //     TestContext.WriteLine("Length = ");
-    //     TestContext.WriteLine(length);
-    //     // TestContext.WriteLine("HashCollisionsLength = ");
-    //     // TestContext.WriteLine(hashCollisionsLength);
-    //     TestContext.WriteLine("Space left = ");
-    //     TestContext.WriteLine(hashCollisions.CapacityLeft);
-    //
-    //     return Verify(span.ToArray());
-    // }
-
     [Test]
     public Task Set_Get_Delete_Get_AnotherSet()
     {
