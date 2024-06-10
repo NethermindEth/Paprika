@@ -17,13 +17,22 @@ public static class StatisticsForPagedDb
         {
             var state = new StatisticsReporter(TrieType.State);
             var storage = new StatisticsReporter(TrieType.Storage);
+            var ids = new PageCountingReporter();
 
-            read.Report(state, storage);
+            read.Report(state, storage, ids, out var totalAbandoned);
 
             var report = new Layout()
-                .SplitColumns(
-                    BuildReport(state, "State"),
-                    BuildReport(storage, "Storage"));
+                .SplitRows(
+                    new Layout("top")
+                        .SplitColumns(
+                            BuildReport(state, "State"),
+                            BuildReport(storage, "Storage")),
+                    new Layout("bottom")
+                        .Update(new Panel(new Paragraph(
+                            $"- pages used for id mapping: {ids.Count,8}\n" +
+                                $"- total pages abandoned: {totalAbandoned,8}\n" +
+                            "")).Header("Other stats").Expand())
+                );
 
             reportTo.Update(new Panel(report).Header("Paprika tree statistics").Expand());
         }

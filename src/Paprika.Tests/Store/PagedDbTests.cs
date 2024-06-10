@@ -186,7 +186,22 @@ public class PagedDbTests
             var state = new StatisticsReporter(TrieType.State);
             var storage = new StatisticsReporter(TrieType.Storage);
 
-            read.Report(state, storage);
+            read.Report(state, storage, new JustLookingReporter(), out _);
+        }
+    }
+
+    private class JustLookingReporter : IReporter
+    {
+        public void ReportDataUsage(PageType type, int pageLevel, int trimmedNibbles, in SlottedArray array)
+        {
+        }
+
+        public void ReportPage(uint ageInBatches, PageType type)
+        {
+        }
+
+        public void ReportLeafOverflowCount(byte count)
+        {
         }
     }
 
