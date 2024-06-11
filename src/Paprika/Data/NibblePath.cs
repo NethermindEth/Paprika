@@ -32,13 +32,18 @@ public readonly ref struct NibblePath
     };
 
     /// <summary>
+    /// Exposes <see cref="Singles"/> for tests only.
+    /// </summary>
+    public static ReadOnlySpan<byte> SinglesForTests => Singles;
+
+    /// <summary>
     /// Creates a <see cref="NibblePath"/> with length of 1.
     /// </summary>
     /// <param name="nibble">The nibble that should be in the path.</param>
     /// <param name="odd">The oddity.</param>
     /// <returns>The path</returns>
     /// <remarks>
-    /// Highly optimized, branchless, just a few moves and adds.
+    /// Highly optimized, branch-less, just a few moves and adds.
     /// </remarks>
     public static NibblePath Single(byte nibble, int odd)
     {
@@ -50,7 +55,7 @@ public readonly ref struct NibblePath
     }
 
     public const int MaxLengthValue = byte.MaxValue / 2 + 2;
-    public const int NibblePerByte = 2;
+    private const int NibblePerByte = 2;
     public const int NibbleShift = 8 / NibblePerByte;
     public const int NibbleMask = 15;
 
@@ -168,7 +173,7 @@ public readonly ref struct NibblePath
     /// <param name="key"></param>
     /// <param name="nibbleFrom"></param>
     /// <returns>
-    /// The Keccak needs to be "in" here, as otherwise a copy would be create and the ref
+    /// The Keccak needs to be "in" here, as otherwise a copy would be created and the ref
     /// would point to a garbage memory.
     /// </returns>
     public static NibblePath FromKey(in Keccak key, int nibbleFrom = 0)
@@ -372,7 +377,7 @@ public readonly ref struct NibblePath
     }
 
     /// <summary>
-    /// Appends the <see cref="other1"/> and then <see cref="other2"/> path using the <paramref name="workingSet"/> as the working memory.
+    /// Appends <see cref="other1"/> and then <see cref="other2"/> path using the <paramref name="workingSet"/> as the working memory.
     /// </summary>
     [SkipLocalsInit]
     public NibblePath Append(scoped in NibblePath other1, int hash, Span<byte> workingSet)
@@ -464,6 +469,7 @@ public readonly ref struct NibblePath
         nibblePath = new NibblePath(source, odd, length);
         return source.Slice(GetSpanLength(odd, length));
     }
+
     public static Span<byte> ReadFrom(Span<byte> source, out NibblePath nibblePath)
     {
         var b = (int)source[0];
