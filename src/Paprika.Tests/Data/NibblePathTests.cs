@@ -1,7 +1,9 @@
 using System.Buffers.Binary;
 using FluentAssertions;
 using NUnit.Framework;
+using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Utils;
 
 // ReSharper disable HeapView.BoxingAllocation
 
@@ -9,6 +11,119 @@ namespace Paprika.Tests.Data;
 
 public class NibblePathTests
 {
+    [Test]
+    public void Get_Singles()
+    {
+        // Expected values
+        byte[] expectedSingles =
+        [
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+            0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF
+        ];
+
+        // Get the actual values from the NibblePath.Singles property
+        var actualSingles = NibblePath.SinglesForTests;
+
+        // Check if the length is correct
+        actualSingles.Length.Should().Be(expectedSingles.Length);
+
+        // Check if each value is correct
+        for (var i = 0; i < expectedSingles.Length; i++)
+        {
+            actualSingles[i].Should().Be(expectedSingles[i]);
+        }
+    }
+
+    [Test]
+    public void Get_Single([Values(0, 1)] int odd)
+    {
+        for (byte nibble = 0; nibble <= NibblePath.NibbleMask; nibble++)
+        {
+            var nibblePath = NibblePath.Single(nibble, odd);
+
+            // Check the length
+            nibblePath.Length.Should().Be(1);
+
+            // Check the nibble value
+            nibblePath[0].Should().Be(nibble);
+
+            // Check the oddity
+            bool isOdd = nibblePath.Oddity == 1;
+            isOdd.Should().Be(odd == 1);
+        }
+    }
+
+    [Test]
+    public void FirstNibble_ShouldReturnCorrectValue()
+    {
+        // Case 1: Even nibble path
+        var evenNibblePath = NibblePath.FromKey(new byte[] { 0x12, 0x34 });
+        evenNibblePath.FirstNibble.Should().Be(0x1);
+
+        // Case 2: Odd nibble path
+        var oddNibblePath = NibblePath.FromKey(new byte[] { 0x12, 0x34 }, 1);
+        oddNibblePath.FirstNibble.Should().Be(0x2);
+
+        // Case 3: Single nibble path (even)
+        var singleEvenNibblePath = NibblePath.Single(0xF, 0);
+        singleEvenNibblePath.FirstNibble.Should().Be(0xF);
+
+        // Case 4: Single nibble path (odd)
+        var singleOddNibblePath = NibblePath.Single(0xA, 1);
+        singleOddNibblePath.FirstNibble.Should().Be(0xA);
+    }
+
+    [Test]
+    public void RawSpan_ShouldReturnCorrectSpan()
+    {
+        // Case 1: Even nibble path
+        var evenNibblePath = NibblePath.FromKey(new byte[] { 0x12, 0x34, 0x56 });
+        var expectedEvenRawSpan = new byte[] { 0x12, 0x34, 0x56 };
+        evenNibblePath.RawSpan.SequenceEqual(expectedEvenRawSpan).Should().BeTrue();
+
+        // Case 2: Odd nibble path
+        var oddNibblePath = NibblePath.FromKey(new byte[] { 0x12, 0x34, 0x56 }, 1);
+        var expectedOddRawSpan = new byte[] { 0x12, 0x34, 0x56 };
+        oddNibblePath.RawSpan.SequenceEqual(expectedOddRawSpan).Should().BeTrue();
+
+        // Case 3: Single nibble path (even)
+        var singleEvenNibblePath = NibblePath.Single(0xF, 0);
+        var expectedSingleEvenRawSpan = new byte[] { 0xFF };
+        singleEvenNibblePath.RawSpan.SequenceEqual(expectedSingleEvenRawSpan).Should().BeTrue();
+
+        // Case 4: Single nibble path (odd)
+        var singleOddNibblePath = NibblePath.Single(0xA, 1);
+        var expectedSingleOddRawSpan = new byte[] { 0xAA };
+        singleOddNibblePath.RawSpan.SequenceEqual(expectedSingleOddRawSpan).Should().BeTrue();
+
+        // Case 5: Empty nibble path
+        var emptyNibblePath = NibblePath.Empty;
+        var expectedEmptyRawSpan = new byte[] { };
+        emptyNibblePath.RawSpan.SequenceEqual(expectedEmptyRawSpan).Should().BeTrue();
+
+        // Case 6: 5 length nibble path (odd)
+        var fiveLengthOddNibblePath = NibblePath.FromKey(new byte[] { 0x12, 0x34, 0x5}, 1);
+        var expectedFiveLengthOddRawSpan = new byte[] { 0x12, 0x34, 0x5 };
+        fiveLengthOddNibblePath.RawSpan.SequenceEqual(expectedFiveLengthOddRawSpan).Should().BeTrue();
+    }
+
+    [Test]
+    public void UnsafeAsKeccak_ShouldReturnCorrectKeccak()
+    {
+        string hexString = "380c98b03a3f72ee8aa540033b219c0d397dbe2523162db9dd07e6bbb015d50b";
+        var nibblePath = NibblePath.Parse(hexString);
+
+        Keccak expectedKeccak = new Keccak(Convert.FromHexString(hexString));
+        Keccak actualKeccak = nibblePath.UnsafeAsKeccak;
+
+        expectedKeccak.Should().Be(actualKeccak);
+
+        Keccak expectedKeccak2 = Keccak.OfAnEmptyString;
+        Keccak actualKeccak2 = NibblePath.Parse("c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470").UnsafeAsKeccak;
+
+        expectedKeccak2.Should().Be(actualKeccak2);
+    }
+
     [Test]
     public void Equal_From([Range(0, 15)] int from)
     {
@@ -292,6 +407,126 @@ public class NibblePathTests
         Span<byte> expected = stackalloc byte[2] { nibble, first };
 
         NibblePath.FromKey(expected).SliceFrom(1).Equals(appended);
+    }
+
+    [Test]
+    public void Append_include_hash()
+    {
+        var path1 = NibblePath.Parse("AB");
+        var path2 = NibblePath.Parse("CDE");
+
+        var appended = path1.Append(path2, 0x12, stackalloc byte[NibblePath.FullKeccakByteLength]);
+        var expected = NibblePath.Parse("ABCDE12");
+        appended.Equals(expected).Should().BeTrue();
+    }
+
+    [Test]
+    public void Append_throw_exception()
+    {
+        // With hash
+        Assert.Throws<ArgumentException>(() =>
+        {
+            var path1 = NibblePath.Single(0xA, 0);
+            var path2 = NibblePath.Single(0xB, 0);
+            path1.Append(path2, 0xCD, stackalloc byte[1]);
+        });
+
+        // Without hash
+        Assert.Throws<ArgumentException>(() =>
+        {
+            var path1 = NibblePath.Single(0xA, 0);
+            var path2 = NibblePath.Single(0xB, 0);
+            path1.Append(path2, stackalloc byte[1]);
+        });
+
+        // AppendNibble
+        // Without hash
+        Assert.Throws<ArgumentException>(() =>
+        {
+            var path1 = NibblePath.Single(0xA, 0);
+            var path2 = NibblePath.Single(0xB, 0);
+            path1.AppendNibble(0xCD, stackalloc byte[1]);
+        });
+    }
+
+    [Test]
+    public void Append_emptyPath()
+    {
+        var path1 = NibblePath.Single(0xA, 0);
+        var emptyPath = NibblePath.Empty;
+
+        // Without hash
+        var appended = path1.Append(emptyPath, stackalloc byte[NibblePath.FullKeccakByteLength]);
+        var expected = NibblePath.Parse("A");
+
+        appended.Equals(expected).Should().BeTrue();
+
+        // With hash
+        appended = path1.Append(emptyPath, 0xCD, stackalloc byte[NibblePath.FullKeccakByteLength]);
+        expected = NibblePath.Parse("ACD");
+
+        appended.Equals(expected).Should().BeTrue();
+    }
+
+    [Test]
+    public void Append__oddity_alignment()
+    {
+        // Starting position of path1 and path2 is aligned
+        var path1 = NibblePath.Parse("AB");
+        var path2 = NibblePath.Parse("CD");
+
+        var appended = path1.Append(path2, stackalloc byte[NibblePath.FullKeccakByteLength]);
+        var expected = NibblePath.Parse("ABCD");
+
+        appended.Equals(expected).Should().BeTrue();
+
+        // Starting position of path1 and path2 is not aligned
+        var path3 = NibblePath.Parse("A");
+        var path4 = NibblePath.Parse("BCD");
+
+        appended = path3.Append(path4, stackalloc byte[NibblePath.FullKeccakByteLength]);
+        expected = NibblePath.Parse("ABCD");
+
+        appended.Equals(expected).Should().BeTrue();
+
+        // Case to increase coverage
+        var path5 = NibblePath.Parse("ABC").SliceFrom(1);
+        var path6 = NibblePath.Parse("DE").SliceFrom(1);
+
+        appended = path5.Append(path6, stackalloc byte[NibblePath.FullKeccakByteLength]);
+        expected = NibblePath.Parse("0BCE").SliceFrom(1); // To make odd
+
+        appended.Equals(expected).Should().BeTrue();
+    }
+
+    [Test]
+    public void Append_non_aligned_oddity_with_hash()
+    {
+        // Starting position of path1 and path2 is aligned
+        var path1 = NibblePath.Parse("AB");
+        var path2 = NibblePath.Parse("CD");
+
+        var appended = path1.Append(path2, 0xEF, stackalloc byte[NibblePath.FullKeccakByteLength]);
+        var expected = NibblePath.Parse("ABCDEF");
+
+        appended.Equals(expected).Should().BeTrue();
+
+        // Starting position of path1 and path2 is not aligned
+        var path3 = NibblePath.Parse("A");
+        var path4 = NibblePath.Parse("BCD");
+
+        appended = path3.Append(path4, 0xEF, stackalloc byte[NibblePath.FullKeccakByteLength]);
+        expected = NibblePath.Parse("ABCDEF");
+
+        appended.Equals(expected).Should().BeTrue();
+
+        var path5 = NibblePath.Parse("ABC").SliceFrom(1);
+        var path6 = NibblePath.Parse("DE").SliceFrom(1);
+
+        appended = path5.Append(path6, 0xAF, stackalloc byte[NibblePath.FullKeccakByteLength]);
+        expected = NibblePath.Parse("0BCEAF").SliceFrom(1); // To make odd
+
+        appended.Equals(expected).Should().BeTrue();
     }
 
     [TestCaseSource(nameof(GetRawNibbles))]
