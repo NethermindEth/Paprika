@@ -345,7 +345,9 @@ public class Blockchain : IAsyncDisposable
     public IReadOnlyWorldState StartReadOnly(Keccak keccak)
     {
         var (batch, ancestors) = BuildBlockDataDependencies(keccak);
-        return new ReadOnlyState(keccak, new ReadOnlyBatchCountingRefs(batch), ancestors);
+        var filter = CreateAncestorsFilter(ancestors);
+
+        return new ReadOnlyState(keccak, new ReadOnlyBatchCountingRefs(batch), ancestors, filter, _pool);
     }
 
     public IReadOnlyWorldState StartReadOnlyLatestFromDb()
@@ -1466,6 +1468,8 @@ public class Blockchain : IAsyncDisposable
     {
         private readonly ReadOnlyBatchCountingRefs _batch;
         private readonly CommittedBlockState[] _ancestors;
+        private readonly BitFilter? _ancestorsFilter;
+        private readonly BufferPool? _pool;
 
         public ReadOnlyState(ReadOnlyBatchCountingRefs batch)
         {
@@ -1478,6 +1482,15 @@ public class Blockchain : IAsyncDisposable
         {
             _batch = batch;
             _ancestors = ancestors;
+            Hash = stateRoot;
+        }
+
+        public ReadOnlyState(Keccak stateRoot, ReadOnlyBatchCountingRefs batch, CommittedBlockState[] ancestors, BitFilter ancestorsFilter, BufferPool pool)
+        {
+            _batch = batch;
+            _ancestors = ancestors;
+            _ancestorsFilter = ancestorsFilter;
+            _pool = pool;
             Hash = stateRoot;
         }
 
@@ -1531,21 +1544,26 @@ public class Blockchain : IAsyncDisposable
         /// chain.
         /// </summary>
         private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
-            ulong bloom,
-            out bool succeeded)
+            ulong keyHash, out bool succeeded)
         {
-            ushort depth = 1;
-
-            var destroyedHash = CommittedBlockState.GetDestroyedHash(key);
-
-            // walk all the blocks locally
-            foreach (var ancestor in _ancestors)
+            if (_ancestors.Length > 0)
             {
-                var owner = ancestor.TryGetLocal(key, keyWritten, bloom, destroyedHash, out succeeded);
-                if (succeeded)
-                    return owner.WithDepth(depth);
+                var destroyedHash = CommittedBlockState.GetDestroyedHash(key);
 
-                depth++;
+                if (_ancestorsFilter == null || _ancestorsFilter.GetValueOrDefault().MayContainAny(keyHash, destroyedHash))
+                {
+                    ushort depth = 1;
+
+                    // Walk through the ancestors only if the filter shows that they may contain the value
+                    foreach (var ancestor in _ancestors)
+                    {
+                        var owner = ancestor.TryGetLocal(key, keyWritten, keyHash, destroyedHash, out succeeded);
+                        if (succeeded)
+                            return owner.WithDepth(depth);
+
+                        depth++;
+                    }
+                }
             }
 
             if (_batch.TryGet(key, out var span))
@@ -1570,6 +1588,8 @@ public class Blockchain : IAsyncDisposable
             {
                 ancestor.Dispose();
             }
+
+            _ancestorsFilter?.Return(_pool);
         }
 
         public override string ToString() =>
