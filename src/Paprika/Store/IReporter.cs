@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using System.Runtime.InteropServices;
 using HdrHistogram;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -26,7 +24,27 @@ public interface IReporter
 
 public interface IReporting
 {
-    void Report(IReporter state, IReporter storage);
+    void Report(IReporter state, IReporter storage, IReporter ids, out long totalAbandoned);
+}
+
+public class PageCountingReporter : IReporter
+{
+    public long Count { get; private set; }
+
+    public void ReportDataUsage(PageType type, int pageLevel, int trimmedNibbles, in SlottedArray array)
+    {
+        Count++;
+    }
+
+    public void ReportPage(uint ageInBatches, PageType type)
+    {
+        throw new NotImplementedException();
+    }
+
+    public void ReportLeafOverflowCount(byte count)
+    {
+        throw new NotImplementedException();
+    }
 }
 
 public class StatisticsReporter(TrieType trieType) : IReporter
