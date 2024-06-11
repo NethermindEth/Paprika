@@ -535,12 +535,7 @@ public class Blockchain : IAsyncDisposable
             _ancestors = ancestors;
 
             // ancestors filter
-            _ancestorsFilter = blockchain.CreateBitFilter();
-            foreach (var ancestor in ancestors)
-            {
-                _ancestorsFilter.OrWith(ancestor.Filter);
-            }
-
+            _ancestorsFilter = blockchain.CreateAncestorsFilter(ancestors);
             _blockchain = blockchain;
 
             ParentHash = parentStateRoot;
@@ -1120,12 +1115,12 @@ public class Blockchain : IAsyncDisposable
         private ReadOnlySpanOwnerWithMetadata<byte> TryGetAncestors(scoped in Key key,
             scoped ReadOnlySpan<byte> keyWritten, ulong keyHash)
         {
-            ushort depth = 1;
-
             var destroyedHash = CommittedBlockState.GetDestroyedHash(key);
 
             if (_ancestorsFilter.MayContainAny(keyHash, destroyedHash))
             {
+                ushort depth = 1;
+
                 // Walk through the ancestors only if the filter shows that they may contain the value
                 foreach (var ancestor in _ancestors)
                 {
@@ -1924,5 +1919,21 @@ public class Blockchain : IAsyncDisposable
 
             _readers.Clear();
         }
+    }
+
+    /// <summary>
+    /// Creates the combined <see cref="BitFilter"/> by or-ing all <paramref name="ancestors"/>
+    /// </summary>
+    /// <param name="ancestors"></param>
+    /// <returns></returns>
+    private BitFilter CreateAncestorsFilter(CommittedBlockState[] ancestors)
+    {
+        var filter = CreateBitFilter();
+        foreach (var ancestor in ancestors)
+        {
+            filter.OrWith(ancestor.Filter);
+        }
+
+        return filter;
     }
 }
