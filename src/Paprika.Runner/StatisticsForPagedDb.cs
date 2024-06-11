@@ -29,8 +29,8 @@ public static class StatisticsForPagedDb
                             BuildReport(storage, "Storage")),
                     new Layout("bottom")
                         .Update(new Panel(new Paragraph(
-                            $"- pages used for id mapping: {ids.Count,8}\n" +
-                                $"- total pages abandoned: {totalAbandoned,8}\n" +
+                            $"- pages used for id mapping: {Page.FormatAsGb(ids.Count)}\n" +
+                                $"- total pages abandoned: {Page.FormatAsGb(totalAbandoned)}\n" +
                             "")).Header("Other stats").Expand())
                 );
 

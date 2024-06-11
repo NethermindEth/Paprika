@@ -216,7 +216,7 @@ public struct AbandonedList
 
         long count = 0;
 
-        foreach (var addr in Addresses)
+        foreach (var addr in Addresses[..(int)EntriesCount])
         {
             var current = addr;
             while (current.IsNull == false)

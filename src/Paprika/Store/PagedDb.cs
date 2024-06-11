@@ -489,7 +489,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             ref readonly var data = ref root.Data;
 
             totalAbandoned = 0;
-            // totalAbandoned = data.AbandonedList.GatherTotalAbandoned(this);
+            totalAbandoned = data.AbandonedList.GatherTotalAbandoned(this);
 
             if (data.StateRoot.IsNull == false)
             {
