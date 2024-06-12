@@ -39,6 +39,7 @@ public class Blockchain : IAsyncDisposable
     private readonly Dictionary<Keccak, CommittedBlockState> _blocksByHash = new();
 
     private volatile ReadOnlyWorldStateAccessor? _accessor;
+    private volatile ReadOnlySyncWorldStateAccessor? _syncAccessor;
 
     // finalization
     private readonly Channel<CommittedBlockState> _finalizedChannel;
@@ -430,6 +431,11 @@ public class Blockchain : IAsyncDisposable
     {
         // pages are zeroed before, return zero on empty tree
         return keccak == Keccak.EmptyTreeHash ? Keccak.Zero : keccak;
+    }
+
+    public void ForceFlush()
+    {
+        _db.ForceFlush();
     }
 
     public void Finalize(Keccak keccak)
@@ -1129,7 +1135,7 @@ public class Blockchain : IAsyncDisposable
                         ? ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateStorageHash(this, context.AccountHash, path)
                         : ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateHash(path, this);
 
-                    visitor.VisitLeaf(path, keccak, leaf, context, this);
+                    visitor.VisitLeaf(path, keccak, leaf.Path, context, this);
 
                     if (!context.IsStorage)
                     {
@@ -1248,12 +1254,22 @@ public class Blockchain : IAsyncDisposable
 
                     context.Level++;
                     Span<byte> workingSpan = stackalloc byte[NibblePath.MaxLengthValue * 2 + 1];
+                    Span<byte> rlpMemoization = stackalloc byte[RlpMemo.Size];
                     for (byte i = 0; i < NibbleSet.NibbleCount; i++)
                     {
                         if (branch.Children[i])
                         {
                             context.BranchChildIndex = i;
                             NibblePath childPath = path.AppendNibble(i, workingSpan);
+
+                            if (childPath.Length == NibblePath.KeccakNibbleCount)
+                            {
+                                RlpMemo memo = RlpMemo.Decompress(leftover, branch.Children, rlpMemoization);
+                                memo.TryGetKeccak(i, out var keccakSpan);
+
+                                visitor.VisitLeaf(childPath, new Keccak(keccakSpan), NibblePath.Empty, context, this);
+                                continue;
+                            }
                             Accept(visitor, childPath, context);
                         }
                     }
@@ -2133,6 +2149,8 @@ public class Blockchain : IAsyncDisposable
 
             IReadOnlyBatch readOnly = _db.BeginReadOnlyBatch();
             _current = new BlockState(Keccak.Zero, readOnly, [], _blockchain);
+
+            _blockchain._syncAccessor?.OnRawStateCommit(readOnly);
         }
 
         public void Finalize(uint blockNumber)
@@ -2364,6 +2382,11 @@ public class Blockchain : IAsyncDisposable
         return _accessor = new ReadOnlyWorldStateAccessor(this);
     }
 
+    public IReadOnlyWorldStateAccessor BuildReadOnlyAccessorForSync()
+    {
+        return _syncAccessor = new ReadOnlySyncWorldStateAccessor(this);
+    }
+
     private class ReadOnlyWorldStateAccessor : IReadOnlyWorldStateAccessor
     {
         private readonly ReaderWriterLockSlim _lock = new();
@@ -2545,6 +2568,110 @@ public class Blockchain : IAsyncDisposable
         }
     }
 
+    private class ReadOnlySyncWorldStateAccessor : IReadOnlyWorldStateAccessor
+    {
+        private readonly ReaderWriterLockSlim _lock = new();
+        private readonly Blockchain _blockchain;
+        private ReadOnlyState? _latestState;
+
+        public ReadOnlySyncWorldStateAccessor(Blockchain blockchain)
+        {
+            _blockchain = blockchain;
+        }
+
+        public void OnRawStateCommit(in IReadOnlyBatch readOnlyBatch)
+        {
+            _lock.EnterWriteLock();
+            try
+            {
+                _latestState = new ReadOnlyState(new ReadOnlyBatchCountingRefs(readOnlyBatch));
+            }
+            finally
+            {
+                _lock.ExitWriteLock();
+            }
+        }
+
+        public bool HasState(in Keccak keccak)
+        {
+            _lock.EnterReadLock();
+            try
+            {
+                return _latestState?.Hash == keccak;
+            }
+            finally
+            {
+                _lock.ExitReadLock();
+            }
+        }
+
+        public Account GetAccount(in Keccak rootHash, in Keccak address)
+        {
+            if (!TryGetLeasedState(rootHash, out var state))
+            {
+                return default;
+            }
+
+            try
+            {
+                return state.GetAccount(address);
+            }
+            finally
+            {
+                // Release
+                state.Dispose();
+            }
+        }
+
+        public Span<byte> GetStorage(in Keccak rootHash, in Keccak address, in Keccak storage, Span<byte> destination)
+        {
+            if (!TryGetLeasedState(rootHash, out var state))
+            {
+                return default;
+            }
+
+            try
+            {
+                return state.GetStorage(address, storage, destination);
+            }
+            finally
+            {
+                // Release
+                state.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Finds the state in the dictionary under the read lock, acquires the lease on it and returns as soon as possible the leased state.
+        /// </summary>
+        private bool TryGetLeasedState(in Keccak rootHash, out ReadOnlyState state)
+        {
+            _lock.EnterReadLock();
+            try
+            {
+                if (_latestState is null)
+                {
+                    state = default;
+                    return false;
+                }
+
+                state = _latestState;
+                state.AcquireLease();
+                return true;
+            }
+            finally
+            {
+                _lock.ExitReadLock();
+            }
+        }
+
+        public void Dispose()
+        {
+            _lock.Dispose();
+            _latestState?.Dispose();
+        }
+    }
+
     /// <summary>
     /// Creates the combined <see cref="BitFilter"/> by or-ing all <paramref name="ancestors"/>
     /// </summary>
@@ -2571,7 +2698,7 @@ public class Blockchain : IAsyncDisposable
 
         void VisitExtension(NibblePath path, KeccakOrRlp keccakOrRlp, Node.Extension extension, BlockstateVisitorContext context, IReadOnlyWorldState worldState);
 
-        void VisitLeaf(NibblePath path, KeccakOrRlp keccakOrRlp, Node.Leaf leaf, BlockstateVisitorContext context, IReadOnlyWorldState worldState);
+        void VisitLeaf(NibblePath path, KeccakOrRlp keccakOrRlp, NibblePath leafPath, BlockstateVisitorContext context, IReadOnlyWorldState worldState);
     }
 
     /// <summary>
@@ -2603,13 +2730,13 @@ public class Blockchain : IAsyncDisposable
             _builder.AppendLine($"{GetPrefix(context)}EXTENSION {extension.Path.ToHexByteString()} -> {GetKeccakString(keccakOrRlp)}");
         }
 
-        public void VisitLeaf(NibblePath path, KeccakOrRlp keccakOrRlp, Node.Leaf leaf, BlockstateVisitorContext context, IReadOnlyWorldState worldState)
+        public void VisitLeaf(NibblePath path, KeccakOrRlp keccakOrRlp, NibblePath leafPath, BlockstateVisitorContext context, IReadOnlyWorldState worldState)
         {
             string leafDescription = context.IsStorage ? "LEAF " : "ACCOUNT ";
 
-            _builder.AppendLine($"{GetPrefix(context)}{leafDescription} {leaf.Path.ToHexByteString()} -> {GetKeccakString(keccakOrRlp)}");
+            _builder.AppendLine($"{GetPrefix(context)}{leafDescription} {leafPath.ToHexByteString()} -> {GetKeccakString(keccakOrRlp)}");
 
-            var full = path.Append(leaf.Path, stackalloc byte[NibblePath.MaxLengthValue * 2 + 1]);
+            var full = path.Append(leafPath, stackalloc byte[NibblePath.MaxLengthValue * 2 + 1]);
             if (!context.IsStorage)
             {
                 using var owner = worldState.Get(Key.Account(full));
