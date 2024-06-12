@@ -583,4 +583,60 @@ public class NibblePathTests
     }
 
     private HashSet<int> _hashes = new();
+
+    [Test]
+    public void HasOnlyZeroes()
+    {
+        var emptyNibblePath = NibblePath.Empty;
+        emptyNibblePath.HasOnlyZeroes().Should().BeTrue();
+
+        var span = new byte[] { 0x10 };
+
+        var evenNibblePath = NibblePath.FromKey(span);
+        evenNibblePath.HasOnlyZeroes().Should().BeFalse();
+
+        var oddNibblePath = NibblePath.FromKey(span).SliceFrom(1);
+        oddNibblePath.HasOnlyZeroes().Should().BeTrue();
+    }
+
+    [Test]
+    public void UnsafeMakeOdd_SingleByteLength([Values(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)] int nibble)
+    {
+        // Parse integer to hexadecimal
+        var single = nibble.ToString("X");
+        var path = NibblePath.Parse(single);
+        path.UnsafeMakeOdd();
+
+        var expectedString = String.Concat("0", single);
+        var expected = NibblePath.Parse(expectedString).SliceFrom(1);
+        path.Equals(expected).Should().BeTrue();
+        path.IsOdd.Should().BeTrue();
+    }
+
+    [Test]
+    public void UnsafeMakeOdd_LengthTwoToFour([Values("ABCD", "ABC", "AB")] string pathString)
+    {
+        var path = NibblePath.Parse(pathString);
+        path.UnsafeMakeOdd();
+
+        path.IsOdd.Should().BeTrue();
+
+        string expectedString = String.Concat("0", pathString);
+        var expected = NibblePath.Parse(expectedString).SliceFrom(1);
+        path.Equals(expected).Should().BeTrue();
+    }
+
+    [Test]
+    public void UnsafeMakeOdd_LargeLength()
+    {
+        var path = NibblePath.Parse("1234567890ABCDEF");
+        path.UnsafeMakeOdd();
+
+        path.IsOdd.Should().BeTrue();
+
+        var expected = NibblePath.Parse("01234567890ABCDEF").SliceFrom(1);
+        path.Equals(expected).Should().BeTrue();
+        // Assert.IsTrue(path.Equals(expected));
+        // Assert.IsTrue(path.IsOdd);
+    }
 }

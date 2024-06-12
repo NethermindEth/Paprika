@@ -161,14 +161,6 @@ public readonly ref struct NibblePath
     }
 
     /// <summary>
-    /// Creates the nibble path from preamble and raw slice
-    /// </summary>
-    public static NibblePath FromRaw(byte preamble, ReadOnlySpan<byte> slice)
-    {
-        return new NibblePath(slice, preamble & OddBit, preamble >> LengthShift);
-    }
-
-    /// <summary>
     /// </summary>
     /// <param name="key"></param>
     /// <param name="nibbleFrom"></param>
