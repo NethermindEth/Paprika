@@ -600,6 +600,23 @@ public class NibblePathTests
     }
 
     [Test]
+    public void UnsafeMakeOdd_ZeroLengthShouldThrow()
+    {
+
+        Assert.Throws<NullReferenceException>(() =>
+        {
+            var path = NibblePath.Empty;
+            path.UnsafeMakeOdd();
+        });
+
+        Assert.Throws<NullReferenceException>(() =>
+        {
+            var path = NibblePath.Single((byte)1, 0).SliceFrom(1);
+            path.UnsafeMakeOdd();
+        });
+    }
+
+    [Test]
     public void UnsafeMakeOdd_SingleByteLength([Values(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)] int nibble)
     {
         // Parse integer to hexadecimal
