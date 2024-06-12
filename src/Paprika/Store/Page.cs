@@ -116,4 +116,10 @@ public readonly unsafe struct Page : IPage, IEquatable<Page>
 
     public static Page DevOnlyNativeAlloc() =>
         new((byte*)NativeMemory.AlignedAlloc(PageSize, PageSize));
+
+    public static string FormatAsGb(long pageCount)
+    {
+        var sizeInGb = (double)pageCount * PageSize / 1024 / 1024 / 1024;
+        return $"{sizeInGb:F2}GB";
+    }
 }

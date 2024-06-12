@@ -39,7 +39,7 @@ public class GatherStatistics : Command<StatisticsSettings>
 
         var stats = new Layout("Stats");
 
-        AnsiConsole.Write("Gathering stats...");
+        AnsiConsole.WriteLine("Gathering stats...");
 
         StatisticsForPagedDb.Report(stats, read);
 

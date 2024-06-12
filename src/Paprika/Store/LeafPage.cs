@@ -294,6 +294,8 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
+        resolver.Prefetch(Data.Buckets);
+
         using var scope = visitor.On(this, addr);
 
         foreach (var bucket in Data.Buckets)
