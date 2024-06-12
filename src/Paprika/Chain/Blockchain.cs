@@ -2,6 +2,7 @@ using System.CodeDom.Compiler;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -722,7 +723,7 @@ public class Blockchain : IAsyncDisposable
         {
             private bool _prefetchPossible = true;
 
-            private readonly HashSet<int> _accounts = new();
+            private readonly HashSet<int> _prefetched = new();
             private readonly HashSet<ulong> _cached = new();
 
             public bool CanPrefetchFurther => Volatile.Read(ref _prefetchPossible);
@@ -732,6 +733,8 @@ public class Blockchain : IAsyncDisposable
                 if (CanPrefetchFurther == false)
                     return;
 
+                var accountHash = account.GetHashCode();
+
                 lock (cache)
                 {
                     if (_prefetchPossible == false)
@@ -739,20 +742,41 @@ public class Blockchain : IAsyncDisposable
                         return;
                     }
 
-                    if (_accounts.Add(account.GetHashCode()) == false)
+                    if (_prefetched.Add(accountHash))
                     {
-                        // already prefetched
-                        return;
+                        parent._blockchain._preCommit.Prefetch(account, this);
                     }
-
-                    parent._blockchain._preCommit.Prefetch(account, this);
                 }
             }
 
             public void PrefetchStorage(in Keccak account, in Keccak storage)
             {
-                // For now, just prefetch account
-                PrefetchAccount(account);
+                if (CanPrefetchFurther == false)
+                    return;
+
+                var accountHash = account.GetHashCode();
+                var storageHash = storage.GetHashCode();
+                var storageCombined = accountHash ^ storageHash;
+
+                lock (cache)
+                {
+                    if (_prefetchPossible == false)
+                    {
+                        return;
+                    }
+
+                    if (_prefetched.Add(accountHash))
+                    {
+                        // prefetch account
+                        parent._blockchain._preCommit.Prefetch(account, this);
+                    }
+
+                    if (_prefetched.Add(storageCombined))
+                    {
+                        // prefetch account
+                        parent._blockchain._preCommit.Prefetch(account, storage, this);
+                    }
+                }
             }
 
             public void BlockFurtherPrefetching()

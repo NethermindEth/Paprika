@@ -79,17 +79,20 @@ public class PrefetchingTests
     }
 
     [Explicit]
-    [TestCase(true, Category = Categories.LongRunning)]
-    [TestCase(false, Category = Categories.LongRunning)]
-    public async Task Spin(bool prefetch)
+    [TestCase(true, false, Category = Categories.LongRunning, TestName = "No storage, prefetch")]
+    [TestCase(false, false, Category = Categories.LongRunning, TestName = "No storage, no prefetch")]
+    [TestCase(true, true, Category = Categories.LongRunning, TestName = "Storage, prefetch")]
+    [TestCase(false, true, Category = Categories.LongRunning, TestName = "Storage, no prefetch")]
+    public async Task Spin(bool prefetch, bool storage)
     {
         var commits = new Stopwatch();
 
         const int parallelism = ComputeMerkleBehavior.ParallelismNone;
         const int finalityLength = 16;
-        const int accounts = 1_000_000;
-        const int accountsPerBlock = 50;
-        const int blocks = accounts / accountsPerBlock;
+        const int accounts = 200_000;
+        const int accountsPerBlock = 100;
+        const int visitSameAccountCount = 2;
+        const int blocks = accounts / accountsPerBlock * visitSameAccountCount;
 
         var random = new Random(13);
         var keccaks = new Keccak[accounts];
@@ -128,6 +131,10 @@ public class PrefetchingTests
                         }
 
                         prefetcher.PrefetchAccount(keccak);
+                        if (storage)
+                        {
+                            prefetcher.PrefetchStorage(keccak, keccak);
+                        }
                     }
 
                     return true;
@@ -138,7 +145,7 @@ public class PrefetchingTests
             if ((await task) == false)
                 prefetchFailures++;
 
-            SetAccounts(slice, block, i);
+            SetAccounts(slice, block, i, storage);
 
             commits.Start();
             parent = block.Commit(i);
@@ -160,11 +167,18 @@ public class PrefetchingTests
         Console.WriteLine($"Prefetch failures: {prefetchFailures}. Commit time {commits.Elapsed:g}");
     }
 
-    private static void SetAccounts(ReadOnlyMemory<Keccak> slice, IWorldState block, uint i)
+    private static void SetAccounts(ReadOnlyMemory<Keccak> slice, IWorldState block, uint i, bool storage)
     {
+        Span<byte> value = stackalloc byte[sizeof(uint)];
+        BinaryPrimitives.WriteUInt32LittleEndian(value, i);
+
         foreach (var keccak in slice.Span)
         {
             block.SetAccount(keccak, new Account(i, i));
+            if (storage)
+            {
+                block.SetStorage(keccak, keccak, value);
+            }
         }
     }
 }

@@ -1508,15 +1508,29 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     public void Prefetch(in Keccak account, IPrefetcherContext context)
     {
+        PrefetchImpl(account, Unsafe.NullRef<Keccak>(), context);
+    }
+
+    public void Prefetch(in Keccak account, in Keccak storage, IPrefetcherContext context)
+    {
+        PrefetchImpl(account, storage, context);
+    }
+
+    [SkipLocalsInit]
+    private static void PrefetchImpl(in Keccak account, in Keccak storage, IPrefetcherContext context)
+    {
+        var isAccountPrefetch = Unsafe.IsNullRef(in storage);
+        var accountPath = NibblePath.FromKey(account);
+
         // Use a similar algorithm to walking through as the MarkPathAsDirty.
         // Preload only branches
         // Flag forcing the leaf creation, that saves one get of the non-existent value.
-        var path = NibblePath.FromKey(account);
+        var path = NibblePath.FromKey(isAccountPrefetch ? account : storage);
 
         for (var i = 0; i <= path.Length; i++)
         {
             var slice = path.SliceTo(i);
-            var key = Key.Merkle(slice);
+            var key = isAccountPrefetch ? Key.Merkle(slice) : Key.Raw(accountPath, DataType.Merkle, slice);
             var leftoverPath = path.SliceFrom(i);
 
             // Query for the node

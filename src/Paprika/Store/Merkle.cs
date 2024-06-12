@@ -129,40 +129,44 @@ public static class Merkle
 
         public void Report(IReporter reporter, IPageResolver resolver, int pageLevel, int trimmedNibbles)
         {
-            // foreach (var bucket in Data.Buckets)
-            // {
-            //     if (!bucket.IsNull)
-            //     {
-            //         var child = resolver.GetAt(bucket);
-            //         if (child.Header.PageType == PageType.Leaf)
-            //             new LeafPage(child).Report(reporter, resolver, pageLevel + 1, trimmedNibbles + 1);
-            //         else
-            //             new DataPage(child).Report(reporter, resolver, pageLevel + 1, trimmedNibbles + 1);
-            //     }
-            // }
-            //
-            // var slotted = new SlottedArray(Data.DataSpan);
-            // reporter.ReportDataUsage(Header.PageType, pageLevel, trimmedNibbles, slotted);
+            foreach (var bucket in Data.Buckets)
+            {
+                if (!bucket.IsNull)
+                {
+                    var consumedNibbles = trimmedNibbles + ConsumedNibbles;
+                    var lvl = pageLevel + 1;
+
+                    var child = resolver.GetAt(bucket);
+
+                    if (child.Header.PageType == PageType.Leaf)
+                        new LeafPage(child).Report(reporter, resolver, lvl, consumedNibbles);
+                    else
+                        new DataPage(child).Report(reporter, resolver, lvl, consumedNibbles);
+                }
+            }
+
+            var slotted = new SlottedArray(Data.DataSpan);
+            reporter.ReportDataUsage(Header.PageType, pageLevel, trimmedNibbles, slotted);
         }
 
         public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
         {
-            // using (visitor.On(this, addr))
-            // {
-            //     foreach (var bucket in Data.Buckets)
-            //     {
-            //         if (bucket.IsNull)
-            //         {
-            //             continue;
-            //         }
-            //
-            //         var child = resolver.GetAt(bucket);
-            //         if (child.Header.PageType == PageType.Leaf)
-            //             new LeafPage(child).Accept(visitor, resolver, bucket);
-            //         else
-            //             new DataPage(child).Accept(visitor, resolver, bucket);
-            //     }
-            // }
+            using (visitor.On(this, addr))
+            {
+                foreach (var bucket in Data.Buckets)
+                {
+                    if (bucket.IsNull)
+                    {
+                        continue;
+                    }
+
+                    var child = resolver.GetAt(bucket);
+                    if (child.Header.PageType == PageType.Leaf)
+                        new LeafPage(child).Accept(visitor, resolver, bucket);
+                    else
+                        new DataPage(child).Accept(visitor, resolver, bucket);
+                }
+            }
         }
     }
 }

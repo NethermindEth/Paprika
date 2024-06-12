@@ -185,7 +185,9 @@ public static class Program
 
             var state = new StatisticsReporter(TrieType.State);
             var storage = new StatisticsReporter(TrieType.Storage);
-            read.Report(state, storage);
+            var counting = new PageCountingReporter();
+
+            read.Report(state, storage, counting, out _);
 
             spectre.Cancel();
             await reportingTask;

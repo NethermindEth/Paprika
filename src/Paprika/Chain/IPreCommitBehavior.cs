@@ -48,11 +48,16 @@ public interface IPreCommitBehavior
     bool CanPrefetch => false;
 
     /// <summary>
-    /// Runs the prefetch for the given account
+    /// Runs the prefetch for the given account.
     /// </summary>
-    /// <param name="account"></param>
-    /// <param name="accessor"></param>
     void Prefetch(in Keccak account, IPrefetcherContext accessor)
+    {
+    }
+
+    /// <summary>
+    /// Runs the prefetch for the given storage.
+    /// </summary>
+    void Prefetch(in Keccak account, in Keccak storage, IPrefetcherContext accessor)
     {
     }
 }
