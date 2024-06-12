@@ -653,7 +653,186 @@ public class NibblePathTests
 
         var expected = NibblePath.Parse("01234567890ABCDEF").SliceFrom(1);
         path.Equals(expected).Should().BeTrue();
-        // Assert.IsTrue(path.Equals(expected));
-        // Assert.IsTrue(path.IsOdd);
+    }
+
+    [Test]
+    public void TryReadFrom_ShouldReturnFalse_WhenPreambleDoesNotMatch()
+    {
+        var nibblePath = NibblePath.Parse("A1B2");
+        var source = new byte[] { 0x00, 0xA1, 0xB2, 0xFF }; // Incorrect preamble
+        var spanSource = new Span<byte>(source);
+
+        var result = NibblePath.TryReadFrom(spanSource, in nibblePath, out var leftover);
+
+        result.Should().BeFalse();
+        leftover.ToArray().Should().BeEmpty();
+    }
+
+    [Test]
+    public void TryReadFrom_ShouldReturnCorrectLeftover_WhenPreambleMatches()
+    {
+        var nibblePath = NibblePath.Parse("A1B2");
+        var preamble = nibblePath.RawPreamble;
+        var source = new byte[] { preamble, 0xA1, 0xB2, 0xCC, 0xDD }; // Correct preamble with extra data
+        var spanSource = new Span<byte>(source);
+
+        var result = NibblePath.TryReadFrom(spanSource, in nibblePath, out var leftover);
+
+        result.Should().BeTrue();
+        leftover.ToArray().Should().Equal(new byte[] { 0xCC, 0xDD });
+    }
+
+    [Test]
+    public void TryReadFrom_ShouldHandleEmptyPath()
+    {
+        var nibblePath = NibblePath.Empty;
+        var preamble = nibblePath.RawPreamble;
+        var source = new byte[] { preamble, 0xCC, 0xDD }; // Correct preamble with extra data
+        var spanSource = new Span<byte>(source);
+
+        var result = NibblePath.TryReadFrom(spanSource, in nibblePath, out var leftover);
+
+        result.Should().BeTrue();
+        leftover.ToArray().Should().Equal(new byte[] { 0xCC, 0xDD });
+    }
+
+    [Test]
+    public void ReadFrom_ShouldHandleEmptyPath()
+    {
+        var source = new byte[] { 0x00 };
+
+        var spanSource = new Span<byte>(source);
+        var leftover = NibblePath.ReadFrom(spanSource, out var nibblePath);
+
+        nibblePath.IsEmpty.Should().BeTrue();
+        leftover.ToArray().Should().Equal([]);
+
+        var roSpanSource = new ReadOnlySpan<byte>(source);
+        var roLeftover = NibblePath.ReadFrom(roSpanSource, out nibblePath);
+
+        nibblePath.IsEmpty.Should().BeTrue();
+        roLeftover.ToArray().Should().Equal([]);
+    }
+
+    [Test]
+    public void ReadFrom_ShouldHandleSingleNibblePath()
+    {
+        var source = new byte[] { 0x02, 0xA0 }; // length = 1, odd = 0
+
+        var spanSource = new Span<byte>(source);
+        var leftover = NibblePath.ReadFrom(spanSource, out var nibblePath);
+
+        nibblePath.Length.Should().Be(1);
+        nibblePath[0].Should().Be(0xA);
+        leftover.ToArray().Should().Equal([]);
+
+        var roSpanSource = new ReadOnlySpan<byte>(source);
+        var roLeftover = NibblePath.ReadFrom(roSpanSource, out nibblePath);
+
+        nibblePath.Length.Should().Be(1);
+        nibblePath[0].Should().Be(0xA);
+        roLeftover.ToArray().Should().Equal([]);
+    }
+
+    [Test]
+    public void ReadFrom_ShouldHandleOddNibblePath()
+    {
+        var source = new byte[] { 0x03, 0xAB, 0xC0 }; // length = 1, odd = 1
+        var expected = new byte[] { 0xC0 };
+
+        var spanSource = new Span<byte>(source);
+        var leftover = NibblePath.ReadFrom(spanSource, out var nibblePath);
+
+        nibblePath.Length.Should().Be(1);
+        nibblePath[0].Should().Be(0xB);
+        nibblePath.IsOdd.Should().BeTrue();
+        leftover.ToArray().Should().Equal(expected);
+
+        var roSpanSource = new Span<byte>(source);
+        var roLeftover = NibblePath.ReadFrom(roSpanSource, out nibblePath);
+
+        nibblePath.Length.Should().Be(1);
+        nibblePath[0].Should().Be(0xB);
+        nibblePath.IsOdd.Should().BeTrue();
+        roLeftover.ToArray().Should().Equal(expected);
+    }
+
+    [Test]
+    public void ReadFrom_ShouldHandleEvenNibblePath()
+    {
+        var source = new byte[] { 0x04, 0xAB, 0xCD }; // length = 2, odd = 0
+        var expected = new byte[] { 0xCD };
+
+        var spanSource = new Span<byte>(source);
+        var leftover = NibblePath.ReadFrom(spanSource, out var nibblePath);
+
+        nibblePath.Length.Should().Be(2);
+        nibblePath[0].Should().Be(0xA);
+        nibblePath[1].Should().Be(0xB);
+        leftover.ToArray().Should().Equal(expected);
+
+        var roSpanSource = new Span<byte>(source);
+        var roLeftover = NibblePath.ReadFrom(roSpanSource, out nibblePath);
+
+        nibblePath.Length.Should().Be(2);
+        nibblePath[0].Should().Be(0xA);
+        nibblePath[1].Should().Be(0xB);
+        roLeftover.ToArray().Should().Equal(expected);
+    }
+
+    [Test]
+    public void ReadFrom_ShouldHandleLongNibblePath()
+    {
+        var source = new byte[] { 0x0A, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0 }; // length = 5, odd = 0
+        var expected = new byte[] { 0x78, 0x9A, 0xBC, 0xDE, 0xF0 };
+
+        // Span<byte>
+        var spanSource = new Span<byte>(source);
+        var leftover = NibblePath.ReadFrom(spanSource, out var nibblePath);
+
+        nibblePath.Length.Should().Be(5);
+
+        for (var i = 1; i <= nibblePath.Length; i++)
+        {
+            nibblePath[i-1].ToString().Should().Be(i.ToString("X"));
+        }
+
+        leftover.ToArray().Should().Equal(expected);
+
+        // ReadOnlySpan<byte>
+        var roSpanSource = new  ReadOnlySpan<byte>(source);
+        var roLeftover = NibblePath.ReadFrom(roSpanSource, out nibblePath);
+
+        nibblePath.Length.Should().Be(5);
+
+        for (var i = 1; i <= nibblePath.Length; i++)
+        {
+            nibblePath[i-1].ToString().Should().Be(i.ToString("X"));
+        }
+
+        roLeftover.ToArray().Should().Equal(expected);
+    }
+
+    [Test]
+    public void ReadFrom_ShouldHandleOddNibblePathWithLeftover()
+    {
+        var source = new byte[] { 0x03, 0xAB, 0xCD, 0xEF }; // length = 1, odd = 1
+        var expected = new byte[] { 0xCD, 0xEF };
+
+        var spanSource = new Span<byte>(source);
+        var leftover = NibblePath.ReadFrom(spanSource, out var nibblePath);
+
+        nibblePath.Length.Should().Be(1);
+        nibblePath[0].Should().Be(0xB);
+        nibblePath.IsOdd.Should().BeTrue();
+        leftover.ToArray().Should().Equal(expected);
+
+        var roSpanSource = new Span<byte>(source);
+        var roLeftover = NibblePath.ReadFrom(roSpanSource, out nibblePath);
+
+        nibblePath.Length.Should().Be(1);
+        nibblePath[0].Should().Be(0xB);
+        nibblePath.IsOdd.Should().BeTrue();
+        roLeftover.ToArray().Should().Equal(expected);
     }
 }

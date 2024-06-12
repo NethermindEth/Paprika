@@ -246,7 +246,7 @@ public readonly ref struct NibblePath
         return destination.Slice(0, length);
     }
 
-    private byte RawPreamble => (byte)((_odd & OddBit) | (Length << LengthShift));
+    public byte RawPreamble => (byte)((_odd & OddBit) | (Length << LengthShift));
 
     private int WriteImplWithPreamble(Span<byte> destination)
     {
@@ -280,8 +280,9 @@ public readonly ref struct NibblePath
                 }
         }
 
-        // clearing the oldest nibble, if needed
-        // yes, it can be branch free
+        // If the path length is odd, clear the lower nibble of the last byte.
+        // This ensures that truncated nibble paths (like 0xAB.SliceTo(1)) are stored unambiguously.
+        // For instance, 0xAB.SliceTo(1) should result in 0xA0, so it can be distinguished from other paths.
         if (((odd + length) & OddBit) == 0)
             return spanLength + PreambleLength;
 
@@ -322,6 +323,9 @@ public readonly ref struct NibblePath
                 }
         }
 
+        // If the path length is odd, clear the lower nibble of the last byte.
+        // This ensures that truncated nibble paths (like 0xAB.SliceTo(1)) are stored unambiguously.
+        // For instance, 0xAB.SliceTo(1) should result in 0xA0, so it can be distinguished from other paths.
         if (((odd + length) & OddBit) == 0)
             return spanLength;
 
@@ -523,6 +527,7 @@ public readonly ref struct NibblePath
         var length = (b >> LengthShift);
 
         source = source.Slice(PreambleLength);
+
         nibblePath = new NibblePath(source, odd, length);
         return source.Slice(GetSpanLength(odd, length));
     }
