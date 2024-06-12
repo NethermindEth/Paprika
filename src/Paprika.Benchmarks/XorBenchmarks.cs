@@ -4,7 +4,7 @@ using Paprika.Utils;
 
 namespace Paprika.Benchmarks;
 
-[DisassemblyDiagnoser(maxDepth: 2)]
+// [DisassemblyDiagnoser(maxDepth: 2)]
 public class XorBenchmarks
 {
     private const int Size = 2000;

@@ -23,6 +23,7 @@ public readonly ref struct SlottedArray
 {
     public const int Alignment = 8;
     public const int HeaderSize = Header.Size;
+    private const int KeyToTrimmedDiff = 4;
 
     private readonly ref Header _header;
     private readonly Span<byte> _data;
@@ -108,14 +109,20 @@ public readonly ref struct SlottedArray
         // write item: length_key, key, data
         var dest = _data.Slice(slot.ItemAddress, total);
 
-        if (HasKeyBytes(preamble))
+        int len = preamble >> Slot.KeyPreambleLengthShift;
+        bool includeLengthAndOddity = HasKeyBytes(preamble);
+        const byte maxLengthEncodedInHash = 4;
+
+        if (len <= maxLengthEncodedInHash)
         {
-            var dest2 = trimmed.WriteToWithLeftover(dest);
-            data.CopyTo(dest2);
+            data.CopyTo(dest);
         }
         else
         {
-            data.CopyTo(dest);
+            var dest2 = includeLengthAndOddity
+                ? trimmed.WriteToWithLeftoverWithPreamble(dest)
+                : trimmed.WriteToWithLeftoverNoPreamble(dest);
+            data.CopyTo(dest2);
         }
 
         // commit low and high
@@ -141,7 +148,7 @@ public readonly ref struct SlottedArray
         [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
         private ref struct Chunk
         {
-            public const int Size = 64;
+            private const int Size = 64;
 
             private byte _start;
 
@@ -236,9 +243,12 @@ public readonly ref struct SlottedArray
             Span<byte> data;
 
             NibblePath trimmed;
-            if (slot.HasKeyBytes)
+
+            int len = slot.KeyPreamble >> Slot.KeyPreambleLengthShift;
+
+            if (len >= Slot.KeyPreambleLen5)
             {
-                data = NibblePath.ReadFrom(payload, out trimmed);
+                data = len <= Slot.KeyPreambleLen6 ? NibblePath.ReadFromWithLength(payload, len - KeyToTrimmedDiff, (byte)(slot.KeyPreamble & 1), out trimmed) : NibblePath.ReadFrom(payload, out trimmed);
             }
             else
             {
@@ -284,7 +294,7 @@ public readonly ref struct SlottedArray
             ref var slot = ref this[i];
 
             // extract only not deleted and these which have at least one nibble
-            if (slot.IsDeleted == false && slot.HasAtLeastOneNibble)
+            if (slot is { IsDeleted: false, HasAtLeastOneNibble: true })
             {
                 buckets[slot.Nibble0Th] += 1;
             }
@@ -293,9 +303,16 @@ public readonly ref struct SlottedArray
 
     private const int KeyLengthLength = 1;
 
+    /// <summary>
+    /// Determines the total space required for the key and data, taking into account specific length conditions.
+    /// </summary>
+    /// <param name="preamble">The preamble byte that contains key length and oddity information.</param>
+    /// <param name="key">The NibblePath key.</param>
+    /// <param name="data">The data associated with the key.</param>
+    /// <returns>The total space required in bytes.</returns>
     private static int GetTotalSpaceRequired(byte preamble, in NibblePath key, ReadOnlySpan<byte> data)
     {
-        return (HasKeyBytes(preamble) ? KeyLengthLength + key.RawSpanLength : 0) + data.Length;
+        return data.Length + (key.IsEmpty ? 0 : key.RawSpanLength) + (HasKeyBytes(preamble) ? KeyLengthLength : 0);
     }
 
     /// <summary>
@@ -304,19 +321,25 @@ public readonly ref struct SlottedArray
     private static bool HasKeyBytes(byte preamble) => preamble >= Slot.KeyPreambleWithBytes;
 
     /// <summary>
+    /// Checks whether the preamble signifies that the length of the NibblePath key is 4, 5, or 6.
+    /// </summary>
+    private static bool HasLengthFiveToSix(byte preamble)
+    {
+        var lengthMarker = (byte)(preamble >> Slot.KeyPreambleLengthShift);
+        return lengthMarker is >= Slot.KeyPreambleLen5 and <= Slot.KeyPreambleLen6;
+    }
+
+    /// <summary>
     /// Warning! This does not set any tombstone so the reader won't be informed about a delete,
     /// just will miss the value.
     /// </summary>
     public bool Delete(in NibblePath key)
     {
         var hash = Slot.PrepareKey(key, out var preamble, out var trimmed);
-        if (TryGetImpl(trimmed, hash, preamble, out _, out var index))
-        {
-            DeleteImpl(index);
-            return true;
-        }
+        if (!TryGetImpl(trimmed, hash, preamble, out _, out var index)) return false;
+        DeleteImpl(index);
+        return true;
 
-        return false;
     }
 
     public void Delete(in Enumerator.Item item) => DeleteImpl(item.Index);
@@ -420,7 +443,7 @@ public readonly ref struct SlottedArray
     /// <summary>
     /// Clears the map.
     /// </summary>
-    public void Clear()
+    private void Clear()
     {
         _header = default;
     }
@@ -461,7 +484,7 @@ public readonly ref struct SlottedArray
                 {
                     var actual = GetSlotPayload(ref slot);
 
-                    if (slot.HasKeyBytes)
+                    if (slot.HasKeyBytes())
                     {
                         if (NibblePath.TryReadFrom(actual, key, out var leftover))
                         {
@@ -472,6 +495,20 @@ public readonly ref struct SlottedArray
                     }
                     else
                     {
+                        var lengthPreamble = slot.KeyPreamble >> Slot.KeyPreambleLengthShift;
+                        if (lengthPreamble is >= Slot.KeyPreambleLen5 and <= Slot.KeyPreambleLen6)
+                        {
+                            // Length of trimmed path = length of key - length of hash
+                            var len = lengthPreamble - KeyToTrimmedDiff;
+
+                            if (NibblePath.TryReadFromWithLength(actual, key, len, (byte)(slot.KeyPreamble & 1), out var leftover))
+                            {
+                                data = leftover;
+                                slotIndex = i;
+                                return true;
+                            }
+                        }
+
                         // The key is contained in the hash, all is equal and good to go!
                         data = actual;
                         slotIndex = i;
@@ -562,17 +599,21 @@ public readonly ref struct SlottedArray
         private const ushort KeyPreambleMask = unchecked((ushort)~AddressMask);
         private const ushort KeyPreambleShift = 12;
 
-        private const byte KeyPreambleBeyond = 0b101; // Some key nibbles are stored along data, this is the marker.
+        public const byte KeyPreambleLen4 = 0b0100;
+        public const byte KeyPreambleLen5 = 0b101;
+        public const byte KeyPreambleLen6 = 0b110;
+
+        private const byte KeyPreambleBeyond = 0b111; // Some key nibbles are stored along data, this is the marker.
         private const byte KeyPreambleEmpty = 0b000; // Empty, no key's nibbles encoded.
         private const byte KeyPreambleOddBit = 0b001; // The bit used for odd-starting paths.
         private const byte KeyPreambleDelete = KeyPreambleOddBit; // Empty cannot be odd, odd is used as deleted marker.
-        // 0b110, 0b111 are not used
 
         public const byte KeyPreambleWithBytes = KeyPreambleBeyond << KeyPreambleLengthShift;
 
-        private const byte KeyPreambleLengthShift = 1;
+        public const byte KeyPreambleLengthShift = 1;
 
         private const byte KeyPreambleMaxEncodedLength = KeyPreambleBeyond - 1;
+        private const byte MaxLengthEncodedInHash = 4;
         private const byte KeySlice = 2;
 
         private const int HashByteShift = 8;
@@ -587,7 +628,9 @@ public readonly ref struct SlottedArray
 
         public readonly byte Nibble0Th => (byte)(Hash >> (HashByteShift + NibblePath.NibbleShift) & 0xF);
 
-        public bool HasKeyBytes => KeyPreamble >= KeyPreambleWithBytes;
+        public bool HasKeyBytes() => KeyPreamble >= KeyPreambleWithBytes;
+
+        public bool GetHasMidLength() => (KeyPreamble >> KeyPreambleLengthShift) is >= KeyPreambleLen5 and <= KeyPreambleLen6;
 
         private ushort Raw;
 
@@ -617,7 +660,7 @@ public readonly ref struct SlottedArray
             var length = key.Length;
             var oddBit = key.IsOdd ? 1 : 0;
 
-            if (length <= KeyPreambleMaxEncodedLength)
+            if (length <= MaxLengthEncodedInHash)
             {
                 preamble = (byte)((length << KeyPreambleLengthShift) | oddBit);
                 trimmed = NibblePath.Empty;
@@ -641,11 +684,14 @@ public readonly ref struct SlottedArray
                 }
             }
 
-            // The path is 4 nibbles or longer
-            preamble = (byte)(KeyPreambleWithBytes | oddBit);
-            trimmed = key.SliceFrom(KeySlice).SliceTo(length - KeyPreambleMaxEncodedLength);
+            // If len <= 6, we can fit the actual length in the preamble
+            preamble = (length <= KeyPreambleMaxEncodedLength)
+                ? (byte)((length << KeyPreambleLengthShift) | oddBit)
+                : (byte)(KeyPreambleWithBytes | oddBit);
 
-            // Extract first 4 nibbles as the hash
+            trimmed = key.SliceFrom(KeySlice).SliceTo(length - MaxLengthEncodedInHash);
+
+            // Extract first 2 nibbles and last 2 nibbles as the hash to avoid collisions due to common prefixes
             return (ushort)((((key.GetAt(0) << shift) | key.GetAt(1)) << HashByteShift) |
                             (key.GetAt(length - 2) << shift) | key.GetAt(length - 1));
         }
@@ -660,31 +706,39 @@ public readonly ref struct SlottedArray
                 data = input;
                 return default;
             }
-
-            if (count <= 2 || count > 4)
-            {
-                workingSet[0] = (byte)(hash >> HashByteShift);
-            }
-            else
+            if (count is > 2 and <= 4)
             {
                 Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(workingSet))
                     = (ushort)((hash >> HashByteShift) | (hash << HashByteShift));
+            }
+            else
+            {
+                workingSet[0] = (byte)(hash >> HashByteShift);
+                if (count <= KeyPreambleLen6)
+                {
+                    workingSet[1] = (byte)(hash & 0xFF);
+                }
             }
 
             NibblePath prefix = NibblePath.FromKey(workingSet, 0, count > 4 ? KeySlice : count);
             if ((preamble & KeyPreambleOddBit) != 0)
             {
-                prefix.UnsafeMakeOdd(); // moving odd can make move beyond 0th
+                prefix.UnsafeMakeOdd();
             }
 
-            if (count <= 4)
+            if (count <= MaxLengthEncodedInHash)
             {
                 data = input;
                 return prefix;
             }
 
             const int limit = 3;
-            data = NibblePath.ReadFrom(input, out var trimmed);
+            bool oddFlag = (preamble & KeyPreambleOddBit) != 0;
+
+            data = count <= KeyPreambleMaxEncodedLength
+                ? NibblePath.ReadFromWithLength(input, count - KeyToTrimmedDiff, oddFlag, out var trimmed)
+                : NibblePath.ReadFrom(input, out trimmed);
+
             return prefix.Append(trimmed, hash, workingSet[limit..]);
         }
 

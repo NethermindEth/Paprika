@@ -5,7 +5,7 @@ using Paprika.Chain;
 namespace Paprika.Benchmarks;
 
 [MemoryDiagnoser]
-[DisassemblyDiagnoser]
+// [DisassemblyDiagnoser]
 public class PooledSpanDictionaryBenchmarks
 {
     private readonly BufferPool _pool = new(1, false);

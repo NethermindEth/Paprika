@@ -7,7 +7,7 @@ using Paprika.Store;
 
 namespace Paprika.Benchmarks;
 
-[DisassemblyDiagnoser(maxDepth: 2)]
+// [DisassemblyDiagnoser(maxDepth: 2)]
 public class SlottedArrayBenchmarks
 {
     private readonly byte[] _writtenLittleEndian = new byte[Page.PageSize];
