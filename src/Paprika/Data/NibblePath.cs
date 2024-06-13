@@ -436,9 +436,8 @@ public readonly ref struct NibblePath
 
     public int RawSpanLength => GetSpanLength(_odd, Length);
 
-    public static ReadOnlySpan<byte> ReadFromWithLength(ReadOnlySpan<byte> source, int length, bool isOdd, out NibblePath nibblePath)
+    public static ReadOnlySpan<byte> ReadFromWithLength(ReadOnlySpan<byte> source, int length, int odd, out NibblePath nibblePath)
     {
-        var odd = isOdd ? OddBit : 0;
         nibblePath = new NibblePath(source, odd, length);
         return source.Slice(GetSpanLength(odd, length));
     }
