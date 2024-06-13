@@ -667,8 +667,8 @@ public class NibblePathTests
     {
         var nibblePath = NibblePath.Parse("A1B2");
         var source = new byte[] { 0x00, 0xA1, 0xB2, 0xFF }; // Incorrect preamble
-        var spanSource = new Span<byte>(source);
 
+        var spanSource = new Span<byte>(source);
         var result = NibblePath.TryReadFrom(spanSource, in nibblePath, out var leftover);
 
         result.Should().BeFalse();
@@ -707,6 +707,36 @@ public class NibblePathTests
 
         result.Should().BeTrue();
         leftover.ToArray().Should().Equal(storedData);
+    }
+
+    [Test]
+    public void TryReadFromWithLength_ShouldReturnFalse_WhenNibblePathDoesNotMatch()
+    {
+        var nibblePath = NibblePath.Parse("A1B2");
+        var source = new byte[] { 0xB1, 0xA2, 0xB2, 0xFF }; // Incorrect NibblePath
+        var expectedLeftover = new byte[] { 0xB2, 0xFF };
+
+        var spanSource = new Span<byte>(source);
+        var result = NibblePath.TryReadFromWithLength(spanSource, in nibblePath, nibblePath.Length, 0, out var leftover);
+
+        result.Should().BeFalse();
+        leftover.ToArray().Should().Equal(expectedLeftover);
+    }
+
+    [Test]
+    public void TryReadFromWithLength_ShouldReturnCorrectLeftover_WhenNibblePathMatches()
+    {
+        var nibblePath = NibblePath.Parse("A1B2");
+
+        var source = new byte[] { 0xA1, 0xB2, 0xC3, 0xD4 };
+        var spanSource = new Span<byte>(source);
+
+        var expectedLeftover = new byte[] { 0xC3, 0xD4 };
+
+        var result = NibblePath.TryReadFromWithLength(spanSource, in nibblePath, nibblePath.Length, 0, out var leftover);
+
+        result.Should().BeTrue();
+        leftover.ToArray().Should().Equal(expectedLeftover);
     }
 
     [Test]
