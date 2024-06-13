@@ -56,55 +56,57 @@ public class NibblePathTests
     [Test]
     public void FirstNibble_ShouldReturnCorrectValue()
     {
+        var raw = new byte[] { 0x12, 0x34 };
+        const byte evenFirst = 0x1;
+        const byte oddFirst = 0x2;
+        const byte single = 0xA;
+
         // Case 1: Even nibble path
-        var evenNibblePath = NibblePath.FromKey(new byte[] { 0x12, 0x34 });
-        evenNibblePath.FirstNibble.Should().Be(0x1);
+        var evenNibblePath = NibblePath.FromKey(raw);
+        evenNibblePath.FirstNibble.Should().Be(evenFirst);
 
         // Case 2: Odd nibble path
-        var oddNibblePath = NibblePath.FromKey(new byte[] { 0x12, 0x34 }, 1);
-        oddNibblePath.FirstNibble.Should().Be(0x2);
+        var oddNibblePath = NibblePath.FromKey(raw, 1);
+        oddNibblePath.FirstNibble.Should().Be(oddFirst);
 
         // Case 3: Single nibble path (even)
-        var singleEvenNibblePath = NibblePath.Single(0xF, 0);
-        singleEvenNibblePath.FirstNibble.Should().Be(0xF);
+        var singleEvenNibblePath = NibblePath.Single(single, 0);
+        singleEvenNibblePath.FirstNibble.Should().Be(single);
 
         // Case 4: Single nibble path (odd)
-        var singleOddNibblePath = NibblePath.Single(0xA, 1);
-        singleOddNibblePath.FirstNibble.Should().Be(0xA);
+        var singleOddNibblePath = NibblePath.Single(single, 1);
+        singleOddNibblePath.FirstNibble.Should().Be(single);
     }
 
-    [Test]
-    public void RawSpan_ShouldReturnCorrectSpan()
+    [TestCase(new byte[] { 0x12, 0x34, 0x56 }, 0, new byte[] { 0x12, 0x34, 0x56 })] // Even nibble path
+    [TestCase(new byte[] { 0x12, 0x34, 0x56 }, 1, new byte[] { 0x12, 0x34, 0x56 })] // Odd nibble path
+    [TestCase(new byte[] { 0x12, 0x34, 0x5 }, 1, new byte[] { 0x12, 0x34, 0x5 })]  // 5 length nibble path (odd)
+    public void RawSpan_ShouldReturnCorrectSpan(byte[] raw, int nibbleOffset, byte[] expectedRaw)
     {
-        // Case 1: Even nibble path
-        var evenNibblePath = NibblePath.FromKey(new byte[] { 0x12, 0x34, 0x56 });
-        var expectedEvenRawSpan = new byte[] { 0x12, 0x34, 0x56 };
-        evenNibblePath.RawSpan.SequenceEqual(expectedEvenRawSpan).Should().BeTrue();
+        var nibblePath = NibblePath.FromKey(raw, nibbleOffset);
+        nibblePath.RawSpan.SequenceEqual(expectedRaw).Should().BeTrue();
+    }
 
-        // Case 2: Odd nibble path
-        var oddNibblePath = NibblePath.FromKey(new byte[] { 0x12, 0x34, 0x56 }, 1);
-        var expectedOddRawSpan = new byte[] { 0x12, 0x34, 0x56 };
-        oddNibblePath.RawSpan.SequenceEqual(expectedOddRawSpan).Should().BeTrue();
 
-        // Case 3: Single nibble path (even)
-        var singleEvenNibblePath = NibblePath.Single(0xF, 0);
-        var expectedSingleEvenRawSpan = new byte[] { 0xFF };
-        singleEvenNibblePath.RawSpan.SequenceEqual(expectedSingleEvenRawSpan).Should().BeTrue();
+    [Test]
+    public void RawSpan_ForSingleAndEmpty()
+    {
+        const byte singleRaw = 0xF;
+        var expectedSingleRaw = new byte[] { 0xFF };
 
-        // Case 4: Single nibble path (odd)
-        var singleOddNibblePath = NibblePath.Single(0xA, 1);
-        var expectedSingleOddRawSpan = new byte[] { 0xAA };
-        singleOddNibblePath.RawSpan.SequenceEqual(expectedSingleOddRawSpan).Should().BeTrue();
+        var expectedEmptyRaw = Array.Empty<byte>();
 
-        // Case 5: Empty nibble path
+        // Case: Single nibble path (even)
+        var singleEvenNibblePath = NibblePath.Single(singleRaw, 0);
+        singleEvenNibblePath.RawSpan.SequenceEqual(expectedSingleRaw).Should().BeTrue();
+
+        // Case: Single nibble path (odd)
+        var singleOddNibblePath = NibblePath.Single(singleRaw, 1);
+        singleOddNibblePath.RawSpan.SequenceEqual(expectedSingleRaw).Should().BeTrue();
+
+        // Case: Empty nibble path
         var emptyNibblePath = NibblePath.Empty;
-        var expectedEmptyRawSpan = new byte[] { };
-        emptyNibblePath.RawSpan.SequenceEqual(expectedEmptyRawSpan).Should().BeTrue();
-
-        // Case 6: 5 length nibble path (odd)
-        var fiveLengthOddNibblePath = NibblePath.FromKey(new byte[] { 0x12, 0x34, 0x5}, 1);
-        var expectedFiveLengthOddRawSpan = new byte[] { 0x12, 0x34, 0x5 };
-        fiveLengthOddNibblePath.RawSpan.SequenceEqual(expectedFiveLengthOddRawSpan).Should().BeTrue();
+        emptyNibblePath.RawSpan.SequenceEqual(expectedEmptyRaw).Should().BeTrue();
     }
 
     [Test]
@@ -611,7 +613,7 @@ public class NibblePathTests
 
         Assert.Throws<NullReferenceException>(() =>
         {
-            var path = NibblePath.Single((byte)1, 0).SliceFrom(1);
+            var path = NibblePath.Single((byte)0xA, 0).SliceFrom(1);
             path.UnsafeMakeOdd();
         });
     }
@@ -619,12 +621,13 @@ public class NibblePathTests
     [Test]
     public void UnsafeMakeOdd_SingleByteLength([Values(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)] int nibble)
     {
+        const string slicePrefix = "0";
         // Parse integer to hexadecimal
         var single = nibble.ToString("X");
         var path = NibblePath.Parse(single);
         path.UnsafeMakeOdd();
 
-        var expectedString = String.Concat("0", single);
+        var expectedString = string.Concat(slicePrefix, single);
         var expected = NibblePath.Parse(expectedString).SliceFrom(1);
         path.Equals(expected).Should().BeTrue();
         path.IsOdd.Should().BeTrue();
@@ -633,12 +636,14 @@ public class NibblePathTests
     [Test]
     public void UnsafeMakeOdd_LengthTwoToFour([Values("ABCD", "ABC", "AB")] string pathString)
     {
+        const string slicePrefix = "0";
+
         var path = NibblePath.Parse(pathString);
         path.UnsafeMakeOdd();
 
         path.IsOdd.Should().BeTrue();
 
-        string expectedString = String.Concat("0", pathString);
+        string expectedString = string.Concat(slicePrefix, pathString);
         var expected = NibblePath.Parse(expectedString).SliceFrom(1);
         path.Equals(expected).Should().BeTrue();
     }
@@ -646,12 +651,14 @@ public class NibblePathTests
     [Test]
     public void UnsafeMakeOdd_LargeLength()
     {
-        var path = NibblePath.Parse("1234567890ABCDEF");
+        const string slicePrefix = "0";
+        const string pathString = "1234567890ABCDEF";
+        var path = NibblePath.Parse(pathString);
         path.UnsafeMakeOdd();
 
         path.IsOdd.Should().BeTrue();
 
-        var expected = NibblePath.Parse("01234567890ABCDEF").SliceFrom(1);
+        var expected = NibblePath.Parse(string.Concat(slicePrefix, pathString)).SliceFrom(1);
         path.Equals(expected).Should().BeTrue();
     }
 
@@ -673,13 +680,16 @@ public class NibblePathTests
     {
         var nibblePath = NibblePath.Parse("A1B2");
         var preamble = nibblePath.RawPreamble;
+
         var source = new byte[] { preamble, 0xA1, 0xB2, 0xCC, 0xDD }; // Correct preamble with extra data
         var spanSource = new Span<byte>(source);
+
+        var expectedLeftover = new byte[] { 0xCC, 0xDD };
 
         var result = NibblePath.TryReadFrom(spanSource, in nibblePath, out var leftover);
 
         result.Should().BeTrue();
-        leftover.ToArray().Should().Equal(new byte[] { 0xCC, 0xDD });
+        leftover.ToArray().Should().Equal(expectedLeftover);
     }
 
     [Test]
@@ -687,31 +697,35 @@ public class NibblePathTests
     {
         var nibblePath = NibblePath.Empty;
         var preamble = nibblePath.RawPreamble;
-        var source = new byte[] { preamble, 0xCC, 0xDD }; // Correct preamble with extra data
+
+        var storedData = new byte[] {0xCC, 0xDD};
+
+        var source = storedData.Prepend(preamble).ToArray(); // [preamble, 0xCC, OxDD]
         var spanSource = new Span<byte>(source);
 
         var result = NibblePath.TryReadFrom(spanSource, in nibblePath, out var leftover);
 
         result.Should().BeTrue();
-        leftover.ToArray().Should().Equal(new byte[] { 0xCC, 0xDD });
+        leftover.ToArray().Should().Equal(storedData);
     }
 
     [Test]
     public void ReadFrom_ShouldHandleEmptyPath()
     {
         var source = new byte[] { 0x00 };
+        var empty = Array.Empty<byte>();
 
         var spanSource = new Span<byte>(source);
         var leftover = NibblePath.ReadFrom(spanSource, out var nibblePath);
 
         nibblePath.IsEmpty.Should().BeTrue();
-        leftover.ToArray().Should().Equal([]);
+        leftover.ToArray().Should().Equal(empty);
 
         var roSpanSource = new ReadOnlySpan<byte>(source);
         var roLeftover = NibblePath.ReadFrom(roSpanSource, out nibblePath);
 
         nibblePath.IsEmpty.Should().BeTrue();
-        roLeftover.ToArray().Should().Equal([]);
+        roLeftover.ToArray().Should().Equal(empty);
     }
 
     [Test]
@@ -719,19 +733,23 @@ public class NibblePathTests
     {
         var source = new byte[] { 0x02, 0xA0 }; // length = 1, odd = 0
 
+        const int len = 1;
+        const byte firstNibble = 0xA;
+        var empty = Array.Empty<byte>();
+
         var spanSource = new Span<byte>(source);
         var leftover = NibblePath.ReadFrom(spanSource, out var nibblePath);
 
-        nibblePath.Length.Should().Be(1);
-        nibblePath[0].Should().Be(0xA);
-        leftover.ToArray().Should().Equal([]);
+        nibblePath.Length.Should().Be(len);
+        nibblePath[0].Should().Be(firstNibble);
+        leftover.ToArray().Should().Equal(empty);
 
         var roSpanSource = new ReadOnlySpan<byte>(source);
         var roLeftover = NibblePath.ReadFrom(roSpanSource, out nibblePath);
 
-        nibblePath.Length.Should().Be(1);
-        nibblePath[0].Should().Be(0xA);
-        roLeftover.ToArray().Should().Equal([]);
+        nibblePath.Length.Should().Be(len);
+        nibblePath[0].Should().Be(firstNibble);
+        roLeftover.ToArray().Should().Equal(empty);
     }
 
     [Test]
@@ -740,19 +758,22 @@ public class NibblePathTests
         var source = new byte[] { 0x03, 0xAB, 0xC0 }; // length = 1, odd = 1
         var expected = new byte[] { 0xC0 };
 
+        const int len = 1;
+        const byte firstNibble = 0xB;
+
         var spanSource = new Span<byte>(source);
         var leftover = NibblePath.ReadFrom(spanSource, out var nibblePath);
 
-        nibblePath.Length.Should().Be(1);
-        nibblePath[0].Should().Be(0xB);
+        nibblePath.Length.Should().Be(len);
+        nibblePath[0].Should().Be(firstNibble);
         nibblePath.IsOdd.Should().BeTrue();
         leftover.ToArray().Should().Equal(expected);
 
         var roSpanSource = new Span<byte>(source);
         var roLeftover = NibblePath.ReadFrom(roSpanSource, out nibblePath);
 
-        nibblePath.Length.Should().Be(1);
-        nibblePath[0].Should().Be(0xB);
+        nibblePath.Length.Should().Be(len);
+        nibblePath[0].Should().Be(firstNibble);
         nibblePath.IsOdd.Should().BeTrue();
         roLeftover.ToArray().Should().Equal(expected);
     }
@@ -763,20 +784,23 @@ public class NibblePathTests
         var source = new byte[] { 0x04, 0xAB, 0xCD }; // length = 2, odd = 0
         var expected = new byte[] { 0xCD };
 
+        const int len = 2;
+        const int firstNibble = 0xA, secondNibble = 0xB;
+
         var spanSource = new Span<byte>(source);
         var leftover = NibblePath.ReadFrom(spanSource, out var nibblePath);
 
-        nibblePath.Length.Should().Be(2);
-        nibblePath[0].Should().Be(0xA);
-        nibblePath[1].Should().Be(0xB);
+        nibblePath.Length.Should().Be(len);
+        nibblePath[0].Should().Be(firstNibble);
+        nibblePath[1].Should().Be(secondNibble);
         leftover.ToArray().Should().Equal(expected);
 
         var roSpanSource = new Span<byte>(source);
         var roLeftover = NibblePath.ReadFrom(roSpanSource, out nibblePath);
 
-        nibblePath.Length.Should().Be(2);
-        nibblePath[0].Should().Be(0xA);
-        nibblePath[1].Should().Be(0xB);
+        nibblePath.Length.Should().Be(len);
+        nibblePath[0].Should().Be(firstNibble);
+        nibblePath[1].Should().Be(secondNibble);
         roLeftover.ToArray().Should().Equal(expected);
     }
 
@@ -786,11 +810,13 @@ public class NibblePathTests
         var source = new byte[] { 0x0A, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0 }; // length = 5, odd = 0
         var expected = new byte[] { 0x78, 0x9A, 0xBC, 0xDE, 0xF0 };
 
+        const int len = 5;
+
         // Span<byte>
         var spanSource = new Span<byte>(source);
         var leftover = NibblePath.ReadFrom(spanSource, out var nibblePath);
 
-        nibblePath.Length.Should().Be(5);
+        nibblePath.Length.Should().Be(len);
 
         for (var i = 1; i <= nibblePath.Length; i++)
         {
@@ -803,7 +829,7 @@ public class NibblePathTests
         var roSpanSource = new  ReadOnlySpan<byte>(source);
         var roLeftover = NibblePath.ReadFrom(roSpanSource, out nibblePath);
 
-        nibblePath.Length.Should().Be(5);
+        nibblePath.Length.Should().Be(len);
 
         for (var i = 1; i <= nibblePath.Length; i++)
         {
@@ -819,19 +845,22 @@ public class NibblePathTests
         var source = new byte[] { 0x03, 0xAB, 0xCD, 0xEF }; // length = 1, odd = 1
         var expected = new byte[] { 0xCD, 0xEF };
 
+        const int len = 1;
+        const int oddFirstNibble = 0xB;
+
         var spanSource = new Span<byte>(source);
         var leftover = NibblePath.ReadFrom(spanSource, out var nibblePath);
 
-        nibblePath.Length.Should().Be(1);
-        nibblePath[0].Should().Be(0xB);
+        nibblePath.Length.Should().Be(len);
+        nibblePath[0].Should().Be(oddFirstNibble);
         nibblePath.IsOdd.Should().BeTrue();
         leftover.ToArray().Should().Equal(expected);
 
         var roSpanSource = new Span<byte>(source);
         var roLeftover = NibblePath.ReadFrom(roSpanSource, out nibblePath);
 
-        nibblePath.Length.Should().Be(1);
-        nibblePath[0].Should().Be(0xB);
+        nibblePath.Length.Should().Be(len);
+        nibblePath[0].Should().Be(oddFirstNibble);
         nibblePath.IsOdd.Should().BeTrue();
         roLeftover.ToArray().Should().Equal(expected);
     }
