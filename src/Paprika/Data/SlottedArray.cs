@@ -733,7 +733,7 @@ public readonly ref struct SlottedArray
             }
 
             const int limit = 3;
-            bool oddFlag = (preamble & KeyPreambleOddBit) != 0;
+            var oddFlag = preamble & KeyPreambleOddBit;
 
             data = count <= KeyPreambleMaxEncodedLength
                 ? NibblePath.ReadFromWithLength(input, count - KeyToTrimmedDiff, oddFlag, out var trimmed)
