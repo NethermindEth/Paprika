@@ -105,7 +105,7 @@ public static partial class Node
     {
         public const int Size = sizeof(byte);
 
-        private const byte HighestBit = 0b1000_0000;
+        public const byte HighestBit = 0b1000_0000;
 
         private const byte NodeTypeMask = 0b1100_0000;
         private const int NodeTypeMaskShift = 6;
@@ -130,7 +130,8 @@ public static partial class Node
         /// The part ((_header & HighestBit) >> 1)) allows for node types with the highest bit set
         /// <see cref="Type.Leaf"/> to have 7 bits of metadata.
         /// </summary>
-        public byte Metadata => (byte)((((_header & MetadataMask) | ((_header & HighestBit) >> 1)) & _header) >> MetadataMaskShift);
+        public byte Metadata =>
+            (byte)((((_header & MetadataMask) | ((_header & HighestBit) >> 1)) & _header) >> MetadataMaskShift);
 
         public Header(Type nodeType, byte metadata = 0b0000)
         {
@@ -189,7 +190,19 @@ public static partial class Node
         public int MaxByteLength => Header.Size + Path.RawSpan.Length - Path.Oddity;
 
         private const byte OddPathMetadata = 0b0001_0000;
-        public const int MinimalLeafPathLength = 1;
+
+        /// <summary>
+        /// This is a special case where a <see cref="NibblePath"/> is:
+        /// - even
+        /// - starts with 0b11XX nibble
+        /// It allows to write the path as is, and treat it as both,
+        /// the leaf and directly as the nibble path.
+        /// </summary>
+        private const byte EvenPathMetadata = 0b0100_0000;
+
+        private const byte EvenPathFirstNibbleMask = EvenPathMetadata | Header.HighestBit;
+
+        private const int MinimalLeafPathLength = 1;
 
         public readonly Header Header;
         public readonly NibblePath Path;
@@ -208,11 +221,30 @@ public static partial class Node
             Assert((path.Oddity + path.Length) % 2 == 0,
                 "If path is odd, length should be odd as well. If even, even");
 
-            var metadata = path.IsOdd ? (byte)(OddPathMetadata | path.FirstNibble) : 0;
-            Header = new Header(Type.Leaf, (byte)metadata);
+            int metadata;
+            if (path.IsOdd)
+            {
+                metadata = (byte)(OddPathMetadata | path.FirstNibble);
+            }
+            // even length
+            else if (IsEvenPathCompressible(path))
+            {
+                // special case where first nibble is in form of 0x11XX, which allows to encode 2 first nibbles a special way
+                metadata = path.FirstNibble << NibblePath.NibbleShift | path.GetAt(1);
+            }
+            else
+            {
+                // the path is even, but it does not start with 
+                metadata = 0;
+            }
 
+            Header = new Header(Type.Leaf, (byte)metadata);
             Path = path;
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static bool IsEvenPathCompressible(in NibblePath path) =>
+            (path.RawSpan[0] & EvenPathFirstNibbleMask) == EvenPathFirstNibbleMask;
 
         public Span<byte> WriteTo(Span<byte> output)
         {
@@ -222,6 +254,13 @@ public static partial class Node
 
         public Span<byte> WriteToWithLeftover(Span<byte> output)
         {
+            // Special case of even, compressible part
+            if (Path.IsOdd == false && IsEvenPathCompressible(Path))
+            {
+                Path.RawSpan.CopyTo(output);
+                return output[Path.RawSpan.Length..];
+            }
+
             var leftover = Header.WriteToWithLeftover(output);
             var span = Path.RawSpan;
             if (Path.IsOdd)
@@ -243,7 +282,12 @@ public static partial class Node
             var leftover = Header.ReadFrom(source, out var header);
 
             NibblePath path;
-            if ((header.Metadata & OddPathMetadata) == OddPathMetadata)
+            if ((source[0] & EvenPathFirstNibbleMask) == EvenPathFirstNibbleMask)
+            {
+                // Even, special case
+                path = NibblePath.FromKey(source, 0);
+            }
+            else if ((header.Metadata & OddPathMetadata) == OddPathMetadata)
             {
                 // Construct path by wrapping the source and slicing by one to move to first nibble.
                 path = NibblePath.FromKey(source, 1);

@@ -176,9 +176,13 @@ public class NodeTests
         decoded.Equals(leaf).Should().BeTrue($"Expected {leaf.ToString()}, got {decoded.ToString()}");
     }
 
-    [TestCase(new byte[] { 253, 137 }, 0, 2, 2)]
-    [TestCase(new byte[] { 253, 137 }, 1, 1, 1)]
-    [TestCase(new byte[] { 253, 137 }, 1, 3, 2)]
+    [TestCase(new byte[] { 129, 137 }, 0, 2, 2)]
+    [TestCase(new byte[] { 129, 137 }, 1, 1, 1)]
+    [TestCase(new byte[] { 129, 137 }, 1, 3, 2)]
+    [TestCase(new byte[] { 0b1100_0000, 137 }, 0, 4, 2)]
+    [TestCase(new byte[] { 0b1100_0001, 137 }, 0, 4, 2, TestName = "Even path - special 1st nibble (1)")]
+    [TestCase(new byte[] { 0b1100_1001, 137 }, 0, 4, 2, TestName = "Even path - special 1st nibble (2)")]
+    [TestCase(new byte[] { 0b1101_0001, 137 }, 0, 4, 2, TestName = "Even path - special 1st nibble (3)")]
     public void Leaf_paths(byte[] raw, int odd, int length, int expectedLength)
     {
         var path = NibblePath.FromKey(raw).SliceFrom(odd).SliceTo(length);
