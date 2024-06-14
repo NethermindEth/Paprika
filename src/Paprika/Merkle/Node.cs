@@ -186,10 +186,10 @@ public static partial class Node
     /// </remarks>
     public readonly ref partial struct Leaf
     {
-        public int MaxByteLength => Header.Size + Path.RawSpan.Length - Path.Oddity;
+        public const int MaxByteLength = Header.Size + NibblePath.KeccakNibbleCount;
 
         private const byte OddPathMetadata = 0b0001_0000;
-        public const int MinimalLeafPathLength = 1;
+        private const int MinimalLeafPathLength = 1;
 
         public readonly Header Header;
         public readonly NibblePath Path;
@@ -269,7 +269,7 @@ public static partial class Node
 
     public readonly ref struct Extension
     {
-        public int MaxByteLength => Header.Size + Path.MaxByteLength;
+        public const int MaxByteLength = Header.Size + NibblePath.KeccakNibbleCount;
 
         public readonly Header Header;
         public readonly NibblePath Path;
@@ -323,12 +323,13 @@ public static partial class Node
 
     public readonly ref struct Branch
     {
-        public int MaxByteLength => Header.Size +
-                                    (HeaderHasAllSet(Header) ? 0 : NibbleSet.MaxByteSize);
+        public const int MaxByteLength = Header.Size + NibbleSet.MaxByteSize;
 
+        private const byte HeaderMetadataAllChildrenSetMask = 0b0010_0000;
+        private const byte HeaderMetadataWithoutOneChildSetMask = 0b0001_0000;
+        private const byte OneChildMask = 0b0000_1111;
 
-        // private const byte HeaderMetadataKeccakMask = 0b0000_0001;
-        private const byte HeaderMetadataAllChildrenSetMask = 0b0000_0010;
+        private const byte HeaderMetadataCustomFormat = HeaderMetadataAllChildrenSetMask | HeaderMetadataWithoutOneChildSetMask;
 
         public readonly Header Header;
         public readonly NibbleSet.Readonly Children;
@@ -356,15 +357,21 @@ public static partial class Node
 
         public Branch(NibbleSet.Readonly children)
         {
-            Header = new Header(Type.Branch, metadata: (byte)(children.AllSet ? HeaderMetadataAllChildrenSetMask : 0));
+            byte metadata = children.SetCount switch
+            {
+                NibbleSet.NibbleCount => HeaderMetadataAllChildrenSetMask,
+                NibbleSet.NibbleCount - 1 => (byte)(HeaderMetadataWithoutOneChildSetMask | children.SmallestNibbleNotSet),
+                _ => 0
+            };
+
+            Header = new Header(Type.Branch, metadata: metadata);
 
             Assert(children);
 
             Children = children;
         }
 
-        private static bool HeaderHasAllSet(Header header) =>
-            (header.Metadata & HeaderMetadataAllChildrenSetMask) == HeaderMetadataAllChildrenSetMask;
+        private static bool HeaderHasCustomFormat(Header header) => (header.Metadata & HeaderMetadataCustomFormat) != 0;
 
         public Span<byte> WriteTo(Span<byte> output)
         {
@@ -376,7 +383,7 @@ public static partial class Node
         {
             var leftover = Header.WriteToWithLeftover(output);
 
-            if (!Children.AllSet)
+            if (!HeaderHasCustomFormat(Header))
             {
                 // write children only if not all set. All set is encoded in the header
                 leftover = Children.WriteToWithLeftover(leftover);
@@ -390,9 +397,11 @@ public static partial class Node
             var leftover = Header.ReadFrom(source, out var header);
 
             NibbleSet.Readonly children;
-            if (HeaderHasAllSet(header))
+            if (HeaderHasCustomFormat(header))
             {
-                children = NibbleSet.Readonly.All;
+                children = header.Metadata == HeaderMetadataAllChildrenSetMask
+                    ? NibbleSet.Readonly.All
+                    : NibbleSet.Readonly.AllWithout((byte)(header.Metadata & OneChildMask));
             }
             else
             {
@@ -415,7 +424,7 @@ public static partial class Node
 
         private static int GetBranchDataLength(Header header) =>
             Header.Size +
-            (HeaderHasAllSet(header) ? 0 : NibbleSet.MaxByteSize);
+            (HeaderHasCustomFormat(header) ? 0 : NibbleSet.MaxByteSize);
 
         public bool Equals(in Branch other)
         {
