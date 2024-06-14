@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Drawing;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
 
@@ -23,13 +24,20 @@ namespace Paprika.Store;
 /// Storage:
 /// <see cref="Payload.Storage"/> is a <see cref="FanOutList"/> of <see cref="FanOutPage"/>s. This gives 64k buckets on two levels. 
 /// </remarks>
-public readonly unsafe struct RootPage(Page root) : IPage
+public readonly unsafe struct RootPage(byte* root)
 {
+    public const int RootPageSize = Page.PageSize + FanOut.Of3Nibbles.Size;
+
     private const int StorageKeySize = Keccak.Size + Keccak.Size + 1;
 
-    public ref PageHeader Header => ref root.Header;
+    public ref PageHeader Header => ref Unsafe.AsRef<PageHeader>(root);
 
-    public ref Payload Data => ref Unsafe.AsRef<Payload>(root.Payload);
+    public ref Payload Data => ref Unsafe.AsRef<Payload>(root + PageHeader.Size);
+
+    public void CopyTo(RootPage destination) => Span.CopyTo(destination.Span);
+
+    private Span<byte> Span => new(root, RootPageSize);
+    public byte* Raw => root;
 
     /// <summary>
     /// Represents the data of the page.
@@ -37,7 +45,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     public struct Payload
     {
-        private const int Size = Page.PageSize - PageHeader.Size;
+        private const int Size = RootPageSize - PageHeader.Size;
 
         /// <summary>
         /// The address of the next free page. This should be used rarely as pages should be reused
@@ -68,18 +76,19 @@ public readonly unsafe struct RootPage(Page root) : IPage
         [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size)]
         private DbAddress StoragePayload;
 
-        public FanOutList<StorageFanOutPage<DataPage>, StandardType, FanOut.Of2Nibbles> Storage => new(MemoryMarshal.CreateSpan(ref StoragePayload, FanOut.Of2Nibbles.FanOut));
+        private const int StorageSize = FanOut.Of3Nibbles.Size;
+
+        public FanOutList<StorageFanOutPage<DataPage>, StandardType, FanOut.Of3Nibbles> Storage => new(MemoryMarshal.CreateSpan(ref StoragePayload, FanOut.Of3Nibbles.FanOut));
 
         /// <summary>
         /// Identifiers
         /// </summary>
-        [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + FanOut.Of2Nibbles.Size)]
+        [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + StorageSize)]
         private DbAddress IdsPayload;
 
         public FanOutList<FanOutPage, IdentityType, FanOut.Of2Nibbles> Ids => new(MemoryMarshal.CreateSpan(ref IdsPayload, FanOut.Of2Nibbles.FanOut));
 
-        public const int AbandonedStart =
-            DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + FanOut.Of2Nibbles.Size * 2;
+        public const int AbandonedStart = DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + StorageSize + FanOut.Of2Nibbles.Size;
 
         /// <summary>
         /// The start of the abandoned pages.
@@ -236,6 +245,11 @@ public readonly unsafe struct RootPage(Page root) : IPage
         var data = batch.TryGetPageAlloc(ref root, PageType.Standard);
         var updated = new Merkle.StateRootPage(data).Set(path, rawData, batch);
         root = batch.GetAddress(updated);
+    }
+
+    public struct RootPoolSize : IPoolSize
+    {
+        public static int BufferSize => RootPageSize;
     }
 }
 

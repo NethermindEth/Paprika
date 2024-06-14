@@ -1,5 +1,6 @@
 //#define TRACKING_REUSED_PAGES
 
+using System.Buffers.Binary;
 using NonBlocking;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
@@ -32,13 +33,15 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     /// </remarks>
     private const int MinHistoryDepth = 2;
 
+    private const int RootIndexOffset = 1;
+
     public const string MeterName = "Paprika.Store.PagedDb";
     public const string DbSize = "DB Size";
 
     private readonly IPageManager _manager;
     private readonly byte _historyDepth;
-    private long _lastRoot;
     private readonly RootPage[] _roots;
+    private long _lastRoot;
 
     // batches
     private readonly object _batchLock = new();
@@ -59,7 +62,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
     // pooled objects
     private Context? _ctx;
-    private readonly BufferPool _pooledRoots;
+    private readonly BufferPool<RootPage.RootPoolSize> _pooledRoots;
 
 #if TRACKING_REUSED_PAGES
     // reuse tracking
@@ -110,7 +113,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             "The number of pages registered to be reused");
 #endif
         // Pool
-        _pooledRoots = new BufferPool(16, true, _meter);
+        _pooledRoots = new BufferPool<RootPage.RootPoolSize>(16, true, _meter);
     }
 
     public static PagedDb NativeMemoryDb(long size, byte historyDepth = 2) =>
@@ -143,30 +146,25 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         _commitPageAbandoned.Record(abandonedCount);
     }
 
-    private void RootInit()
+    private unsafe void RootInit()
     {
         // create all root pages for the history depth
         for (uint i = 0; i < _historyDepth; i++)
         {
-            _roots[i] = new RootPage(_manager.GetAt(DbAddress.Page(i)));
+            _roots[i] = new RootPage((byte*)_manager.GetAt(GetRootAddress(i)).Raw.ToPointer());
         }
 
-        if (_roots[0].Data.NextFreePage < _historyDepth)
-        {
-            // the 0th page will have the properly number set to first free page
-            _roots[0].Data.NextFreePage = DbAddress.Page(_historyDepth);
-        }
+        _lastRoot = BinaryPrimitives.ReadInt64LittleEndian(
+            new Span<byte>(_manager.GetAt(DbAddress.Null).Raw.ToPointer(), sizeof(long)));
 
-        _lastRoot = 0;
-        for (var i = 0; i < _historyDepth; i++)
+        if (_lastRoot == 0)
         {
-            var batchId = _roots[i].Header.BatchId;
-            if (batchId > _lastRoot)
-            {
-                _lastRoot = batchId;
-            }
+            _roots[0].Data.NextFreePage = GetRootAddress(_historyDepth);
         }
     }
+
+    private static DbAddress GetRootAddress(uint rootIndex) =>
+        DbAddress.Page(rootIndex * RootPage.RootPageSize / Page.PageSize + RootIndexOffset);
 
     public double Megabytes
     {
@@ -215,9 +213,9 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
-    private ReadOnlyBatch BeginReadOnlyBatch(string name, in RootPage root)
+    private unsafe ReadOnlyBatch BeginReadOnlyBatch(string name, in RootPage root)
     {
-        var copy = new RootPage(_pooledRoots.Rent(false));
+        var copy = new RootPage((byte*)_pooledRoots.Rent(false).Raw.ToPointer());
 
         root.CopyTo(copy);
 
@@ -347,7 +345,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     {
         var root = Root;
 
-        using (visitor.On(root, GetAddress(Root.AsPage())))
+        using (visitor.On(root, GetAddress(Root)))
         {
             root.Accept(visitor, this);
         }
@@ -368,12 +366,12 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     private static int GetRootSizeInMb(RootPage root) =>
         (int)((long)root.Data.NextFreePage.Raw * Page.PageSize / 1024 / 1024);
 
-    private void DisposeReadOnlyBatch(ReadOnlyBatch batch)
+    private unsafe void DisposeReadOnlyBatch(ReadOnlyBatch batch)
     {
         lock (_batchLock)
         {
             _batchesReadOnly.Remove(batch);
-            _pooledRoots.Return(batch.Root.AsPage());
+            _pooledRoots.Return(new Page(batch.Root.Raw));
         }
     }
 
@@ -390,7 +388,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             _ctx = null;
 
             // prepare root
-            var root = new RootPage(ctx.Page);
+            var root = ctx.Page;
             rootPage.CopyTo(root);
 
             // always inc the batchId
@@ -417,6 +415,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     }
 
     private DbAddress GetAddress(in Page page) => _manager.GetAddress(page);
+
+    private unsafe DbAddress GetAddress(RootPage page) => _manager.GetAddress(new Page(page.Raw));
 
     public Page GetAt(DbAddress address) => _manager.GetAt(address);
 
@@ -624,7 +624,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             MemoizeAbandoned();
 
             // report metrics
-            _db.ReportPageCountPerCommit(_written.Count, _metrics.PagesReused, _metrics.PagesAllocated, _abandoned.Count);
+            _db.ReportPageCountPerCommit(_written.Count, _metrics.PagesReused, _metrics.PagesAllocated,
+                _abandoned.Count);
 
             _db.ReportReads(_metrics.Reads);
             _db.ReportWrites(_metrics.Writes);
@@ -742,7 +743,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
 #if TRACKING_REUSED_PAGES
             // register at this batch
-            ref var batchId = ref CollectionsMarshal.GetValueRefOrAddDefault(_db._registeredForReuse, addr, out var exists);
+            ref var batchId =
+ ref CollectionsMarshal.GetValueRefOrAddDefault(_db._registeredForReuse, addr, out var exists);
             if (exists)
             {
                 throw new Exception(
@@ -792,7 +794,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     {
         public unsafe Context()
         {
-            Page = new((byte*)NativeMemory.AlignedAlloc(Page.PageSize, (UIntPtr)UIntPtr.Size));
+            Page = new((byte*)NativeMemory.AlignedAlloc(RootPage.RootPageSize, (UIntPtr)UIntPtr.Size));
             Abandoned = new List<DbAddress>();
             Written = new HashSet<DbAddress>();
             IdCache = new Dictionary<Keccak, uint>();
@@ -800,7 +802,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
         public Dictionary<Keccak, uint> IdCache { get; }
 
-        public Page Page { get; }
+        public RootPage Page { get; }
 
         public List<DbAddress> Abandoned { get; }
         public HashSet<DbAddress> Written { get; }

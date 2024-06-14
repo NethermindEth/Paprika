@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using Paprika.Store;
 using Paprika.Utils;
@@ -10,9 +11,9 @@ namespace Paprika.Chain;
 /// <summary>
 /// The default page sized pool
 /// </summary>
-public sealed class BufferPool : BufferPool<PageSize>
+public sealed class BufferPool : BufferPool<PagePoolSize>
 {
-    public static int BufferSize => PageSize.BufferSize;
+    public static int BufferSize => PagePoolSize.BufferSize;
 
     public BufferPool(int buffersInOneSlab, bool assertCountOnDispose = true, Meter? meter = null)
         : base(buffersInOneSlab, assertCountOnDispose, meter)
@@ -20,12 +21,12 @@ public sealed class BufferPool : BufferPool<PageSize>
     }
 }
 
-public struct PageSize : ISize
+public struct PagePoolSize : IPoolSize
 {
     public static int BufferSize => Page.PageSize;
 }
 
-public interface ISize
+public interface IPoolSize
 {
     static abstract int BufferSize { get; }
 }
@@ -34,7 +35,7 @@ public interface ISize
 /// A simple page pool, that creates slabs of pages and allows for their reuse.
 /// </summary>
 public class BufferPool<TSize> : IDisposable
-    where TSize : struct, ISize
+    where TSize : struct, IPoolSize
 {
     private readonly int _buffersInOneSlab;
     private readonly bool _assertCountOnDispose;
@@ -60,6 +61,7 @@ public class BufferPool<TSize> : IDisposable
     public unsafe Page Rent(bool clear = true)
     {
         var size = TSize.BufferSize;
+        var alignment = BitOperations.RoundUpToPowerOf2((UIntPtr)size);
 
         Page pooled;
         while (_pool.TryDequeue(out pooled) == false)
@@ -68,7 +70,7 @@ public class BufferPool<TSize> : IDisposable
 
             _allocatedMB?.Add(allocSize / 1024 / 1024);
 
-            var slab = (byte*)NativeMemory.AlignedAlloc((UIntPtr)allocSize, (UIntPtr)size);
+            var slab = (byte*)NativeMemory.AlignedAlloc((UIntPtr)allocSize, alignment);
 
             _slabs.Enqueue(new IntPtr(slab));
 

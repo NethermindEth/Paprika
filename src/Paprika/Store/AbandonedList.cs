@@ -16,7 +16,7 @@ public struct AbandonedList
     /// </summary>
     private const int EntriesStart = DbAddress.Size + sizeof(uint);
 
-    public const int Size = Page.PageSize - PageHeader.Size - RootPage.Payload.AbandonedStart - EntriesStart;
+    public const int Size = RootPage.RootPageSize - PageHeader.Size - RootPage.Payload.AbandonedStart - EntriesStart;
     private const int EntrySize = sizeof(uint) + DbAddress.Size;
     private const int MaxCount = (Size - EntriesStart) / EntrySize;
 

@@ -155,7 +155,7 @@ public sealed class MemoryMappedPageManager : PointerPageManager
 
         if (options != CommitOptions.DangerNoWrite)
         {
-            await WriteAt(root);
+            await WriteAt(root, RootPage.RootPageSize / Page.PageSize);
         }
 
         if (options == CommitOptions.FlushDataAndRoot)

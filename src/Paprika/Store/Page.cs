@@ -38,7 +38,8 @@ public interface IPageWithData<TPage> : IPage
 /// </summary>
 public static class PageExtensions
 {
-    public static void CopyTo<TPage>(this TPage page, TPage destination) where TPage : unmanaged, IPage =>
+    public static void CopyTo<TPage>(this TPage page, TPage destination)
+        where TPage : unmanaged, IPage =>
         Unsafe.As<TPage, Page>(ref page).Span.CopyTo(Unsafe.As<TPage, Page>(ref destination).Span);
 
     public static void CopyTo<TPage>(this TPage page, Page destination) where TPage : unmanaged, IPage =>
