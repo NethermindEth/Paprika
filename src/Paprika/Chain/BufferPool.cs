@@ -8,12 +8,34 @@ using Paprika.Utils;
 namespace Paprika.Chain;
 
 /// <summary>
+/// The default page sized pool
+/// </summary>
+public sealed class BufferPool : BufferPool<PageSize>
+{
+    public static int BufferSize => PageSize.BufferSize;
+
+    public BufferPool(int buffersInOneSlab, bool assertCountOnDispose = true, Meter? meter = null)
+        : base(buffersInOneSlab, assertCountOnDispose, meter)
+    {
+    }
+}
+
+public struct PageSize : ISize
+{
+    public static int BufferSize => Page.PageSize;
+}
+
+public interface ISize
+{
+    static abstract int BufferSize { get; }
+}
+
+/// <summary>
 /// A simple page pool, that creates slabs of pages and allows for their reuse.
 /// </summary>
-public class BufferPool : IDisposable
+public class BufferPool<TSize> : IDisposable
+    where TSize : struct, ISize
 {
-    public const int BufferSize = Page.PageSize;
-
     private readonly int _buffersInOneSlab;
     private readonly bool _assertCountOnDispose;
     private readonly ConcurrentQueue<Page> _pool = new();
@@ -37,21 +59,23 @@ public class BufferPool : IDisposable
 
     public unsafe Page Rent(bool clear = true)
     {
+        var size = TSize.BufferSize;
+
         Page pooled;
         while (_pool.TryDequeue(out pooled) == false)
         {
-            var allocSize = _buffersInOneSlab * BufferSize;
+            var allocSize = _buffersInOneSlab * size;
 
             _allocatedMB?.Add(allocSize / 1024 / 1024);
 
-            var slab = (byte*)NativeMemory.AlignedAlloc((UIntPtr)allocSize, BufferSize);
+            var slab = (byte*)NativeMemory.AlignedAlloc((UIntPtr)allocSize, (UIntPtr)size);
 
             _slabs.Enqueue(new IntPtr(slab));
 
             // enqueue all
             for (var i = 0; i < _buffersInOneSlab; i++)
             {
-                var page = new Page(slab + BufferSize * i);
+                var page = new Page(slab + size * i);
                 _pool.Enqueue(page);
             }
         }

@@ -13,7 +13,7 @@ namespace Paprika.Chain;
 /// </summary>
 public class PooledSpanDictionary : IDisposable
 {
-    private const int BufferSize = BufferPool.BufferSize;
+    private static readonly int BufferSize = BufferPool.BufferSize;
 
     private readonly BufferPool _pool;
     private readonly bool _preserveOldValues;
