@@ -484,14 +484,20 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             return root.TryGet(key, this, out result);
         }
 
-        public void Report(IReporter state, IReporter storage)
+        public void Report(IReporter state, IReporter storage, IReporter ids, out long totalAbandoned)
         {
-            if (root.Data.StateRoot.IsNull == false)
+            ref readonly var data = ref root.Data;
+
+            totalAbandoned = 0;
+            totalAbandoned = data.AbandonedList.GatherTotalAbandoned(this);
+
+            if (data.StateRoot.IsNull == false)
             {
                 new Merkle.StateRootPage(GetAt(root.Data.StateRoot)).Report(state, this, 0, 0);
             }
 
-            root.Data.Storage.Report(storage, this, 0, 0);
+            data.Storage.Report(storage, this, 0, 0);
+            data.Ids.Report(ids, this, 0, 0);
         }
 
         public uint BatchId => root.Header.BatchId;

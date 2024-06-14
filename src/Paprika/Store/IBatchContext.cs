@@ -145,5 +145,17 @@ public interface IPageResolver
     /// Gets the page at given address.
     /// </summary>
     Page GetAt(DbAddress address);
+
     void Prefetch(DbAddress address);
+
+    void Prefetch(ReadOnlySpan<DbAddress> addresses)
+    {
+        foreach (var bucket in addresses)
+        {
+            if (!bucket.IsNull)
+            {
+                Prefetch(bucket);
+            }
+        }
+    }
 }

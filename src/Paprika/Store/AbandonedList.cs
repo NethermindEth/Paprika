@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Contracts;
 using System.Runtime.InteropServices;
 
 namespace Paprika.Store;
@@ -10,15 +11,17 @@ namespace Paprika.Store;
 [StructLayout(LayoutKind.Explicit, Size = Size)]
 public struct AbandonedList
 {
+    /// <summary>
+    /// The start for spans of <see cref="BatchIds"/> and <see cref="Addresses"/>.
+    /// </summary>
     private const int EntriesStart = DbAddress.Size + sizeof(uint);
 
-    private const int Size = Page.PageSize - PageHeader.Size - RootPage.Payload.AbandonedStart - EntriesStart;
+    public const int Size = Page.PageSize - PageHeader.Size - RootPage.Payload.AbandonedStart - EntriesStart;
     private const int EntrySize = sizeof(uint) + DbAddress.Size;
-    private const int MaxCount = Size / EntrySize;
+    private const int MaxCount = (Size - EntriesStart) / EntrySize;
 
     [FieldOffset(0)] private DbAddress Current;
-
-    [FieldOffset(4)] private uint EntriesCount;
+    [FieldOffset(DbAddress.Size)] private uint EntriesCount;
 
     [FieldOffset(EntriesStart)] private uint BatchIdStart;
 
@@ -26,8 +29,6 @@ public struct AbandonedList
 
     [FieldOffset(MaxCount * sizeof(uint) + EntriesStart)]
     private DbAddress AddressStart;
-
-    private const int NotFound = -1;
 
     private Span<DbAddress> Addresses => MemoryMarshal.CreateSpan(ref AddressStart, MaxCount);
 
@@ -205,6 +206,40 @@ public struct AbandonedList
 
                 abandoned.Accept(visitor, resolver);
             }
+        }
+    }
+
+    [Pure]
+    public long GatherTotalAbandoned(IPageResolver resolver)
+    {
+        resolver.Prefetch(Addresses);
+
+        long count = 0;
+
+        foreach (var addr in Addresses[..(int)EntriesCount])
+        {
+            var current = addr;
+            while (current.IsNull == false)
+            {
+                var abandoned = new AbandonedPage(resolver.GetAt(current));
+                count += abandoned.Count;
+                current = abandoned.Next;
+            }
+        }
+
+        return count;
+    }
+
+    public bool IsFullyEmpty
+    {
+        get
+        {
+            const int notFound = -1;
+
+            return Addresses.IndexOfAnyExcept(DbAddress.Null) == notFound &&
+                   BatchIds.IndexOfAnyExcept(default(uint)) == notFound &&
+                   EntriesCount == 0 &&
+                   Current == DbAddress.Null;
         }
     }
 }
