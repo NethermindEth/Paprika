@@ -40,15 +40,15 @@ public class AbandonedTests : BasePageTests
 
     private const int HistoryDepth = 2;
 
-    [TestCase(23, 1, 10_000, false, TestName = "Accounts - 1")]
-    [TestCase(464, 100, 10_000, false, TestName = "Accounts - 100")]
-    [TestCase(24533, 4000, 200, false,
+    [TestCase(32, 1, 10_000, false, TestName = "Accounts - 1")]
+    [TestCase(473, 100, 10_000, false, TestName = "Accounts - 100")]
+    [TestCase(24542, 4000, 200, false,
         TestName = "Accounts - 4000 to get a bit reuse",
         Category = Categories.LongRunning)]
-    [TestCase(68419, 10_000, 50, false,
+    [TestCase(68428, 10_000, 50, false,
         TestName = "Accounts - 10000 to breach the AbandonedPage",
         Category = Categories.LongRunning)]
-    [TestCase(98577, 20_000, 50, true,
+    [TestCase(102_683, 20_000, 50, true,
         TestName = "Storage - 20_000 accounts with a single storage slot",
         Category = Categories.LongRunning)]
     public async Task Reuse_in_limited_environment(int pageCount, int accounts, int repeats, bool isStorage)
@@ -146,7 +146,7 @@ public class AbandonedTests : BasePageTests
 
         byte[] value = [13];
 
-        using var db = PagedDb.NativeMemoryDb((multiplier * repeats + historyDepth) * Page.PageSize);
+        using var db = PagedDb.NativeMemoryDb((multiplier * repeats + historyDepth * RootPage.RootPageSize / Page.PageSize) * Page.PageSize);
 
         var reads = new List<IReadOnlyBatch>();
 

@@ -357,7 +357,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     /// <returns></returns>
     public IEnumerable<Page> UnsafeEnumerateNonRoot()
     {
-        for (uint i = _historyDepth; i < Root.Data.NextFreePage; i++)
+        for (uint i = GetRootAddress(_historyDepth); i < Root.Data.NextFreePage; i++)
         {
             yield return _manager.GetAt(DbAddress.Page(i));
         }
@@ -427,10 +427,9 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     /// </summary>
     private DbAddress SetNewRoot(RootPage root)
     {
-        var pageAddress = (_lastRoot + 1) % _historyDepth;
-
-        root.CopyTo(_roots[pageAddress]);
-        return DbAddress.Page((uint)pageAddress);
+        var rootIndex = (uint)((_lastRoot + 1) % _historyDepth);
+        root.CopyTo(_roots[rootIndex]);
+        return GetRootAddress(rootIndex);
     }
 
     private void CommitNewRoot() => _lastRoot += 1;
