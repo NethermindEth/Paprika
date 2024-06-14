@@ -327,9 +327,16 @@ public static partial class Node
 
         private const byte HeaderMetadataAllChildrenSetMask = 0b0010_0000;
         private const byte HeaderMetadataWithoutOneChildSetMask = 0b0001_0000;
-        private const byte OneChildMask = 0b0000_1111;
+        private const byte HeaderMetadataWithTwoOrThree = 0b0011_0000;
+        private const byte OneNibbleHeaderMask = 0b0000_1111;
 
-        private const byte HeaderMetadataCustomFormat = HeaderMetadataAllChildrenSetMask | HeaderMetadataWithoutOneChildSetMask;
+        private const byte HeaderMetadataCustomFormat = HeaderMetadataAllChildrenSetMask |
+                                                        HeaderMetadataWithoutOneChildSetMask |
+                                                        HeaderMetadataWithTwoOrThree;
+
+        private const byte ChildCount3 = 3;
+        private const byte ChildCount2 = 2;
+        private const byte BytesConsumedBy2Or3Children = 1;
 
         public readonly Header Header;
         public readonly NibbleSet.Readonly Children;
@@ -361,6 +368,8 @@ public static partial class Node
             {
                 NibbleSet.NibbleCount => HeaderMetadataAllChildrenSetMask,
                 NibbleSet.NibbleCount - 1 => (byte)(HeaderMetadataWithoutOneChildSetMask | children.SmallestNibbleNotSet),
+                ChildCount3 => (byte)(HeaderMetadataWithTwoOrThree | children.SmallestNibbleSet),
+                ChildCount2 => (byte)(HeaderMetadataWithTwoOrThree | children.SmallestNibbleSet),
                 _ => 0
             };
 
@@ -386,10 +395,30 @@ public static partial class Node
             if (!HeaderHasCustomFormat(Header))
             {
                 // write children only if not all set. All set is encoded in the header
-                leftover = Children.WriteToWithLeftover(leftover);
+                return Children.WriteToWithLeftover(leftover);
             }
 
-            return leftover;
+            var custom = Header.Metadata & HeaderMetadataCustomFormat;
+            if (custom is HeaderMetadataWithoutOneChildSetMask or HeaderMetadataAllChildrenSetMask)
+            {
+                return leftover;
+            }
+
+            // 2 or 3 children case, use one more byte, the smallest is stored already in the header
+            if (Children.SetCount == ChildCount2)
+            {
+                leftover[0] = (byte)(Children.BiggestNibbleSet | (Children.BiggestNibbleSet << NibblePath.NibbleShift));
+            }
+            else
+            {
+                Debug.Assert(Children.SetCount == ChildCount3);
+
+                // remove the smallest nibble set and then get the smallest
+                var mid = Children.Remove(Children.SmallestNibbleSet).SmallestNibbleSet;
+                leftover[0] = (byte)(mid | (Children.BiggestNibbleSet << NibblePath.NibbleShift));
+            }
+
+            return leftover[BytesConsumedBy2Or3Children..];
         }
 
         public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Branch branch)
@@ -399,9 +428,24 @@ public static partial class Node
             NibbleSet.Readonly children;
             if (HeaderHasCustomFormat(header))
             {
-                children = header.Metadata == HeaderMetadataAllChildrenSetMask
-                    ? NibbleSet.Readonly.All
-                    : NibbleSet.Readonly.AllWithout((byte)(header.Metadata & OneChildMask));
+                var meta = header.Metadata & HeaderMetadataCustomFormat;
+
+                if (meta == HeaderMetadataAllChildrenSetMask)
+                {
+                    children = NibbleSet.Readonly.All;
+                }
+                else if (meta == HeaderMetadataWithoutOneChildSetMask)
+                {
+                    children = NibbleSet.Readonly.AllWithout((byte)(header.Metadata & OneNibbleHeaderMask));
+                }
+                else
+                {
+                    var b = leftover[0];
+                    children = new NibbleSet((byte)(header.Metadata & OneNibbleHeaderMask),
+                        (byte)(b & NibblePath.NibbleMask),
+                        (byte)((b >> NibblePath.NibbleShift) & NibblePath.NibbleMask));
+                    leftover = leftover[BytesConsumedBy2Or3Children..];
+                }
             }
             else
             {
@@ -422,9 +466,16 @@ public static partial class Node
             return source[..GetBranchDataLength(header)];
         }
 
-        private static int GetBranchDataLength(Header header) =>
-            Header.Size +
-            (HeaderHasCustomFormat(header) ? 0 : NibbleSet.MaxByteSize);
+        private static int GetBranchDataLength(Header header)
+        {
+            return (header.Metadata & HeaderMetadataCustomFormat) switch
+            {
+                HeaderMetadataAllChildrenSetMask => Header.Size,
+                HeaderMetadataWithoutOneChildSetMask => Header.Size,
+                HeaderMetadataWithTwoOrThree => Header.Size + BytesConsumedBy2Or3Children,
+                _ => Header.Size + NibbleSet.MaxByteSize
+            };
+        }
 
         public bool Equals(in Branch other)
         {
