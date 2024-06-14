@@ -21,6 +21,20 @@ public static class FanOut
 
         public const int Size = FanOut * DbAddress.Size;
     }
+
+    public struct Of3Nibbles : ISize
+    {
+        public static int GetIndex(scoped in NibblePath key) =>
+            (key.GetAt(0) << NibblePath.NibbleShift * 2) +
+            (key.GetAt(1) << NibblePath.NibbleShift) +
+            key.GetAt(2);
+
+        public static int ConsumedNibbles => 3;
+
+        public const int FanOut = 256 * 16;
+
+        public const int Size = FanOut * DbAddress.Size;
+    }
 }
 
 /// <summary>
