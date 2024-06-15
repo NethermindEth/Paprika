@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.RLP;
@@ -116,6 +117,7 @@ public readonly ref struct RlpMemo
         return memo;
     }
 
+    [SkipLocalsInit]
     public static int Compress(in Key key, scoped in ReadOnlySpan<byte> memoizedRlp, NibbleSet.Readonly children, scoped in Span<byte> writeTo)
     {
         // Optimization, omitting some of the branches to memoize.

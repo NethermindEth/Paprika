@@ -58,7 +58,7 @@ public class StatisticsReporter(TrieType trieType) : IReporter
     public long MerkleBranchSize;
     public long MerkleBranchWithSmallEmpty;
     public long MerkleBranchWithOneChildMissing;
-    public long MerkleBranchWithTwoChildrenOnly;
+    public long MerkleBranchWithThreeChildrenOrLess;
     public long MerkleExtensionSize;
     public long MerkleLeafSize;
 
@@ -115,9 +115,9 @@ public class StatisticsReporter(TrieType trieType) : IReporter
                             {
                                 MerkleBranchWithOneChildMissing++;
                             }
-                            else if (branch.Children.SetCount == 2)
+                            else if (branch.Children.SetCount <= 3)
                             {
-                                MerkleBranchWithTwoChildrenOnly++;
+                                MerkleBranchWithThreeChildrenOrLess++;
                             }
 
                             var len = leftover.Length % Keccak.Size;
