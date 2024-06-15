@@ -69,7 +69,7 @@ public static class StatisticsForPagedDb
             "---\n" +
             $" Branches with small empty set: {reporter.MerkleBranchWithSmallEmpty}\n" +
             $" Branches with 15 children: {reporter.MerkleBranchWithOneChildMissing}\n" +
-            $" Branches with 2 children: {reporter.MerkleBranchWithTwoChildrenOnly}\n";
+            $" Branches with 3 or less children: {reporter.MerkleBranchWithThreeChildrenOrLess}\n";
 
         up.Update(new Panel(general).Header($"General stats for {name}").Expand());
 
