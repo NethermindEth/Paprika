@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Crypto;
+using Paprika.Data;
 using Paprika.Store;
 
 namespace Paprika.Tests.Store;
@@ -39,7 +40,7 @@ public class AbandonedTests : BasePageTests
     }
 
     [Test]
-    public void Properly_recognizes_sequences_of_addresses()
+    public void Properly_handles_page_addresses_that_are_packed_1()
     {
         var list = new AbandonedList();
 
@@ -60,6 +61,23 @@ public class AbandonedTests : BasePageTests
         var last = addresses.Single();
 
         list.GetCurrentForTest().Should().Be(last);
+    }
+
+    [Test]
+    public void Properly_handles_page_addresses_that_are_packed_2()
+    {
+        using var db = PagedDb.NativeMemoryDb(32 * Page.PageSize, 2);
+
+        var value = new byte[1024];
+        var account = Key.Account(Keccak.OfAnEmptySequenceRlp);
+
+        for (int i = 0; i < 1000; i++)
+        {
+            using var batch = db.BeginNextBatch();
+            //batch.SetRaw(merkle, value);
+            batch.SetRaw(account, value);
+            batch.Commit(CommitOptions.FlushDataOnly);
+        }
     }
 
     private const int HistoryDepth = 2;

@@ -88,7 +88,7 @@ public readonly struct AbandonedPage(Page page) : IPage
         addr = new DbAddress(top);
 
         // The entry is not packed and is the only one
-        hasMoreThanPeeked = Data.Count == 1;
+        hasMoreThanPeeked = Data.Count > 1;
 
         return true;
     }
