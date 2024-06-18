@@ -74,7 +74,8 @@ public class AbandonedTests : BasePageTests
         for (int i = 0; i < 1000; i++)
         {
             using var batch = db.BeginNextBatch();
-            //batch.SetRaw(merkle, value);
+            
+            // should modify 2 pages per commit
             batch.SetRaw(account, value);
             batch.Commit(CommitOptions.FlushDataOnly);
         }
