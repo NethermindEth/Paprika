@@ -144,7 +144,20 @@ public class PooledSpanDictionary : IDisposable
         {
             if (metadataWhere(kvp.Metadata))
             {
-                Key.ReadType(kvp.Key);
+                destination.SetImpl(kvp.Key, kvp.Hash, kvp.Value, ReadOnlySpan<byte>.Empty, kvp.Metadata, append);
+            }
+        }
+    }
+
+    public void CopyTo<TAccessor>(PooledSpanDictionary destination, Predicate<byte> metadataWhere, in BitMapFilter<TAccessor> filter, bool append = false)
+        where TAccessor : struct, BitMapFilter.IAccessor<TAccessor>
+    {
+        foreach (var kvp in this)
+        {
+            if (metadataWhere(kvp.Metadata))
+            {
+                Key.ReadFrom(kvp.Key, out var key);
+                filter.Add(Blockchain.GetHash(key));
                 destination.SetImpl(kvp.Key, kvp.Hash, kvp.Value, ReadOnlySpan<byte>.Empty, kvp.Metadata, append);
             }
         }
