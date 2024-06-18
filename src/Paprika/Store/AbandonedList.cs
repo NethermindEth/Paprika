@@ -102,9 +102,9 @@ public struct AbandonedList
             // First, register it for reuse
             batch.RegisterForFutureReuse(current.AsPage());
 
-            if (current.TryPeek(out var newAt))
+            if (current.TryPeek(out var newAt, out var hasMoreThanPeeked))
             {
-                if (current.Count == 1)
+                if (hasMoreThanPeeked == false)
                 {
                     // Special case as the current has only one page. 
                     // There's no use in COWing the page. Just return the page and clean the current
@@ -242,4 +242,6 @@ public struct AbandonedList
                    Current == DbAddress.Null;
         }
     }
+
+    public DbAddress GetCurrentForTest() => Current;
 }

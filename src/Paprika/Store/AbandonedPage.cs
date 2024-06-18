@@ -63,11 +63,12 @@ public readonly struct AbandonedPage(Page page) : IPage
         }
     }
 
-    public bool TryPeek(out DbAddress addr)
+    public bool TryPeek(out DbAddress addr, out bool hasMoreThanPeeked)
     {
         if (Data.Count == 0)
         {
             addr = default;
+            hasMoreThanPeeked = default;
             return false;
         }
 
@@ -77,11 +78,18 @@ public readonly struct AbandonedPage(Page page) : IPage
         {
             // Remove the flag and return
             addr = new DbAddress((top & ~PackedFlag) + PackedDiff);
+
+            // The entry is packed so has more than peeked.
+            hasMoreThanPeeked = true;
             return true;
         }
 
         // Not packed, handle
         addr = new DbAddress(top);
+
+        // The entry is not packed and is the only one
+        hasMoreThanPeeked = Data.Count > 1;
+
         return true;
     }
 
