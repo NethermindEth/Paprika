@@ -38,6 +38,30 @@ public class AbandonedTests : BasePageTests
         }
     }
 
+    [Test]
+    public void Properly_recognizes_sequences_of_addresses()
+    {
+        var list = new AbandonedList();
+
+        const uint batchId = 10;
+
+        var batch = new TestBatchContext(batchId);
+        batch.GetNewPage(out var a, false);
+        batch.GetNewPage(out var b, false);
+
+        list.Register([a, b], batch);
+
+        var next = batch.Next();
+
+        list.TryGet(out var oneOfReused, next.BatchId, next).Should().BeTrue();
+
+        var addresses = new HashSet<DbAddress> { a, b };
+        addresses.Remove(oneOfReused).Should().BeTrue($"The {oneOfReused} should be in the set");
+        var last = addresses.Single();
+
+        list.GetCurrentForTest().Should().Be(last);
+    }
+
     private const int HistoryDepth = 2;
 
     [TestCase(23, 1, 10_000, false, TestName = "Accounts - 1")]
