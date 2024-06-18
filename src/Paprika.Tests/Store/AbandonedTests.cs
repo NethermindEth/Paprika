@@ -83,7 +83,7 @@ public class AbandonedTests : BasePageTests
 
     private const int HistoryDepth = 2;
 
-    [TestCase(23, 1, 10_000, false, TestName = "Accounts - 1")]
+    [TestCase(20, 1, 10_000, false, TestName = "Accounts - 1")]
     [TestCase(464, 100, 10_000, false, TestName = "Accounts - 100")]
     [TestCase(24533, 4000, 200, false,
         TestName = "Accounts - 4000 to get a bit reuse",
