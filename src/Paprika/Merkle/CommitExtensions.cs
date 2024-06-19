@@ -26,8 +26,7 @@ public static class CommitExtensions
         }
 
         var leaf = new Node.Leaf(leafPath);
-        //Console.WriteLine($"{Environment.CurrentManagedThreadId}: Setting leaf {key.ToString()} - key: {leafPath.ToString()}");
-        commit.Set(key, leaf.WriteTo(stackalloc byte[leaf.MaxByteLength]), type);
+        commit.Set(key, leaf.WriteTo(stackalloc byte[Leaf.MaxByteLength]), type);
     }
 
     [SkipLocalsInit]
@@ -35,8 +34,7 @@ public static class CommitExtensions
         EntryType type = EntryType.Persistent)
     {
         var branch = new Node.Branch(children);
-        //Console.WriteLine($"{Environment.CurrentManagedThreadId}: Setting branch {key.ToString()} - {children.ToString()}");
-        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), RlpMemo.Empty, type);
+        commit.Set(key, branch.WriteTo(stackalloc byte[Branch.MaxByteLength]), RlpMemo.Empty, type);
     }
 
     [SkipLocalsInit]
@@ -44,14 +42,14 @@ public static class CommitExtensions
         EntryType type = EntryType.Persistent)
     {
         var branch = new Node.Branch(children);
-        commit.Set(key, branch.WriteTo(stackalloc byte[branch.MaxByteLength]), rlp, type);
+        commit.Set(key, branch.WriteTo(stackalloc byte[Branch.MaxByteLength]), rlp, type);
     }
 
     [SkipLocalsInit]
     public static void SetExtension(this ICommit commit, in Key key, in NibblePath path, EntryType type = EntryType.Persistent)
     {
         var extension = new Extension(path);
-        commit.Set(key, extension.WriteTo(stackalloc byte[extension.MaxByteLength]), type);
+        commit.Set(key, extension.WriteTo(stackalloc byte[Extension.MaxByteLength]), type);
     }
 
     public static void DeleteKey(this ICommit commit, in Key key) => commit.Set(key, ReadOnlySpan<byte>.Empty);

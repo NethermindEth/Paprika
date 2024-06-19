@@ -354,7 +354,7 @@ public static class CommitExtensions
     public static void SetLeaf(this ICommit commit, in Key key, string leafPath)
     {
         var leaf = new Node.Leaf(NibblePath.Parse(leafPath));
-        commit.Set(key, leaf.WriteTo(stackalloc byte[leaf.MaxByteLength]));
+        commit.Set(key, leaf.WriteTo(stackalloc byte[Node.Leaf.MaxByteLength]));
     }
 
     public static void Set(this Commit commit, string path) => commit.Set(NibblePath.Parse(path));

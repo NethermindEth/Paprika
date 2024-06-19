@@ -101,7 +101,7 @@ public class NodeTests
     public void Branch_read_write(ushort nibbleBitSet, Keccak keccak)
     {
         var branch = new Node.Branch(new NibbleSet.Readonly(nibbleBitSet));
-        Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
+        Span<byte> buffer = stackalloc byte[Node.Branch.MaxByteLength];
 
         var encoded = branch.WriteTo(buffer);
         var leftover = Node.Branch.ReadFrom(encoded, out var decoded);
@@ -117,7 +117,7 @@ public class NodeTests
     public void Branch_read_write_no_keccak(ushort nibbleBitSet)
     {
         var branch = new Node.Branch(new NibbleSet.Readonly(nibbleBitSet));
-        Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
+        Span<byte> buffer = stackalloc byte[Node.Branch.MaxByteLength];
 
         var encoded = branch.WriteTo(buffer);
         var leftover = Node.Branch.ReadFrom(encoded, out var decoded);
@@ -131,10 +131,29 @@ public class NodeTests
     {
         var branch = new Node.Branch(NibbleSet.Readonly.All);
 
-        Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
+        Span<byte> buffer = stackalloc byte[Node.Branch.MaxByteLength];
         var encoded = branch.WriteTo(buffer);
 
         encoded.Length.Should().Be(1, "Full branch should encode to one byte");
+
+        var leftover = Node.Branch.ReadFrom(encoded, out var decoded);
+
+        leftover.Length.Should().Be(0);
+
+        decoded.Equals(branch).Should().BeTrue($"Expected {branch.ToString()}, got {decoded.ToString()}");
+    }
+
+    [TestCase(0)]
+    [TestCase(1)]
+    [TestCase(15)]
+    public void Branch_all_set_but_one(byte without)
+    {
+        var branch = new Node.Branch(NibbleSet.Readonly.AllWithout(without));
+
+        Span<byte> buffer = stackalloc byte[Node.Branch.MaxByteLength];
+        var encoded = branch.WriteTo(buffer);
+
+        encoded.Length.Should().Be(1, "A branch without one child should encode to one byte");
 
         var leftover = Node.Branch.ReadFrom(encoded, out var decoded);
 
@@ -167,7 +186,7 @@ public class NodeTests
     public void Leaf_read_write(byte[] pathBytes, Keccak keccak)
     {
         var leaf = new Node.Leaf(NibblePath.FromKey(pathBytes));
-        Span<byte> buffer = stackalloc byte[leaf.MaxByteLength];
+        Span<byte> buffer = stackalloc byte[Node.Leaf.MaxByteLength];
 
         var encoded = leaf.WriteTo(buffer);
         var leftover = Node.Leaf.ReadFrom(encoded, out var decoded);
@@ -183,7 +202,7 @@ public class NodeTests
     {
         var path = NibblePath.FromKey(raw).SliceFrom(odd).SliceTo(length);
         var leaf = new Node.Leaf(path);
-        Span<byte> buffer = stackalloc byte[leaf.MaxByteLength];
+        Span<byte> buffer = stackalloc byte[Node.Leaf.MaxByteLength];
 
         var encoded = leaf.WriteTo(buffer);
         encoded.Length.Should().Be(expectedLength);
@@ -218,7 +237,7 @@ public class NodeTests
     public void Extension_read_write(byte[] pathBytes)
     {
         var extension = new Node.Extension(NibblePath.FromKey(pathBytes));
-        Span<byte> buffer = stackalloc byte[extension.MaxByteLength];
+        Span<byte> buffer = stackalloc byte[Node.Extension.MaxByteLength];
 
         var encoded = extension.WriteTo(buffer);
         var leftover = Node.Extension.ReadFrom(encoded, out var decoded);
@@ -233,7 +252,7 @@ public class NodeTests
         var nibblePath = NibblePath.FromKey(new byte[] { 0x1, 0x2 });
 
         var leaf = new Node.Leaf(nibblePath);
-        Span<byte> buffer = stackalloc byte[leaf.MaxByteLength];
+        Span<byte> buffer = stackalloc byte[Node.Leaf.MaxByteLength];
 
         var encoded = leaf.WriteTo(buffer);
         var leftover = Node.ReadFrom(out var nodeType, out var actual, out _, out _, encoded);
@@ -249,7 +268,7 @@ public class NodeTests
         var nibblePath = NibblePath.FromKey(new byte[] { 0x1, 0x2 });
 
         var extension = new Node.Extension(nibblePath);
-        Span<byte> buffer = stackalloc byte[extension.MaxByteLength];
+        Span<byte> buffer = stackalloc byte[Node.Extension.MaxByteLength];
 
         var encoded = extension.WriteTo(buffer);
         var leftover = Node.ReadFrom(out var nodeType, out _, out var actual, out _, encoded);
@@ -265,7 +284,7 @@ public class NodeTests
         const ushort nibbleBitSet = 0b1100_0011_0101_1010;
 
         var branch = new Node.Branch(new NibbleSet.Readonly(nibbleBitSet));
-        Span<byte> buffer = stackalloc byte[branch.MaxByteLength];
+        Span<byte> buffer = stackalloc byte[Node.Branch.MaxByteLength];
 
         var encoded = branch.WriteTo(buffer);
         var leftover = Node.ReadFrom(out var nodeType, out _, out _, out var actual, encoded);

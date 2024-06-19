@@ -253,8 +253,9 @@ public readonly ref struct NibblePath
             MemoryMarshal.CreateSpan(ref _span, spanLength).CopyTo(destination.Slice(PreambleLength));
         }
 
-        // clearing the oldest nibble, if needed
-        // yes, it can be branch free
+        // If the path length is odd, clear the lower nibble of the last byte.
+        // This ensures that truncated nibble paths (like 0xAB.SliceTo(1)) are stored unambiguously.
+        // For instance, 0xAB.SliceTo(1) should result in 0xA0, so it can be distinguished from other paths.
         if (((odd + length) & 1) != 0)
         {
             ref var oldest = ref destination[spanLength];

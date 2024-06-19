@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Crypto;
+using Paprika.Data;
 using Paprika.Store;
 
 namespace Paprika.Tests.Store;
@@ -38,9 +39,51 @@ public class AbandonedTests : BasePageTests
         }
     }
 
+    [Test]
+    public void Properly_handles_page_addresses_that_are_packed_1()
+    {
+        var list = new AbandonedList();
+
+        const uint batchId = 10;
+
+        var batch = new TestBatchContext(batchId);
+        batch.GetNewPage(out var a, false);
+        batch.GetNewPage(out var b, false);
+
+        list.Register([a, b], batch);
+
+        var next = batch.Next();
+
+        list.TryGet(out var oneOfReused, next.BatchId, next).Should().BeTrue();
+
+        var addresses = new HashSet<DbAddress> { a, b };
+        addresses.Remove(oneOfReused).Should().BeTrue($"The {oneOfReused} should be in the set");
+        var last = addresses.Single();
+
+        list.GetCurrentForTest().Should().Be(last);
+    }
+
+    [Test]
+    public void Properly_handles_page_addresses_that_are_packed_2()
+    {
+        using var db = PagedDb.NativeMemoryDb(32 * Page.PageSize, 2);
+
+        var value = new byte[1024];
+        var account = Key.Account(Keccak.OfAnEmptySequenceRlp);
+
+        for (int i = 0; i < 1000; i++)
+        {
+            using var batch = db.BeginNextBatch();
+
+            // should modify 2 pages per commit
+            batch.SetRaw(account, value);
+            batch.Commit(CommitOptions.FlushDataOnly);
+        }
+    }
+
     private const int HistoryDepth = 2;
 
-    [TestCase(23, 1, 10_000, false, TestName = "Accounts - 1")]
+    [TestCase(20, 1, 10_000, false, TestName = "Accounts - 1")]
     [TestCase(464, 100, 10_000, false, TestName = "Accounts - 100")]
     [TestCase(24533, 4000, 200, false,
         TestName = "Accounts - 4000 to get a bit reuse",
