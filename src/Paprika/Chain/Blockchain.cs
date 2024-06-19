@@ -929,16 +929,40 @@ public class Blockchain : IAsyncDisposable
 
         public bool IsNonBoundaryHash(in NibblePath path, out Keccak existingHash)
         {
+            existingHash = Keccak.Zero;
+
+            //TODO - this should be taken into account by CalculateHash method
+            if (path.Length == NibblePath.KeccakNibbleCount)
+            {
+                //Merkle leaves are omitted at this height, so need to pick up keccak from parent (branch)
+                var branchKey = Key.Merkle(path.SliceTo(path.Length - 1));
+                using var branchOwner = Get(branchKey);
+                if (!branchOwner.Span.IsEmpty)
+                {
+                    var leftover = Node.ReadFrom(out var type, out var leaf, out var ext, out var branch, branchOwner.Span);
+                    if (type != Node.Type.Branch)
+                        throw new Exception("Expected branch type");
+
+                    Span<byte> rlpMemoization = stackalloc byte[RlpMemo.Size];
+                    RlpMemo memo = RlpMemo.Decompress(leftover, branch.Children, rlpMemoization);
+                    if (memo.TryGetKeccak(path[NibblePath.KeccakNibbleCount - 1], out var keccakSpan))
+                        existingHash = new Keccak(keccakSpan);
+                    return true;
+                }
+
+                return false;
+            }
+
             var key = Key.Merkle(path);
             using var owner = Get(key);
-            existingHash = Keccak.Zero;
+            
             if (!owner.Span.IsEmpty)
             {
                 Node.ReadFrom(out var type, out var leaf, out var ext, out var branch, owner.Span);
                 switch (type)
                 {
                     case Node.Type.Leaf:
-                        if (leaf.Path.Length > 64) return false;
+                        if (leaf.Path.Length > NibblePath.KeccakNibbleCount) return false;
                         existingHash = ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateHash(path, this);
                         return true;
                     default:
