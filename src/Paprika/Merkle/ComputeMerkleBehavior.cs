@@ -1289,6 +1289,19 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                         if (LeafCanBeOmitted(i + 1))
                         {
+#if SNAP_SYNC_SUPPORT
+                            //TODO - move this to a single place
+                            DataType dataType = trieType == TrieType.State ? DataType.Account : DataType.StorageCell;
+                            var valueKey = Key.Raw(path, dataType, NibblePath.Empty);
+                            using var readRawData = commit.Get(valueKey);
+                            if (SnapSync.IsBoundaryValue(readRawData.Span))
+                            {
+                                NibblePath pathWithKeccak = NibblePath.Single(0, 1).Append(NibblePath.FromKey(readRawData.Span.Slice(SnapSync.PreambleLength)), stackalloc byte[33]);
+                                commit.DeleteProofKey(valueKey);
+                                commit.SetLeaf(Key.Merkle(path), pathWithKeccak, EntryType.UseOnce);
+                                return;
+                            }
+#endif
                             // no need to store leaf on the last level
                             return;
                         }
