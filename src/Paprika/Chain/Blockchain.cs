@@ -40,9 +40,7 @@ public class Blockchain : IAsyncDisposable
     // finalization
     private readonly Channel<CommittedBlockState> _finalizedChannel;
     private readonly Task _flusher;
-    private readonly TimeSpan _minFlushDelay;
     private uint _lastFinalized;
-    private static readonly TimeSpan DefaultFlushDelay = TimeSpan.FromSeconds(1);
 
     // metrics
     private readonly Meter _meter;
@@ -58,18 +56,21 @@ public class Blockchain : IAsyncDisposable
     private readonly IPreCommitBehavior _preCommit;
     private readonly CacheBudget.Options _cacheBudgetStateAndStorage;
     private readonly CacheBudget.Options _cacheBudgetPreCommit;
+    private readonly IFlushStrategy _flushStrategy;
     private readonly Action? _beforeMetricsDisposed;
 
-    public Blockchain(IDb db, IPreCommitBehavior preCommit, TimeSpan? minFlushDelay = null,
+    public Blockchain(IDb db, IPreCommitBehavior preCommit,
         CacheBudget.Options cacheBudgetStateAndStorage = default,
         CacheBudget.Options cacheBudgetPreCommit = default,
-        int? finalizationQueueLimit = null, Action? beforeMetricsDisposed = null)
+        int? finalizationQueueLimit = null,
+        IFlushStrategy? flushStrategy = null,
+        Action? beforeMetricsDisposed = null)
     {
         _db = db;
         _preCommit = preCommit;
         _cacheBudgetStateAndStorage = cacheBudgetStateAndStorage;
         _cacheBudgetPreCommit = cacheBudgetPreCommit;
-        _minFlushDelay = minFlushDelay ?? DefaultFlushDelay;
+        _flushStrategy = flushStrategy ?? FlushStrategy.Always;
         _beforeMetricsDisposed = beforeMetricsDisposed;
 
         _finalizedChannel = CreateChannel(finalizationQueueLimit);
@@ -129,6 +130,7 @@ public class Blockchain : IAsyncDisposable
     private async Task FlusherTask()
     {
         var reader = _finalizedChannel.Reader;
+        var previousLevel = CommitOptions.DangerNoWrite;
 
         try
         {
@@ -139,9 +141,9 @@ public class Blockchain : IAsyncDisposable
 
                 (uint _blocksByNumber, Keccak blockHash) last = default;
 
-                bool requiresForceFlush = false;
+                var level = CommitOptions.DangerNoFlush;
 
-                while (timer.Elapsed < _minFlushDelay && reader.TryRead(out var block))
+                while (reader.TryRead(out var block))
                 {
                     last = (block.BlockNumber, block.Hash);
 
@@ -169,17 +171,7 @@ public class Blockchain : IAsyncDisposable
 
                     _flusherQueueCount.Set(readerCount);
 
-                    var level = readerCount switch
-                    {
-                        0 => CommitOptions.FlushDataOnly, // see: CommitOptions.FlushDataOnly
-                        1 => CommitOptions.FlushDataOnly, // see: CommitOptions.FlushDataOnly
-                        _ when readerCount <= _db.HistoryDepth => CommitOptions
-                            .DangerNoFlush, // see: CommitOptions.DangerNoFlush
-                        _ => CommitOptions.DangerNoWrite
-                    };
-
-                    // If at least one write is no write, require flush
-                    requiresForceFlush |= level == CommitOptions.DangerNoWrite;
+                    level = _flushStrategy.GetCommitOptions(readerCount);
 
                     // commit but no flush here, it's too heavy, the flush will come later
                     await batch.Commit(level);
@@ -215,18 +207,27 @@ public class Blockchain : IAsyncDisposable
                     continue;
                 }
 
-                var flushWatch = Stopwatch.StartNew();
-
-                if (requiresForceFlush)
+                if (level is CommitOptions.FlushDataOnly or CommitOptions.FlushDataAndRoot)
                 {
-                    _db.ForceFlush();
-                }
-                else
-                {
-                    _db.Flush();
+                    // The level requires flushing.
+                    // Decide on how to flush depending on the previous level.
+                    // If previously, there was no writing, use the forceful flush to msync first.
+                    // Otherwise, just flush.
+                    var flushWatch = Stopwatch.StartNew();
+                    if (previousLevel == CommitOptions.DangerNoWrite)
+                    {
+                        _db.ForceFlush();
+                    }
+                    else
+                    {
+                        _db.Flush();
+                    }
+
+                    _flusherFlushInMs.Record((int)flushWatch.ElapsedMilliseconds);
                 }
 
-                _flusherFlushInMs.Record((int)flushWatch.ElapsedMilliseconds);
+                // update the previous
+                previousLevel = level;
 
                 Flushed?.Invoke(this, last);
 

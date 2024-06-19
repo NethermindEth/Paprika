@@ -25,7 +25,6 @@ public record Case(
     int AccountsPerBlock,
     long DbFileSize,
     bool PersistentDb,
-    TimeSpan FlushEvery,
     bool Fsync,
     bool UseBigStorageAccount)
 {
@@ -36,22 +35,22 @@ public record Case(
 public static class Program
 {
     private static readonly Case InMemoryReallySmall =
-        new(100, 1000, 1 * Gb, false, TimeSpan.FromSeconds(5), false, true);
+        new(100, 1000, 1 * Gb, false, false, true);
 
     private static readonly Case InMemorySmall =
-        new(10_000, 1000, 10 * Gb, false, TimeSpan.FromSeconds(5), false, true);
+        new(10_000, 1000, 10 * Gb, false, false, true);
 
     private static readonly Case InMemoryMedium =
-        new(50_000, 1000, 32 * Gb, false, TimeSpan.FromSeconds(5), false, false);
+        new(50_000, 1000, 32 * Gb, false, false, false);
 
     private static readonly Case
-        InMemoryBig = new(100_000, 1000, 56 * Gb, false, TimeSpan.FromSeconds(5), false, false);
+        InMemoryBig = new(100_000, 1000, 56 * Gb, false, false, false);
 
     private static readonly Case DiskSmallNoFlush =
-        new(50_000, 1000, 11 * Gb, true, TimeSpan.FromSeconds(5), false, false);
+        new(50_000, 1000, 11 * Gb, true, false, false);
 
     private static readonly Case DiskSmallFlushFile =
-        new(50_000, 1000, 32 * Gb, true, TimeSpan.FromSeconds(60), true, false);
+        new(50_000, 1000, 32 * Gb, true, true, false);
 
     private const int MaxReorgDepth = 64;
     private const int FinalizeEvery = 64;
@@ -164,7 +163,7 @@ public static class Program
             //IPreCommitBehavior preCommit = null;
 
             await using (var blockchain =
-                         new Blockchain(db, preCommit, config.FlushEvery, default, default, 1000, reporter.Observe))
+                         new Blockchain(db, preCommit, default, default, 1000, FlushStrategy.AfterNCommits(), reporter.Observe))
             {
                 blockchain.Flushed += (_, e) => gate.Signal(e.blockNumber);
 
