@@ -28,7 +28,7 @@ public class Performance
         var cache = new CacheBudget.Options(5000, 16);
         var merkle = new ComputeMerkleBehavior();
 
-        await using var blockchain = new Blockchain(db, merkle, TimeSpan.FromSeconds(10), cache, cache);
+        await using var blockchain = new Blockchain(db, merkle, cache, cache);
 
         // Create 64 blocks, then try to read non-existing accounts
 

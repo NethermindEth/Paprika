@@ -17,11 +17,6 @@ public interface IDb
     IReadOnlyBatch BeginReadOnlyBatch(string name = "");
 
     /// <summary>
-    /// Force flush
-    /// </summary>
-    void Flush();
-
-    /// <summary>
     /// Begins the readonly batch with the given Keccak or the latest.
     /// </summary>
     IReadOnlyBatch BeginReadOnlyBatchOrLatest(in Keccak stateHash, string name = "");
@@ -42,5 +37,13 @@ public interface IDb
     /// </summary>
     int HistoryDepth { get; }
 
+    /// <summary>
+    /// Flushes the file buffers (FSYNS/FlushFileBuffers).
+    /// </summary>
+    void Flush();
+
+    /// <summary>
+    /// Forcefully flush after operating without file writes. Will issue MSYNC/FlushViewOfFile followed by FSYNS/FlushFileBuffers.
+    /// </summary>
     void ForceFlush();
 }

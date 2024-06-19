@@ -100,8 +100,8 @@ public static class Program
             var cacheBudgetStateAndStorage = new CacheBudget.Options(2_000, 16);
             var cacheBudgetPreCommit = new CacheBudget.Options(2_000, 16);
 
-            await using (var blockchain = new Blockchain(db, preCommit, TimeSpan.FromSeconds(5),
-                             cacheBudgetStateAndStorage, cacheBudgetPreCommit, 1000, reporter.Observe))
+            await using (var blockchain = new Blockchain(db, preCommit, cacheBudgetStateAndStorage,
+                             cacheBudgetPreCommit, 1000, FlushStrategy.AfterNCommits(), reporter.Observe))
             {
                 blockchain.Flushed += (_, e) => gate.Signal(e.blockNumber);
 

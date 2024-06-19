@@ -523,7 +523,7 @@ public class BlockchainTests
 
         var cacheBudgetPreCommit = new CacheBudget.Options(1, 1);
 
-        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(), null, CacheBudget.Options.None,
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(), CacheBudget.Options.None,
             cacheBudgetPreCommit, 1, null);
 
         // Initial commit
@@ -551,7 +551,7 @@ public class BlockchainTests
     {
         using var db = PagedDb.NativeMemoryDb(1 * Mb);
 
-        await using var blockchain = new Blockchain(db, new PreCommit(), null, CacheBudget.Options.None,
+        await using var blockchain = new Blockchain(db, new PreCommit(), CacheBudget.Options.None,
             CacheBudget.Options.None, 1);
 
         // Arrange
