@@ -805,8 +805,15 @@ public class Blockchain : IAsyncDisposable
                 if (_merkleCached.MayContainVolatile(hash))
                 {
                     _lock.EnterReadLock();
+
                     try
                     {
+                        if (_prefetchPossible == false)
+                        {
+                            // prefetch no longer active, default!
+                            return default;
+                        }
+
                         if (_cache.TryGet(keyWritten, hash, out var data))
                         {
                             // No ownership needed, it's all local here
@@ -854,6 +861,8 @@ public class Blockchain : IAsyncDisposable
 
             public void Dispose()
             {
+                _prefetched.Return(_parent.Pool);
+                _merkleCached.Return(_parent.Pool);
             }
         }
 
