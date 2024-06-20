@@ -140,7 +140,7 @@ public class PrefetchingTests
                     return true;
                 });
 
-            await Task.WhenAll(Task.Delay(50), task);
+            await Task.WhenAll(Task.Delay(20), task);
 
             if ((await task) == false)
                 prefetchFailures++;
