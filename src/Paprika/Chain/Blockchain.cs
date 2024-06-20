@@ -708,13 +708,23 @@ public class Blockchain : IAsyncDisposable
             return null;
         }
 
-        private class PreCommitPrefetcher(PooledSpanDictionary cache, BlockState parent)
-            : IDisposable, IPreCommitPrefetcher, IPrefetcherContext
+        private class PreCommitPrefetcher : IDisposable, IPreCommitPrefetcher, IPrefetcherContext
         {
             private bool _prefetchPossible = true;
 
-            private readonly HashSet<int> _prefetched = new();
-            private readonly HashSet<ulong> _cached = new();
+            private readonly BitFilter _merkleCached;
+            private readonly BitFilter _prefetched;
+            private readonly ReaderWriterLockSlim _lock = new();
+            private readonly PooledSpanDictionary _cache;
+            private readonly BlockState _parent;
+
+            public PreCommitPrefetcher(PooledSpanDictionary cache, BlockState parent)
+            {
+                _cache = cache;
+                _parent = parent;
+                _merkleCached = parent._blockchain.CreateBitFilter();
+                _prefetched = parent._blockchain.CreateBitFilter();
+            }
 
             public bool CanPrefetchFurther => Volatile.Read(ref _prefetchPossible);
 
@@ -725,18 +735,30 @@ public class Blockchain : IAsyncDisposable
 
                 var accountHash = account.GetHashCode();
 
-                lock (cache)
+                if (_prefetched.AddAtomic((uint)accountHash))
                 {
-                    if (_prefetchPossible == false)
-                    {
-                        return;
-                    }
-
-                    if (_prefetched.Add(accountHash))
-                    {
-                        parent._blockchain._preCommit.Prefetch(account, this);
-                    }
+                    ScheduleAccountPrefetch(account);
                 }
+            }
+
+            private void ScheduleAccountPrefetch(Keccak account)
+            {
+                ThreadPool.QueueUserWorkItem<(Keccak, PreCommitPrefetcher)>(static state =>
+                {
+                    var (a, context) = state;
+                    context._parent._blockchain._preCommit.Prefetch(a, context);
+
+                }, (account, this), true);
+            }
+
+            private void ScheduleStoragePrefetch(Keccak account, Keccak storage)
+            {
+                ThreadPool.QueueUserWorkItem<(Keccak, Keccak, PreCommitPrefetcher)>(static state =>
+                {
+                    var (a, s, context) = state;
+                    context._parent._blockchain._preCommit.Prefetch(a, s, context);
+
+                }, (account, storage, this), true);
             }
 
             public void PrefetchStorage(in Keccak account, in Keccak storage)
@@ -748,38 +770,30 @@ public class Blockchain : IAsyncDisposable
                 var storageHash = storage.GetHashCode();
                 var storageCombined = accountHash ^ storageHash;
 
-                lock (cache)
+                if (_prefetched.AddAtomic((uint)accountHash))
                 {
-                    if (_prefetchPossible == false)
-                    {
-                        return;
-                    }
+                    ScheduleAccountPrefetch(account);
+                }
 
-                    if (_prefetched.Add(accountHash))
-                    {
-                        // prefetch account
-                        parent._blockchain._preCommit.Prefetch(account, this);
-                    }
-
-                    if (_prefetched.Add(storageCombined))
-                    {
-                        // prefetch account
-                        parent._blockchain._preCommit.Prefetch(account, storage, this);
-                    }
+                if (_prefetched.AddAtomic((ulong)storageCombined))
+                {
+                    ScheduleStoragePrefetch(account, storage);
                 }
             }
 
             public void BlockFurtherPrefetching()
             {
-                lock (cache)
+                _lock.EnterWriteLock();
+                try
                 {
-                    _prefetchPossible = false;
+                    Volatile.Write(ref _prefetchPossible, false);
+                }
+                finally
+                {
+                    _lock.ExitWriteLock();
                 }
 
-                foreach (var key in _cached)
-                {
-                    parent._filter.Add(key);
-                }
+                _parent._filter.OrWith(_merkleCached);
             }
 
             [SkipLocalsInit]
@@ -788,25 +802,54 @@ public class Blockchain : IAsyncDisposable
                 var hash = GetHash(key);
                 var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
-                if (_cached.Contains(hash) && cache.TryGet(keyWritten, hash, out var data))
+                if (_merkleCached.MayContainVolatile(hash))
                 {
-                    // No ownership needed, it's all local here
-                    var owner = new ReadOnlySpanOwner<byte>(data, null);
-                    return new ReadOnlySpanOwnerWithMetadata<byte>(owner, 0);
+                    _lock.EnterReadLock();
+                    try
+                    {
+                        if (_cache.TryGet(keyWritten, hash, out var data))
+                        {
+                            // No ownership needed, it's all local here
+                            var owner = new ReadOnlySpanOwner<byte>(data, null);
+                            return new ReadOnlySpanOwnerWithMetadata<byte>(owner, 0);
+                        }
+                    }
+                    finally
+                    {
+                        _lock.ExitReadLock();
+                    }
                 }
 
-                return parent.TryGetAncestors(key, keyWritten, hash);
+                return _parent.TryGetAncestors(key, keyWritten, hash);
             }
 
             [SkipLocalsInit]
-            public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type)
+            public bool TrySet(in Key key, in ReadOnlySpan<byte> payload, EntryType type)
             {
                 var hash = GetHash(key);
-
-                _cached.Add(hash);
-
                 var k = key.WriteTo(stackalloc byte[key.MaxByteLength]);
-                cache.Set(k, hash, payload, (byte)type);
+
+                if (_merkleCached.AddAtomic(hash) == false)
+                {
+                    // the entry has been probably set, move on, return true for the caller to proceed
+                    return true;
+                }
+
+                _lock.EnterWriteLock();
+                try
+                {
+                    if (_prefetchPossible == false)
+                    {
+                        return false;
+                    }
+
+                    _cache.Set(k, hash, payload, (byte)type);
+                    return true;
+                }
+                finally
+                {
+                    _lock.ExitWriteLock();
+                }
             }
 
             public void Dispose()
@@ -1486,7 +1529,8 @@ public class Blockchain : IAsyncDisposable
             Hash = stateRoot;
         }
 
-        public ReadOnlyState(Keccak stateRoot, ReadOnlyBatchCountingRefs batch, CommittedBlockState[] ancestors, BitFilter ancestorsFilter, BufferPool pool)
+        public ReadOnlyState(Keccak stateRoot, ReadOnlyBatchCountingRefs batch, CommittedBlockState[] ancestors,
+            BitFilter ancestorsFilter, BufferPool pool)
         {
             _batch = batch;
             _ancestors = ancestors;
@@ -1551,7 +1595,8 @@ public class Blockchain : IAsyncDisposable
             {
                 var destroyedHash = CommittedBlockState.GetDestroyedHash(key);
 
-                if (_ancestorsFilter == null || _ancestorsFilter.GetValueOrDefault().MayContainAny(keyHash, destroyedHash))
+                if (_ancestorsFilter == null ||
+                    _ancestorsFilter.GetValueOrDefault().MayContainAny(keyHash, destroyedHash))
                 {
                     ushort depth = 1;
 

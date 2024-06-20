@@ -44,5 +44,6 @@ public interface IPrefetcherContext
     /// <summary>
     /// Sets the value under the given key.
     /// </summary>
-    void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type = EntryType.Persistent);
+    /// <remarks>Whether set was successful. If false, the consecutive sets will fail as well.</remarks>
+    bool TrySet(in Key key, in ReadOnlySpan<byte> payload, EntryType type = EntryType.Persistent);
 }

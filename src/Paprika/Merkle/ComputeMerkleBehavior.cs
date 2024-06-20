@@ -1477,7 +1477,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     if (nonLocal)
                     {
                         // data came from the depth
-                        context.Set(key, owner.Span, EntryType.UseOnce);
+                        if (context.TrySet(key, owner.Span, EntryType.UseOnce) == false)
+                        {
+                            return;
+                        }
                     }
                     return;
                 case Node.Type.Extension:
@@ -1485,7 +1488,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         if (nonLocal)
                         {
                             // data came from the depth
-                            context.Set(key, owner.Span, EntryType.UseOnce);
+                            if (context.TrySet(key, owner.Span, EntryType.UseOnce) == false)
+                            {
+                                return;
+                            }
                         }
 
                         var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
@@ -1505,7 +1511,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     if (nonLocal)
                     {
                         // Will be modified and we can set to persistent already
-                        context.Set(key, owner.Span, EntryType.Persistent);
+                        if (context.TrySet(key, owner.Span, EntryType.Persistent) == false)
+                        {
+                            return;
+                        }
                     }
 
                     var nibble = path[i];

@@ -20,9 +20,9 @@ public abstract class BitMapFilterTests<TAccessor> : IDisposable
 
         for (ulong i = 0; i < count; i++)
         {
-            filter[i].Should().BeFalse();
-            filter[i] = true;
-            filter[i].Should().BeTrue();
+            filter.MayContain(i).Should().BeFalse();
+            filter.Add(i);
+            filter.MayContain(i).Should().BeTrue();
         }
 
         filter.Return(_pool);
