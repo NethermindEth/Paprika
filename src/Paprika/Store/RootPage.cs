@@ -103,7 +103,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
 
         Data.Storage.Accept(visitor, resolver);
 
-        // Data.AbandonedList.Accept(visitor, resolver);
+        Data.AbandonedList.Accept(visitor, resolver);
     }
 
     /// <summary>

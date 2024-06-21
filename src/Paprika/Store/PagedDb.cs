@@ -623,8 +623,12 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             // memoize the abandoned so that it's preserved for future uses
             MemoizeAbandoned();
 
+            using var missing = new MissingPagesVisitor(_root, _db._historyDepth);
+            _root.Accept(missing, this);
+
             // report metrics
-            _db.ReportPageCountPerCommit(_written.Count, _metrics.PagesReused, _metrics.PagesAllocated, _abandoned.Count);
+            _db.ReportPageCountPerCommit(_written.Count, _metrics.PagesReused, _metrics.PagesAllocated,
+                _abandoned.Count);
 
             _db.ReportReads(_metrics.Reads);
             _db.ReportWrites(_metrics.Writes);
@@ -742,7 +746,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
 #if TRACKING_REUSED_PAGES
             // register at this batch
-            ref var batchId = ref CollectionsMarshal.GetValueRefOrAddDefault(_db._registeredForReuse, addr, out var exists);
+            ref var batchId =
+ ref CollectionsMarshal.GetValueRefOrAddDefault(_db._registeredForReuse, addr, out var exists);
             if (exists)
             {
                 throw new Exception(
@@ -820,6 +825,56 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     public void Flush() => _manager.Flush();
 
     public void ForceFlush() => _manager.ForceFlush();
+}
+
+internal class MissingPagesVisitor : IPageVisitor, IDisposable
+{
+    private readonly DbAddressSet _pages;
+
+    public MissingPagesVisitor(RootPage page, byte historyDepth)
+    {
+        _pages = new(page.Data.NextFreePage);
+
+        // Mark all roots
+        for (uint i = 0; i < historyDepth; i++)
+        {
+            Mark(DbAddress.Page(i));
+        }
+    }
+
+    public IDisposable On(RootPage page, DbAddress addr) => Mark(addr);
+
+    public IDisposable On(AbandonedPage page, DbAddress addr)
+    {
+        foreach (var abandoned in page.Enumerate())
+        {
+            Mark(abandoned);
+        }
+
+        return Mark(addr);
+    }
+
+    public IDisposable On(DataPage page, DbAddress addr) => Mark(addr);
+
+    public IDisposable On(FanOutPage page, DbAddress addr) => Mark(addr);
+
+    public IDisposable On(LeafPage page, DbAddress addr) => Mark(addr);
+
+    public IDisposable On<TNext>(StorageFanOutPage<TNext> page, DbAddress addr)
+        where TNext : struct, IPageWithData<TNext>
+        => Mark(addr);
+
+    public IDisposable On(LeafOverflowPage page, DbAddress addr) => Mark(addr);
+
+    public IDisposable On(Merkle.StateRootPage data, DbAddress addr) => Mark(addr);
+
+    private IDisposable Mark(DbAddress addr)
+    {
+        _pages[addr] = false;
+        return Disposable.Instance;
+    }
+
+    public void Dispose() => _pages.Dispose();
 }
 
 public interface IReportingReadOnlyBatch : IReporting, IReadOnlyBatch

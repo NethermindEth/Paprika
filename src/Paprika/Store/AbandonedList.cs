@@ -197,16 +197,22 @@ public struct AbandonedList
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver)
     {
+        TryAcceptAbandoned(visitor, resolver, Current);
+
         foreach (var addr in Addresses)
         {
-            if (addr.IsNull == false)
-            {
-                var abandoned = new AbandonedPage(resolver.GetAt(addr));
-                visitor.On(abandoned, addr);
-
-                abandoned.Accept(visitor, resolver);
-            }
+            TryAcceptAbandoned(visitor, resolver, addr);
         }
+    }
+
+    private static void TryAcceptAbandoned(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
+    {
+        if (addr.IsNull)
+            return;
+
+        var abandoned = new AbandonedPage(resolver.GetAt(addr));
+        visitor.On(abandoned, addr);
+        abandoned.Accept(visitor, resolver);
     }
 
     [Pure]
