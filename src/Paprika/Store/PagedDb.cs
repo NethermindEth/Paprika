@@ -881,6 +881,13 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
 
     public void EnsureNoMissing(IPageResolver resolver)
     {
+        foreach (var addr in _pages.EnumerateSet())
+        {
+            var page = resolver.GetAt(addr);
+            throw new Exception(
+                $"The page at {addr} is not reachable from the tree nor from the set of abandoned pages. " +
+                $"Highly likely it's a leak. The page is {page.Header.PageType} and was written last in batch {page.Header.BatchId}");
+        }
     }
 }
 
