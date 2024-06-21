@@ -53,6 +53,7 @@ public class Blockchain : IAsyncDisposable
     private readonly Counter<long> _bloomMissedReads;
     private readonly Histogram<int> _cacheUsageState;
     private readonly Histogram<int> _cacheUsagePreCommit;
+    private readonly Histogram<int> _prefetchCount;
     private readonly MetricsExtensions.IAtomicIntGauge _flusherQueueCount;
 
     private readonly IDb _db;
@@ -95,6 +96,8 @@ public class Blockchain : IAsyncDisposable
             "How much used was the transient cache");
         _cacheUsagePreCommit = _meter.CreateHistogram<int>("PreCommit transient cache usage per commit", "%",
             "How much used was the transient cache");
+        _prefetchCount = _meter.CreateHistogram<int>("Prefetch count",
+            "Number of prefetches performed by the prefetcher", "count");
 
         // pool
         _pool = new(1024, true, _meter);
@@ -623,7 +626,11 @@ public class Blockchain : IAsyncDisposable
 
         private CommittedBlockState? CommitImpl(uint blockNumber, bool raw)
         {
-            _prefetcher?.BlockFurtherPrefetching();
+            if (_prefetcher != null)
+            {
+                _prefetcher.BlockFurtherPrefetching();
+                _blockchain._prefetchCount.Record(_prefetcher.PrefetchCount);
+            }
 
             EnsureHash();
 
@@ -714,6 +721,8 @@ public class Blockchain : IAsyncDisposable
         private interface IPrefetcher : IDisposable
         {
             void BlockFurtherPrefetching();
+
+            int PrefetchCount { get; }
         }
 
         private class PreCommitPrefetcher<TMapping, TAccount, TStorage>(PooledSpanDictionary cache, BlockState parent)
@@ -726,6 +735,9 @@ public class Blockchain : IAsyncDisposable
             private readonly BitFilter _prefetched = parent._blockchain.CreateBitFilter();
             private readonly ReaderWriterLockSlim _lock = new();
             private readonly BlockState _parent = parent;
+            private int _prefetchCount;
+
+            public int PrefetchCount => _prefetchCount;
 
             public bool CanPrefetchFurther => Volatile.Read(ref _prefetchPossible);
 
@@ -853,6 +865,7 @@ public class Blockchain : IAsyncDisposable
                         return false;
                     }
 
+                    _prefetchCount++;
                     cache.Set(k, hash, payload, (byte)type);
                     return true;
                 }
