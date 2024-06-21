@@ -7,7 +7,7 @@ namespace Paprika.Chain;
 /// The prefetcher that can be used to prefetch data for <see cref="IPreCommitBehavior"/>
 /// to help it with a faster commitment when <see cref="IWorldState.Commit"/> happens.
 /// </summary>
-public interface IPreCommitPrefetcher
+public interface IPreCommitPrefetcher<TAccount, TStorage>
 {
     /// <summary>
     /// Whether this prefetcher is still capable of prefetching data.
@@ -18,14 +18,33 @@ public interface IPreCommitPrefetcher
     /// Prefetches data needed for the account.
     /// </summary>
     /// <param name="account">The account to be prefetched.</param>
-    void PrefetchAccount(in Keccak account);
+    void PrefetchAccount(in TAccount account);
 
     /// <summary>
     /// Prefetches data needed for the account.
     /// </summary>
     /// <param name="account">The account to be prefetched.</param>
     /// <param name="storage">The storage slot</param>
-    void PrefetchStorage(in Keccak account, in Keccak storage);
+    void PrefetchStorage(in TAccount account, in TStorage storage);
+}
+
+public interface IPrefetchMapping<TAccount, TStorage>
+{
+    public static abstract int GetHashCode(in TAccount account);
+    public static abstract int GetStorageHashCode(in TStorage storage);
+
+    public static abstract Keccak ToKeccak(in TAccount account);
+    public static abstract Keccak ToStorageKeccak(in TStorage storage);
+}
+
+public struct IdentityPrefetchMapping : IPrefetchMapping<Keccak, Keccak>
+{
+    public static int GetHashCode(in Keccak storage) => storage.GetHashCode();
+    public static int GetStorageHashCode(in Keccak account) => account.GetHashCode();
+
+    public static Keccak ToKeccak(in Keccak account) => account;
+
+    public static Keccak ToStorageKeccak(in Keccak storage) => storage;
 }
 
 /// <summary>

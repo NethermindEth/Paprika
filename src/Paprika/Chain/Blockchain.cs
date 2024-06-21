@@ -520,7 +520,7 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private PooledSpanDictionary _preCommit = null!;
 
-        private PreCommitPrefetcher? _prefetcher;
+        private IPrefetcher? _prefetcher;
 
         private readonly DelayedMetrics.DelayedCounter<long, DelayedMetrics.LongIncrement> _xorMissed;
         private readonly CacheBudget _cacheBudgetStorageAndStage;
@@ -693,7 +693,8 @@ public class Blockchain : IAsyncDisposable
 
         IStateStats IWorldState.Stats => this;
 
-        public IPreCommitPrefetcher? OpenPrefetcher()
+        public IPreCommitPrefetcher<TAccount, TStorage>? OpenPrefetcher<TMapping, TAccount, TStorage>()
+            where TMapping : IPrefetchMapping<TAccount, TStorage>
         {
             if (_prefetcher != null)
             {
@@ -702,38 +703,38 @@ public class Blockchain : IAsyncDisposable
 
             if (_blockchain._preCommit.CanPrefetch)
             {
-                return _prefetcher = new PreCommitPrefetcher(_preCommit, this);
+                var prefetcher = new PreCommitPrefetcher<TMapping, TAccount, TStorage>(_preCommit, this);
+                _prefetcher = prefetcher;
+                return prefetcher;
             }
 
             return null;
         }
 
-        private class PreCommitPrefetcher : IDisposable, IPreCommitPrefetcher, IPrefetcherContext
+        private interface IPrefetcher : IDisposable
+        {
+            void BlockFurtherPrefetching();
+        }
+
+        private class PreCommitPrefetcher<TMapping, TAccount, TStorage>(PooledSpanDictionary cache, BlockState parent)
+            : IPreCommitPrefetcher<TAccount, TStorage>, IPrefetcherContext, IPrefetcher
+            where TMapping : IPrefetchMapping<TAccount, TStorage>
         {
             private bool _prefetchPossible = true;
 
-            private readonly BitFilter _merkleCached;
-            private readonly BitFilter _prefetched;
+            private readonly BitFilter _merkleCached = parent._blockchain.CreateBitFilter();
+            private readonly BitFilter _prefetched = parent._blockchain.CreateBitFilter();
             private readonly ReaderWriterLockSlim _lock = new();
-            private readonly PooledSpanDictionary _cache;
-            private readonly BlockState _parent;
-
-            public PreCommitPrefetcher(PooledSpanDictionary cache, BlockState parent)
-            {
-                _cache = cache;
-                _parent = parent;
-                _merkleCached = parent._blockchain.CreateBitFilter();
-                _prefetched = parent._blockchain.CreateBitFilter();
-            }
+            private readonly BlockState _parent = parent;
 
             public bool CanPrefetchFurther => Volatile.Read(ref _prefetchPossible);
 
-            public void PrefetchAccount(in Keccak account)
+            public void PrefetchAccount(in TAccount account)
             {
                 if (CanPrefetchFurther == false)
                     return;
 
-                var accountHash = account.GetHashCode();
+                var accountHash = TMapping.GetHashCode(account);
 
                 if (_prefetched.AddAtomic((uint)accountHash))
                 {
@@ -741,33 +742,35 @@ public class Blockchain : IAsyncDisposable
                 }
             }
 
-            private void ScheduleAccountPrefetch(Keccak account)
+            private void ScheduleAccountPrefetch(TAccount account)
             {
-                ThreadPool.QueueUserWorkItem<(Keccak, PreCommitPrefetcher)>(static state =>
-                {
-                    var (a, context) = state;
-                    context._parent._blockchain._preCommit.Prefetch(a, context);
-
-                }, (account, this), true);
+                ThreadPool.QueueUserWorkItem<(TAccount, PreCommitPrefetcher<TMapping, TAccount, TStorage>)>(
+                    static state =>
+                    {
+                        var (a, context) = state;
+                        context._parent._blockchain._preCommit.Prefetch(TMapping.ToKeccak(a), context);
+                    }, (account, this), true);
             }
 
-            private void ScheduleStoragePrefetch(Keccak account, Keccak storage)
+            private void ScheduleStoragePrefetch(TAccount account, TStorage storage)
             {
-                ThreadPool.QueueUserWorkItem<(Keccak, Keccak, PreCommitPrefetcher)>(static state =>
-                {
-                    var (a, s, context) = state;
-                    context._parent._blockchain._preCommit.Prefetch(a, s, context);
-
-                }, (account, storage, this), true);
+                ThreadPool.QueueUserWorkItem<(TAccount, TStorage, PreCommitPrefetcher<TMapping, TAccount, TStorage>)>(
+                    static state =>
+                    {
+                        var (a, s, context) = state;
+                        context._parent._blockchain._preCommit.Prefetch(TMapping.ToKeccak(a),
+                            TMapping.ToStorageKeccak(s), context);
+                    }, (account, storage, this), true);
             }
 
-            public void PrefetchStorage(in Keccak account, in Keccak storage)
+            public void PrefetchStorage(in TAccount account, in TStorage storage)
             {
                 if (CanPrefetchFurther == false)
                     return;
 
-                var accountHash = account.GetHashCode();
-                var storageHash = storage.GetHashCode();
+                var accountHash = TMapping.GetHashCode(account);
+                var storageHash = TMapping.GetStorageHashCode(storage);
+
                 var storageCombined = accountHash ^ storageHash;
 
                 if (_prefetched.AddAtomic((uint)accountHash))
@@ -814,7 +817,7 @@ public class Blockchain : IAsyncDisposable
                             return default;
                         }
 
-                        if (_cache.TryGet(keyWritten, hash, out var data))
+                        if (cache.TryGet(keyWritten, hash, out var data))
                         {
                             // No ownership needed, it's all local here
                             var owner = new ReadOnlySpanOwner<byte>(data, null);
@@ -850,7 +853,7 @@ public class Blockchain : IAsyncDisposable
                         return false;
                     }
 
-                    _cache.Set(k, hash, payload, (byte)type);
+                    cache.Set(k, hash, payload, (byte)type);
                     return true;
                 }
                 finally

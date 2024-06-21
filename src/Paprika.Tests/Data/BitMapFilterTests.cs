@@ -29,6 +29,25 @@ public abstract class BitMapFilterTests<TAccessor> : IDisposable
     }
 
     [Test]
+    public void Atomic_non_colliding_sets()
+    {
+        var filter = Build(_pool);
+
+        var count = filter.BucketCount;
+
+        Parallel.For(0, count, i =>
+        {
+            var hash = (uint)i;
+            filter.MayContainVolatile(hash).Should().BeFalse();
+            filter.AddAtomic(hash).Should().BeTrue();
+            filter.MayContainVolatile(hash).Should().BeTrue();
+            filter.AddAtomic(hash).Should().BeFalse();
+        });
+
+        filter.Return(_pool);
+    }
+
+    [Test]
     public void Or_with()
     {
         var filter1 = Build(_pool);
