@@ -25,4 +25,17 @@ public class DbAddressSetTests
             set[addr].Should().BeFalse();
         }
     }
+
+    [Test]
+    public void Set_enumeration()
+    {
+        const uint max = 5;
+        var set = new DbAddressSet(DbAddress.Page(max));
+
+        set[DbAddress.Page(0)] = false;
+        set[DbAddress.Page(2)] = false;
+        set[DbAddress.Page(4)] = false;
+
+        set.EnumerateSet().ToArray().Should().BeEquivalentTo([DbAddress.Page(1), DbAddress.Page(3)]);
+    }
 }

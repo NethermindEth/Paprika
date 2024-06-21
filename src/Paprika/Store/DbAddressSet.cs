@@ -33,6 +33,22 @@ public class DbAddressSet : IDisposable
         }
     }
 
+    public IEnumerable<DbAddress> EnumerateSet()
+    {
+        for (var i = 0; i < _bitSets.Length; i++)
+        {
+            var set = _bitSets[i];
+            foreach (var index in set.EnumerateSet())
+            {
+                var addr = DbAddress.Page((uint)(i * AddressesPerPage + index));
+                if (addr >= _max)
+                    yield break;
+
+                yield return addr;
+            }
+        }
+    }
+
     public bool this[DbAddress addr]
     {
         get
@@ -66,6 +82,24 @@ public class DbAddressSet : IDisposable
                 else
                 {
                     slot = (byte)(slot & ~bitMask);
+                }
+            }
+        }
+
+        public bool AnySet => page.Span.IndexOfAnyExcept((byte)0) != -1;
+
+        public IEnumerable<int> EnumerateSet()
+        {
+            if (page.Span.IndexOfAnyExcept((byte)0) == -1)
+            {
+                yield break;
+            }
+
+            for (int i = 0; i < AddressesPerPage; i++)
+            {
+                if (this[i])
+                {
+                    yield return i;
                 }
             }
         }

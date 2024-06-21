@@ -1,4 +1,5 @@
 //#define TRACKING_REUSED_PAGES
+#define VERIFY_COMMIT
 
 using NonBlocking;
 using System.Diagnostics;
@@ -623,9 +624,11 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             // memoize the abandoned so that it's preserved for future uses
             MemoizeAbandoned();
 
+#if VERIFY_COMMIT
             using var missing = new MissingPagesVisitor(_root, _db._historyDepth);
             _root.Accept(missing, this);
-
+            missing.EnsureNoMissing(this);
+#endif
             // report metrics
             _db.ReportPageCountPerCommit(_written.Count, _metrics.PagesReused, _metrics.PagesAllocated,
                 _abandoned.Count);
@@ -875,6 +878,10 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
     }
 
     public void Dispose() => _pages.Dispose();
+
+    public void EnsureNoMissing(IPageResolver resolver)
+    {
+    }
 }
 
 public interface IReportingReadOnlyBatch : IReporting, IReadOnlyBatch
