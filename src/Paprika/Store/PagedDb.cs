@@ -879,14 +879,15 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
 
     public void Dispose() => _pages.Dispose();
 
-    public void EnsureNoMissing(IPageResolver resolver)
+    public void EnsureNoMissing(IReadOnlyBatchContext batch)
     {
         foreach (var addr in _pages.EnumerateSet())
         {
-            var page = resolver.GetAt(addr);
+            var page = batch.GetAt(addr);
             throw new Exception(
                 $"The page at {addr} is not reachable from the tree nor from the set of abandoned pages. " +
-                $"Highly likely it's a leak. The page is {page.Header.PageType} and was written last in batch {page.Header.BatchId}");
+                $"Highly likely it's a leak. The page is {page.Header.PageType} and was written last in batch {page.Header.BatchId} " +
+                $"while the current batch is {batch.BatchId}");
         }
     }
 }
