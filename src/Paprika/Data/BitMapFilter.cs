@@ -10,10 +10,9 @@ namespace Paprika.Data;
 
 public static class BitMapFilter
 {
-    private const int BitsPerByteShift = 3;
-    private const int BitsPerByte = 1 << BitsPerByteShift;
-    private const int BitMask = BitsPerByte - 1;
-    private const ulong PageMask = Page.PageSize - 1;
+    private const int BitsPerByte = 8;
+    private const int SlotsPerPage = Page.PageSize / sizeof(int);
+    private const int SlotsPerPageMask = SlotsPerPage - 1;
 
     public static BitMapFilter<Of1> CreateOf1(BufferPool pool) => new(new Of1(pool.Rent(true)));
 
@@ -34,7 +33,7 @@ public static class BitMapFilter
         where TAccessor : struct, IAccessor<TAccessor>
     {
         [Pure]
-        unsafe byte* GetBit(uint hash, out byte mask);
+        ref int GetSlot(uint hash);
 
         [Pure]
         void Clear();
@@ -48,22 +47,12 @@ public static class BitMapFilter
         void OrWith(in TAccessor other);
     }
 
-    public readonly struct Of1 : IAccessor<Of1>
+    public readonly struct Of1(Page page) : IAccessor<Of1>
     {
-        private readonly Page _page;
+        private readonly Page _page = page;
 
-        public Of1(Page page)
-        {
-            _page = page;
-        }
-
-        [Pure]
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public unsafe byte* GetBit(uint hash, out byte mask)
-        {
-            mask = (byte)(1 << (int)(hash & BitMask));
-            return (byte*)_page.Raw.ToPointer() + ((hash >> BitsPerByteShift) & PageMask);
-        }
+        public unsafe ref int GetSlot(uint hash) =>
+            ref Unsafe.Add(ref Unsafe.AsRef<int>(_page.Raw.ToPointer()), hash & SlotsPerPageMask);
 
         public void Clear() => _page.Clear();
 
@@ -84,19 +73,15 @@ public static class BitMapFilter
             _page1 = page1;
         }
 
-        [Pure]
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public unsafe byte* GetBit(uint hash, out byte mask)
+        public unsafe ref int GetSlot(uint hash)
         {
             const int pageMask = 1;
             const int pageMaskShift = 1;
 
-            mask = (byte)(1 << (int)(hash & BitMask));
-            var h = hash >> BitsPerByteShift;
-            var page = (h & pageMask) != pageMask ? _page0 : _page1;
-            h >>= pageMaskShift;
+            var page = (hash & pageMask) != pageMask ? _page0 : _page1;
+            var index = (hash >> pageMaskShift) & SlotsPerPageMask;
 
-            return (byte*)page.Raw.ToPointer() + (h & PageMask);
+            return ref Unsafe.Add(ref Unsafe.AsRef<int>(page.Raw.ToPointer()), index);
         }
 
         public void Clear()
@@ -134,16 +119,12 @@ public static class BitMapFilter
             _pageMaskShift = (byte)BitOperations.Log2((uint)pages.Length);
         }
 
-        [Pure]
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public unsafe byte* GetBit(uint hash, out byte mask)
+        public unsafe ref int GetSlot(uint hash)
         {
-            mask = (byte)(1 << (int)(hash & BitMask));
-            var h = hash >> BitsPerByteShift;
-            var page = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_pages), (int)(h & _pageMask));
-            h >>= _pageMaskShift;
+            var page = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_pages), (int)(hash & _pageMask));
+            var index = (hash >> _pageMaskShift) & SlotsPerPageMask;
 
-            return (byte*)page.Raw.ToPointer() + (h & PageMask);
+            return ref Unsafe.Add(ref Unsafe.AsRef<int>(page.Raw.ToPointer()), index);
         }
 
         public void Clear()
@@ -190,6 +171,9 @@ public readonly struct BitMapFilter<TAccessor>
     where TAccessor : struct, BitMapFilter.IAccessor<TAccessor>
 {
     private readonly TAccessor _accessor;
+    private const int BitsPerIntShift = 5;
+    private const int BitsPerInt = 1 << BitsPerIntShift;
+    private const int BitMask = BitsPerInt - 1;
 
     /// <summary>
     /// Represents a simple bitmap based filter.
@@ -206,39 +190,51 @@ public readonly struct BitMapFilter<TAccessor>
     /// <summary>
     /// Checks whether the filter may contain any of the hashes.
     /// </summary>
-    public unsafe bool MayContainAny(ulong hash0, ulong hash1)
+    [SkipLocalsInit]
+    public bool MayContainAny(ulong hash0, ulong hash1)
     {
-        var ptr0 = _accessor.GetBit(Mix(hash0), out var bit0);
-        var ptr1 = _accessor.GetBit(Mix(hash1), out var bit1);
+        var mixed0 = Mix(hash0);
+        var slot0 = _accessor.GetSlot(mixed0 >> BitsPerIntShift);
+        var mixed1 = Mix(hash1);
+        var slot1 = _accessor.GetSlot(mixed1 >> BitsPerIntShift);
 
-        return ((*ptr0 & bit0) | (*ptr1 & bit1)) != 0;
+        return ((slot0 & GetBitMask(mixed0)) | (slot1 & GetBitMask(mixed1))) != 0;
     }
 
     public void Clear() => _accessor.Clear();
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static uint Mix(ulong hash) => (uint)((hash >> 32) ^ hash);
-
-    public unsafe bool this[ulong hash]
+    [SkipLocalsInit]
+    public bool this[ulong hash]
     {
         get
         {
-            var ptr = _accessor.GetBit(Mix(hash), out var bit);
-            return (*ptr & bit) == bit;
+            var mixed = Mix(hash);
+            var mask = GetBitMask(mixed);
+            var slot = _accessor.GetSlot(mixed >> BitsPerIntShift);
+            return (slot & mask) == mask;
         }
         set
         {
-            var ptr = _accessor.GetBit(Mix(hash), out var bit);
+            var mixed = Mix(hash);
+            var mask = GetBitMask(mixed);
+            ref var slot = ref _accessor.GetSlot(mixed >> BitsPerIntShift);
+
             if (value)
             {
-                *ptr = (byte)(*ptr | bit);
+                slot |= mask;
             }
             else
             {
-                *ptr = (byte)(*ptr & ~bit);
+                slot &= ~mask;
             }
         }
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int GetBitMask(uint mixed) => 1 << (int)(mixed & BitMask);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static uint Mix(ulong hash) => (uint)((hash >> 32) ^ hash);
 
     /// <summary>
     /// Applies or operation with <paramref name="other"/> bitmap filter and stores it in this one.

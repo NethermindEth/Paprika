@@ -2,6 +2,7 @@ using System.CodeDom.Compiler;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -1532,8 +1533,7 @@ public class Blockchain : IAsyncDisposable
 
         public Keccak Hash { get; }
 
-        public const ulong NonDestroyable = 0;
-        public const ulong Destroyable = 1;
+        private const ulong NonDestroyable = 0;
 
         public static ulong GetDestroyedHash(in Key key)
         {
@@ -1548,7 +1548,8 @@ public class Blockchain : IAsyncDisposable
             return GetDestroyedHash(path.UnsafeAsKeccak);
         }
 
-        private static ulong GetDestroyedHash(in Keccak keccak) => keccak.GetHashCodeUlong() | Destroyable;
+        private static uint GetDestroyedHash(in Keccak keccak) =>
+            BitOperations.Crc32C((uint)keccak.GetHashCode(), 0xDEADBEEF);
 
         /// <summary>
         /// Tries to get the key only from this block, acquiring no lease as it assumes that the lease is taken.
