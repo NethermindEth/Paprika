@@ -67,7 +67,7 @@ public readonly ref partial struct Key
 
     private const int TypeByteLength = 1;
 
-    public int MaxByteLength => TypeByteLength + Path.MaxByteLength + StoragePath.MaxByteLength;
+    public int MaxByteLength => TypeByteLength + NibblePath.MaxByteLength + NibblePath.MaxByteLength;
 
     /// <summary>
     /// Writes the span to the destination.
@@ -76,8 +76,8 @@ public readonly ref partial struct Key
     public Span<byte> WriteTo(Span<byte> destination)
     {
         destination[0] = (byte)Type;
-        var leftover = Path.WriteToWithLeftover(destination.Slice(1));
-        leftover = StoragePath.WriteToWithLeftover(leftover);
+        var leftover = NibblePath.WithPreamble.WriteToWithLeftover(Path, destination.Slice(1));
+        leftover = NibblePath.WithPreamble.WriteToWithLeftover(StoragePath, leftover);
 
         var written = destination.Length - leftover.Length;
         return destination.Slice(0, written);
@@ -86,8 +86,8 @@ public readonly ref partial struct Key
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Key key)
     {
         var type = (DataType)source[0];
-        var leftover = NibblePath.ReadFrom(source.Slice(1), out var path);
-        leftover = NibblePath.ReadFrom(leftover, out var storageKey);
+        var leftover = NibblePath.WithPreamble.ReadFrom(source.Slice(1), out var path);
+        leftover = NibblePath.WithPreamble.ReadFrom(leftover, out var storageKey);
         key = new Key(path, type, storageKey);
 
         return leftover;

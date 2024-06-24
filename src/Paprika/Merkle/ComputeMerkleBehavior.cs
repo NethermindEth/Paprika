@@ -901,7 +901,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     // there's an only child now. The branch should be collapsed
                     var onlyNibble = updatedChildren.SmallestNibbleSet;
                     var onlyChildPath = slice.AppendNibble(onlyNibble,
-                        stackalloc byte[slice.MaxByteLength + 1]);
+                        stackalloc byte[NibblePath.MaxByteLength + 1]);
 
                     var onlyChildKey = Key.Merkle(onlyChildPath);
                     using var onlyChildSpanOwner = commit.Get(onlyChildKey);
