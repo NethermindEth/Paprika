@@ -317,43 +317,6 @@ public class NibblePathTests
     [TestCase(0, 3)]
     [TestCase(1, 3)]
     [TestCase(1, 2)]
-    public void Write_and_read(int from, int length)
-    {
-        const byte data = 253;
-        var raw = new byte[] { 0x12, 0x34 };
-        var path = NibblePath.FromKey(raw).SliceFrom(from).SliceTo(length);
-
-        Span<byte> span = stackalloc byte[path.MaxByteLength + 1];
-        var written = path.WriteToWithPreamble(span);
-        span[written.Length] = data;
-
-        var left = NibblePath.ReadFrom(span.Slice(0, written.Length + 1), out var actual);
-
-        // assert
-        actual.ToString().Should().Be(path.ToString());
-
-        left.Length.Should().Be(1);
-        left[0].Should().Be(data);
-    }
-
-    [Test]
-    public void Writing_path_with_last_nibble_skipped_should_not_care_about_the_rest()
-    {
-        const int length = 3;
-
-        var pathA = NibblePath.FromKey(new byte[] { 0x12, 0x3A }).SliceTo(length);
-        var pathB = NibblePath.FromKey(new byte[] { 0x12, 0x3B }).SliceTo(length);
-
-        var writtenA = pathA.WriteToWithPreamble(stackalloc byte[pathA.MaxByteLength]);
-        var writtenB = pathB.WriteToWithPreamble(stackalloc byte[pathB.MaxByteLength]);
-
-        writtenA.SequenceEqual(writtenB).Should().BeTrue();
-    }
-
-    [TestCase(0, 4)]
-    [TestCase(0, 3)]
-    [TestCase(1, 3)]
-    [TestCase(1, 2)]
     public void AppendNibble(int from, int length)
     {
         const byte first = 0xDC;
@@ -1032,5 +995,157 @@ public class NibblePathTests
         }
 
         roLeftover.ToArray().Should().Equal(expected);
+    }
+
+    [TestCase(0, 4)]
+    [TestCase(0, 3)]
+    [TestCase(1, 3)]
+    [TestCase(1, 2)]
+    public void WriteToWithPreamble_and_read(int from, int length)
+    {
+        const byte data = 253;
+        var raw = new byte[] { 0x12, 0x34 };
+        var path = NibblePath.FromKey(raw).SliceFrom(from).SliceTo(length);
+
+        Span<byte> span = stackalloc byte[path.MaxByteLength + 1];
+        var written = path.WriteToWithPreamble(span);
+        span[written.Length] = data;
+
+        var left = NibblePath.ReadFrom(span.Slice(0, written.Length + 1), out var actual);
+
+        // assert
+        actual.ToString().Should().Be(path.ToString());
+
+        left.Length.Should().Be(1);
+        left[0].Should().Be(data);
+    }
+
+    [Test]
+    public void WriteToWithPreamble_last_nibble_skipped_should_not_care_about_the_rest()
+    {
+        const int length = 3;
+
+        var pathA = NibblePath.FromKey(new byte[] { 0x12, 0x3A }).SliceTo(length);
+        var pathB = NibblePath.FromKey(new byte[] { 0x12, 0x3B }).SliceTo(length);
+
+        var writtenA = pathA.WriteToWithPreamble(stackalloc byte[pathA.MaxByteLength]);
+        var writtenB = pathB.WriteToWithPreamble(stackalloc byte[pathB.MaxByteLength]);
+
+        writtenA.SequenceEqual(writtenB).Should().BeTrue();
+    }
+
+    [TestCase(0, 4)]
+    [TestCase(0, 3)]
+    [TestCase(1, 3)]
+    [TestCase(1, 2)]
+    public void WriteToNoPreamble_and_read(int from, int length)
+    {
+        const byte data = 253;
+        var raw = new byte[] { 0x12, 0x34 };
+        var path = NibblePath.FromKey(raw).SliceFrom(from).SliceTo(length);
+
+        Span<byte> span = stackalloc byte[path.MaxByteLength];
+        var written = path.WriteToNoPreamble(span);
+        span[written.Length] = data;
+
+        var left = NibblePath.ReadFromWithLength(span.Slice(0, written.Length + 1), path.Length, path.Oddity,  out var actual);
+
+        // assert
+        actual.ToString().Should().Be(path.ToString());
+
+        left.Length.Should().Be(1);
+        left[0].Should().Be(data);
+    }
+
+    [Test]
+    public void WriteToNoPreamble_last_nibble_skipped_NoPreamble_should_not_care_about_the_rest()
+    {
+        const int length = 3;
+
+        var pathA = NibblePath.FromKey(new byte[] { 0x12, 0x3A }).SliceTo(length);
+        var pathB = NibblePath.FromKey(new byte[] { 0x12, 0x3B }).SliceTo(length);
+
+        var writtenA = pathA.WriteToNoPreamble(stackalloc byte[pathA.MaxByteLength]);
+        var writtenB = pathB.WriteToNoPreamble(stackalloc byte[pathB.MaxByteLength]);
+
+        writtenA.SequenceEqual(writtenB).Should().BeTrue();
+    }
+
+    [TestCase(0, 4)]
+    [TestCase(0, 3)]
+    [TestCase(1, 3)]
+    [TestCase(1, 2)]
+    public void WriteToWithLeftoverNoPreamble_and_read(int from, int length)
+    {
+        const byte data = 253;
+        var raw = new byte[] { 0x12, 0x34 };
+        var path = NibblePath.FromKey(raw).SliceFrom(from).SliceTo(length);
+        var odd = path.IsOdd ? 1 : 0;
+
+        Span<byte> span = stackalloc byte[path.MaxByteLength];
+        var leftover = path.WriteToWithLeftoverNoPreamble(span);
+        leftover[0] = data;
+
+        leftover.Length.Should().Be(1);
+        leftover[0].Should().Be(data);
+
+        var left = NibblePath.ReadFromWithLength(span.Slice(0, span.Length - leftover.Length), path.Length, odd, out var actual);
+
+        // assert
+        actual.ToString().Should().Be(path.ToString());
+
+        leftover.Length.Should().Be(1);
+        leftover[0].Should().Be(data);
+    }
+
+    [Test]
+    public void WriteToWithLeftoverNoPreamble_last_nibble_skipped_WithLeftoverNoPreamble_should_not_care_about_the_rest()
+    {
+        const int length = 3;
+
+        var pathA = NibblePath.FromKey(new byte[] { 0x12, 0x3A }).SliceTo(length);
+        var pathB = NibblePath.FromKey(new byte[] { 0x12, 0x3B }).SliceTo(length);
+
+        var writtenA = pathA.WriteToWithLeftoverNoPreamble(stackalloc byte[pathA.MaxByteLength]);
+        var writtenB = pathB.WriteToWithLeftoverNoPreamble(stackalloc byte[pathB.MaxByteLength]);
+
+        writtenA.SequenceEqual(writtenB).Should().BeTrue();
+    }
+
+    [TestCase(0, 4)]
+    [TestCase(0, 3)]
+    [TestCase(1, 3)]
+    [TestCase(1, 2)]
+    public void WriteToWithLeftoverWithPreamble_and_read(int from, int length)
+    {
+        const byte data = 253;
+        var raw = new byte[] { 0x12, 0x34 };
+        var path = NibblePath.FromKey(raw).SliceFrom(from).SliceTo(length);
+
+        Span<byte> span = stackalloc byte[path.MaxByteLength + 1];
+        var leftover = path.WriteToWithLeftoverWithPreamble(span);
+        leftover[0] = data;
+
+        var left = NibblePath.ReadFrom(span.Slice(0, span.Length - leftover.Length), out var actual);
+
+        // assert
+        actual.ToString().Should().Be(path.ToString());
+
+        leftover.Length.Should().Be(1);
+        leftover[0].Should().Be(data);
+    }
+
+    [Test]
+    public void WriteToWithLeftoverWithPreamble_last_nibble_skipped_WithLeftoverWithPreamble_should_not_care_about_the_rest()
+    {
+        const int length = 3;
+
+        var pathA = NibblePath.FromKey(new byte[] { 0x12, 0x3A }).SliceTo(length);
+        var pathB = NibblePath.FromKey(new byte[] { 0x12, 0x3B }).SliceTo(length);
+
+        var writtenA = pathA.WriteToWithLeftoverWithPreamble(stackalloc byte[pathA.MaxByteLength]);
+        var writtenB = pathB.WriteToWithLeftoverWithPreamble(stackalloc byte[pathB.MaxByteLength]);
+
+        writtenA.SequenceEqual(writtenB).Should().BeTrue();
     }
 }
