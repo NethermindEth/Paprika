@@ -63,6 +63,26 @@ public readonly struct AbandonedPage(Page page) : IPage
         }
     }
 
+    public IEnumerable<DbAddress> Enumerate()
+    {
+        for (var i = 0; i < Data.Count; i++)
+        {
+            var top = Data.Abandoned[i];
+            if ((top & PackedFlag) == PackedFlag)
+            {
+                // is packed, return this and next
+                var addr = top & ~PackedFlag;
+                yield return new DbAddress(addr);
+                yield return new DbAddress(addr + PackedDiff);
+            }
+            else
+            {
+                // not packed, just return
+                yield return new DbAddress(top);
+            }
+        }
+    }
+
     public bool TryPeek(out DbAddress addr, out bool hasMoreThanPeeked)
     {
         if (Data.Count == 0)

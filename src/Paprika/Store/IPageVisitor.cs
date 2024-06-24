@@ -17,3 +17,17 @@ public interface IPageVisitor
 
     IDisposable On(Merkle.StateRootPage data, DbAddress addr);
 }
+
+public sealed class Disposable : IDisposable
+{
+    private Disposable()
+    {
+    }
+
+    public static readonly IDisposable Instance = new Disposable();
+
+    public void Dispose()
+    {
+
+    }
+}

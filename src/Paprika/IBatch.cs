@@ -31,6 +31,11 @@ public interface IBatch : IReadOnlyBatch
     /// Gets the low levels stats of the given batch.
     /// </summary>
     IBatchStats? Stats { get; }
+
+    /// <summary>
+    /// Performs a time consuming verification when <see cref="Commit"/> is called that all the pages are reachable.
+    /// </summary>
+    void VerifyDbPagesOnCommit();
 }
 
 public interface IBatchStats
