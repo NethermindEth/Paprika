@@ -339,7 +339,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         // There are RLPs here, compress them
         var dataLength = data.Length - RlpMemo.Size;
-        data[..dataLength].CopyTo(workingSet);
+        data.Slice(0, dataLength).CopyTo(workingSet);
 
         var compressedLength = RlpMemo.Compress(key, memoizedRlp, branch.Children, workingSet[dataLength..]);
 
@@ -1444,87 +1444,125 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     [SkipLocalsInit]
     private static void PrefetchImpl(in Keccak account, in Keccak storage, IPrefetcherContext context)
     {
-        var isAccountPrefetch = Unsafe.IsNullRef(in storage);
-        var accountPath = NibblePath.FromKey(account);
+        byte[]? bytes = null;
 
-        // Use a similar algorithm to walking through as the MarkPathAsDirty.
-        // Preload only branches
-        // Flag forcing the leaf creation, that saves one get of the non-existent value.
-        var path = NibblePath.FromKey(isAccountPrefetch ? account : storage);
-
-        for (var i = 0; i <= path.Length; i++)
+        try
         {
-            var slice = path.SliceTo(i);
-            var key = isAccountPrefetch ? Key.Merkle(slice) : Key.Raw(accountPath, DataType.Merkle, slice);
-            var leftoverPath = path.SliceFrom(i);
+            var isAccountPrefetch = Unsafe.IsNullRef(in storage);
+            var accountPath = NibblePath.FromKey(account);
 
-            // Query for the node
-            using var owner = context.Get(key);
-            if (owner.IsEmpty)
+            // Use a similar algorithm to walking through as the MarkPathAsDirty.
+            // Preload only branches
+            // Flag forcing the leaf creation, that saves one get of the non-existent value.
+            var path = NibblePath.FromKey(isAccountPrefetch ? account : storage);
+
+            for (var i = 0; i <= path.Length; i++)
             {
-                // A leaf will be created here.
-                return;
-            }
+                var slice = path.SliceTo(i);
+                var key = isAccountPrefetch ? Key.Merkle(slice) : Key.Raw(accountPath, DataType.Merkle, slice);
+                var leftoverPath = path.SliceFrom(i);
 
-            // read the existing one
-            Node.ReadFrom(out var type, out _, out var ext, out var branch, owner.Span);
-
-            var nonLocal = owner.QueryDepth > 0;
-
-            switch (type)
-            {
-                case Node.Type.Leaf:
-                    if (nonLocal)
-                    {
-                        // data came from the depth
-                        context.Set(key, owner.Span, EntryType.UseOnce);
-                    }
+                // Query for the node
+                using var owner = context.Get(key);
+                if (owner.IsEmpty)
+                {
+                    // A leaf will be created here.
                     return;
-                case Node.Type.Extension:
-                    {
+                }
+
+                // read the existing one
+                Node.ReadFrom(out var type, out _, out var ext, out var branch, owner.Span);
+
+                var nonLocal = owner.QueryDepth > 0;
+
+                switch (type)
+                {
+                    case Node.Type.Leaf:
                         if (nonLocal)
                         {
                             // data came from the depth
-                            context.Set(key, owner.Span, EntryType.UseOnce);
+                            if (context.TrySet(key, owner.Span, EntryType.UseOnce) == false)
+                            {
+                                return;
+                            }
                         }
-
-                        var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
-                        if (diffAt == ext.Path.Length)
+                        return;
+                    case Node.Type.Extension:
                         {
-                            // The path overlaps with what is there, move forward
-                            i += ext.Path.Length - 1;
+                            if (nonLocal)
+                            {
+                                // data came from the depth
+                                if (context.TrySet(key, owner.Span, EntryType.UseOnce) == false)
+                                {
+                                    return;
+                                }
+                            }
 
-                            // Consider adding the extension here?
-                            continue;
+                            var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
+                            if (diffAt == ext.Path.Length)
+                            {
+                                // The path overlaps with what is there, move forward
+                                i += ext.Path.Length - 1;
+
+                                // Consider adding the extension here?
+                                continue;
+                            }
+
+                            // The paths are different, handle by MarkPathAsDirty
+                            return;
+                        }
+                    case Node.Type.Branch:
+                        if (nonLocal)
+                        {
+                            // Need to decompress data as the MarkPathAsDirty requires branches owned by this commit to be decompressed
+                            var branchOnlyData = Node.Branch.GetOnlyBranchData(owner.Span);
+                            var rlpMemo = owner.Span.Slice(branchOnlyData.Length);
+                            if (rlpMemo.Length == RlpMemo.Size)
+                            {
+                                // RLP memo is right, just set
+                                if (context.TrySet(key, owner.Span, EntryType.Persistent) == false)
+                                {
+                                    return;
+                                }
+                            }
+                            else
+                            {
+                                bytes ??= ArrayPool<byte>.Shared.Rent(RlpMemo.Size + Node.Branch.MaxByteLength);
+                                branchOnlyData.CopyTo(bytes);
+                                var decompressed = RlpMemo.Decompress(rlpMemo, branch.Children, bytes.AsSpan(branchOnlyData.Length));
+
+                                // Calculate the actual payload by adding the lengths of the branch and the decompressed length
+                                var actual = bytes.AsSpan(0, branchOnlyData.Length + decompressed.Raw.Length);
+                                if (context.TrySet(key, actual, EntryType.Persistent) == false)
+                                {
+                                    return;
+                                }
+                            }
                         }
 
-                        // The paths are different, handle by MarkPathAsDirty
-                        return;
-                    }
-                case Node.Type.Branch:
-                    if (nonLocal)
-                    {
-                        // Will be modified and we can set to persistent already
-                        context.Set(key, owner.Span, EntryType.Persistent);
-                    }
+                        var nibble = path[i];
+                        if (branch.Children[nibble] == false)
+                        {
+                            // no children set, will be created
+                            return;
+                        }
 
-                    var nibble = path[i];
-                    if (branch.Children[nibble] == false)
-                    {
-                        // no children set, will be created
-                        return;
-                    }
+                        if (LeafCanBeOmitted(i + 1))
+                        {
+                            // no need to store leaf on the last level
+                            return;
+                        }
 
-                    if (LeafCanBeOmitted(i + 1))
-                    {
-                        // no need to store leaf on the last level
+                        break;
+                    default:
                         return;
-                    }
-
-                    break;
-                default:
-                    return;
+                }
             }
+        }
+        finally
+        {
+            if (bytes != null)
+                ArrayPool<byte>.Shared.Return(bytes);
         }
     }
 
