@@ -296,7 +296,7 @@ public static partial class Node
         public Span<byte> WriteToWithLeftover(Span<byte> output)
         {
             var leftover = Header.WriteToWithLeftover(output);
-            leftover = Path.WriteToWithLeftover(leftover);
+            leftover = NibblePath.WithPreamble.WriteToWithLeftover(Path, leftover);
 
             return leftover;
         }
@@ -304,7 +304,7 @@ public static partial class Node
         public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Extension extension)
         {
             var leftover = Header.ReadFrom(source, out var header);
-            leftover = NibblePath.ReadFrom(leftover, out var path);
+            leftover = NibblePath.WithPreamble.ReadFrom(leftover, out var path);
 
             extension = new Extension(header, path);
             return leftover;

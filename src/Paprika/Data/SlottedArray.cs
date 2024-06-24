@@ -110,7 +110,7 @@ public readonly ref struct SlottedArray
 
         if (HasKeyBytes(preamble))
         {
-            var dest2 = trimmed.WriteToWithLeftover(dest);
+            var dest2 = NibblePath.WithPreamble.WriteToWithLeftover(trimmed, dest);
             data.CopyTo(dest2);
         }
         else
@@ -238,7 +238,7 @@ public readonly ref struct SlottedArray
             NibblePath trimmed;
             if (slot.HasKeyBytes)
             {
-                data = NibblePath.ReadFrom(payload, out trimmed);
+                data = NibblePath.WithPreamble.ReadFrom(payload, out trimmed);
             }
             else
             {
@@ -463,7 +463,7 @@ public readonly ref struct SlottedArray
 
                     if (slot.HasKeyBytes)
                     {
-                        if (NibblePath.TryReadFrom(actual, key, out var leftover))
+                        if (NibblePath.WithPreamble.TryReadFrom(actual, key, out var leftover))
                         {
                             data = leftover;
                             slotIndex = i;
@@ -684,7 +684,7 @@ public readonly ref struct SlottedArray
             }
 
             const int limit = 3;
-            data = NibblePath.ReadFrom(input, out var trimmed);
+            data = NibblePath.WithPreamble.ReadFrom(input, out var trimmed);
             return prefix.Append(trimmed, hash, workingSet[limit..]);
         }
 
