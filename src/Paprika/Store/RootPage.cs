@@ -101,9 +101,9 @@ public readonly unsafe struct RootPage(Page root) : IPage
             new Merkle.StateRootPage(resolver.GetAt(stateRoot)).Accept(visitor, resolver, stateRoot);
         }
 
+        Data.Ids.Accept(visitor, resolver);
         Data.Storage.Accept(visitor, resolver);
-
-        // Data.AbandonedList.Accept(visitor, resolver);
+        Data.AbandonedList.Accept(visitor, resolver);
     }
 
     /// <summary>

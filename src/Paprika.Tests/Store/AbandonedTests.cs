@@ -199,6 +199,8 @@ public class AbandonedTests : BasePageTests
 
             using var block = db.BeginNextBatch();
             block.SetAccount(account, value);
+            block.VerifyDbPagesOnCommit();
+
             await block.Commit(CommitOptions.FlushDataAndRoot);
         }
 
