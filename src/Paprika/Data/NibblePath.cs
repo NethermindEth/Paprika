@@ -60,7 +60,7 @@ public readonly ref struct NibblePath
     public const int NibbleMask = 15;
 
     private const int LengthShift = 1;
-    private const int PreambleLength = 1;
+    public const int PreambleLength = 1;
     private const int OddBit = 1;
 
     private readonly ref byte _span;
@@ -329,7 +329,7 @@ public readonly ref struct NibblePath
         if (((odd + length) & OddBit) == 0)
             return spanLength;
 
-        ref var oldest = ref destination[spanLength];
+        ref var oldest = ref destination[spanLength-PreambleLength];
         oldest = (byte)(oldest & 0b1111_0000);
 
         return spanLength;
