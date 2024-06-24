@@ -178,8 +178,12 @@ public struct AbandonedList
                 }
             }
 
+            // 1. Attach the previously existing abandoned as tail to the current one
             new AbandonedPage(batch.GetAt(head)).AttachTail(Addresses[maxAt], batch);
+            // 2. Update the batch id
             BatchIds[maxAt] = batch.BatchId;
+            // 3. Set properly the address to the head that has been chained up
+            Addresses[maxAt] = head;
         }
         else
         {

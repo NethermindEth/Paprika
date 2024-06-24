@@ -114,6 +114,8 @@ public class DbTests
 
                 // write current
                 block.SetAccount(Key0, GetValue(i));
+
+                block.VerifyDbPagesOnCommit();
                 await block.Commit(CommitOptions.FlushDataOnly);
 
                 read.ShouldHaveAccount(Key0, GetValue(start));

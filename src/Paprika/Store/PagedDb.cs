@@ -1,5 +1,4 @@
 //#define TRACKING_REUSED_PAGES
-#define VERIFY_COMMIT
 
 using NonBlocking;
 using System.Diagnostics;
@@ -524,7 +523,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         private readonly PagedDb _db;
         private readonly RootPage _root;
         private readonly uint _reusePagesOlderThanBatchId;
-
+        private bool _verify = false;
         private bool _disposed;
 
         private readonly Context _ctx;
@@ -624,11 +623,13 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             // memoize the abandoned so that it's preserved for future uses
             MemoizeAbandoned();
 
-#if VERIFY_COMMIT
-            using var missing = new MissingPagesVisitor(_root, _db._historyDepth);
-            _root.Accept(missing, this);
-            missing.EnsureNoMissing(this);
-#endif
+            if (_verify)
+            {
+                using var missing = new MissingPagesVisitor(_root, _db._historyDepth);
+                _root.Accept(missing, this);
+                missing.EnsureNoMissing(this);
+            }
+
             // report metrics
             _db.ReportPageCountPerCommit(_written.Count, _metrics.PagesReused, _metrics.PagesAllocated,
                 _abandoned.Count);
@@ -660,6 +661,11 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         }
 
         IBatchStats? IBatch.Stats => Stats;
+
+        public void VerifyDbPagesOnCommit()
+        {
+            _verify = true;
+        }
 
         [DebuggerStepThrough]
         public override Page GetAt(DbAddress address)
