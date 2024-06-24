@@ -201,6 +201,17 @@ public readonly ref struct NibblePath
     /// </summary>
     public const int MaxByteLength = 64;
 
+    /// <summary>
+    /// Writes the nibbles to the destination.
+    /// </summary>
+    /// <param name="path"></param>
+    /// <param name="destination"></param>
+    /// <returns>The actual bytes written.</returns>
+    public static Span<byte> WriteTo(in NibblePath path, Span<byte> destination)
+    {
+        return WithPreamble.WriteTo(this, path, destination);
+    }
+
     public const int KeccakNibbleCount = Keccak.Size * NibblePerByte;
 
     public const int FullKeccakByteLength = Keccak.Size + 2;
