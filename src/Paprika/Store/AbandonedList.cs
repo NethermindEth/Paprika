@@ -178,8 +178,12 @@ public struct AbandonedList
                 }
             }
 
+            // 1. Attach the previously existing abandoned as tail to the current one
             new AbandonedPage(batch.GetAt(head)).AttachTail(Addresses[maxAt], batch);
+            // 2. Update the batch id
             BatchIds[maxAt] = batch.BatchId;
+            // 3. Set properly the address to the head that has been chained up
+            Addresses[maxAt] = head;
         }
         else
         {
@@ -197,16 +201,22 @@ public struct AbandonedList
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver)
     {
+        TryAcceptAbandoned(visitor, resolver, Current);
+
         foreach (var addr in Addresses)
         {
-            if (addr.IsNull == false)
-            {
-                var abandoned = new AbandonedPage(resolver.GetAt(addr));
-                visitor.On(abandoned, addr);
-
-                abandoned.Accept(visitor, resolver);
-            }
+            TryAcceptAbandoned(visitor, resolver, addr);
         }
+    }
+
+    private static void TryAcceptAbandoned(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
+    {
+        if (addr.IsNull)
+            return;
+
+        var abandoned = new AbandonedPage(resolver.GetAt(addr));
+        visitor.On(abandoned, addr);
+        abandoned.Accept(visitor, resolver);
     }
 
     [Pure]
