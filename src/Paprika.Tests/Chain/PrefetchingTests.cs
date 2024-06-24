@@ -160,12 +160,16 @@ public class PrefetchingTests
             }
         }
 
+        Keccak keccak = default;
         while (finality.TryDequeue(out var k))
         {
             blockchain.Finalize(k);
+            keccak = k;
         }
 
-        Console.WriteLine($"Prefetch failures: {prefetchFailures}. Commit time {commits.Elapsed:g}");
+        Console.WriteLine($"Prefetch failures: {prefetchFailures}. " +
+                          $"Commit time {commits.Elapsed:g}. " +
+                          $"Final Keccak: {keccak}");
     }
 
     private static void SetAccounts(ReadOnlyMemory<Keccak> slice, IWorldState block, uint i, bool storage)
