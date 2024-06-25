@@ -387,22 +387,22 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
     private IBatch BuildFromRoot(RootPage rootPage)
     {
+        var ctx = Interlocked.Exchange(ref _ctx, null) ?? new Context();
+
+        // prepare root
+        var root = new RootPage(ctx.PageForRoot);
+        rootPage.CopyTo(root);
+
+        // always inc the batchId
+        root.Header.BatchId++;
+
+        // copying done above, to minimize the lock
         lock (_batchLock)
         {
             if (_batchCurrent != null)
             {
                 ThrowOnlyOneBatch();
             }
-
-            var ctx = _ctx ?? new Context();
-            _ctx = null;
-
-            // prepare root
-            var root = new RootPage(ctx.Page);
-            rootPage.CopyTo(root);
-
-            // always inc the batchId
-            root.Header.BatchId++;
 
             // select min batch across the one respecting history and the min of all the read-only batches
             var rootBatchId = root.Header.BatchId;
@@ -814,7 +814,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     {
         public unsafe Context()
         {
-            Page = new((byte*)NativeMemory.AlignedAlloc(Page.PageSize, (UIntPtr)UIntPtr.Size));
+            PageForRoot = new((byte*)NativeMemory.AlignedAlloc(Page.PageSize, (UIntPtr)UIntPtr.Size));
             Abandoned = new List<DbAddress>();
             Written = new HashSet<DbAddress>();
             IdCache = new Dictionary<Keccak, uint>();
@@ -822,7 +822,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
         public Dictionary<Keccak, uint> IdCache { get; }
 
-        public Page Page { get; }
+        public Page PageForRoot { get; }
 
         public List<DbAddress> Abandoned { get; }
         public HashSet<DbAddress> Written { get; }
