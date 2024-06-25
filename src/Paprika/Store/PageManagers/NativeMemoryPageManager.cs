@@ -8,10 +8,10 @@ public sealed unsafe class NativeMemoryPageManager : PointerPageManager
 
     public NativeMemoryPageManager(long size, byte historyDepth) : base(size)
     {
-        _ptr = NativeMemory.AlignedAlloc((UIntPtr)size, (UIntPtr)Page.PageSize);
+        _ptr = NativeMemory.AlignedAlloc((UIntPtr)size, Page.PageSize);
 
         // clear first pages to make it clean
-        for (var i = 0; i < historyDepth; i++)
+        for (var i = 0; i < historyDepth * PagedDb.DbPagesPerRoot; i++)
         {
             GetAt(new DbAddress((uint)i)).Clear();
         }

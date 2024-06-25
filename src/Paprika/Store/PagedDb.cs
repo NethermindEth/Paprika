@@ -32,6 +32,14 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     /// </remarks>
     private const int MinHistoryDepth = 2;
 
+    /// <summary>
+    /// The number of db pages that a single root actually occupies.
+    /// The pages, when flushed, should be written from the highest address to the lowest.
+    /// </summary>
+    public const uint DbPagesPerRoot = 2;
+
+    private uint DataStart => _historyDepth * DbPagesPerRoot;
+
     public const string MeterName = "Paprika.Store.PagedDb";
     public const string DbSize = "DB Size";
 
@@ -148,13 +156,13 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         // create all root pages for the history depth
         for (uint i = 0; i < _historyDepth; i++)
         {
-            _roots[i] = new RootPage(_manager.GetAt(DbAddress.Page(i)));
+            _roots[i] = new RootPage(_manager.GetAt(DbAddress.Page(i * DbPagesPerRoot)));
         }
 
-        if (_roots[0].Data.NextFreePage < _historyDepth)
+        if (_roots[0].Data.NextFreePage < DataStart)
         {
             // the 0th page will have the properly number set to first free page
-            _roots[0].Data.NextFreePage = DbAddress.Page(_historyDepth);
+            _roots[0].Data.NextFreePage = DbAddress.Page(DataStart);
         }
 
         _lastRoot = 0;
@@ -359,7 +367,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     /// <returns></returns>
     public IEnumerable<Page> UnsafeEnumerateNonRoot()
     {
-        for (uint i = _historyDepth; i < Root.Data.NextFreePage; i++)
+        for (uint i = DataStart; i < Root.Data.NextFreePage; i++)
         {
             yield return _manager.GetAt(DbAddress.Page(i));
         }
@@ -845,7 +853,7 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
         _pages = new(page.Data.NextFreePage);
 
         // Mark all roots
-        for (uint i = 0; i < historyDepth; i++)
+        for (uint i = 0; i < historyDepth * PagedDb.DbPagesPerRoot; i++)
         {
             Mark(DbAddress.Page(i));
         }
