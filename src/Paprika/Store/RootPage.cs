@@ -77,14 +77,6 @@ public readonly unsafe struct RootPage(Page root) : IPage
 
         public FanOutList<FanOutPage, IdentityType> Ids => new(MemoryMarshal.CreateSpan(ref IdsPayload, FanOutList.FanOut));
 
-        public const int AbandonedStart =
-            DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + FanOutList.Size * 2;
-
-        /// <summary>
-        /// The start of the abandoned pages.
-        /// </summary>
-        [FieldOffset(AbandonedStart)] public AbandonedList AbandonedList;
-
         public DbAddress GetNextFreePage()
         {
             var free = NextFreePage;
@@ -93,7 +85,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         }
     }
 
-    public void Accept(IPageVisitor visitor, IPageResolver resolver)
+    public void Accept(IPageVisitor visitor, IPageResolver resolver, Page abandoned)
     {
         var stateRoot = Data.StateRoot;
         if (stateRoot.IsNull == false)
@@ -103,7 +95,8 @@ public readonly unsafe struct RootPage(Page root) : IPage
 
         Data.Ids.Accept(visitor, resolver);
         Data.Storage.Accept(visitor, resolver);
-        Data.AbandonedList.Accept(visitor, resolver);
+
+        AbandonedList.Wrap(abandoned).Accept(visitor, resolver);
     }
 
     /// <summary>
