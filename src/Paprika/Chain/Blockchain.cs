@@ -32,6 +32,8 @@ public class Blockchain : IAsyncDisposable
     /// </summary>
     private const int BitMapFilterSizePerBlock = 512 * 1024 / Page.PageSize;
 
+    private const int MaxSquashCount = 32;
+
     private readonly object _blockLock = new();
     private readonly Dictionary<uint, List<CommittedBlockState>> _blocksByNumber = new();
     private readonly Dictionary<Keccak, CommittedBlockState> _blocksByHash = new();
@@ -140,64 +142,67 @@ public class Blockchain : IAsyncDisposable
 
                 (uint _blocksByNumber, Keccak blockHash) last = default;
 
-                bool requiresForceFlush = false;
-
                 while (timer.Elapsed < _minFlushDelay && reader.TryRead(out var block))
                 {
                     last = (block.BlockNumber, block.Hash);
 
-                    using var batch = _db.BeginNextBatch();
-
-                    // apply
-                    var application = Stopwatch.StartNew();
-
-                    flushed.Add(block.BlockNumber);
-
-                    var flushedTo = block.BlockNumber;
-
-                    batch.SetMetadata(block.BlockNumber, block.Hash);
-
-                    block.Apply(batch);
-
-                    // only for debugging if needed
-                    //block.Assert(batch);
-
-                    application.Stop();
-                    _flusherBlockApplicationInMs.Record((int)application.ElapsedMilliseconds);
-
-                    // If there's something in the queue, don't flush. Flush here only where there's nothing to read from the reader.
                     var readerCount = reader.Count;
-
                     _flusherQueueCount.Set(readerCount);
 
-                    var level = readerCount switch
+                    // Batch up
+                    var squashCount = Math.Min(readerCount - _db.HistoryDepth, MaxSquashCount);
+
+                    FlushRange range;
+
+                    if (squashCount > 0)
                     {
-                        0 => CommitOptions.FlushDataOnly, // see: CommitOptions.FlushDataOnly
-                        1 => CommitOptions.FlushDataOnly, // see: CommitOptions.FlushDataOnly
-                        _ when readerCount <= _db.HistoryDepth => CommitOptions
-                            .DangerNoFlush, // see: CommitOptions.DangerNoFlush
-                        _ => CommitOptions.DangerNoWrite
-                    };
+                        var blockCount = squashCount + 1;
 
-                    // If at least one write is no write, require flush
-                    requiresForceFlush |= level == CommitOptions.DangerNoWrite;
+                        range = new FlushRange(block.BlockNumber, squashCount);
 
-                    // commit but no flush here, it's too heavy, the flush will come later
-                    await batch.Commit(level);
+                        // There's more blocks than history depth, squash them
+                        using var dict = new PooledSpanDictionary(_pool);
+                        block.Apply(dict);
+
+                        while (squashCount > 0 && reader.TryRead(out block))
+                        {
+                            squashCount--;
+                            block.Apply(dict);
+                            flushed.Add(block.BlockNumber);
+                        }
+
+                        Debug.Assert(squashCount == 0);
+                        Debug.Assert(block != null);
+
+                        await ApplyAndCommit(dict, block, ApplyDict, blockCount);
+                    }
+                    else
+                    {
+                        range = new FlushRange(block.BlockNumber, 1);
+                        flushed.Add(block.BlockNumber);
+                        await ApplyAndCommit(block, block, (batch, b) => b.Apply(batch), 1);
+                    }
+
+                    var toRemove = new List<CommittedBlockState>(range.Count * 2);
 
                     // inform blocks about flushing
                     lock (_blockLock)
                     {
-                        if (!_blocksByNumber.TryGetValue(flushedTo, out var removedBlocks))
+                        for (uint i = 0; i < range.Count; i++)
                         {
-                            ThrowMissingBlocks(flushedTo);
+                            var flushedTo = range.From + i;
+                            if (!_blocksByNumber.TryGetValue(flushedTo, out var removedBlocks))
+                            {
+                                ThrowMissingBlocks(flushedTo);
+                            }
+
+                            toRemove.AddRange(removedBlocks);
                         }
 
-                        var cloned = removedBlocks.ToArray();
+                        // update accessor only on the last one
+                        _accessor?.OnCommitToDatabase(toRemove);
 
-                        _accessor?.OnCommitToDatabase(block, cloned);
-
-                        foreach (var removedBlock in cloned)
+                        foreach (var removedBlock in toRemove)
                         {
                             // dispose one to allow leases to do the count
                             removedBlock.Dispose();
@@ -218,14 +223,7 @@ public class Blockchain : IAsyncDisposable
 
                 var flushWatch = Stopwatch.StartNew();
 
-                if (requiresForceFlush)
-                {
-                    _db.ForceFlush();
-                }
-                else
-                {
-                    _db.Flush();
-                }
+                _db.Flush();
 
                 _flusherFlushInMs.Record((int)flushWatch.ElapsedMilliseconds);
 
@@ -250,6 +248,30 @@ public class Blockchain : IAsyncDisposable
         {
             throw new Exception($"Missing blocks at block number {flushedTo}");
         }
+    }
+
+    private record FlushRange(uint From, int Count);
+
+    private async ValueTask ApplyAndCommit<TItem>(TItem item, CommittedBlockState block, Action<IBatch, TItem> apply,
+        int count)
+    {
+        using var batch = _db.BeginNextBatch();
+
+        // apply
+        var application = Stopwatch.StartNew();
+
+        batch.SetMetadata(block.BlockNumber, block.Hash);
+
+        apply(batch, item);
+
+        // only for debugging if needed
+        //block.Assert(batch);
+
+        application.Stop();
+        _flusherBlockApplicationInMs.Record((int)(application.ElapsedMilliseconds / count));
+
+        // commit but no flush here, it's too heavy, the flush will come later
+        await batch.Commit(CommitOptions.FlushDataOnly);
     }
 
     /// <summary>
@@ -1423,32 +1445,13 @@ public class Blockchain : IAsyncDisposable
                 }
             }
 
-            Apply(batch, _committed);
+            _blockchain.ApplyDict(batch, _committed);
         }
 
-        private void Apply(IBatch batch, PooledSpanDictionary dict)
+        public void Apply(PooledSpanDictionary dict)
         {
-            var preCommit = _blockchain._preCommit;
-
-            var page = _blockchain._pool.Rent(false);
-            try
-            {
-                var span = page.Span;
-
-                foreach (var kvp in dict)
-                {
-                    if (kvp.Metadata == (byte)EntryType.Persistent)
-                    {
-                        Key.ReadFrom(kvp.Key, out var key);
-                        var data = preCommit == null ? kvp.Value : preCommit.InspectBeforeApply(key, kvp.Value, span);
-                        batch.SetRaw(key, data);
-                    }
-                }
-            }
-            finally
-            {
-                _blockchain._pool.Return(page);
-            }
+            // omit destroyed. Right now, destroyed contracts are not stored beyond the block
+            _committed.CopyTo(dict, metadata => metadata == (byte)EntryType.Persistent);
         }
 
         public override string ToString() =>
@@ -1872,29 +1875,27 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-        public void OnCommitToDatabase(CommittedBlockState committed, CommittedBlockState[] blocksWithSameNumber)
+        public void OnCommitToDatabase(List<CommittedBlockState> toRemove)
         {
             // Capture the readonly tx first
             var batch = new ReadOnlyBatchCountingRefs(_blockchain._db.BeginReadOnlyBatch());
             var readOnly = new ReadOnlyState(batch);
 
-            Debug.Assert(committed.Hash == batch.Metadata.StateHash, "Should be equal to the last written");
-            Debug.Assert(blocksWithSameNumber.Contains(committed));
-
-            ref ReadOnlyState reader = ref Unsafe.NullRef<ReadOnlyState>();
-            var toDispose = new List<ReadOnlyState>(blocksWithSameNumber.Length);
+            var toDispose = new List<ReadOnlyState>(toRemove.Count);
 
             _lock.EnterWriteLock();
             try
             {
-                reader = ref CollectionsMarshal.GetValueRefOrNullRef(_readers, committed.Hash);
-                Debug.Assert(Unsafe.IsNullRef(ref reader) == false);
+                foreach (var committed in toRemove)
+                {
+                    if (_readers.Remove(committed.Hash, out var reader))
+                    {
+                        // add reader to dispose
+                        toDispose.Add(reader);
+                    }
+                }
 
-                // add reader to dispose
-                toDispose.Add(reader);
-
-                // update to the batch
-                reader = readOnly;
+                _readers.Add(batch.Metadata.StateHash, readOnly);
 
                 // enqueue the batch for cleanup later
                 _queue.Enqueue(readOnly);
@@ -1907,16 +1908,6 @@ public class Blockchain : IAsyncDisposable
 
                     var removed = _readers.Remove(oldestBatch.Hash);
                     Debug.Assert(removed);
-                }
-
-                foreach (CommittedBlockState b in blocksWithSameNumber)
-                {
-                    if (b.Hash != committed.Hash)
-                    {
-                        var removed = _readers.Remove(b.Hash, out ReadOnlyState? state);
-                        Debug.Assert(removed);
-                        toDispose.Add(state);
-                    }
                 }
             }
             finally
@@ -1956,5 +1947,28 @@ public class Blockchain : IAsyncDisposable
         }
 
         return filter;
+    }
+
+    public void ApplyDict(IBatch batch, PooledSpanDictionary dict)
+    {
+        var page = _pool.Rent(false);
+        try
+        {
+            var span = page.Span;
+
+            foreach (var kvp in dict)
+            {
+                if (kvp.Metadata == (byte)EntryType.Persistent)
+                {
+                    Key.ReadFrom(kvp.Key, out var key);
+                    var data = _preCommit == null ? kvp.Value : _preCommit.InspectBeforeApply(key, kvp.Value, span);
+                    batch.SetRaw(key, data);
+                }
+            }
+        }
+        finally
+        {
+            _pool.Return(page);
+        }
     }
 }

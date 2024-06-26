@@ -5,6 +5,7 @@ using FluentAssertions;
 using Nethermind.Int256;
 using Paprika.Chain;
 using Paprika.Crypto;
+using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Store;
 using static Paprika.Tests.Values;
@@ -651,6 +652,33 @@ public class BlockchainTests
         {
             db.CountReadOnlyBatches().Should().Be(none);
         }
+    }
+
+    [Test]
+    public async Task Long_finalization_queue_batches()
+    {
+        const int count = 500;
+
+        using var db = PagedDb.NativeMemoryDb(128 * Mb, 2);
+
+        await using var blockchain = new Blockchain(db, new PreCommit());
+
+        var hash = Keccak.EmptyTreeHash;
+
+        var value = new byte[] { 1 };
+        for (int i = 0; i < count; i++)
+        {
+            using var block = blockchain.StartNew(hash);
+            var k = BuildKey(i);
+
+            block.SetAccount(k, GetAccount(i));
+            block.SetStorage(k, k, value);
+
+            hash = block.Commit((uint)(i + 1));
+        }
+
+        blockchain.Finalize(hash);
+        await blockchain.WaitTillFlush(hash);
     }
 
     private static Account GetAccount(int i) => new((UInt256)i + 1, (UInt256)i + 1);
