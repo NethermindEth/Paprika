@@ -17,13 +17,35 @@ public interface IRawState : IReadOnlyWorldState
 
     void DestroyAccount(in Keccak address);
 
+    Keccak GetHash(in NibblePath path);
+
     /// <summary>
     /// Commits the pending changes.
     /// </summary>
-    void Commit();
+    void Commit(bool ensureHash = true);
 
     /// <summary>
     /// Finalizes the raw state flushing the metadata.
     /// </summary>
     void Finalize(uint blockNumber);
+
+    /// <summary>
+    /// Enforces root hash calculation without actual commit
+    /// </summary>
+    /// <returns></returns>
+    Keccak RefreshRootHash();
+
+    /// <summary>
+    /// Recalculates storage roots and returns new storage root hash for a given account 
+    /// </summary>
+    /// <param name="accountAddress"></param>
+    /// <returns></returns>
+    Keccak RecalculateStorageRoot(in Keccak accountAddress);
+
+    /// <summary>
+    /// Cleans current data
+    /// </summary>
+    void Discard();
+
+    string DumpTrie();
 }
