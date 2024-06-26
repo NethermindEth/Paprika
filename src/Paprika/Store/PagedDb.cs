@@ -512,7 +512,6 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         {
             ref readonly var data = ref root.Data;
 
-
             totalAbandoned = AbandonedList.Wrap(abandoned).GatherTotalAbandoned(this);
 
             if (data.StateRoot.IsNull == false)
@@ -521,6 +520,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             }
 
             data.Storage.Report(storage, this, 0, 0);
+            data.StorageMerkle.Report(storage, this, 0, 0);
             data.Ids.Report(ids, this, 0, 0);
         }
 
