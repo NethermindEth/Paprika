@@ -1,15 +1,17 @@
-using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using BenchmarkDotNet.Attributes;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store;
+using static System.Buffers.Binary.BinaryPrimitives;
 
 namespace Paprika.Benchmarks;
 
 [DisassemblyDiagnoser(maxDepth: 2)]
 public class SlottedArrayBenchmarks
 {
+    private readonly byte[] _defragmentation = new byte[Page.PageSize];
     private readonly byte[] _writtenLittleEndian = new byte[Page.PageSize];
     private readonly byte[] _writtenBigEndian = new byte[Page.PageSize];
     private readonly byte[] _writable = new byte[Page.PageSize];
@@ -33,14 +35,14 @@ public class SlottedArrayBenchmarks
         // Big and small endian tests
         while (true)
         {
-            BinaryPrimitives.WriteInt32LittleEndian(key, _to);
+            WriteInt32LittleEndian(key, _to);
             if (little.TrySet(NibblePath.FromKey(key), key) == false)
             {
                 // filled
                 break;
             }
 
-            BinaryPrimitives.WriteInt32BigEndian(key, _to);
+            WriteInt32BigEndian(key, _to);
             if (big.TrySet(NibblePath.FromKey(key), key) == false)
             {
                 // filled
@@ -76,7 +78,7 @@ public class SlottedArrayBenchmarks
         // fill 
         for (int i = 0; i < _to; i++)
         {
-            BinaryPrimitives.WriteInt32LittleEndian(key, i);
+            WriteInt32LittleEndian(key, i);
             if (map.TrySet(NibblePath.FromKey(key), key))
             {
                 count++;
@@ -97,7 +99,7 @@ public class SlottedArrayBenchmarks
         // find all values
         for (var i = 0; i < _to; i++)
         {
-            BinaryPrimitives.WriteInt32LittleEndian(key, i);
+            WriteInt32LittleEndian(key, i);
             if (map.TryGet(NibblePath.FromKey(key), out var data))
             {
                 result += data.Length;
@@ -118,7 +120,7 @@ public class SlottedArrayBenchmarks
         // find all values
         for (var i = 0; i < _to; i++)
         {
-            BinaryPrimitives.WriteInt32BigEndian(key, i);
+            WriteInt32BigEndian(key, i);
             if (map.TryGet(NibblePath.FromKey(key), out var data))
             {
                 result += data.Length;
@@ -139,7 +141,7 @@ public class SlottedArrayBenchmarks
         // miss all the next
         for (int i = _to; i < _to * 2; i++)
         {
-            BinaryPrimitives.WriteInt32LittleEndian(key, i);
+            WriteInt32LittleEndian(key, i);
             if (map.TryGet(NibblePath.FromKey(key), out _) == false)
             {
                 result += 1;
@@ -235,5 +237,68 @@ public class SlottedArrayBenchmarks
         }
 
         return length;
+    }
+
+    private const int DefragmentOpsCount = 4;
+    [Benchmark(OperationsPerInvoke = DefragmentOpsCount)]
+    public void Defragment_first_key_deleted()
+    {
+        var map = new SlottedArray(_defragmentation);
+        map.Clear();
+
+        var value = _writtenLittleEndian.AsSpan(64);
+        ushort i = 0;
+        Span<byte> key = stackalloc byte[2];
+
+        // Set as many as possible
+        while (map.TrySet(NibblePath.FromKey(key), value))
+        {
+            i++;
+            WriteUInt16LittleEndian(key, i);
+        }
+
+        // Delete & defragment
+        for (ushort j = 0; j < DefragmentOpsCount; j++)
+        {
+            // Delete first
+            WriteUInt16LittleEndian(key, j);
+            map.Delete(NibblePath.FromKey(key));
+
+            // Encode new key and set
+            WriteUInt16LittleEndian(key, i++);
+            map.TrySet(NibblePath.FromKey(key), value);
+        }
+    }
+
+    [Benchmark(OperationsPerInvoke = DefragmentOpsCount)]
+    public void Defragment_last_key_deleted()
+    {
+        var map = new SlottedArray(_defragmentation);
+        map.Clear();
+
+        var value = _writtenLittleEndian.AsSpan(64);
+        ushort i = 0;
+        Span<byte> key = stackalloc byte[2];
+
+        // Set as many as possible
+        while (map.TrySet(NibblePath.FromKey(key), value))
+        {
+            i++;
+            WriteUInt16LittleEndian(key, i);
+        }
+
+        i--; // to go back to the existing key
+
+        // Delete & defragment
+        for (var j = 0; j < DefragmentOpsCount; j++)
+        {
+            // Delete first existing, the last one
+            WriteUInt16LittleEndian(key, i);
+            map.Delete(NibblePath.FromKey(key));
+
+            // Encode new key and set
+            WriteUInt16LittleEndian(key, i++);
+            map.TrySet(NibblePath.FromKey(key), value);
+        }
     }
 }
