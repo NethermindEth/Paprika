@@ -369,7 +369,8 @@ public readonly ref struct SlottedArray
                     ref var destinationSlot = ref this[writeAt];
 
                     // Copy everything, just overwrite the address
-                    destinationSlot = slot;
+                    destinationSlot.Hash = slot.Hash;
+                    destinationSlot.KeyPreamble = slot.KeyPreamble;
                     destinationSlot.ItemAddress = writtenTo;
 
                     writeAt++;
