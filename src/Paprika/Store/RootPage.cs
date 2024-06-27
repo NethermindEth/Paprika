@@ -66,29 +66,20 @@ public readonly unsafe struct RootPage(Page root) : IPage
         /// <summary>
         /// Storage.
         /// </summary>
-        [FieldOffset(FanOutsStart)] private DbAddress StoragePayload;
-
-        public FanOutList<StorageFanOutPage<DataPage>, StandardType> Storage =>
-            new(MemoryMarshal.CreateSpan(ref StoragePayload, FanOutList.FanOut));
+        [FieldOffset(FanOutsStart)]
+        public FanOutOf4<DataPage, StandardType> Storage;
 
         /// <summary>
         /// Identifiers
         /// </summary>
-        [FieldOffset(FanOutsStart + FanOutList.Size)]
-        private DbAddress IdsPayload;
-
-        public FanOutList<FanOutPage, IdentityType> Ids =>
-            new(MemoryMarshal.CreateSpan(ref IdsPayload, FanOutList.FanOut));
-
+        [FieldOffset(FanOutsStart + FanOutOf4<DataPage, StandardType>.Size)]
+        public FanOutOf4<DataPage, IdentityType> Ids;
 
         /// <summary>
         /// Storage Merkle
         /// </summary>
-        [FieldOffset(FanOutsStart + FanOutList.Size * 2)]
-        private DbAddress StorageMerklePayload;
-
-        public FanOutList<FanOutPage, StandardType> StorageMerkle =>
-            new(MemoryMarshal.CreateSpan(ref StorageMerklePayload, FanOutList.FanOut));
+        [FieldOffset(FanOutsStart + FanOutOf4<DataPage, StandardType>.Size + FanOutOf4<DataPage, IdentityType>.Size)]
+        public FanOutOf4<DataPage, StandardType> StorageMerkle;
 
         public DbAddress GetNextFreePage()
         {
