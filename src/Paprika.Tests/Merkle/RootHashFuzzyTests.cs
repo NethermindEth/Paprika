@@ -69,7 +69,7 @@ public class RootHashFuzzyTests
     {
         var generator = Build(test);
 
-        using var db = PagedDb.NativeMemoryDb(16 * 1024 * 1024, 2);
+        using var db = PagedDb.NativeMemoryDb(32 * 1024 * 1024, 2);
         var parallelism = parallel ? ComputeMerkleBehavior.ParallelismUnlimited : ComputeMerkleBehavior.ParallelismNone;
         var merkle = new ComputeMerkleBehavior(parallelism);
 
