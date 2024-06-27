@@ -1,15 +1,20 @@
-using System.Buffers.Binary;
-using System.Runtime.CompilerServices;
 using BenchmarkDotNet.Attributes;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store;
+using static System.Buffers.Binary.BinaryPrimitives;
 
 namespace Paprika.Benchmarks;
 
 [DisassemblyDiagnoser(maxDepth: 2)]
 public class SlottedArrayBenchmarks
 {
+    // defragmentation
+    private readonly byte[] _defragmentation = new byte[Page.PageSize];
+    private readonly byte[] _defragmentationCopy = new byte[Page.PageSize];
+    private readonly byte[] _defragmentationValue = new byte[64];
+    private readonly ushort _writtenTo;
+
     private readonly byte[] _writtenLittleEndian = new byte[Page.PageSize];
     private readonly byte[] _writtenBigEndian = new byte[Page.PageSize];
     private readonly byte[] _writable = new byte[Page.PageSize];
@@ -25,41 +30,62 @@ public class SlottedArrayBenchmarks
 
     public SlottedArrayBenchmarks()
     {
-        var little = new SlottedArray(_writtenLittleEndian);
-        var big = new SlottedArray(_writtenBigEndian);
-
-        Span<byte> key = stackalloc byte[4];
-
         // Big and small endian tests
-        while (true)
         {
-            BinaryPrimitives.WriteInt32LittleEndian(key, _to);
-            if (little.TrySet(NibblePath.FromKey(key), key) == false)
-            {
-                // filled
-                break;
-            }
+            var little = new SlottedArray(_writtenLittleEndian);
+            var big = new SlottedArray(_writtenBigEndian);
 
-            BinaryPrimitives.WriteInt32BigEndian(key, _to);
-            if (big.TrySet(NibblePath.FromKey(key), key) == false)
-            {
-                // filled
-                break;
-            }
+            Span<byte> key = stackalloc byte[4];
 
-            _to++;
+
+            while (true)
+            {
+                WriteInt32LittleEndian(key, _to);
+                if (little.TrySet(NibblePath.FromKey(key), key) == false)
+                {
+                    // filled
+                    break;
+                }
+
+                WriteInt32BigEndian(key, _to);
+                if (big.TrySet(NibblePath.FromKey(key), key) == false)
+                {
+                    // filled
+                    break;
+                }
+
+                _to++;
+            }
         }
 
         // Hash collisions tests
-        var zeroes = NibblePath.FromKey(Keccak.Zero);
-        var hashCollisions = new SlottedArray(_hashCollisions);
-
-        for (var i = 0; i <= HashCollisionsCount; i++)
         {
-            if (!hashCollisions.TrySet(zeroes.SliceTo(i), HashCollisionValue))
+            var zeroes = NibblePath.FromKey(Keccak.Zero);
+            var hashCollisions = new SlottedArray(_hashCollisions);
+
+            for (var i = 0; i <= HashCollisionsCount; i++)
             {
-                throw new Exception($"No place to set hash collision at {i}");
+                if (!hashCollisions.TrySet(zeroes.SliceTo(i), HashCollisionValue))
+                {
+                    throw new Exception($"No place to set hash collision at {i}");
+                }
             }
+        }
+
+        // Defragmentation
+        {
+            var map = new SlottedArray(_defragmentation);
+            ushort i = 0;
+            Span<byte> key = stackalloc byte[2];
+
+            // Set as many as possible
+            while (map.TrySet(NibblePath.FromKey(key), _defragmentationValue))
+            {
+                i++;
+                WriteUInt16LittleEndian(key, i);
+            }
+
+            _writtenTo = i;
         }
     }
 
@@ -76,7 +102,7 @@ public class SlottedArrayBenchmarks
         // fill 
         for (int i = 0; i < _to; i++)
         {
-            BinaryPrimitives.WriteInt32LittleEndian(key, i);
+            WriteInt32LittleEndian(key, i);
             if (map.TrySet(NibblePath.FromKey(key), key))
             {
                 count++;
@@ -97,7 +123,7 @@ public class SlottedArrayBenchmarks
         // find all values
         for (var i = 0; i < _to; i++)
         {
-            BinaryPrimitives.WriteInt32LittleEndian(key, i);
+            WriteInt32LittleEndian(key, i);
             if (map.TryGet(NibblePath.FromKey(key), out var data))
             {
                 result += data.Length;
@@ -118,7 +144,7 @@ public class SlottedArrayBenchmarks
         // find all values
         for (var i = 0; i < _to; i++)
         {
-            BinaryPrimitives.WriteInt32BigEndian(key, i);
+            WriteInt32BigEndian(key, i);
             if (map.TryGet(NibblePath.FromKey(key), out var data))
             {
                 result += data.Length;
@@ -139,7 +165,7 @@ public class SlottedArrayBenchmarks
         // miss all the next
         for (int i = _to; i < _to * 2; i++)
         {
-            BinaryPrimitives.WriteInt32LittleEndian(key, i);
+            WriteInt32LittleEndian(key, i);
             if (map.TryGet(NibblePath.FromKey(key), out _) == false)
             {
                 result += 1;
@@ -235,5 +261,53 @@ public class SlottedArrayBenchmarks
         }
 
         return length;
+    }
+
+    private const int DefragmentOpsCount = 4;
+
+    [Benchmark(OperationsPerInvoke = DefragmentOpsCount)]
+    public void Defragment_first_key_deleted()
+    {
+        _defragmentation.CopyTo(_defragmentationCopy.AsSpan());
+
+        var map = new SlottedArray(_defragmentationCopy);
+
+        Span<byte> key = stackalloc byte[2];
+        var i = _writtenTo;
+
+        // Delete & defragment
+        for (ushort j = 0; j < DefragmentOpsCount; j++)
+        {
+            // Delete first
+            WriteUInt16LittleEndian(key, j);
+            map.Delete(NibblePath.FromKey(key));
+
+            // Encode new key and set
+            WriteUInt16LittleEndian(key, i++);
+            map.TrySet(NibblePath.FromKey(key), _defragmentationValue);
+        }
+    }
+
+    [Benchmark(OperationsPerInvoke = DefragmentOpsCount)]
+    public void Defragment_last_key_deleted()
+    {
+        _defragmentation.CopyTo(_defragmentationCopy.AsSpan());
+
+        var map = new SlottedArray(_defragmentationCopy);
+
+        Span<byte> key = stackalloc byte[2];
+        var last = (ushort)(_writtenTo - 1);
+
+        // Delete & defragment
+        for (ushort j = 0; j < DefragmentOpsCount; j++)
+        {
+            // Delete first
+            WriteUInt16LittleEndian(key, last);
+            map.Delete(NibblePath.FromKey(key));
+
+            // Encode new key and set
+            WriteUInt16LittleEndian(key, last++);
+            map.TrySet(NibblePath.FromKey(key), _defragmentationValue);
+        }
     }
 }

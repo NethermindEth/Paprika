@@ -336,45 +336,55 @@ public readonly ref struct SlottedArray
     private void Defragment()
     {
         // As data were fitting before, the will fit after so all the checks can be skipped
-        var size = Header.Size + _data.Length;
-        var array = ArrayPool<byte>.Shared.Rent(size);
-        var span = array.AsSpan(0, size);
-
-        // Create the slotted array over the dirty span and then clear it.
-        // It's much cheaper than clearing the whole span itself.
-        var copy = new SlottedArray(span);
-        copy.Clear();
-
         var count = _header.Low / Slot.Size;
+
+        // The pointer where the writing in the array ended, move it up when written.
+        var writeAt = 0;
+        var writtenTo = (ushort)_data.Length;
+        var readTo = writtenTo;
+        var newCount = (ushort)0;
 
         for (int i = 0; i < count; i++)
         {
-            var copyFrom = this[i];
-            if (copyFrom.IsDeleted == false)
+            var slot = this[i];
+            var addr = slot.ItemAddress;
+
+            if (!slot.IsDeleted)
             {
-                var fromSpan = GetSlotPayload(ref this[i]);
+                newCount++;
 
-                ref var copyTo = ref copy[copy._header.Low / Slot.Size];
+                if (writtenTo == readTo)
+                {
+                    // This is a case where nothing required copying so far, just move on by advancing it all.
+                    writeAt++;
+                    writtenTo = addr;
+                }
+                else
+                {
+                    // Something has been previously deleted, needs to be copied carefully
+                    var source = _data.Slice(addr, readTo - addr);
+                    writtenTo = (ushort)(writtenTo - source.Length);
+                    var destination = _data.Slice(writtenTo, source.Length);
+                    source.CopyTo(destination);
+                    ref var destinationSlot = ref this[writeAt];
 
-                // copy raw, no decoding
-                var high = (ushort)(copy._data.Length - copy._header.High - fromSpan.Length);
-                fromSpan.CopyTo(copy._data.Slice(high));
+                    // Copy everything, just overwrite the address
+                    destinationSlot.Hash = slot.Hash;
+                    destinationSlot.KeyPreamble = slot.KeyPreamble;
+                    destinationSlot.ItemAddress = writtenTo;
 
-                copyTo.Hash = copyFrom.Hash;
-                copyTo.ItemAddress = high;
-                copyTo.KeyPreamble = copyFrom.KeyPreamble;
-
-                copy._header.Low += Slot.Size;
-                copy._header.High = (ushort)(copy._header.High + fromSpan.Length);
+                    writeAt++;
+                }
             }
+
+            // Memoize to what is read to
+            readTo = addr;
         }
 
-        // finalize by coping over to this
-        var raw = MemoryMarshal.CreateSpan(ref Unsafe.As<Header, byte>(ref _header), Header.Size + _data.Length);
-        span.CopyTo(raw);
-
-        ArrayPool<byte>.Shared.Return(array);
-        Debug.Assert(copy._header.Deleted == 0, "All deleted should be gone");
+        // Finalize by setting the header
+        _header.Low = (ushort)(newCount * Slot.Size);
+        _header.High = (ushort)(_data.Length - writtenTo);
+        _header.Deleted = 0;
     }
 
     /// <summary>
