@@ -35,22 +35,45 @@ public struct FanOutList
 
         public void Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
         {
-            ref var addr = ref GetBucket(key, out var index);
+            ref var addr = ref GetBucket(key, out var index, out var bucket);
+            var cowFlag = 1L << bucket;
 
-            // Ensure the first page is properly set
+            // The page that contains the buckets requires manual management as it has no header.
             Page page;
             if (addr.IsNull)
             {
-                page = batch.GetNewPage(out addr, true);
-                page.Header.PageType = PageType.Standard;
-                page.Header.Level = 0;
+                // The page did not exist before.
+                // Get a new but remember that the manual clearing is required to destroy assigned metadata.
+                page = batch.GetNewPage(out addr, false);
+                page.Clear();
             }
             else
             {
-                page = batch.EnsureWritableCopy(ref addr);
+                if ((_data.CowBitVector & cowFlag) != cowFlag)
+                {
+                    // This page have not been COWed during this batch.
+                    // This must be done in a manual way as the header is overwritten.
+                    var prev = batch.GetAt(addr);
+                    page = batch.GetNewPage(out addr, false);
+                    prev.CopyTo(page);
+                    batch.RegisterForFutureReuse(prev);
+
+                    // Mark the flag so that the next one does not COW again.
+                    _data.CowBitVector |= cowFlag;
+                }
+                else
+                {
+                    // This page has been COWed already, just retrieve.
+                    page = batch.GetAt(addr);
+                }
             }
 
             ref var descendant = ref GetDescendantAddress(page, index);
+            if (descendant.IsNull)
+            {
+                batch.GetNewPage(out descendant, true);
+            }
+
             // The page exists, update
             var updated = TPage.Wrap(batch.GetAt(descendant)).Set(key.SliceFrom(ConsumedNibbles), data, batch);
             descendant = batch.GetAddress(updated);
@@ -58,7 +81,7 @@ public struct FanOutList
 
         public bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
         {
-            ref var addr = ref GetBucket(key, out var index);
+            ref var addr = ref GetBucket(key, out var index, out _);
 
             if (addr.IsNull)
             {
@@ -81,7 +104,7 @@ public struct FanOutList
             }
         }
 
-        private ref DbAddress GetBucket(in NibblePath key, out int index)
+        private ref DbAddress GetBucket(in NibblePath key, out int index, out int pageNo)
         {
             Debug.Assert(key.Length > ConsumedNibbles);
 
@@ -94,7 +117,7 @@ public struct FanOutList
                 (key.GetAt(3) << (3 * shift));
 
             Debug.Assert(bucket < DbAddressesPerPage * PageCount);
-            (index, var pageNo) = Math.DivRem(bucket, PageCount);
+            (index, pageNo) = Math.DivRem(bucket, PageCount);
             return ref _data.Addresses[pageNo];
         }
 

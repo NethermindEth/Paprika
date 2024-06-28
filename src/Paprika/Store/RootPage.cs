@@ -84,7 +84,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         [FieldOffset(FanOutsStart + FanOutList.Size + FanOutList.Size)]
         private FanOutList StorageMerklePayload;
 
-        public FanOutList.Of<DataPage, StandardType> StorageMerkle => new(ref StoragePayload);
+        public FanOutList.Of<DataPage, StandardType> StorageMerkle => new(ref StorageMerklePayload);
 
 
         public DbAddress GetNextFreePage()
