@@ -66,20 +66,26 @@ public readonly unsafe struct RootPage(Page root) : IPage
         /// <summary>
         /// Storage.
         /// </summary>
-        [FieldOffset(FanOutsStart)]
-        public FanOutOf4<DataPage, StandardType> Storage;
+        [FieldOffset(FanOutsStart)] private FanOutList StoragePayload;
+
+        public FanOutList.Of<DataPage, StandardType> Storage => new(ref StoragePayload);
 
         /// <summary>
         /// Identifiers
         /// </summary>
-        [FieldOffset(FanOutsStart + FanOutOf4<DataPage, StandardType>.Size)]
-        public FanOutOf4<DataPage, IdentityType> Ids;
+        [FieldOffset(FanOutsStart + FanOutList.Size)]
+        private FanOutList IdsPayload;
+
+        public FanOutList.Of<DataPage, IdentityType> Ids => new(ref IdsPayload);
 
         /// <summary>
-        /// Storage Merkle
+        /// Storage Merkle.
         /// </summary>
-        [FieldOffset(FanOutsStart + FanOutOf4<DataPage, StandardType>.Size + FanOutOf4<DataPage, IdentityType>.Size)]
-        public FanOutOf4<DataPage, StandardType> StorageMerkle;
+        [FieldOffset(FanOutsStart + FanOutList.Size + FanOutList.Size)]
+        private FanOutList StorageMerklePayload;
+
+        public FanOutList.Of<DataPage, StandardType> StorageMerkle => new(ref StoragePayload);
+
 
         public DbAddress GetNextFreePage()
         {
@@ -248,6 +254,13 @@ public readonly unsafe struct RootPage(Page root) : IPage
         var data = batch.TryGetPageAlloc(ref root, PageType.Standard);
         var updated = new Merkle.StateRootPage(data).Set(path, rawData, batch);
         root = batch.GetAddress(updated);
+    }
+
+    public void ClearCowInfo()
+    {
+        Data.Ids.ClearCowVector();
+        Data.Storage.ClearCowVector();
+        Data.StorageMerkle.ClearCowVector();
     }
 }
 

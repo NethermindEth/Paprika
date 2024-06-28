@@ -402,6 +402,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         // prepare root
         var root = new RootPage(ctx.PageForRoot);
         rootPage.CopyTo(root);
+        root.ClearCowInfo();
 
         // always inc the batchId
         root.Header.BatchId++;
@@ -519,9 +520,9 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
                 new Merkle.StateRootPage(GetAt(root.Data.StateRoot)).Report(state, this, 0, 0);
             }
 
-            data.Storage.Report(storage, this, 0, 0);
-            data.StorageMerkle.Report(storage, this, 0, 0);
-            data.Ids.Report(ids, this, 0, 0);
+            // data.Storage.Report(storage, this, 0, 0);
+            // data.StorageMerkle.Report(storage, this, 0, 0);
+            // data.Ids.Report(ids, this, 0, 0);
         }
 
         public uint BatchId => root.Header.BatchId;
