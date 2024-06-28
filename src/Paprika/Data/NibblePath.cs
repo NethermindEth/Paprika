@@ -169,6 +169,7 @@ public readonly ref struct NibblePath
     /// The Keccak needs to be "in" here, as otherwise a copy would be create and the ref
     /// would point to a garbage memory.
     /// </returns>
+    [DebuggerStepThrough]
     public static NibblePath FromKey(in Keccak key, int nibbleFrom = 0)
     {
         var count = Keccak.Size * NibblePerByte;

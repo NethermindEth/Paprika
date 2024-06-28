@@ -118,13 +118,23 @@ public interface IReadOnlyBatchContext : IPageResolver
     IDictionary<Keccak, uint> IdCache { get; }
 }
 
-public static class ReadOnlyBatchContextExtensions
+public static class BatchContextExtensions
 {
-    public static void AssertRead(this IReadOnlyBatchContext batch, in PageHeader header)
+    public static void AssertRead(this IReadOnlyBatchContext batch, in PageHeader header, PageType type)
     {
         if (header.BatchId > batch.BatchId)
         {
             ThrowWrongBatch(header);
+        }
+
+        // if (header.PageType != type)
+        // {
+        //     ThrowWrongType(header, type);
+        // }
+
+        if (header.PaprikaVersion != PageHeader.CurrentVersion)
+        {
+            ThrowWrongVersion(header);
         }
 
         [DoesNotReturn]
@@ -132,6 +142,21 @@ public static class ReadOnlyBatchContextExtensions
         static void ThrowWrongBatch(in PageHeader header)
         {
             throw new Exception($"The page that is at batch {header.BatchId} should not be read by a batch with lower batch number {header.BatchId}.");
+        }
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowWrongType(in PageHeader header, PageType type)
+        {
+            throw new Exception($"The page expected type is {type} while the actual is {header.PageType}");
+        }
+
+        [DoesNotReturn]
+        [StackTraceHidden]
+        static void ThrowWrongVersion(in PageHeader header)
+        {
+            throw new Exception(
+                $"Paprika version is set to {header.PaprikaVersion} while it should be {PageHeader.CurrentVersion}");
         }
     }
 }

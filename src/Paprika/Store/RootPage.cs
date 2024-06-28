@@ -66,29 +66,26 @@ public readonly unsafe struct RootPage(Page root) : IPage
         /// <summary>
         /// Storage.
         /// </summary>
-        [FieldOffset(FanOutsStart)] private DbAddress StoragePayload;
+        [FieldOffset(FanOutsStart)] private FanOutList StoragePayload;
 
-        public FanOutList<StorageFanOutPage<DataPage>, StandardType> Storage =>
-            new(MemoryMarshal.CreateSpan(ref StoragePayload, FanOutList.FanOut));
+        public FanOutList.Of<DataPage, StandardType> Storage => new(ref StoragePayload);
 
         /// <summary>
         /// Identifiers
         /// </summary>
         [FieldOffset(FanOutsStart + FanOutList.Size)]
-        private DbAddress IdsPayload;
+        private FanOutList IdsPayload;
 
-        public FanOutList<FanOutPage, IdentityType> Ids =>
-            new(MemoryMarshal.CreateSpan(ref IdsPayload, FanOutList.FanOut));
-
+        public FanOutList.Of<DataPage, IdentityType> Ids => new(ref IdsPayload);
 
         /// <summary>
-        /// Storage Merkle
+        /// Storage Merkle.
         /// </summary>
-        [FieldOffset(FanOutsStart + FanOutList.Size * 2)]
-        private DbAddress StorageMerklePayload;
+        [FieldOffset(FanOutsStart + FanOutList.Size + FanOutList.Size)]
+        private FanOutList StorageMerklePayload;
 
-        public FanOutList<FanOutPage, StandardType> StorageMerkle =>
-            new(MemoryMarshal.CreateSpan(ref StorageMerklePayload, FanOutList.FanOut));
+        public FanOutList.Of<DataPage, StandardType> StorageMerkle => new(ref StorageMerklePayload);
+
 
         public DbAddress GetNextFreePage()
         {
@@ -257,6 +254,13 @@ public readonly unsafe struct RootPage(Page root) : IPage
         var data = batch.TryGetPageAlloc(ref root, PageType.Standard);
         var updated = new Merkle.StateRootPage(data).Set(path, rawData, batch);
         root = batch.GetAddress(updated);
+    }
+
+    public void ClearCowInfo()
+    {
+        Data.Ids.ClearCowVector();
+        Data.Storage.ClearCowVector();
+        Data.StorageMerkle.ClearCowVector();
     }
 }
 

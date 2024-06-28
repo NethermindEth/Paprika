@@ -250,7 +250,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
     public bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
     {
-        batch.AssertRead(Header);
+        batch.AssertRead(Header, PageType.Leaf);
 
         if (Map.TryGet(key, out result))
         {
