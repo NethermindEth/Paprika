@@ -120,7 +120,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
         // The key has a single nibble, the child page was written in this batch and is a standard page. Let's proceed!
         Debug.Assert(child.Header.BatchId == batch.BatchId);
-        var result = new DataPage(child).Set(key, data, batch);
+        var result = new DataPage(child).Set(key.SliceFrom(ConsumedNibbles), data, batch);
         Debug.Assert(result.Equals(child));
         return true;
     }
