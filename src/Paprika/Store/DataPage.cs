@@ -256,7 +256,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         var sliced = key;
         do
         {
-            batch.AssertRead(page.Header);
+            batch.AssertRead(page.Header, PageType.Standard);
             DbAddress bucket = default;
             if (!sliced.IsEmpty)
             {

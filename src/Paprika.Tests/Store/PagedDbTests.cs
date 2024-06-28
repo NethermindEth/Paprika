@@ -145,7 +145,7 @@ public class PagedDbTests
     {
         const int size = 256 * 256;
 
-        using var db = PagedDb.NativeMemoryDb(512 * Mb, 2);
+        using var db = PagedDb.NativeMemoryDb(1024 * Mb, 2);
 
         var value = new byte[4];
 
@@ -264,7 +264,7 @@ public class PagedDbTests
         const int accounts = 10_000;
         var data = new byte[100];
 
-        using var db = PagedDb.NativeMemoryDb(32 * Mb, 2);
+        using var db = PagedDb.NativeMemoryDb(64 * Mb, 2);
 
         using var batch = db.BeginNextBatch();
 

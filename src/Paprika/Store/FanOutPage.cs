@@ -52,7 +52,7 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
 
     public bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
     {
-        batch.AssertRead(Header);
+        batch.AssertRead(Header, PageType.Standard);
 
         if (IsKeyLocal(key))
         {

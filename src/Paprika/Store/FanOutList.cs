@@ -71,7 +71,8 @@ public struct FanOutList
             ref var descendant = ref GetDescendantAddress(page, index);
             if (descendant.IsNull)
             {
-                batch.GetNewPage(out descendant, true);
+                var descendantPage = batch.GetNewPage(out descendant, true);
+                descendantPage.Header.PageType = TPageType.Type;
             }
 
             // The page exists, update
@@ -90,6 +91,12 @@ public struct FanOutList
             }
 
             var descendant = GetDescendantAddress(batch.GetAt(addr), index);
+            if (descendant.IsNull)
+            {
+                result = default;
+                return false;
+            }
+
             return TPage.Wrap(batch.GetAt(descendant)).TryGet(batch, key.SliceFrom(ConsumedNibbles), out result);
         }
 
