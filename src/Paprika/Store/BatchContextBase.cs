@@ -37,7 +37,7 @@ abstract class BatchContextBase(uint batchId) : IBatchContext
         return @new;
     }
 
-    public abstract bool WasWritten(DbAddress addr);
+    public bool WasWritten(Page page) => page.Header.BatchId == BatchId;
 
     /// <summary>
     /// Registers the given page for future GC.
