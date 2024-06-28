@@ -60,6 +60,14 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             return page;
         }
 
+        Page child;
+
+        // Special case: if the key can be flushed down and a child if it was written in this batch, go to it directly
+        if (TryWriteDownToAlreadyWrittenInThisBatch(key, data, batch))
+        {
+            return page;
+        }
+
         // No place in map, try flush to leafs first
         TryFlushDownToExistingChildren(map, batch);
 
@@ -74,7 +82,6 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
         // Try get the child page
         ref var address = ref Data.Buckets[nibble];
-        Page child;
 
         if (address.IsNull)
         {
@@ -96,6 +103,26 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
         // The page has some of the values flushed down, try to add again.
         return Set(key, data, batch);
+    }
+
+    private bool TryWriteDownToAlreadyWrittenInThisBatch(in NibblePath key, ReadOnlySpan<byte> data, IBatchContext batch)
+    {
+        if (key.IsEmpty)
+            return false;
+
+        var addr = Data.Buckets[key.FirstNibble];
+        if (addr.IsNull)
+            return false;
+
+        var child = batch.GetAt(addr);
+        if (batch.WasWritten(child) == false || child.Header.PageType != PageType.Standard)
+            return false;
+
+        // The key has a single nibble, the child page was written in this batch and is a standard page. Let's proceed!
+        Debug.Assert(child.Header.BatchId == batch.BatchId);
+        var result = new DataPage(child).Set(key, data, batch);
+        Debug.Assert(result.Equals(child));
+        return true;
     }
 
     private void TryFlushDownToExistingChildren(in SlottedArray map, IBatchContext batch)
