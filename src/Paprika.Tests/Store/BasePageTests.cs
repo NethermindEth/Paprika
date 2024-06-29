@@ -56,9 +56,6 @@ public abstract class BasePageTests
             return page;
         }
 
-        // for now
-        public override bool WasWritten(DbAddress addr) => true;
-
         public override void RegisterForFutureReuse(Page page)
         {
             _toReuse.Add(GetAddress(page))
