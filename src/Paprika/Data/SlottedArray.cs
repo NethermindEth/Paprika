@@ -440,61 +440,64 @@ public readonly ref struct SlottedArray
     private unsafe bool TryGetImpl(in NibblePath key, int hash, out Span<byte> data, out int slotIndex)
     {
         var to = _header.Low / Slot.Size;
-        var ptr = (int*)MemoryMarshal.GetReference(_data);
-
-        var searched = Vector256.Create(hash, hash, hash, hash, hash, hash, hash, hash);
-
-        const int m = Slot.HashMaskRemovingAddress;
-        var mask = Vector256.Create(m, m, m, m, m, m, m, m);
-
+        
         var vectorSize = Vector256<int>.Count;
-
-        int i;
-        for (i = 0; i <= to - vectorSize; i += vectorSize)
+        
+        int i = 0;
+        if (to >= vectorSize)
         {
-            // Load a vector
-            var vector = Vector256.Load(ptr + i);
+            var ptr = (int*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(_data));
+            var searched = Vector256.Create(hash, hash, hash, hash, hash, hash, hash, hash);
 
-            // Remove addresses by bitwise and with the mask removing the address
-            var masked = Vector256.BitwiseAnd(vector, mask);
+            const int m = Slot.HashMaskRemovingAddress;
+            var mask = Vector256.Create(m, m, m, m, m, m, m, m);
 
-            // Compare the masked with the searched
-            var comparison = Vector256.Equals(masked, searched);
-
-            // Create a mask from the comparison results
-            if (comparison != Vector256<int>.Zero)
+            for (i = 0; i <= to - vectorSize; i += vectorSize)
             {
-                // Use a mask to find the first matching index
-                for (var j = 0; j < vectorSize; j++)
-                {
-                    if (comparison[j] != 0)
-                    {
-                        ref var slot = ref this[i + j];
-                        var actual = GetSlotPayload(ref slot);
+                // Load a vector
+                var vector = Vector256.Load(ptr + i);
 
-                        if (Slot.HasKeyBytes(slot.Hash))
+                // Remove addresses by bitwise and with the mask removing the address
+                var masked = Vector256.BitwiseAnd(vector, mask);
+
+                // Compare the masked with the searched
+                var comparison = Vector256.Equals(masked, searched);
+
+                // Create a mask from the comparison results
+                if (comparison != Vector256<int>.Zero)
+                {
+                    // Use a mask to find the first matching index
+                    for (var j = 0; j < vectorSize; j++)
+                    {
+                        if (comparison[j] != 0)
                         {
-                            if (NibblePath.TryReadFrom(actual, key, out var leftover))
+                            ref var slot = ref this[i + j];
+                            var actual = GetSlotPayload(ref slot);
+
+                            if (Slot.HasKeyBytes(slot.Hash))
                             {
-                                data = leftover;
+                                if (NibblePath.TryReadFrom(actual, key, out var leftover))
+                                {
+                                    data = leftover;
+                                    slotIndex = i;
+                                    return true;
+                                }
+                            }
+                            else
+                            {
+                                // The key is contained in the hash, all is equal and good to go!
+                                data = actual;
                                 slotIndex = i;
                                 return true;
                             }
-                        }
-                        else
-                        {
-                            // The key is contained in the hash, all is equal and good to go!
-                            data = actual;
-                            slotIndex = i;
-                            return true;
                         }
                     }
                 }
             }
         }
         
-        // The leftovers
-        for (var j = 0; i < to; i++)
+        // The leftovers that did not fit the vector
+        for (; i < to; i++)
         {
             ref var slot = ref this[i];
             if (slot.Hash != hash) 
@@ -693,16 +696,16 @@ public readonly ref struct SlottedArray
                 return default;
             }
 
-            ushort shortHash = (ushort)(hash >> ShiftHash);
+            ushort hashWithNoPreamble = (ushort)(hash >> ShiftHash);
 
             if (count <= 2 || count > 4)
             {
-                workingSet[0] = (byte)(shortHash >> (HashByteShift));
+                workingSet[0] = (byte)(hashWithNoPreamble >> (HashByteShift));
             }
             else
             {
                 Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(workingSet))
-                    = (ushort)((shortHash >> HashByteShift) | (shortHash << HashByteShift));
+                    = (ushort)((hashWithNoPreamble >> HashByteShift) | (hashWithNoPreamble << HashByteShift));
             }
 
             NibblePath prefix = NibblePath.FromKey(workingSet, 0, count > 4 ? KeySlice : count);
@@ -719,7 +722,7 @@ public readonly ref struct SlottedArray
 
             const int limit = 3;
             data = NibblePath.ReadFrom(input, out var trimmed);
-            return prefix.Append(trimmed, hash, workingSet[limit..]);
+            return prefix.Append(trimmed, hashWithNoPreamble, workingSet[limit..]);
         }
 
         public static byte GetFirstNibble(int hash)
