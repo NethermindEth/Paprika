@@ -533,7 +533,7 @@ public class SlottedArrayTests
     [Test]
     public void Hashing()
     {
-        var hashes = new Dictionary<ushort, string>();
+        var hashes = new Dictionary<int, string>();
 
         // empty
         Unique("");
