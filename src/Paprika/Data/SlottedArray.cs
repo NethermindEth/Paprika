@@ -427,7 +427,7 @@ public readonly ref struct SlottedArray
         _header = default;
     }
 
-  
+
     /// <summary>
     /// The search implementation consists of two parts.
     /// The first is vectorized, using bit mask to extract 
@@ -440,9 +440,9 @@ public readonly ref struct SlottedArray
     private unsafe bool TryGetImpl(in NibblePath key, int hash, out Span<byte> data, out int slotIndex)
     {
         var to = _header.Low / Slot.Size;
-        
+
         var vectorSize = Vector256<int>.Count;
-        
+
         int i = 0;
         if (to >= vectorSize)
         {
@@ -495,14 +495,14 @@ public readonly ref struct SlottedArray
                 }
             }
         }
-        
+
         // The leftovers that did not fit the vector
         for (; i < to; i++)
         {
             ref var slot = ref this[i];
-            if (slot.Hash != hash) 
+            if (slot.Hash != hash)
                 continue;
-            
+
             var actual = GetSlotPayload(ref slot);
             if (Slot.HasKeyBytes(slot.Hash))
             {
@@ -688,7 +688,7 @@ public readonly ref struct SlottedArray
             Span<byte> workingSet, out ReadOnlySpan<byte> data)
         {
             var preamble = GetPreamble(hash);
-            
+
             var count = preamble >> KeyPreambleLengthShift;
             if (count == 0)
             {
