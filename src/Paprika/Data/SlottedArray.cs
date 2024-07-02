@@ -1,8 +1,9 @@
-using System.Buffers;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using Paprika.Store;
 using Paprika.Utils;
 
@@ -255,6 +256,7 @@ public readonly ref struct SlottedArray
                 {
                     map.DeleteImpl(index);
                 }
+
                 slot.MarkAsDeleted();
             }
             else if (map.TrySetImpl(slot.Hash, slot.KeyPreamble, trimmed, data))
@@ -443,71 +445,131 @@ public readonly ref struct SlottedArray
 
     [OptimizationOpportunity(OptimizationType.CPU,
         "key encoding is delayed but it might be called twice, here + TrySet")]
-    private int TryGetImpl(in NibblePath key, ushort hash, byte preamble, out Span<byte> data)
+    private unsafe int TryGetImpl(in NibblePath key, ushort hash, byte preamble, out Span<byte> data)
     {
-        var to = _header.Low;
+        var to = _header.Low / Slot.Size;
 
-        // uses vectorized search, treating slots as a Span<ushort>
-        // if the found index is odd -> found a slot to be queried
+        var d = (int*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(_data));
 
-        const int notFound = -1;
-        var span = MemoryMarshal.Cast<byte, ushort>(_data.Slice(0, to));
+        const int s = sizeof(int);
 
-        var offset = 0;
-        int index = span.IndexOf(hash);
+        var search = Slot.CreateSearch(hash, preamble);
 
-        if (index == notFound)
+        var i = 0;
+
+        while (i < to)
         {
-            data = default;
-            return NotFoundIndex;
-        }
+            var count = to - i;
 
-        while (index != notFound)
-        {
-            // move offset to the given position
-            offset += index;
+            // set represents significant bits, they are set in the order of the vector, meaning, that 0th value sets 0th bit 
+            ulong set;
+            int move;
 
-            if ((offset & Slot.HashShiftForSearch) == Slot.HashShiftForSearch)
+            if (Vector512.IsHardwareAccelerated && Vector512<int>.Count <= count)
             {
-                var i = offset / 2;
-
-                ref var slot = ref this[i];
-
-                // IsDeleted is encoded as a special preamble no need to check it
-                if (/*slot.IsDeleted == false && */ slot.KeyPreamble == preamble)
+                var v = Vector512.Load(d);
+                var mask = Vector512.Create(Slot.NonAddressMask);
+                var masked = Vector512.BitwiseAnd(v, mask);
+                var searchVector = Vector512.Create(search);
+                var result = Vector512.Equals(masked, searchVector);
+                set = result.ExtractMostSignificantBits();
+                move = Vector512<int>.Count;
+            }
+            else if (Vector256.IsHardwareAccelerated && Vector256<int>.Count <= count)
+            {
+                var v = Vector256.Load(d);
+                var mask = Vector256.Create(Slot.NonAddressMask);
+                var masked = Vector256.BitwiseAnd(v, mask);
+                var searchVector = Vector256.Create(search);
+                var result = Vector256.Equals(masked, searchVector);
+                set = result.ExtractMostSignificantBits();
+                move = Vector256<int>.Count;
+            }
+            else if (Vector128.IsHardwareAccelerated && Vector128<int>.Count <= count)
+            {
+                var v = Vector128.Load(d);
+                var mask = Vector128.Create(Slot.NonAddressMask);
+                var masked = Vector128.BitwiseAnd(v, mask);
+                var searchVector = Vector128.Create(search);
+                var result = Vector128.Equals(masked, searchVector);
+                set = result.ExtractMostSignificantBits();
+                move = Vector128<int>.Count;
+            }
+            else
+            {
+                set = 0;
+                if (count >= 8)
                 {
-                    var actual = GetSlotPayload(ref slot);
+                    move = 8;
 
-                    if (slot.HasKeyBytes)
+                    // according to set, the further the higher bit is set
+                    set |= (*(d + 0) & Slot.NonAddressMask ^ search) == 0 ? 1UL : 0;
+                    set |= (*(d + 1) & Slot.NonAddressMask ^ search) == 0 ? 2UL : 0;
+                    set |= (*(d + 2) & Slot.NonAddressMask ^ search) == 0 ? 4UL : 0;
+                    set |= (*(d + 3) & Slot.NonAddressMask ^ search) == 0 ? 8UL : 0;
+                    set |= (*(d + 4) & Slot.NonAddressMask ^ search) == 0 ? 16UL : 0;
+                    set |= (*(d + 5) & Slot.NonAddressMask ^ search) == 0 ? 32UL : 0;
+                    set |= (*(d + 6) & Slot.NonAddressMask ^ search) == 0 ? 64UL : 0;
+                    set |= (*(d + 7) & Slot.NonAddressMask ^ search) == 0 ? 128UL : 0;
+                }
+                else if (count >= 4)
+                {
+                    move = 4;
+
+                    set |= (*(d + 0) & Slot.NonAddressMask ^ search) == 0 ? 1UL : 0;
+                    set |= (*(d + 1) & Slot.NonAddressMask ^ search) == 0 ? 2UL : 0;
+                    set |= (*(d + 2) & Slot.NonAddressMask ^ search) == 0 ? 4UL : 0;
+                    set |= (*(d + 3) & Slot.NonAddressMask ^ search) == 0 ? 8UL : 0;
+                }
+                else
+                {
+                    move = count;
+                    for (int j = 0; j < count; j++)
                     {
-                        if (NibblePath.TryReadFrom(actual, key, out var leftover))
-                        {
-                            data = leftover;
-                            return i;
-                        }
-                    }
-                    else
-                    {
-                        // The key is contained in the hash, all is equal and good to go!
-                        data = actual;
-                        return i;
+                        set |= (*(d + j) & Slot.NonAddressMask ^ search) == 0 ? 1UL << j : 0;
                     }
                 }
             }
 
-            if (index + 1 >= span.Length)
+            // search through found
+            while (set > 0)
             {
-                // the span is empty and there's not place to move forward
-                break;
+                var j = BitOperations.TrailingZeroCount(set);
+                var mask = 1UL << j;
+
+                if ((set & mask) == mask)
+                {
+                    // remove mask
+                    set &= ~mask;
+
+                    var slotIndex = i + j;
+                    ref var slot = ref this[slotIndex];
+
+                    // IsDeleted is encoded as a special preamble no need to check it
+                    if ( /*slot.IsDeleted == false && */ slot.KeyPreamble == preamble)
+                    {
+                        var actual = GetSlotPayload(ref slot);
+
+                        if (slot.HasKeyBytes)
+                        {
+                            if (NibblePath.TryReadFrom(actual, key, out var leftover))
+                            {
+                                data = leftover;
+                                return slotIndex;
+                            }
+                        }
+                        else
+                        {
+                            // The key is contained in the hash, all is equal and good to go!
+                            data = actual;
+                            return slotIndex;
+                        }
+                    }
+                }
             }
 
-            // move next: ushorts sliced to the next
-            // offset moved by 1 to align
-            span = span.Slice(index + 1);
-            offset += 1;
-
-            // move to next index
-            index = span.IndexOf(hash);
+            i += move;
+            d += move;
         }
 
         data = default;
@@ -606,11 +668,6 @@ public readonly ref struct SlottedArray
         private ushort Raw;
 
         /// <summary>
-        /// Used for vectorized search
-        /// </summary>
-        public const int HashShiftForSearch = 1;
-
-        /// <summary>
         /// The memorized result of <see cref="PrepareKey"/> of this item.
         /// </summary>
         public ushort Hash;
@@ -706,6 +763,25 @@ public readonly ref struct SlottedArray
         {
             const int shift = NibblePath.NibbleShift;
             return (byte)(hash >> (shift + HashByteShift));
+        }
+
+        private const int EndianShift = 16;
+        /// <summary>
+        /// Assumes order of <see cref="Hash"/> and <see cref="Raw"/>!
+        /// </summary>
+        public static readonly int NonAddressMask = BitConverter.IsLittleEndian ? ~AddressMask : ~(AddressMask << EndianShift);
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int CreateSearch(ushort hash, byte preamble)
+        {
+            if (BitConverter.IsLittleEndian)
+            {
+                return (hash << EndianShift) | (preamble << KeyPreambleShift);
+            }
+            else
+            {
+                return hash | (preamble << KeyPreambleShift << EndianShift);
+            }
         }
     }
 
