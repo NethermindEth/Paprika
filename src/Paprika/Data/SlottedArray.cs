@@ -427,7 +427,6 @@ public readonly ref struct SlottedArray
         _header = default;
     }
 
-
     /// <summary>
     /// The search implementation consists of two parts.
     /// The first is vectorized, using bit mask to extract 
@@ -447,10 +446,10 @@ public readonly ref struct SlottedArray
         if (to >= vectorSize)
         {
             var ptr = (int*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(_data));
-            var searched = Vector256.Create(hash, hash, hash, hash, hash, hash, hash, hash);
+            var searched = Vector256.Create(hash);
 
             const int m = Slot.HashMaskRemovingAddress;
-            var mask = Vector256.Create(m, m, m, m, m, m, m, m);
+            var mask = Vector256.Create(m);
 
             for (i = 0; i <= to - vectorSize; i += vectorSize)
             {
@@ -460,16 +459,29 @@ public readonly ref struct SlottedArray
                 // Remove addresses by bitwise and with the mask removing the address
                 var masked = Vector256.BitwiseAnd(vector, mask);
 
-                // Compare the masked with the searched
-                var comparison = Vector256.Equals(masked, searched);
-
-                // Create a mask from the comparison results
-                if (comparison != Vector256<int>.Zero)
+                // Search for any match first that is fully vectorized
+                if (Vector256.EqualsAny(masked, searched))
                 {
-                    // Use a mask to find the first matching index
-                    for (var j = 0; j < vectorSize; j++)
+                    // Only then do the comparison
+                    var comparison = Vector256.Equals(masked, searched);
+
+                    // Shuffle the comparison, to pack all the matches to first long
+                    var shuffle = Vector256.Create(
+                        (byte)0, 4, 8, 12, 16, 20, 24, 28,
+                        0, 0, 0, 00, 00, 00, 00, 00,
+                        0, 0, 0, 00, 00, 00, 00, 00,
+                        0, 0, 0, 00, 00, 00, 00, 00);
+
+                    var shuffled = Vector256.Shuffle(comparison.AsByte(), shuffle);
+
+                    var matches = shuffled.AsInt64().GetElement(0);
+
+                    var j = 0;
+                    while (matches != 0)
                     {
-                        if (comparison[j] != 0)
+                        var matchMask = 0xFFL << (j * 8);
+
+                        if ((matchMask & matches) == matchMask)
                         {
                             ref var slot = ref this[i + j];
                             var actual = GetSlotPayload(ref slot);
@@ -491,6 +503,10 @@ public readonly ref struct SlottedArray
                                 return true;
                             }
                         }
+
+                        // update loop variables, move j up, and remove match from the loop
+                        j++;
+                        matches &= ~matchMask;
                     }
                 }
             }
@@ -623,7 +639,11 @@ public readonly ref struct SlottedArray
         /// <summary>
         /// The memorized result of <see cref="PrepareKey"/> of this item.
         /// </summary>
-        public readonly int Hash => Raw & HashMaskRemovingAddress;
+        public readonly int Hash
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => Raw & HashMaskRemovingAddress;
+        }
 
         public readonly override string ToString()
         {

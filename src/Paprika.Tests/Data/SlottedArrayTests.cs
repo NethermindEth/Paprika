@@ -1,3 +1,5 @@
+using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using FluentAssertions;
 using NUnit.Framework;
 using Paprika.Crypto;
@@ -113,6 +115,27 @@ public class SlottedArrayTests
 
         // verify
         return Verify(span.ToArray());
+    }
+
+
+    public static ReadOnlySpan<byte> Indices => new byte[32]
+    {
+        0, 4, 8, 12, 16, 20, 24, 28,
+        0, 0, 0, 00, 00, 00, 00, 00,
+        0, 0, 0, 00, 00, 00, 00, 00,
+        0, 0, 0, 00, 00, 00, 00, 00
+    };
+
+    [Test]
+    public void Shuffle()
+    {
+        var masked = Vector256.Create(1, 5, 3, 4, 5, 6, 5, 8);
+        var searched = Vector256.Create(5, 5, 5, 5, 5, 5, 5, 5);
+
+        var comparison = Vector256.Equals(masked, searched);
+        var shuffled = Vector256.Shuffle(comparison.AsByte(), Vector256.Create(Indices));
+        shuffled.AsInt64();
+
     }
 
     [Test]
