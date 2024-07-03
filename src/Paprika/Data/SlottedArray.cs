@@ -460,6 +460,8 @@ public readonly ref struct SlottedArray
 
         // set represents significant bits, they are set in the order of the vector, meaning, that 0th value sets 0th bit
         ulong set;
+
+        // If the max-to is small, consume the set first
         if (max - to < batch)
         {
             i = max - to;
@@ -494,7 +496,7 @@ public readonly ref struct SlottedArray
                     i += Vector512<int>.Count;
                     continue;
                 }
-                
+
                 consumed = Vector512<int>.Count;
             }
             else if (Vector256.IsHardwareAccelerated)
@@ -504,6 +506,7 @@ public readonly ref struct SlottedArray
                 var masked = Vector256.BitwiseAnd(v, mask);
                 var searchVector = Vector256.Create(search);
                 var result = Vector256.Equals(masked, searchVector);
+
                 if (result != Vector256<int>.Zero)
                 {
                     set = result.ExtractMostSignificantBits();
@@ -513,7 +516,7 @@ public readonly ref struct SlottedArray
                     i += Vector256<int>.Count;
                     continue;
                 }
-                
+
                 consumed = Vector256<int>.Count;
             }
             else if (Vector128.IsHardwareAccelerated)
@@ -532,7 +535,7 @@ public readonly ref struct SlottedArray
                     i += Vector128<int>.Count;
                     continue;
                 }
-              
+
                 consumed = Vector128<int>.Count;
             }
             else if (Vector64.IsHardwareAccelerated)
@@ -542,7 +545,7 @@ public readonly ref struct SlottedArray
                 var masked = Vector64.BitwiseAnd(v, mask);
                 var searchVector = Vector64.Create(search);
                 var result = Vector64.Equals(masked, searchVector);
-                
+
                 if (result != Vector64<int>.Zero)
                 {
                     set = result.ExtractMostSignificantBits();
