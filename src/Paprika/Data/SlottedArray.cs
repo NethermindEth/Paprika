@@ -446,6 +446,7 @@ public readonly ref struct SlottedArray
     [OptimizationOpportunity(OptimizationType.CPU,
         "key encoding is delayed but it might be called twice, here + TrySet")]
     [SkipLocalsInit]
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private unsafe int TryGetImpl(in NibblePath key, ushort hash, byte preamble, out Span<byte> data)
     {
         var to = _header.Low / Slot.Size;
@@ -454,7 +455,7 @@ public readonly ref struct SlottedArray
         var d = (int*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(_data));
 
         var search = Slot.CreateSearch(hash, preamble);
-
+        var batch = Vector512<int>.Count;
         var i = 0;
 
         while (i < to)
@@ -462,12 +463,13 @@ public readonly ref struct SlottedArray
             // set represents significant bits, they are set in the order of the vector, meaning, that 0th value sets 0th bit 
             ulong set = 0;
             int consumed = 0;
+            var meaningful = to - i;
 
             var slotMask = BitConverter.IsLittleEndian ? Slot.NonAddressMaskLittleEndian : Slot.NonAddressMaskBigEndian;
 
             if (Vector512.IsHardwareAccelerated)
             {
-                if (i + Vector512<int>.Count <= max)
+                if (i + batch <= max)
                 {
                     var v = Vector512.Load(d);
                     var mask = Vector512.Create(slotMask);
@@ -475,7 +477,7 @@ public readonly ref struct SlottedArray
                     var searchVector = Vector512.Create(search);
                     var result = Vector512.Equals(masked, searchVector);
                     set = result.ExtractMostSignificantBits();
-                    consumed = Vector512<int>.Count;
+                    consumed = batch;
                 }
                 else
                 {
@@ -484,18 +486,35 @@ public readonly ref struct SlottedArray
             }
             else if (Vector256.IsHardwareAccelerated)
             {
-                if (i + Vector256<int>.Count <= max)
+                if (i + batch <= max)
                 {
+                    // unroll by two
+
+                    // 1st part of the batch
                     var v = Vector256.Load(d);
                     var mask = Vector256.Create(slotMask);
                     var masked = Vector256.BitwiseAnd(v, mask);
                     var searchVector = Vector256.Create(search);
                     var result = Vector256.Equals(masked, searchVector);
-                    set = result.ExtractMostSignificantBits();
-                    consumed = Vector256<int>.Count;
+                    if (result != Vector256<int>.Zero)
+                    {
+                        set = result.ExtractMostSignificantBits();
+                    }
+
+                    // 2nd part of the batch
+                    v = Vector256.Load(d + Vector256<int>.Count);
+                    masked = Vector256.BitwiseAnd(v, mask);
+                    result = Vector256.Equals(masked, searchVector);
+                    if (result != Vector256<int>.Zero)
+                    {
+                        set |= (ulong)result.ExtractMostSignificantBits() << Vector256<int>.Count;
+                    }
+
+                    consumed = batch;
                 }
                 else
                 {
+                    set = GatherTail(d, meaningful, search);
                     consumed = 0;
                 }
             }
@@ -513,6 +532,7 @@ public readonly ref struct SlottedArray
                 }
                 else
                 {
+                    set = GatherTail(d, meaningful, search);
                     consumed = 0;
                 }
             }
@@ -530,20 +550,15 @@ public readonly ref struct SlottedArray
                 }
                 else
                 {
+                    set = GatherTail(d, meaningful, search);
                     consumed = 0;
                 }
             }
 
-            var meaningful = to - i;
-            
-            if (consumed == 0)
-            {
-                set = GatherTail(d, meaningful, search);
-            }
-            else if (i + consumed > to)
+            if (i + consumed > to)
             {
                 // create a mask to have them extracted
-                var mask = (1UL << (meaningful)) - 1;
+                var mask = (1UL << meaningful) - 1;
                 set &= mask;
             }
 
@@ -588,6 +603,7 @@ public readonly ref struct SlottedArray
         [MethodImpl(MethodImplOptions.NoInlining)]
         static ulong GatherTail(int* data, int count, int search)
         {
+            throw new Exception("BOOM");
             var slotMask = BitConverter.IsLittleEndian ? Slot.NonAddressMaskLittleEndian : Slot.NonAddressMaskBigEndian;
 
             ulong set = 0;

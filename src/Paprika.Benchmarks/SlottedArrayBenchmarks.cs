@@ -37,7 +37,6 @@ public class SlottedArrayBenchmarks
 
             Span<byte> key = stackalloc byte[4];
 
-
             while (true)
             {
                 WriteInt32LittleEndian(key, _to);
