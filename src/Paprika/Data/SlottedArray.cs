@@ -62,7 +62,8 @@ public readonly ref struct SlottedArray
 
     private bool TrySetImpl(ushort hash, byte preamble, in NibblePath trimmed, ReadOnlySpan<byte> data)
     {
-        if (TryGetImpl(trimmed, hash, preamble, out var existingData, out var index))
+        var index = TryGetImpl(trimmed, hash, preamble, out var existingData);
+        if (index != NotFound)
         {
             // same size, copy in place
             if (data.Length == existingData.Length)
@@ -249,7 +250,8 @@ public readonly ref struct SlottedArray
             if (data.IsEmpty && treatEmptyAsTombstone)
             {
                 // special case for tombstones in overflows
-                if (map.TryGetImpl(trimmed, slot.Hash, slot.KeyPreamble, out _, out var index))
+                var index = map.TryGetImpl(trimmed, slot.Hash, slot.KeyPreamble, out _);
+                if (index != NotFound)
                 {
                     map.DeleteImpl(index);
                 }
@@ -310,7 +312,8 @@ public readonly ref struct SlottedArray
     public bool Delete(in NibblePath key)
     {
         var hash = Slot.PrepareKey(key, out var preamble, out var trimmed);
-        if (TryGetImpl(trimmed, hash, preamble, out _, out var index))
+        var index = TryGetImpl(trimmed, hash, preamble, out _);
+        if (index != NotFound)
         {
             DeleteImpl(index);
             return true;
@@ -417,7 +420,7 @@ public readonly ref struct SlottedArray
     public bool TryGet(scoped in NibblePath key, out ReadOnlySpan<byte> data)
     {
         var hash = Slot.PrepareKey(key, out byte preamble, out var trimmed);
-        if (TryGetImpl(trimmed, hash, preamble, out var span, out _))
+        if (TryGetImpl(trimmed, hash, preamble, out var span) != NotFound)
         {
             data = span.IsEmpty ? ReadOnlySpan<byte>.Empty : MemoryMarshal.CreateReadOnlySpan(ref span[0], span.Length);
             return true;
@@ -435,9 +438,11 @@ public readonly ref struct SlottedArray
         _header = default;
     }
 
+    private const int NotFound = -1;
+
     [OptimizationOpportunity(OptimizationType.CPU,
         "key encoding is delayed but it might be called twice, here + TrySet")]
-    private bool TryGetImpl(in NibblePath key, ushort hash, byte preamble, out Span<byte> data, out int slotIndex)
+    private int TryGetImpl(in NibblePath key, ushort hash, byte preamble, out Span<byte> data)
     {
         var to = _header.Low;
 
@@ -453,8 +458,7 @@ public readonly ref struct SlottedArray
         if (index == notFound)
         {
             data = default;
-            slotIndex = default;
-            return false;
+            return NotFound;
         }
 
         while (index != notFound)
@@ -476,16 +480,14 @@ public readonly ref struct SlottedArray
                         if (NibblePath.TryReadFrom(actual, key, out var leftover))
                         {
                             data = leftover;
-                            slotIndex = i;
-                            return true;
+                            return i;
                         }
                     }
                     else
                     {
                         // The key is contained in the hash, all is equal and good to go!
                         data = actual;
-                        slotIndex = i;
-                        return true;
+                        return i;
                     }
                 }
             }
@@ -506,8 +508,7 @@ public readonly ref struct SlottedArray
         }
 
         data = default;
-        slotIndex = default;
-        return false;
+        return NotFound;
     }
 
     /// <summary>
