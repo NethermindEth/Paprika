@@ -456,12 +456,23 @@ public readonly ref struct SlottedArray
 
         var search = Slot.CreateSearch(hash, preamble);
         var batch = Vector512<int>.Count;
-        var i = 0;
+        int i;
+
+        // set represents significant bits, they are set in the order of the vector, meaning, that 0th value sets 0th bit
+        ulong set;
+        if (max - to < batch)
+        {
+            i = max - to;
+            set = GatherTail(d, i, search);
+        }
+        else
+        {
+            set = 0;
+            i = 0;
+        }
 
         while (i < to)
         {
-            // set represents significant bits, they are set in the order of the vector, meaning, that 0th value sets 0th bit 
-            ulong set = 0;
             int consumed = 0;
             var meaningful = to - i;
 
@@ -469,132 +480,122 @@ public readonly ref struct SlottedArray
 
             if (Vector512.IsHardwareAccelerated)
             {
-                if (i + batch <= max)
+                var v = Vector512.Load(d + i);
+                var mask = Vector512.Create(slotMask);
+                var masked = Vector512.BitwiseAnd(v, mask);
+                var searchVector = Vector512.Create(search);
+                var result = Vector512.Equals(masked, searchVector);
+                if (result != Vector512<int>.Zero)
                 {
-                    var v = Vector512.Load(d);
-                    var mask = Vector512.Create(slotMask);
-                    var masked = Vector512.BitwiseAnd(v, mask);
-                    var searchVector = Vector512.Create(search);
-                    var result = Vector512.Equals(masked, searchVector);
                     set = result.ExtractMostSignificantBits();
-                    consumed = batch;
                 }
                 else
                 {
-                    consumed = 0;
+                    i += Vector512<int>.Count;
+                    continue;
                 }
+                
+                consumed = Vector512<int>.Count;
             }
             else if (Vector256.IsHardwareAccelerated)
             {
-                if (i + batch <= max)
+                var v = Vector256.Load(d + i);
+                var mask = Vector256.Create(slotMask);
+                var masked = Vector256.BitwiseAnd(v, mask);
+                var searchVector = Vector256.Create(search);
+                var result = Vector256.Equals(masked, searchVector);
+                if (result != Vector256<int>.Zero)
                 {
-                    // unroll by two
-
-                    // 1st part of the batch
-                    var v = Vector256.Load(d);
-                    var mask = Vector256.Create(slotMask);
-                    var masked = Vector256.BitwiseAnd(v, mask);
-                    var searchVector = Vector256.Create(search);
-                    var result = Vector256.Equals(masked, searchVector);
-                    if (result != Vector256<int>.Zero)
-                    {
-                        set = result.ExtractMostSignificantBits();
-                    }
-
-                    // 2nd part of the batch
-                    v = Vector256.Load(d + Vector256<int>.Count);
-                    masked = Vector256.BitwiseAnd(v, mask);
-                    result = Vector256.Equals(masked, searchVector);
-                    if (result != Vector256<int>.Zero)
-                    {
-                        set |= (ulong)result.ExtractMostSignificantBits() << Vector256<int>.Count;
-                    }
-
-                    consumed = batch;
+                    set = result.ExtractMostSignificantBits();
                 }
                 else
                 {
-                    set = GatherTail(d, meaningful, search);
-                    consumed = 0;
+                    i += Vector256<int>.Count;
+                    continue;
                 }
+                
+                consumed = Vector256<int>.Count;
             }
             else if (Vector128.IsHardwareAccelerated)
             {
-                if (i + Vector128<int>.Count <= max)
+                var v = Vector128.Load(d + i);
+                var mask = Vector128.Create(slotMask);
+                var masked = Vector128.BitwiseAnd(v, mask);
+                var searchVector = Vector128.Create(search);
+                var result = Vector128.Equals(masked, searchVector);
+                if (result != Vector128<int>.Zero)
                 {
-                    var v = Vector128.Load(d);
-                    var mask = Vector128.Create(slotMask);
-                    var masked = Vector128.BitwiseAnd(v, mask);
-                    var searchVector = Vector128.Create(search);
-                    var result = Vector128.Equals(masked, searchVector);
                     set = result.ExtractMostSignificantBits();
-                    consumed = Vector128<int>.Count;
                 }
                 else
                 {
-                    set = GatherTail(d, meaningful, search);
-                    consumed = 0;
+                    i += Vector128<int>.Count;
+                    continue;
                 }
+              
+                consumed = Vector128<int>.Count;
             }
             else if (Vector64.IsHardwareAccelerated)
             {
-                if (i + Vector64<int>.Count <= max)
+                var v = Vector64.Load(d + i);
+                var mask = Vector64.Create(slotMask);
+                var masked = Vector64.BitwiseAnd(v, mask);
+                var searchVector = Vector64.Create(search);
+                var result = Vector64.Equals(masked, searchVector);
+                
+                if (result != Vector64<int>.Zero)
                 {
-                    var v = Vector64.Load(d);
-                    var mask = Vector64.Create(slotMask);
-                    var masked = Vector64.BitwiseAnd(v, mask);
-                    var searchVector = Vector64.Create(search);
-                    var result = Vector64.Equals(masked, searchVector);
                     set = result.ExtractMostSignificantBits();
-                    consumed = Vector64<int>.Count;
                 }
                 else
                 {
-                    set = GatherTail(d, meaningful, search);
-                    consumed = 0;
+                    i += Vector64<int>.Count;
+                    continue;
                 }
             }
 
-            if (i + consumed > to)
+            if (set > 0)
             {
-                // create a mask to have them extracted
-                var mask = (1UL << meaningful) - 1;
-                set &= mask;
-            }
-
-            // search through found
-            while (set > 0)
-            {
-                var j = BitOperations.TrailingZeroCount(set);
-                var mask = 1UL << j;
-
-                // Remove mask and mark this entry as covered
-                set &= ~mask;
-
-                var slotIndex = i + j;
-                ref var slot = ref this[slotIndex];
-
-                var actual = GetSlotPayload(ref slot);
-
-                // no additional checks needed as it was checked against everything above
-                if (slot.HasKeyBytes)
+                if (i + consumed > to)
                 {
-                    if (NibblePath.TryReadFrom(actual, key, out var leftover))
+                    // create a mask to have them extracted
+                    var mask = (1UL << meaningful) - 1;
+                    set &= mask;
+                }
+
+                // search through found
+                while (set > 0)
+                {
+                    var j = BitOperations.TrailingZeroCount(set);
+                    var mask = 1UL << j;
+
+                    // Remove mask and mark this entry as covered
+                    set &= ~mask;
+
+                    var slotIndex = i + j;
+                    ref var slot = ref this[slotIndex];
+
+                    var actual = GetSlotPayload(ref slot);
+
+                    // no additional checks needed as it was checked against everything above
+                    if (slot.HasKeyBytes)
                     {
-                        data = leftover;
+                        if (NibblePath.TryReadFrom(actual, key, out var leftover))
+                        {
+                            data = leftover;
+                            return slotIndex;
+                        }
+                    }
+                    else
+                    {
+                        // The key is contained in the hash, all is equal and good to go!
+                        data = actual;
                         return slotIndex;
                     }
-                }
-                else
-                {
-                    // The key is contained in the hash, all is equal and good to go!
-                    data = actual;
-                    return slotIndex;
                 }
             }
 
             i += consumed;
-            d += consumed;
         }
 
         data = default;
