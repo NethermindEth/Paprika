@@ -445,13 +445,12 @@ public readonly ref struct SlottedArray
 
     [OptimizationOpportunity(OptimizationType.CPU,
         "key encoding is delayed but it might be called twice, here + TrySet")]
+    [SkipLocalsInit]
     private unsafe int TryGetImpl(in NibblePath key, ushort hash, byte preamble, out Span<byte> data)
     {
         var to = _header.Low / Slot.Size;
 
         var d = (int*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(_data));
-
-        const int s = sizeof(int);
 
         var search = Slot.CreateSearch(hash, preamble);
 
@@ -465,10 +464,12 @@ public readonly ref struct SlottedArray
             ulong set;
             int move;
 
+            var slotMask = BitConverter.IsLittleEndian ? Slot.NonAddressMaskLittleEndian : Slot.NonAddressMaskBigEndian;
+            
             if (Vector512.IsHardwareAccelerated && Vector512<int>.Count <= count)
             {
                 var v = Vector512.Load(d);
-                var mask = Vector512.Create(Slot.NonAddressMask);
+                var mask = Vector512.Create(slotMask);
                 var masked = Vector512.BitwiseAnd(v, mask);
                 var searchVector = Vector512.Create(search);
                 var result = Vector512.Equals(masked, searchVector);
@@ -478,7 +479,7 @@ public readonly ref struct SlottedArray
             else if (Vector256.IsHardwareAccelerated && Vector256<int>.Count <= count)
             {
                 var v = Vector256.Load(d);
-                var mask = Vector256.Create(Slot.NonAddressMask);
+                var mask = Vector256.Create(slotMask);
                 var masked = Vector256.BitwiseAnd(v, mask);
                 var searchVector = Vector256.Create(search);
                 var result = Vector256.Equals(masked, searchVector);
@@ -488,7 +489,7 @@ public readonly ref struct SlottedArray
             else if (Vector128.IsHardwareAccelerated && Vector128<int>.Count <= count)
             {
                 var v = Vector128.Load(d);
-                var mask = Vector128.Create(Slot.NonAddressMask);
+                var mask = Vector128.Create(slotMask);
                 var masked = Vector128.BitwiseAnd(v, mask);
                 var searchVector = Vector128.Create(search);
                 var result = Vector128.Equals(masked, searchVector);
@@ -498,36 +499,11 @@ public readonly ref struct SlottedArray
             else
             {
                 set = 0;
-                if (count >= 8)
+                move = count > 64 ? 64 : count; // max number of bits in ulong
+                
+                for (int j = 0; j < move; j++)
                 {
-                    move = 8;
-
-                    // according to set, the further the higher bit is set
-                    set |= (*(d + 0) & Slot.NonAddressMask ^ search) == 0 ? 1UL : 0;
-                    set |= (*(d + 1) & Slot.NonAddressMask ^ search) == 0 ? 2UL : 0;
-                    set |= (*(d + 2) & Slot.NonAddressMask ^ search) == 0 ? 4UL : 0;
-                    set |= (*(d + 3) & Slot.NonAddressMask ^ search) == 0 ? 8UL : 0;
-                    set |= (*(d + 4) & Slot.NonAddressMask ^ search) == 0 ? 16UL : 0;
-                    set |= (*(d + 5) & Slot.NonAddressMask ^ search) == 0 ? 32UL : 0;
-                    set |= (*(d + 6) & Slot.NonAddressMask ^ search) == 0 ? 64UL : 0;
-                    set |= (*(d + 7) & Slot.NonAddressMask ^ search) == 0 ? 128UL : 0;
-                }
-                else if (count >= 4)
-                {
-                    move = 4;
-
-                    set |= (*(d + 0) & Slot.NonAddressMask ^ search) == 0 ? 1UL : 0;
-                    set |= (*(d + 1) & Slot.NonAddressMask ^ search) == 0 ? 2UL : 0;
-                    set |= (*(d + 2) & Slot.NonAddressMask ^ search) == 0 ? 4UL : 0;
-                    set |= (*(d + 3) & Slot.NonAddressMask ^ search) == 0 ? 8UL : 0;
-                }
-                else
-                {
-                    move = count;
-                    for (int j = 0; j < count; j++)
-                    {
-                        set |= (*(d + j) & Slot.NonAddressMask ^ search) == 0 ? 1UL << j : 0;
-                    }
+                    set |= (*(d + j) & slotMask ^ search) == 0 ? 1UL << j : 0;
                 }
             }
 
@@ -537,34 +513,28 @@ public readonly ref struct SlottedArray
                 var j = BitOperations.TrailingZeroCount(set);
                 var mask = 1UL << j;
 
-                if ((set & mask) == mask)
+                // Remove mask and mark this entry as covered
+                set &= ~mask;
+
+                var slotIndex = i + j;
+                ref var slot = ref this[slotIndex];
+
+                var actual = GetSlotPayload(ref slot);
+
+                // no additional checks needed as it was checked against everything above
+                if (slot.HasKeyBytes)
                 {
-                    // remove mask
-                    set &= ~mask;
-
-                    var slotIndex = i + j;
-                    ref var slot = ref this[slotIndex];
-
-                    // IsDeleted is encoded as a special preamble no need to check it
-                    if ( /*slot.IsDeleted == false && */ slot.KeyPreamble == preamble)
+                    if (NibblePath.TryReadFrom(actual, key, out var leftover))
                     {
-                        var actual = GetSlotPayload(ref slot);
-
-                        if (slot.HasKeyBytes)
-                        {
-                            if (NibblePath.TryReadFrom(actual, key, out var leftover))
-                            {
-                                data = leftover;
-                                return slotIndex;
-                            }
-                        }
-                        else
-                        {
-                            // The key is contained in the hash, all is equal and good to go!
-                            data = actual;
-                            return slotIndex;
-                        }
+                        data = leftover;
+                        return slotIndex;
                     }
+                }
+                else
+                {
+                    // The key is contained in the hash, all is equal and good to go!
+                    data = actual;
+                    return slotIndex;
                 }
             }
 
@@ -581,8 +551,10 @@ public readonly ref struct SlottedArray
     /// </summary>
     private Span<byte> GetSlotPayload(ref Slot slot)
     {
+        ref var start = ref Unsafe.As<byte, Slot>(ref MemoryMarshal.GetReference(_data));
+        
         // assert whether the slot has a previous, if not use data.length
-        var previousSlotAddress = Unsafe.IsAddressLessThan(ref this[0], ref slot)
+        var previousSlotAddress = Unsafe.IsAddressLessThan(ref start, ref slot)
             ? Unsafe.Add(ref slot, -1).ItemAddress
             : _data.Length;
 
@@ -620,8 +592,9 @@ public readonly ref struct SlottedArray
         /// </summary>
         public ushort ItemAddress
         {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
             readonly get => (ushort)(Raw & AddressMask);
-            set => Raw = (ushort)((Raw & ~AddressMask) | value);
+            set => Raw = (ushort)((Raw & NonAddressMaskLittleEndian) | value);
         }
 
         /// <summary>
@@ -635,7 +608,7 @@ public readonly ref struct SlottedArray
         public void MarkAsDeleted() => KeyPreamble = KeyPreambleDelete;
 
         // Preamble uses all bits that AddressMask does not
-        private const ushort KeyPreambleMask = unchecked((ushort)~AddressMask);
+        private const ushort KeyPreambleMask = unchecked((ushort)NonAddressMaskLittleEndian);
         private const ushort KeyPreambleShift = 12;
 
         private const byte KeyPreambleBeyond = 0b101; // Some key nibbles are stored along data, this is the marker.
@@ -663,7 +636,11 @@ public readonly ref struct SlottedArray
 
         public readonly byte Nibble0Th => (byte)(Hash >> (HashByteShift + NibblePath.NibbleShift) & 0xF);
 
-        public bool HasKeyBytes => KeyPreamble >= KeyPreambleWithBytes;
+        public bool HasKeyBytes
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get { return KeyPreamble >= KeyPreambleWithBytes; }
+        }
 
         private ushort Raw;
 
@@ -766,11 +743,11 @@ public readonly ref struct SlottedArray
         }
 
         private const int EndianShift = 16;
-        /// <summary>
-        /// Assumes order of <see cref="Hash"/> and <see cref="Raw"/>!
-        /// </summary>
-        public static readonly int NonAddressMask = BitConverter.IsLittleEndian ? ~AddressMask : ~(AddressMask << EndianShift);
-
+        
+        // endian based masks
+        public const int NonAddressMaskLittleEndian = ~AddressMask;
+        public const int NonAddressMaskBigEndian = ~(AddressMask << EndianShift);
+        
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int CreateSearch(ushort hash, byte preamble)
         {
