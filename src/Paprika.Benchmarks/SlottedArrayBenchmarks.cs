@@ -275,17 +275,52 @@ public class SlottedArrayBenchmarks
     [Arguments(1, 30)]
     public int Prepare_Key(int sliceFrom, int length)
     {
-        var key = NibblePath.FromKey(Keccak.EmptyTreeHash).SliceFrom(sliceFrom).SliceTo(length);
-        
+        var key = NibblePath.FromKey(Keccak.EmptyTreeHash).Slice(sliceFrom, length);
+
         // spin: 1
         var hash = SlottedArray.PrepareKeyForTests(key, out var preamble, out var trimmed);
-        
+
         // spin: 2
         var hash2 = SlottedArray.PrepareKeyForTests(key, out var preamble2, out var trimmed2);
 
         return
-            hash + preamble + trimmed.Length + 
+            hash + preamble + trimmed.Length +
             hash2 + preamble2 + trimmed2.Length;
+    }
+
+    [Benchmark(OperationsPerInvoke = 2)]
+    [Arguments(0, 0)]
+    [Arguments(0, 1)]
+    [Arguments(1, 1)]
+    [Arguments(0, 2)]
+    [Arguments(1, 2)]
+    [Arguments(0, 3)]
+    [Arguments(1, 3)]
+    [Arguments(0, 4)]
+    [Arguments(1, 4)]
+    [Arguments(0, 6)]
+    [Arguments(1, 6)]
+    [Arguments(0, 32)]
+    [Arguments(1, 31)]
+    [Arguments(1, 30)]
+    public int Prepare_Key_UnPrepare(int sliceFrom, int length)
+    {
+        var key = NibblePath.FromKey(Keccak.EmptyTreeHash).Slice(sliceFrom, length);
+
+        // prepare
+        var hash = SlottedArray.PrepareKeyForTests(key, out var preamble, out var trimmed);
+        var written = trimmed.WriteTo(stackalloc byte[33]);
+
+        Span<byte> working = stackalloc byte[32];
+
+        // spin: 1
+        var key1 = SlottedArray.UnPrepareKeyForTests(hash, preamble, written, working, out var data);
+
+        // spin: 2
+        var key2 = SlottedArray.UnPrepareKeyForTests(hash, preamble, written, working, out data);
+
+
+        return key1.Length + key2.Length;
     }
 
     private const int DefragmentOpsCount = 4;

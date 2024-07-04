@@ -644,40 +644,42 @@ public readonly ref struct SlottedArray
         {
             const int shift = NibblePath.NibbleShift;
 
+            trimmed = NibblePath.Empty;
             var length = key.Length;
-            var oddBit = key.IsOdd ? 1 : 0;
+            
+            if (length == 0)
+            {
+                preamble = 0; // no oddity for empty, preamble is zero and so is hash
+                return 0;
+            }
+
+            var hash = (ushort)(key.GetAt(0) << (shift + HashByteShift));
+            var oddBit = key.Oddity;
+            preamble = (byte)((length << KeyPreambleLengthShift) | oddBit);
+            
+            if (length == 1)
+            {
+                return hash;
+            }
+
+            hash = (ushort)(hash | (key.GetAt(1) << HashByteShift));
+            if (length == 2)
+            {
+                return hash;
+            }
 
             if (length <= KeyPreambleMaxEncodedLength)
             {
-                preamble = (byte)((length << KeyPreambleLengthShift) | oddBit);
-                trimmed = NibblePath.Empty;
-
-                switch (length)
-                {
-                    // produce hashes aligned with NibblePath ordering
-                    case 0:
-                        preamble = 0; // no oddity for empty
-                        return 0;
-                    case 1:
-                        return (ushort)(key.GetAt(0) << (shift + HashByteShift));
-                    case 2:
-                        return (ushort)(((key.GetAt(0) << shift) | key.GetAt(1)) << HashByteShift);
-                    case 3:
-                        return (ushort)((((key.GetAt(0) << shift) | key.GetAt(1)) << HashByteShift) |
-                                        (key.GetAt(2) << shift));
-                    case 4:
-                        return (ushort)((((key.GetAt(0) << shift) | key.GetAt(1)) << HashByteShift) |
-                                        (key.GetAt(2) << shift) | key.GetAt(3));
-                }
+                hash = (ushort)(hash | (key.GetAt(2) << shift));
+                return length == 3 ? hash : (ushort)(hash | key.GetAt(3));
             }
 
             // The path is 4 nibbles or longer
             preamble = (byte)(KeyPreambleWithBytes | oddBit);
             trimmed = key.SliceFrom(KeySlice).SliceTo(length - KeyPreambleMaxEncodedLength);
-
-            // Extract first 4 nibbles as the hash
-            return (ushort)((((key.GetAt(0) << shift) | key.GetAt(1)) << HashByteShift) |
-                            (key.GetAt(length - 2) << shift) | key.GetAt(length - 1));
+            
+            // First 2 nibbles already extracted in the hash, extract two last
+            return (ushort)(hash | (key.GetAt(length - 2) << shift) | key.GetAt(length - 1));
         }
 
         [SkipLocalsInit]
