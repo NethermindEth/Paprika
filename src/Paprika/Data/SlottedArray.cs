@@ -471,7 +471,7 @@ public readonly ref struct SlottedArray
                 var i = offset / 2;
 
                 ref var slot = ref this[i];
-                
+
                 // Preamble check is sufficient as IsDeleted is a special value of the preamble
                 if (/*slot.IsDeleted == false &&*/ slot.KeyPreamble == preamble)
                 {
@@ -572,7 +572,7 @@ public readonly ref struct SlottedArray
         public void MarkAsDeleted()
         {
             KeyPreamble = KeyPreambleDelete;
-            
+
             // Provide a different hash so that further searches with TryGet won't be hitting this slot.
             //
             // We could use a constant value, but then on a collision with an actual value the tail

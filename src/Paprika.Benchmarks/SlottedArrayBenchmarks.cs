@@ -236,7 +236,7 @@ public class SlottedArrayBenchmarks
     public void Set_And_Delete()
     {
         const int count = 80;
-        
+
         Span<byte> data = stackalloc byte[count];
         var a = NibblePath.FromKey(stackalloc byte[] { 12, 34, 98 });
         var b = NibblePath.FromKey(stackalloc byte[] { 78, 34, 35 });
@@ -246,11 +246,11 @@ public class SlottedArrayBenchmarks
 
         // init by setting a
         map.TrySet(a, ReadOnlySpan<byte>.Empty);
-        
+
         for (int i = 1; i < count; i++)
         {
             var d = data[..i];
-            
+
             map.TrySet(b, d);
             map.Delete(a); // delete previous a, b above prohibits collect tombstones
             map.TrySet(a, d); // set new
