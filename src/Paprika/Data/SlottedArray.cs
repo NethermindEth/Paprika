@@ -531,6 +531,13 @@ public readonly ref struct SlottedArray
     /// </summary>
     public static ushort HashForTests(in NibblePath key) => Slot.PrepareKey(key, out _, out _);
 
+    public static NibblePath UnPrepareKeyForTests(ushort hash, byte preamble, ReadOnlySpan<byte> input,
+        Span<byte> workingSet, out ReadOnlySpan<byte> data) =>
+        Slot.UnPrepareKey(hash, preamble, input, workingSet, out data);
+
+    public static ushort PrepareKeyForTests(in NibblePath key, out byte preamble, out NibblePath trimmed) =>
+        Slot.PrepareKey(key, out preamble, out trimmed);
+    
     /// <summary>
     /// The slot is a size of <see cref="Size"/> bytes.
     ///
