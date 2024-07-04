@@ -567,7 +567,18 @@ public readonly ref struct SlottedArray
         /// <summary>
         /// Marks the slot as deleted
         /// </summary>
-        public void MarkAsDeleted() => KeyPreamble = KeyPreambleDelete;
+        public void MarkAsDeleted()
+        {
+            KeyPreamble = KeyPreambleDelete;
+            
+            // Provide a different hash so that further searches with TryGet won't be hitting this slot.
+            //
+            // We could use a constant value, but then on a collision with an actual value the tail
+            // performance would be terrible.
+            //
+            // The easiest way is to negate the hash that makes it not equal and yet is not a single value.
+            Hash = (ushort)~Hash;
+        }
 
         // Preamble uses all bits that AddressMask does not
         private const ushort KeyPreambleMask = unchecked((ushort)~AddressMask);
