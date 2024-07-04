@@ -9,6 +9,9 @@ namespace Paprika.Benchmarks;
 [DisassemblyDiagnoser(maxDepth: 2)]
 public class SlottedArrayBenchmarks
 {
+    // set delete
+    private readonly byte[] _setDelete = new byte[Page.PageSize];
+
     // defragmentation
     private readonly byte[] _defragmentation = new byte[Page.PageSize];
     private readonly byte[] _defragmentationCopy = new byte[Page.PageSize];
@@ -223,6 +226,36 @@ public class SlottedArrayBenchmarks
         map.MoveNonEmptyKeysTo(new MapSource(map0, map1));
 
         return map.Count + map0.Count + map1.Count;
+    }
+
+    /// <summary>
+    /// Multiple rounds of setting and deleting to ensure that tombstones do not impact the search nor insert.
+    /// Increasing values are used so that slot cannot be easily reused.
+    /// </summary>
+    [Benchmark]
+    public void Set_And_Delete()
+    {
+        const int count = 80;
+        
+        Span<byte> data = stackalloc byte[count];
+        var a = NibblePath.FromKey(stackalloc byte[] { 12, 34, 98 });
+        var b = NibblePath.FromKey(stackalloc byte[] { 78, 34, 35 });
+
+        var map = new SlottedArray(_setDelete);
+        map.Clear();
+
+        // init by setting a
+        map.TrySet(a, ReadOnlySpan<byte>.Empty);
+        
+        for (int i = 1; i < count; i++)
+        {
+            var d = data[..i];
+            
+            map.TrySet(b, d);
+            map.Delete(a); // delete previous a, b above prohibits collect tombstones
+            map.TrySet(a, d); // set new
+            map.Delete(b); // delete previous b, a above prohibits collect tombstones
+        }
     }
 
     [Benchmark(OperationsPerInvoke = 4)]
