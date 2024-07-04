@@ -471,7 +471,9 @@ public readonly ref struct SlottedArray
                 var i = offset / 2;
 
                 ref var slot = ref this[i];
-                if (slot.IsDeleted == false && slot.KeyPreamble == preamble)
+                
+                // Preamble check is sufficient as IsDeleted is a special value of the preamble
+                if (/*slot.IsDeleted == false &&*/ slot.KeyPreamble == preamble)
                 {
                     var actual = GetSlotPayload(ref slot);
 
