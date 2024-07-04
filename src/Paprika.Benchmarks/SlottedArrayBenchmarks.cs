@@ -1,3 +1,4 @@
+using System.Numerics;
 using BenchmarkDotNet.Attributes;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -9,8 +10,7 @@ namespace Paprika.Benchmarks;
 [DisassemblyDiagnoser(maxDepth: 2)]
 public class SlottedArrayBenchmarks
 {
-    // set delete
-    private readonly byte[] _setDelete = new byte[Page.PageSize];
+    private readonly byte[] _onePage = new byte[Page.PageSize];
 
     // defragmentation
     private readonly byte[] _defragmentation = new byte[Page.PageSize];
@@ -241,7 +241,7 @@ public class SlottedArrayBenchmarks
         var a = NibblePath.FromKey(stackalloc byte[] { 12, 34, 98 });
         var b = NibblePath.FromKey(stackalloc byte[] { 78, 34, 35 });
 
-        var map = new SlottedArray(_setDelete);
+        var map = new SlottedArray(_onePage);
         map.Clear();
 
         // init by setting a
@@ -256,6 +256,44 @@ public class SlottedArrayBenchmarks
             map.TrySet(a, d); // set new
             map.Delete(b); // delete previous b, a above prohibits collect tombstones
         }
+    }
+
+    private const int NonVectorizedOps = 16;
+    [Benchmark(OperationsPerInvoke = NonVectorizedOps)]
+    [Arguments(1)]
+    [Arguments(3)]
+    [Arguments(5)]
+    [Arguments(7)]
+    [Arguments(9)]
+    [Arguments(15)]
+    [Arguments(17)]
+    public int Non_vectorizable_items_count(int count)
+    {
+        // IndexOf is vectorized.
+        // The smallest vectorized size is Vector128 which is 16 bytes, which is 8 ushorts.
+        // The biggest on this machine is 32 bytes which is 16 ushorts.
+        // Test around these boundaries
+        var path = NibblePath.FromKey(stackalloc byte[] { 12, 34, 45, 78, 91, 14 });
+
+        // Setup
+        var map = new SlottedArray(_onePage);
+        map.Clear();
+
+        for (int i = 0; i < count; i++)
+        {
+            map.TrySet(path.SliceTo(i + 1), ReadOnlySpan<byte>.Empty);
+        }
+
+        var notFound = path;
+
+        var sum = 0;
+        for (var i = 0; i < NonVectorizedOps / 2; i++)
+        {
+            if (map.TryGet(notFound, out _)) sum++;
+            if (map.TryGet(notFound, out _)) sum++;
+        }
+
+        return sum;
     }
 
     [Benchmark(OperationsPerInvoke = 4)]
