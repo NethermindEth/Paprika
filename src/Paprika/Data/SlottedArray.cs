@@ -230,7 +230,7 @@ public readonly ref struct SlottedArray
             if (slot.HasAtLeastOneNibble == false)
                 continue;
 
-            var nibble = slot.FirstNibble;
+            var nibble = slot.Nibble0;
             ref readonly var map = ref MapSource.GetMap(destination, nibble);
             var payload = GetSlotPayload(ref slot);
 
@@ -289,7 +289,7 @@ public readonly ref struct SlottedArray
             // extract only not deleted and these which have at least one nibble
             if (slot.IsDeleted == false && slot.HasAtLeastOneNibble)
             {
-                buckets[slot.Nibble0Th] += 1;
+                buckets[slot.Nibble0] += 1;
             }
         }
     }
@@ -612,7 +612,7 @@ public readonly ref struct SlottedArray
         public bool HasAtLeastOneNibble => KeyPreamble != KeyPreambleEmpty;
 
         // Shift by 12, unless it's odd. If odd, shift by 8
-        public byte FirstNibble => (byte)(0x0F & (Hash >> (3 * NibblePath.NibbleShift -
+        public byte Nibble0 => (byte)(0x0F & (Hash >> (3 * NibblePath.NibbleShift -
                                                            ((Raw >> KeyPreambleShift) & KeyPreambleOddBit) *
                                                            NibblePath.NibbleShift)));
 
@@ -621,8 +621,6 @@ public readonly ref struct SlottedArray
             readonly get => (byte)((Raw & KeyPreambleMask) >> KeyPreambleShift);
             set => Raw = (ushort)((Raw & ~KeyPreambleMask) | (value << KeyPreambleShift));
         }
-
-        public readonly byte Nibble0Th => (byte)(Hash >> (HashByteShift + NibblePath.NibbleShift) & 0xF);
 
         public bool HasKeyBytes => KeyPreamble >= KeyPreambleWithBytes;
 
