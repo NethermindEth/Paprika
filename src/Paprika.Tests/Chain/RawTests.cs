@@ -106,7 +106,7 @@ public class RawTests
     {
         var account = Values.Key1;
 
-        using var db = PagedDb.NativeMemoryDb(512 * 1024, 2);
+        using var db = PagedDb.NativeMemoryDb(256 * 1024, 2);
         var merkle = new ComputeMerkleBehavior();
 
         await using var blockchain = new Blockchain(db, merkle);
