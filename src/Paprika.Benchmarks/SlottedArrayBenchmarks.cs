@@ -258,80 +258,69 @@ public class SlottedArrayBenchmarks
         }
     }
 
-    private const int NonVectorizedOps = 16;
-    [Benchmark(OperationsPerInvoke = NonVectorizedOps)]
-    [Arguments(1)]
-    [Arguments(3)]
-    [Arguments(5)]
-    [Arguments(7)]
-    [Arguments(9)]
-    [Arguments(15)]
-    [Arguments(17)]
-    public int Non_vectorizable_items_count(int count)
+    [Benchmark(OperationsPerInvoke = 2)]
+    [Arguments(0, 0)]
+    [Arguments(0, 1)]
+    [Arguments(1, 1)]
+    [Arguments(0, 2)]
+    [Arguments(1, 2)]
+    [Arguments(0, 3)]
+    [Arguments(1, 3)]
+    [Arguments(0, 4)]
+    [Arguments(1, 4)]
+    [Arguments(0, 6)]
+    [Arguments(1, 6)]
+    [Arguments(0, 32)]
+    [Arguments(1, 31)]
+    [Arguments(1, 30)]
+    public int Prepare_Key(int sliceFrom, int length)
     {
-        // IndexOf is vectorized.
-        // The smallest vectorized size is Vector128 which is 16 bytes, which is 8 ushorts.
-        // The biggest on this machine is 32 bytes which is 16 ushorts.
-        // Test around these boundaries
-        var path = NibblePath.FromKey(stackalloc byte[] { 12, 34, 45, 78, 91, 14 });
+        var key = NibblePath.FromKey(Keccak.EmptyTreeHash).Slice(sliceFrom, length);
 
-        // Setup
-        var map = new SlottedArray(_onePage);
-        map.Clear();
+        // spin: 1
+        var hash = SlottedArray.PrepareKeyForTests(key, out var preamble, out var trimmed);
 
-        for (int i = 0; i < count; i++)
-        {
-            map.TrySet(path.SliceTo(i + 1), ReadOnlySpan<byte>.Empty);
-        }
+        // spin: 2
+        var hash2 = SlottedArray.PrepareKeyForTests(key, out var preamble2, out var trimmed2);
 
-        var notFound = path;
-
-        var sum = 0;
-        for (var i = 0; i < NonVectorizedOps / 2; i++)
-        {
-            if (map.TryGet(notFound, out _)) sum++;
-            if (map.TryGet(notFound, out _)) sum++;
-        }
-
-        return sum;
+        return
+            hash + preamble + trimmed.Length +
+            hash2 + preamble2 + trimmed2.Length;
     }
 
-    [Benchmark(OperationsPerInvoke = 4)]
-    [Arguments(0)]
-    [Arguments(1)]
-    [Arguments(62)]
-    [Arguments(63)]
-    [Arguments(64)]
-    public int UnPrepareKey(int sliceFrom)
+    [Benchmark(OperationsPerInvoke = 2)]
+    [Arguments(0, 0)]
+    [Arguments(0, 1)]
+    [Arguments(1, 1)]
+    [Arguments(0, 2)]
+    [Arguments(1, 2)]
+    [Arguments(0, 3)]
+    [Arguments(1, 3)]
+    [Arguments(0, 4)]
+    [Arguments(1, 4)]
+    [Arguments(0, 6)]
+    [Arguments(1, 6)]
+    [Arguments(0, 32)]
+    [Arguments(1, 31)]
+    [Arguments(1, 30)]
+    public int Prepare_Key_UnPrepare(int sliceFrom, int length)
     {
-        var key = NibblePath.FromKey(Keccak.EmptyTreeHash).SliceFrom(sliceFrom);
+        var key = NibblePath.FromKey(Keccak.EmptyTreeHash).Slice(sliceFrom, length);
 
-        var map = new SlottedArray(stackalloc byte[256]);
-        map.TrySet(key, ReadOnlySpan<byte>.Empty);
+        // prepare
+        var hash = SlottedArray.PrepareKeyForTests(key, out var preamble, out var trimmed);
+        var written = trimmed.WriteTo(stackalloc byte[33]);
 
-        var length = 0;
+        Span<byte> working = stackalloc byte[32];
 
-        foreach (var item in map.EnumerateAll())
-        {
-            length += item.Key.Length;
-        }
+        // spin: 1
+        var key1 = SlottedArray.UnPrepareKeyForTests(hash, preamble, written, working, out var data);
 
-        foreach (var item in map.EnumerateAll())
-        {
-            length += item.Key.Length;
-        }
+        // spin: 2
+        var key2 = SlottedArray.UnPrepareKeyForTests(hash, preamble, written, working, out data);
 
-        foreach (var item in map.EnumerateAll())
-        {
-            length += item.Key.Length;
-        }
 
-        foreach (var item in map.EnumerateAll())
-        {
-            length += item.Key.Length;
-        }
-
-        return length;
+        return key1.Length + key2.Length;
     }
 
     private const int DefragmentOpsCount = 4;

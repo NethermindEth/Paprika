@@ -33,6 +33,11 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
+        if (page.Header.Level > 10)
+        {
+            Debugger.Break();
+        }
+
         if (Header.BatchId != batch.BatchId)
         {
             // the page is from another batch, meaning, it's readonly. Copy

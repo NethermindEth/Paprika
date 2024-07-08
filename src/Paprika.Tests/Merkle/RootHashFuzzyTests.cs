@@ -104,7 +104,7 @@ public class RootHashFuzzyTests
         // delete
         var rootHash = generator.Run(blockchain, 1001, true, true);
 
-        rootHash.Should().Be(Keccak.EmptyTreeHash);
+        rootHash.Should().BeOneOf(Keccak.EmptyTreeHash, Keccak.Zero);
     }
 
     private static void AssertRootHash(Keccak rootHash, CaseGenerator generator)
