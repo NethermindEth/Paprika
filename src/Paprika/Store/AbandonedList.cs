@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Contracts;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Paprika.Store;
@@ -17,7 +16,7 @@ public struct AbandonedList
     /// </summary>
     private const int EntriesStart = DbAddress.Size + sizeof(uint);
 
-    public const int Size = Page.PageSize;
+    public const int Size = Page.PageSize - PageHeader.Size - RootPage.Payload.AbandonedStart - EntriesStart;
     private const int EntrySize = sizeof(uint) + DbAddress.Size;
     private const int MaxCount = (Size - EntriesStart) / EntrySize;
 
@@ -255,7 +254,4 @@ public struct AbandonedList
     }
 
     public DbAddress GetCurrentForTest() => Current;
-
-    public static ref AbandonedList Wrap(Page page) =>
-        ref Unsafe.As<byte, AbandonedList>(ref MemoryMarshal.GetReference(page.Span));
 }
