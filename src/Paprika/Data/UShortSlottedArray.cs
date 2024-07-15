@@ -23,12 +23,10 @@ public readonly ref struct UShortSlottedArray
 {
     private readonly ref Header _header;
     private readonly Span<byte> _data;
-    private readonly Span<byte> _raw;
 
     public UShortSlottedArray(Span<byte> buffer)
     {
-        _raw = buffer;
-        _header = ref Unsafe.As<byte, Header>(ref _raw[0]);
+        _header = ref Unsafe.As<byte, Header>(ref buffer[0]);
         _data = buffer.Slice(Header.Size);
     }
 
