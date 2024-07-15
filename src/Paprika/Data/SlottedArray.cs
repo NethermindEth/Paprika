@@ -618,15 +618,9 @@ public readonly ref struct SlottedArray
             {
                 var count = KeyPreamble >> KeyPreambleLengthShift;
 
-                // Remove length masks
-                var hash = count switch
-                {
-                    1 => (ushort)(Hash ^ HashMaskLength1),
-                    2 => (ushort)(Hash ^ HashMaskLength2),
-                    _ => Hash
-                };
-                
-                
+                // Remove the length mask
+                var hash = (ushort)(Hash ^ GetHashMask(count));
+
                 return (byte)(0x0F & (hash >> (3 * NibblePath.NibbleShift -
                                                ((Raw >> KeyPreambleShift) & KeyPreambleOddBit) *
                                                NibblePath.NibbleShift)));
@@ -659,8 +653,20 @@ public readonly ref struct SlottedArray
                 $"{nameof(Hash)}: {Hash}, {nameof(ItemAddress)}: {ItemAddress}";
         }
 
-        private const ushort HashMaskLength1 = 0b01010101_01010101;
-        private const ushort HashMaskLength2 = 0b10101010_10101010;
+        /// <summary>
+        /// Mask selected in a way that it can be shifted by 0, 1, 2 and
+        /// for higher numbers it's zeros.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int GetHashMask(int length)
+        {
+            const ushort hashMaskLength = 0b0000_0000_1010_0000;
+            
+            if (length > 2)
+                return 0;
+
+            return hashMaskLength << (length * NibblePath.NibbleShift);
+        }
 
         /// <summary>
         /// Prepares the key for the search. 
@@ -686,21 +692,21 @@ public readonly ref struct SlottedArray
                 // length 1:
                 case 2:
                     // even
-                    hash = (ushort)(((b & 0xF0) << HashByteShift) ^ HashMaskLength1);
+                    hash = (ushort)((b & 0xF0) << HashByteShift);
                     break;
                 case 3:
                     // odd
-                    hash = (ushort)(((b & 0x0F) << HashByteShift) ^ HashMaskLength1);
+                    hash = (ushort)((b & 0x0F) << HashByteShift);
                     break;
                 // length 2:
                 case 4:
                     // even
-                    hash = (ushort)((b << HashByteShift) ^ HashMaskLength2);
+                    hash = (ushort)(b << HashByteShift);
                     break;
                 case 5:
                     // odd
-                    hash = (ushort)((((b & 0x0F) << HashByteShift) +
-                                     (Unsafe.Add(ref b, 1) & 0xF0)) ^ HashMaskLength2);
+                    hash = (ushort)(((b & 0x0F) << HashByteShift) +
+                                    (Unsafe.Add(ref b, 1) & 0xF0));
                     break;
                 // length 3:
                 case 6:
@@ -757,6 +763,8 @@ public readonly ref struct SlottedArray
                     break;
             }
 
+            hash = (ushort)(hash ^ GetHashMask(length));
+
             return hash;
         }
 
@@ -768,12 +776,7 @@ public readonly ref struct SlottedArray
             var odd = preamble & KeyPreambleOddBit;
 
             // Remove length masks
-            hash = count switch
-            {
-                1 => (ushort)(hash ^ HashMaskLength1),
-                2 => (ushort)(hash ^ HashMaskLength2),
-                _ => hash
-            };
+            hash = (ushort)(hash ^ GetHashMask(count));
 
             // Get directly reference, hash is big endian
             ref var b = ref MemoryMarshal.GetReference(workingSet);
