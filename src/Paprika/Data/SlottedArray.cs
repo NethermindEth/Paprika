@@ -840,12 +840,6 @@ public readonly ref struct SlottedArray
                     return result;
             }
         }
-
-        public static byte GetFirstNibble(ushort hash)
-        {
-            const int shift = NibblePath.NibbleShift;
-            return (byte)(hash >> (shift + HashByteShift));
-        }
     }
 
     public override string ToString() => $"{nameof(Count)}: {Count}, {nameof(CapacityLeft)}: {CapacityLeft}";
