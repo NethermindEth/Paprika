@@ -660,12 +660,13 @@ public readonly ref struct SlottedArray
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static int GetHashMask(int length)
         {
-            const ushort hashMaskLength = 0b0000_0000_1010_0000;
-            
-            if (length > 2)
-                return 0;
+            const ushort hashMaskLength = 0b0000_0000_0000_1010;
+            var shift = length * NibblePath.NibbleShift;
 
-            return hashMaskLength << (length * NibblePath.NibbleShift);
+            // Create a mask that is 0 if shiftAmount is >= 32, and -1 (all bits set) otherwise.
+            var mask = ~((31 - shift) >> 31);
+
+            return (hashMaskLength << shift) & mask;
         }
 
         /// <summary>
