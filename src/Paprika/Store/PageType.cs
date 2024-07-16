@@ -50,6 +50,11 @@ public readonly struct StandardType : IPageTypeProvider
     public static PageType Type => PageType.Standard;
 }
 
+public readonly struct MerkleFanOutType : IPageTypeProvider
+{
+    public static PageType Type => PageType.MerkleFanOut;
+}
+
 public readonly struct IdentityType : IPageTypeProvider
 {
     public static PageType Type => PageType.Identity;

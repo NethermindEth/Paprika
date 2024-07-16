@@ -30,23 +30,7 @@ public class TreeView : IPageVisitor, IDisposable
         return this;
     }
 
-    public IDisposable On(RootPage page, DbAddress addr) => Build(nameof(RootPage), addr);
-
-    public IDisposable On(AbandonedPage page, DbAddress addr) => Build(nameof(AbandonedPage), addr);
-
-
-    public IDisposable On(DataPage page, DbAddress addr) => Build(nameof(DataPage), addr, page.CapacityLeft);
-
-    public IDisposable On(FanOutPage page, DbAddress addr) => Build(nameof(FanOutPage), addr);
-
-    public IDisposable On(LeafPage page, DbAddress addr) => Build(nameof(LeafPage), addr, page.CapacityLeft);
-
-    public IDisposable On<TNext>(StorageFanOutPage<TNext> page, DbAddress addr)
-        where TNext : struct, IPageWithData<TNext> =>
-        Build(nameof(StorageFanOutPage), addr);
-
-    public IDisposable On(LeafOverflowPage page, DbAddress addr) => Build(nameof(LeafOverflowPage), addr, page.CapacityLeft);
-    public IDisposable On(MerkleStateRootPage data, DbAddress addr) => Build(nameof(LeafOverflowPage), addr);
+    public IDisposable On<TPage>(in TPage page, DbAddress addr) => Build(nameof(TPage), addr);
 
     public void Dispose() => _nodes.TryPop(out _);
 }

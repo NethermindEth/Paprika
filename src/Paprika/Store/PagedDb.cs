@@ -10,6 +10,7 @@ using Paprika.Data;
 using Paprika.Store.PageManagers;
 using Paprika.Utils;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 
 namespace Paprika.Store;
 
@@ -851,7 +852,21 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
         }
     }
 
-    public IDisposable On(RootPage page, DbAddress addr) => Mark(addr);
+    public IDisposable On<TPage>(in TPage page, DbAddress addr)
+    {
+        if (typeof(TPage) == typeof(AbandonedPage))
+        {
+            return On(As<TPage, AbandonedPage>(page), addr);
+        }
+        
+        return Mark(addr);
+    }
+
+    private static TDestinationPage As<TPage, TDestinationPage>(in TPage page)
+        where TDestinationPage : IPage
+    {
+        return Unsafe.As<TPage, TDestinationPage>(ref Unsafe.AsRef(in page));
+    }
 
     public IDisposable On(AbandonedPage page, DbAddress addr)
     {
@@ -862,20 +877,6 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
 
         return Mark(addr);
     }
-
-    public IDisposable On(DataPage page, DbAddress addr) => Mark(addr);
-
-    public IDisposable On(FanOutPage page, DbAddress addr) => Mark(addr);
-
-    public IDisposable On(LeafPage page, DbAddress addr) => Mark(addr);
-
-    public IDisposable On<TNext>(StorageFanOutPage<TNext> page, DbAddress addr)
-        where TNext : struct, IPageWithData<TNext>
-        => Mark(addr);
-
-    public IDisposable On(LeafOverflowPage page, DbAddress addr) => Mark(addr);
-
-    public IDisposable On(MerkleStateRootPage data, DbAddress addr) => Mark(addr);
 
     private IDisposable Mark(DbAddress addr)
     {

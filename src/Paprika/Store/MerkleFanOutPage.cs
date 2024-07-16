@@ -35,7 +35,7 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
         }
 
         var isDelete = data.IsEmpty;
-        
+
         ref var local = ref TryFindLocal(key, out var id);
         if (Unsafe.IsNullRef(ref local) == false)
         {
@@ -56,47 +56,58 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
 
         Debug.Assert(key.Length >= ConsumedNibbles, "Key is meant for the next level");
 
-        // If child exists and was written this batch, just pass through
         var childIndex = GetIndex(key);
         ref var childAddr = ref Data.Buckets[childIndex];
+        var slotted = new SlottedArray(Data.DataSpan);
 
-        if (childAddr.IsNull == false && batch.WasWritten(childAddr))
+        // If it's a delete and child does not exist, delete in-situ
+        if (isDelete && childAddr.IsNull)
         {
-            SetInChild(ref childAddr, key.SliceFrom(ConsumedNibbles), data, batch);
+            slotted.Delete(key);
             return page;
         }
-        
+
+        // Write through optimization
+        // // If child exists and was written this batch, just pass through
+        // if (childAddr.IsNull == false && batch.WasWritten(childAddr))
+        // {
+        //     // Delete locally to ensure no cache
+        //     slotted.Delete(key);
+        //     SetInChild(ref childAddr, key.SliceFrom(ConsumedNibbles), data, batch);
+        //     return page;
+        // }
+
         // Try set in page in write-through cache
-        var slotted = new SlottedArray(Data.DataSpan);
         if (slotted.TrySet(key, data))
             return page;
 
         // Map is filled, flush down items, first to existent children
         FlushDown(key, data, batch, slotted, true);
-        
+
         // Try set again
         if (slotted.TrySet(key, data))
             return page;
-        
+
         // This means that there are child pages that should be flushed but were not
         FlushDown(key, data, batch, slotted, false);
-        
+
         // Try set again
         slotted.Set(key, data);
-        
+
         return page;
     }
 
-    private void FlushDown(in NibblePath key, ReadOnlySpan<byte> data, IBatchContext batch, in SlottedArray slotted, bool toExistingOnly)
+    private void FlushDown(in NibblePath key, ReadOnlySpan<byte> data, IBatchContext batch, in SlottedArray slotted,
+        bool toExistingOnly)
     {
         foreach (var item in slotted.EnumerateAll())
         {
             var index = GetIndex(item.Key);
             ref var addr = ref Data.Buckets[index];
 
-            if (toExistingOnly && addr.IsNull) 
+            if (toExistingOnly && addr.IsNull)
                 continue;
-            
+
             SetInChild(ref addr, key.SliceFrom(ConsumedNibbles), data, batch);
             slotted.Delete(item);
         }
@@ -107,18 +118,18 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
         if (addr.IsNull)
         {
             var child = batch.GetNewPage(out addr, true);
-            
+
             child.Header.Level = (byte)(Header.Level + ConsumedNibbles);
             child.Header.PageType = PageType.MerkleLeaf;
-            new LeafPage(child).Set(key, data, batch);
-            
+            new MerkleLeafPage(child).Set(key, data, batch);
+
             return;
         }
 
         var existing = batch.GetAt(addr);
         var updated =
-            existing.Header.PageType == PageType.Leaf
-                ? new LeafPage(existing).Set(key, data, batch)
+            existing.Header.PageType == PageType.MerkleLeaf
+                ? new MerkleLeafPage(existing).Set(key, data, batch)
                 : new MerkleFanOutPage(existing).Set(key, data, batch);
 
         addr = batch.GetAddress(updated);
@@ -151,7 +162,7 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
         {
             return true;
         }
-        
+
         // Failed, follow path
         var index = GetIndex(key);
         var addr = Data.Buckets[index];
@@ -163,9 +174,9 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
 
         var child = batch.GetAt(addr);
         var sliced = key.SliceFrom(ConsumedNibbles);
-    
-        return child.Header.PageType == PageType.Leaf
-            ? new LeafPage(child).TryGet(batch, sliced, out result)
+
+        return child.Header.PageType == PageType.MerkleLeaf
+            ? new MerkleLeafPage(child).TryGet(batch, sliced, out result)
             : new MerkleFanOutPage(child).TryGet(batch, sliced, out result);
     }
 
@@ -179,7 +190,7 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
     {
         private const int Size = Page.PageSize - PageHeader.Size;
         private const int BucketSize = BucketCount * DbAddress.Size;
-        private const int LocalMerkleNodeCount = 3;
+        private const int LocalMerkleNodeCount = 4; // 4 to align to 8
         private const int LocalMerkleNodeSize = DbAddress.Size * LocalMerkleNodeCount;
 
         /// <summary>
@@ -221,10 +232,10 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
 
                 var child = resolver.GetAt(bucket);
 
-                if (child.Header.PageType == PageType.Leaf)
-                    new LeafPage(child).Report(reporter, resolver, lvl, consumedNibbles);
+                if (child.Header.PageType == PageType.MerkleLeaf)
+                    new MerkleLeafPage(child).Report(reporter, resolver, lvl, consumedNibbles);
                 else
-                    new DataPage(child).Report(reporter, resolver, lvl, consumedNibbles);
+                    new MerkleFanOutPage(child).Report(reporter, resolver, lvl, consumedNibbles);
             }
         }
 
@@ -244,10 +255,10 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
                 }
 
                 var child = resolver.GetAt(bucket);
-                if (child.Header.PageType == PageType.Leaf)
-                    new LeafPage(child).Accept(visitor, resolver, bucket);
+                if (child.Header.PageType == PageType.MerkleLeaf)
+                    new MerkleLeafPage(child).Accept(visitor, resolver, bucket);
                 else
-                    new DataPage(child).Accept(visitor, resolver, bucket);
+                    new MerkleFanOutPage(child).Accept(visitor, resolver, bucket);
             }
         }
     }

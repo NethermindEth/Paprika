@@ -124,20 +124,15 @@ public readonly unsafe struct MerkleStateRootPage(Page page) : IPageWithData<Mer
     {
         foreach (var bucket in Data.Buckets)
         {
-            if (!bucket.IsNull)
-            {
-                var consumedNibbles = trimmedNibbles + ConsumedNibbles;
-                var lvl = pageLevel + 1;
+            if (bucket.IsNull) 
+                continue;
+            
+            var consumedNibbles = trimmedNibbles + ConsumedNibbles;
+            var lvl = pageLevel + 1;
 
-                var child = resolver.GetAt(bucket);
+            var child = resolver.GetAt(bucket);
 
-                new MerkleFanOutPage(child).Report(reporter);
-                
-                if (child.Header.PageType == PageType.Leaf)
-                    new LeafPage(child).Report(reporter, resolver, lvl, consumedNibbles);
-                else
-                    new DataPage(child).Report(reporter, resolver, lvl, consumedNibbles);
-            }
+            new MerkleFanOutPage(child).Report(reporter, resolver, lvl, consumedNibbles);
         }
 
         var slotted = new SlottedArray(Data.DataSpan);

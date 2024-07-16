@@ -48,76 +48,16 @@ public readonly unsafe struct MerkleLeafPage(Page page) : IPageWithData<MerkleLe
         header.PageType = PageType.MerkleFanOut;
         header.Level = page.Header.Level; // same level
 
-        var dataPage = new MerkleFanOutPage(@new);
+        var updated = new MerkleFanOutPage(@new);
 
         foreach (var item in Map.EnumerateAll())
         {
-            dataPage = new MerkleFanOutPage(dataPage.Set(item.Key, item.RawData, batch));
+            updated = new MerkleFanOutPage(updated.Set(item.Key, item.RawData, batch));
         }
 
         // Set this value and return data page
-        return dataPage.Set(key, data, batch);
+        return updated.Set(key, data, batch);
     }
-
-    [SkipLocalsInit]
-    private bool TryFlushDownToExisting(IBatchContext batch)
-    {
-        var count = Data.CountOverflowPages();
-
-        if (count == 0)
-        {
-            return false;
-        }
-
-        var o0 = GetOverflowWritableMap(batch, 0);
-
-        MapSource source;
-        if (count == 1)
-        {
-            source = new MapSource(o0);
-        }
-        else
-        {
-            var o1 = GetOverflowWritableMap(batch, 1);
-            if (count == 2)
-            {
-                source = new MapSource(o0, o1);
-            }
-            else
-            {
-                var o2 = GetOverflowWritableMap(batch, 2);
-                var o3 = GetOverflowWritableMap(batch, 3);
-                if (count == 4)
-                {
-                    source = new MapSource(o0, o1, o2, o3);
-                }
-                else
-                {
-                    var o4 = GetOverflowWritableMap(batch, 4);
-                    var o5 = GetOverflowWritableMap(batch, 5);
-                    var o6 = GetOverflowWritableMap(batch, 6);
-                    var o7 = GetOverflowWritableMap(batch, 7);
-                    source = new MapSource(o0, o1, o2, o3, o4, o5, o6, o7);
-                }
-            }
-        }
-
-        Map.MoveNonEmptyKeysTo(source, true);
-        return true;
-    }
-
-    private SlottedArray GetOverflowWritableMap(IBatchContext batch, int index) =>
-        new LeafOverflowPage(batch.EnsureWritableCopy(ref Data.Buckets[index])).Map;
-
-    private LeafOverflowPage AllocOverflow(IBatchContext batch, out DbAddress addr)
-    {
-        var newPage = batch.GetNewPage(out addr, true);
-        newPage.Header.Level = (byte)(Header.Level + 1);
-        newPage.Header.PageType = PageType.LeafOverflow;
-        return new LeafOverflowPage(newPage);
-    }
-
-    private const int BucketCount = 8;
 
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Payload
@@ -154,16 +94,6 @@ public readonly unsafe struct MerkleLeafPage(Page page) : IPageWithData<MerkleLe
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
-        resolver.Prefetch(Data.Buckets);
-
         using var scope = visitor.On(this, addr);
-
-        foreach (var bucket in Data.Buckets)
-        {
-            if (bucket.IsNull == false)
-            {
-                new LeafOverflowPage(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
-            }
-        }
     }
 }
