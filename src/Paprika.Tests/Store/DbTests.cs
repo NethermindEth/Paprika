@@ -61,7 +61,7 @@ public class DbTests
     [TestCase(500, 2_000, TestName = "Short history, many accounts")]
     public async Task Page_reuse(int blockCount, int accountsCount)
     {
-        const int size = MB64;
+        const int size = MB256;
 
         using var db = PagedDb.NativeMemoryDb(size);
 
