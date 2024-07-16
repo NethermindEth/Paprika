@@ -98,7 +98,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         var stateRoot = Data.StateRoot;
         if (stateRoot.IsNull == false)
         {
-            new Merkle.StateRootPage(resolver.GetAt(stateRoot)).Accept(visitor, resolver, stateRoot);
+            new MerkleStateRootPage(resolver.GetAt(stateRoot)).Accept(visitor, resolver, stateRoot);
         }
 
         Data.Ids.Accept(visitor, resolver);
@@ -121,7 +121,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
                 return false;
             }
 
-            return new Merkle.StateRootPage(batch.GetAt(Data.StateRoot)).TryGet(batch, key.Path, out result);
+            return new MerkleStateRootPage(batch.GetAt(Data.StateRoot)).TryGet(batch, key.Path, out result);
         }
 
         Span<byte> idSpan = stackalloc byte[sizeof(uint)];
@@ -233,7 +233,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
     private static void SetAtRoot(IBatchContext batch, in NibblePath path, in ReadOnlySpan<byte> rawData, ref DbAddress root)
     {
         var data = batch.TryGetPageAlloc(ref root, PageType.Standard);
-        var updated = new Merkle.StateRootPage(data).Set(path, rawData, batch);
+        var updated = new MerkleStateRootPage(data).Set(path, rawData, batch);
         root = batch.GetAddress(updated);
     }
 }

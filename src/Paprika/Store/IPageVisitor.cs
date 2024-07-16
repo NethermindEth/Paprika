@@ -15,7 +15,7 @@ public interface IPageVisitor
 
     IDisposable On(LeafOverflowPage page, DbAddress addr);
 
-    IDisposable On(Merkle.StateRootPage data, DbAddress addr);
+    IDisposable On(MerkleStateRootPage data, DbAddress addr);
 }
 
 public sealed class Disposable : IDisposable

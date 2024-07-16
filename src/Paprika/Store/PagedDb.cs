@@ -493,7 +493,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
             if (data.StateRoot.IsNull == false)
             {
-                new Merkle.StateRootPage(GetAt(root.Data.StateRoot)).Report(state, this, 0, 0);
+                new MerkleStateRootPage(GetAt(root.Data.StateRoot)).Report(state, this, 0, 0);
             }
 
             data.Storage.Report(storage, this, 0, 0);
@@ -875,7 +875,7 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
 
     public IDisposable On(LeafOverflowPage page, DbAddress addr) => Mark(addr);
 
-    public IDisposable On(Merkle.StateRootPage data, DbAddress addr) => Mark(addr);
+    public IDisposable On(MerkleStateRootPage data, DbAddress addr) => Mark(addr);
 
     private IDisposable Mark(DbAddress addr)
     {
