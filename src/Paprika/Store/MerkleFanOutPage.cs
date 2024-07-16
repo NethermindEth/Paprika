@@ -82,23 +82,22 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
             return page;
 
         // Map is filled, flush down items, first to existent children
-        FlushDown(key, data, batch, slotted, true);
+        FlushDown(slotted, batch, true);
 
         // Try set again
         if (slotted.TrySet(key, data))
             return page;
 
         // This means that there are child pages that should be flushed but were not
-        FlushDown(key, data, batch, slotted, false);
+        FlushDown(slotted, batch, false);
 
-        // Try set again
+        // Room is provided, just set.
         slotted.Set(key, data);
 
         return page;
     }
 
-    private void FlushDown(in NibblePath key, ReadOnlySpan<byte> data, IBatchContext batch, in SlottedArray slotted,
-        bool toExistingOnly)
+    private void FlushDown(in SlottedArray slotted, IBatchContext batch, bool toExistingOnly)
     {
         foreach (var item in slotted.EnumerateAll())
         {
@@ -108,7 +107,8 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
             if (toExistingOnly && addr.IsNull)
                 continue;
 
-            SetInChild(ref addr, key.SliceFrom(ConsumedNibbles), data, batch);
+            var sliced = item.Key.SliceFrom(ConsumedNibbles);
+            SetInChild(ref addr, sliced, item.RawData, batch);
             slotted.Delete(item);
         }
     }
@@ -182,7 +182,7 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
 
     /// <summary>
     /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
-    /// These buckets is used to store up to <see cref="DataSize"/> entries before flushing them down as other pages
+    /// These buckets are used to store up to <see cref="DataSize"/> entries before flushing them down as other pages
     /// like page split.
     /// </summary>
     [StructLayout(LayoutKind.Explicit, Size = Size)]

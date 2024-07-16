@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
@@ -67,7 +68,12 @@ public readonly unsafe struct RootPage(Page root) : IPage
         [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size)]
         private DbAddress StoragePayload;
 
-        public FanOutList<MerkleFanOutPage, MerkleFanOutType> Storage => new(MemoryMarshal.CreateSpan(ref StoragePayload, FanOutList.FanOut));
+
+        public FanOutList<MerkleFanOutPage, MerkleFanOutType> Storage
+        {
+            [DebuggerStepThrough]
+            get => new(MemoryMarshal.CreateSpan(ref StoragePayload, FanOutList.FanOut));
+        }
 
         /// <summary>
         /// Identifiers

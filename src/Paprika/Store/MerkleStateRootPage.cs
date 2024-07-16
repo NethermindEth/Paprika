@@ -124,9 +124,9 @@ public readonly unsafe struct MerkleStateRootPage(Page page) : IPageWithData<Mer
     {
         foreach (var bucket in Data.Buckets)
         {
-            if (bucket.IsNull) 
+            if (bucket.IsNull)
                 continue;
-            
+
             var consumedNibbles = trimmedNibbles + ConsumedNibbles;
             var lvl = pageLevel + 1;
 

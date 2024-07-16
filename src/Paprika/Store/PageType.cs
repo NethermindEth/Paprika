@@ -28,12 +28,12 @@ public enum PageType : byte
     /// The overflow of the leaf, storing all the data.
     /// </summary>
     LeafOverflow = 5,
-    
+
     /// <summary>
     /// Merkle FanOut Page
     /// </summary>
     MerkleFanOut = 6,
-    
+
     /// <summary>
     /// Merkle Leaf
     /// </summary>

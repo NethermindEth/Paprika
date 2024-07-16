@@ -858,7 +858,7 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
         {
             return On(As<TPage, AbandonedPage>(page), addr);
         }
-        
+
         return Mark(addr);
     }
 
