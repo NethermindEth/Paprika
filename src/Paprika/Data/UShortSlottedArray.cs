@@ -63,7 +63,7 @@ public readonly ref struct UShortSlottedArray
             }
 
             // there are some deleted entries, run defragmentation of the buffer and try again
-            Deframent();
+            Defragment();
 
             // re-evaluate again
             if (_header.Taken + total + Slot.Size > _data.Length)
@@ -125,8 +125,6 @@ public readonly ref struct UShortSlottedArray
     /// </summary>
     public int CapacityLeft => _data.Length - _header.Taken + _header.Deleted;
 
-    public bool CanAdd(in ReadOnlySpan<byte> data) => CapacityLeft >= Slot.Size + data.Length;
-
     private static int GetTotalSpaceRequired(ReadOnlySpan<byte> data) => data.Length;
 
     /// <summary>
@@ -148,11 +146,15 @@ public readonly ref struct UShortSlottedArray
     {
         // mark as deleted first
         ref var slot = ref this[index];
+
+        Debug.Assert(slot.IsDeleted == false);
+
         slot.IsDeleted = true;
 
         var size = (ushort)(GetSlotLength(ref slot) + Slot.Size);
 
-        Debug.Assert(_header.Deleted + size <= _data.Length, "Deleted marker breached size");
+        var deleted = _header.Deleted;
+        Debug.Assert(deleted + size <= _data.Length, "Deleted marker breached size");
 
         _header.Deleted += size;
 
@@ -160,7 +162,7 @@ public readonly ref struct UShortSlottedArray
         CollectTombstones();
     }
 
-    private void Deframent()
+    private void Defragment()
     {
         // As data were fitting before, the will fit after so all the checks can be skipped
         var count = _header.Low / Slot.Size;
@@ -211,6 +213,7 @@ public readonly ref struct UShortSlottedArray
         // Finalize by setting the header
         _header.Low = (ushort)(newCount * Slot.Size);
         _header.High = (ushort)(_data.Length - writtenTo);
+        _header.Deleted = 0;
     }
 
     /// <summary>

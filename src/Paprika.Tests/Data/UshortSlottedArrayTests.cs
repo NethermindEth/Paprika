@@ -78,6 +78,32 @@ public class UshortSlottedArrayTests
 
         map.GetAssert(Key0, Data2);
     }
+
+    [Test]
+    public void Rotating_updates()
+    {
+        Span<byte> span = stackalloc byte[128];
+        var map = new UShortSlottedArray(span);
+
+        var keys = new Queue<ushort>();
+        ushort key = 0;
+
+        while (map.TrySet(key, Data0))
+        {
+            keys.Enqueue(key);
+            key++;
+        }
+
+        const int count = 1000;
+
+        for (int i = 0; i < count; i++)
+        {
+            map.Delete(keys.Dequeue()).Should().BeTrue();
+            map.Set(key, Data0);
+            keys.Enqueue(key);
+            key++;
+        }
+    }
 }
 
 file static class Extensions
