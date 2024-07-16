@@ -22,7 +22,7 @@ public class StatisticsSettings : CommandSettings
     public string Path { get; set; }
 
     [CommandArgument(1, "<size>")]
-    public int Size { get; set; }
+    public byte Size { get; set; }
 
     [CommandArgument(1, "<historyDepth>")]
     public byte HistoryDepth { get; set; }

@@ -109,6 +109,8 @@ public readonly ref struct NibblePath
         return copy;
     }
 
+    public ref byte UnsafeSpan => ref _span;
+
     /// <summary>
     /// Reuses the memory of this nibble path moving it to odd position.
     /// </summary>
@@ -290,6 +292,16 @@ public readonly ref struct NibblePath
         return new NibblePath(ref _span, _odd, (byte)length);
     }
 
+    /// <summary>
+    /// Trims the end of the nibble path so that it gets to the specified length.
+    /// </summary>
+    public NibblePath Slice(int start, int length)
+    {
+        Debug.Assert(start + length <= Length, "Cannot slice the NibblePath beyond its Length");
+        return new(ref Unsafe.Add(ref _span, (_odd + start) / 2),
+            (byte)((start & 1) ^ _odd), (byte)length);
+    }
+
     public byte this[int nibble] => GetAt(nibble);
 
     public byte GetAt(int nibble) => (byte)((GetRefAt(nibble) >> GetShift(nibble)) & NibbleMask);
@@ -300,7 +312,7 @@ public readonly ref struct NibblePath
     /// Sets a <paramref name="value"/> of the nibble at the given <paramref name="nibble"/> location.
     /// This is unsafe. Use only for owned memory. 
     /// </summary>
-    private void UnsafeSetAt(int nibble, byte value)
+    public void UnsafeSetAt(int nibble, byte value)
     {
         ref var b = ref GetRefAt(nibble);
         var shift = GetShift(nibble);
@@ -309,6 +321,7 @@ public readonly ref struct NibblePath
         b = (byte)((b & ~mask) | (value << shift));
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ref byte GetRefAt(int nibble) => ref Unsafe.Add(ref _span, (nibble + _odd) / 2);
 
     /// <summary>

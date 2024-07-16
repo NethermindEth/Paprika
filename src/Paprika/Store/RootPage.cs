@@ -61,34 +61,29 @@ public readonly unsafe struct RootPage(Page root) : IPage
         [FieldOffset(DbAddress.Size * 2 + sizeof(uint))]
         public Metadata Metadata;
 
-        private const int FanOutsStart = DbAddress.Size * 2 + sizeof(uint) + Metadata.Size;
-
         /// <summary>
         /// Storage.
         /// </summary>
-        [FieldOffset(FanOutsStart)] private DbAddress StoragePayload;
+        [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size)]
+        private DbAddress StoragePayload;
 
-        public FanOutList<StorageFanOutPage<DataPage>, StandardType> Storage =>
-            new(MemoryMarshal.CreateSpan(ref StoragePayload, FanOutList.FanOut));
+        public FanOutList<StorageFanOutPage<DataPage>, StandardType> Storage => new(MemoryMarshal.CreateSpan(ref StoragePayload, FanOutList.FanOut));
 
         /// <summary>
         /// Identifiers
         /// </summary>
-        [FieldOffset(FanOutsStart + FanOutList.Size)]
+        [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + FanOutList.Size)]
         private DbAddress IdsPayload;
 
-        public FanOutList<FanOutPage, IdentityType> Ids =>
-            new(MemoryMarshal.CreateSpan(ref IdsPayload, FanOutList.FanOut));
+        public FanOutList<FanOutPage, IdentityType> Ids => new(MemoryMarshal.CreateSpan(ref IdsPayload, FanOutList.FanOut));
 
+        public const int AbandonedStart =
+            DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + FanOutList.Size * 2;
 
         /// <summary>
-        /// Storage Merkle
+        /// The start of the abandoned pages.
         /// </summary>
-        [FieldOffset(FanOutsStart + FanOutList.Size * 2)]
-        private DbAddress StorageMerklePayload;
-
-        public FanOutList<FanOutPage, StandardType> StorageMerkle =>
-            new(MemoryMarshal.CreateSpan(ref StorageMerklePayload, FanOutList.FanOut));
+        [FieldOffset(AbandonedStart)] public AbandonedList AbandonedList;
 
         public DbAddress GetNextFreePage()
         {
@@ -98,7 +93,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         }
     }
 
-    public void Accept(IPageVisitor visitor, IPageResolver resolver, Page abandoned)
+    public void Accept(IPageVisitor visitor, IPageResolver resolver)
     {
         var stateRoot = Data.StateRoot;
         if (stateRoot.IsNull == false)
@@ -108,8 +103,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
 
         Data.Ids.Accept(visitor, resolver);
         Data.Storage.Accept(visitor, resolver);
-
-        AbandonedList.Wrap(abandoned).Accept(visitor, resolver);
+        Data.AbandonedList.Accept(visitor, resolver);
     }
 
     /// <summary>
@@ -167,18 +161,11 @@ public readonly unsafe struct RootPage(Page root) : IPage
 
         var path = NibblePath.FromKey(id).Append(key.StoragePath, stackalloc byte[StorageKeySize]);
 
-        if (key.StoragePath.Length == NibblePath.KeccakNibbleCount)
-        {
-            return Data.Storage.TryGet(batch, path, out result);
-        }
-
-        return Data.StorageMerkle.TryGet(batch, path, out result);
+        return Data.Storage.TryGet(batch, path, out result);
     }
 
     private static uint ReadId(ReadOnlySpan<byte> id) => BinaryPrimitives.ReadUInt32LittleEndian(id);
-
-    private static void WriteId(Span<byte> idSpan, uint cachedId) =>
-        BinaryPrimitives.WriteUInt32LittleEndian(idSpan, cachedId);
+    private static void WriteId(Span<byte> idSpan, uint cachedId) => BinaryPrimitives.WriteUInt32LittleEndian(idSpan, cachedId);
 
 
     public void SetRaw(in Key key, IBatchContext batch, ReadOnlySpan<byte> rawData)
@@ -224,15 +211,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
             }
 
             var path = id.Append(key.StoragePath, stackalloc byte[StorageKeySize]);
-
-            if (key.StoragePath.Length == NibblePath.KeccakNibbleCount)
-            {
-                Data.Storage.Set(path, rawData, batch);
-            }
-            else
-            {
-                Data.StorageMerkle.Set(path, rawData, batch);
-            }
+            Data.Storage.Set(path, rawData, batch);
         }
     }
 
@@ -251,8 +230,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         // It should not be hard. Walk down by the mapped path, then remove all the pages underneath.
     }
 
-    private static void SetAtRoot(IBatchContext batch, in NibblePath path, in ReadOnlySpan<byte> rawData,
-        ref DbAddress root)
+    private static void SetAtRoot(IBatchContext batch, in NibblePath path, in ReadOnlySpan<byte> rawData, ref DbAddress root)
     {
         var data = batch.TryGetPageAlloc(ref root, PageType.Standard);
         var updated = new Merkle.StateRootPage(data).Set(path, rawData, batch);

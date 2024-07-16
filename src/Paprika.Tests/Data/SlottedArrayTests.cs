@@ -582,6 +582,36 @@ public class SlottedArrayTests
             }
         }
     }
+
+    [TestCase(0, 0)]
+    [TestCase(0, 1)]
+    [TestCase(1, 1)]
+    [TestCase(0, 2)]
+    [TestCase(1, 2)]
+    [TestCase(0, 3)]
+    [TestCase(1, 3)]
+    [TestCase(0, 4)]
+    [TestCase(1, 4)]
+    [TestCase(0, 6)]
+    [TestCase(1, 6)]
+    [TestCase(0, 64)]
+    [TestCase(1, 63)]
+    [TestCase(1, 62)]
+    public void Prepare_UnPrepare(int sliceFrom, int length)
+    {
+        var key = NibblePath.FromKey(Keccak.EmptyTreeHash).Slice(sliceFrom, length);
+
+        // prepare
+        var hash = SlottedArray.PrepareKeyForTests(key, out var preamble, out var trimmed);
+        var written = trimmed.IsEmpty ? ReadOnlySpan<byte>.Empty : trimmed.WriteTo(stackalloc byte[33]);
+
+        Span<byte> working = stackalloc byte[32];
+
+        var unprepared = SlottedArray.UnPrepareKeyForTests(hash, preamble, written, working, out var data);
+
+        data.IsEmpty.Should().BeTrue();
+        key.Equals(unprepared).Should().BeTrue();
+    }
 }
 
 file static class FixedMapTestExtensions
