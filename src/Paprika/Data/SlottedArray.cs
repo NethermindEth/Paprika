@@ -54,6 +54,12 @@ public readonly ref struct SlottedArray
         }
     }
 
+    public void Set(in NibblePath key, ReadOnlySpan<byte> data)
+    {
+        var succeeded = TrySet(key, data);
+        Debug.Assert(succeeded);
+    }
+    
     public bool TrySet(in NibblePath key, ReadOnlySpan<byte> data)
     {
         var hash = Slot.PrepareKey(key, out var preamble, out var trimmed);

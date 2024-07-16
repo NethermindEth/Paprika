@@ -30,6 +30,12 @@ public readonly ref struct UShortSlottedArray
         _data = buffer.Slice(Header.Size);
     }
 
+    public void Set(ushort key, ReadOnlySpan<byte> data)
+    {
+        var succeeded = TrySet(key, data);
+        Debug.Assert(succeeded);
+    }
+    
     public bool TrySet(ushort key, ReadOnlySpan<byte> data)
     {
         if (TryGetImpl(key, out var existingData, out var index))
