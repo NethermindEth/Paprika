@@ -452,6 +452,8 @@ public readonly ref struct SlottedArray
         var count = _header.Low / sizeof(ushort);
 
         ref var searchSpace = ref Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(_data));
+        ref var end = ref Unsafe.Add(ref searchSpace, count);
+
         ref var currentSearchSpace = ref searchSpace;
 
         // Vectorized search use the same approach, with shuffling batches of two vectors at the time.
@@ -465,11 +467,18 @@ public readonly ref struct SlottedArray
         {
             // Consume 2 vectors at the time as each vector will have half of it shuffled away
             const int batch = 2;
-            ref var twoVectorAwayFromEnd = ref Unsafe.Add(ref searchSpace, count - Vector256<ushort>.Count * batch);
+            var batchSize = Vector256<ushort>.Count * batch;
+
+            // Aligned count to the batch size.
+            var alignedCount = (count + (batchSize - 1)) & -batchSize;
+
+            // if aligned count ends before, add batch size to make it aligned.
+            ref var loopEnd = ref Unsafe.Add(ref searchSpace,
+                alignedCount <= _data.Length ? alignedCount : alignedCount - batchSize);
 
             var search = Vector256.Create(hash);
 
-            while (!Unsafe.IsAddressGreaterThan(ref currentSearchSpace, ref twoVectorAwayFromEnd))
+            while (Unsafe.IsAddressLessThan(ref currentSearchSpace, ref loopEnd))
             {
                 // There's more than 2 vectors to scan, use shuffling approach.
                 // Pack lower with first hashes, then higher with high
@@ -486,8 +495,21 @@ public readonly ref struct SlottedArray
                 if (Vector256.EqualsAny(combined, search))
                 {
                     var matches = Vector256.Equals(combined, search).ExtractMostSignificantBits();
-                    var at = (int)Unsafe.ByteOffset(ref searchSpace, ref currentSearchSpace) / Slot.Size;
 
+                    // Check if this was not a test over the boundary
+                    if (Unsafe.IsAddressGreaterThan(ref Unsafe.Add(ref currentSearchSpace, batchSize), ref end))
+                    {
+                        // It was and it requires removing some bits that might be over the boundary.
+                        var shift = count - (alignedCount - batchSize);
+                        matches &= (1U << shift) - 1;
+                        if (matches == 0)
+                        {
+                            data = default;
+                            return NotFound;
+                        }
+                    }
+
+                    var at = (int)Unsafe.ByteOffset(ref searchSpace, ref currentSearchSpace) / Slot.Size;
                     var found = TryFind(at, matches, key, preamble, out data);
                     if (found != NotFound)
                     {
@@ -495,21 +517,36 @@ public readonly ref struct SlottedArray
                     }
                 }
 
-                currentSearchSpace = ref Unsafe.Add(ref currentSearchSpace, Vector256<ushort>.Count * batch);
+                currentSearchSpace = ref Unsafe.Add(ref currentSearchSpace, batchSize);
             }
-
-            // There might be a leftover here! Optimize by checking whether it can be handled with a mask. If it can, loop one more time
         }
 
-        // Leftover handling
-        currentSearchSpace = ref Unsafe.Add(ref currentSearchSpace, Slot.HashShiftForSearch);
-
-        ref var end = ref Unsafe.Add(ref searchSpace, count);
-        while (!Unsafe.IsAddressGreaterThan(ref currentSearchSpace, ref end))
+        if (!Unsafe.IsAddressLessThan(ref currentSearchSpace, ref end))
         {
-            if (currentSearchSpace == hash)
+            data = default;
+            return NotFound;
+        }
+        else
+        {
+            return SlowTail(key, hash, preamble, out data, ref currentSearchSpace, ref end, ref searchSpace);
+        }
+    }
+
+    /// <summary>
+    /// Slow that is just a scan over the leftovers.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private int SlowTail(in NibblePath key, ushort hash, byte preamble, out Span<byte> data, ref ushort currentSearchSpace, ref ushort end,
+        ref ushort searchSpace)
+    {
+        // Leftover handling
+        ref var search = ref Unsafe.Add(ref currentSearchSpace, Slot.HashShiftForSearch);
+
+        while (!Unsafe.IsAddressGreaterThan(ref search, ref end))
+        {
+            if (search == hash)
             {
-                var at = (int)Unsafe.ByteOffset(ref searchSpace, ref currentSearchSpace) / Slot.Size;
+                var at = (int)Unsafe.ByteOffset(ref searchSpace, ref search) / Slot.Size;
                 var found = TryFind(at, 1, key, preamble, out data);
                 if (found != NotFound)
                 {
@@ -517,7 +554,7 @@ public readonly ref struct SlottedArray
                 }
             }
 
-            currentSearchSpace = ref Unsafe.Add(ref currentSearchSpace, Slot.Size / sizeof(ushort));
+            search = ref Unsafe.Add(ref currentSearchSpace, Slot.Size / sizeof(ushort));
         }
 
         data = default;
