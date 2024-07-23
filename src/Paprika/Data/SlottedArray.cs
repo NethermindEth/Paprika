@@ -527,7 +527,10 @@ public readonly ref struct SlottedArray
     private int TryFind(int at, uint matches, in NibblePath key, byte preamble, out Span<byte> data)
     {
         var search = matches;
-        while (search != 0)
+
+        Debug.Assert(search != 0);
+
+        do
         {
             var index = BitOperations.TrailingZeroCount(matches);
 
@@ -558,7 +561,7 @@ public readonly ref struct SlottedArray
                     return i;
                 }
             }
-        }
+        } while (search != 0);
 
         data = default;
         return NotFound;
