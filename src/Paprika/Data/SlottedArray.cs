@@ -1,8 +1,10 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using Paprika.Store;
 using Paprika.Utils;
 
@@ -445,69 +447,117 @@ public readonly ref struct SlottedArray
         "key encoding is delayed but it might be called twice, here + TrySet")]
     private int TryGetImpl(in NibblePath key, ushort hash, byte preamble, out Span<byte> data)
     {
-        var to = _header.Low;
+        // Count is the number of ushort hashes to scan from Slots.
+        // Each Slot has the hash as the second one.
+        var count = _header.Low / sizeof(ushort);
 
-        // uses vectorized search, treating slots as a Span<ushort>
-        // if the found index is odd -> found a slot to be queried
+        ref var searchSpace = ref Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(_data));
+        ref var currentSearchSpace = ref searchSpace;
 
-        const int notFound = -1;
-        var span = MemoryMarshal.Cast<byte, ushort>(_data.Slice(0, to));
+        // Vectorized search use the same approach, with shuffling batches of two vectors at the time.
+        // As hash is held as ushort (2 bytes) at a Slot struct (4 bytes), we can use shuffle instruction to extract them.
+        // Hashes will be at indexes 1, 3, 5, ... so with shuffle indexes can be shuffled to lower (first vector)
+        // and upper (second vector).
+        // This amortizes the comparison making 2x less comparisons and no false matches (only hashes are compared).
+        // When found, TryFind is executed with all the matches from the given 2*vector size batch.
 
-        var offset = 0;
-        int index = span.IndexOf(hash);
-
-        if (index == notFound)
+        if (Vector256.IsHardwareAccelerated)
         {
-            data = default;
-            return NotFound;
+            // Consume 2 vectors at the time as each vector will have half of it shuffled away
+            const int batch = 2;
+            ref var twoVectorAwayFromEnd = ref Unsafe.Add(ref searchSpace, count - Vector256<ushort>.Count * batch);
+
+            var search = Vector256.Create(hash);
+
+            while (!Unsafe.IsAddressGreaterThan(ref currentSearchSpace, ref twoVectorAwayFromEnd))
+            {
+                // There's more than 2 vectors to scan, use shuffling approach.
+                // Pack lower with first hashes, then higher with high
+                var a = Vector256.LoadUnsafe(ref currentSearchSpace);
+                var shuffleLow = Vector256.Create((ushort)1, 3, 5, 7, 9, 11, 13, 15, 0, 0, 0, 0, 0, 0, 0, 0);
+                var lower = Vector256.Shuffle(a, shuffleLow).GetLower();
+
+                var b = Vector256.LoadUnsafe(ref currentSearchSpace, (UIntPtr)Vector256<ushort>.Count);
+                var shuffleHigh = Vector256.Create((ushort)0, 0, 0, 0, 0, 0, 0, 0, 1, 3, 5, 7, 9, 11, 13, 15);
+                var higher = Vector256.Shuffle(b, shuffleHigh).GetUpper();
+
+                var combined = Vector256.Create(lower, higher);
+
+                if (Vector256.EqualsAny(combined, search))
+                {
+                    var matches = Vector256.Equals(combined, search).ExtractMostSignificantBits();
+                    var at = (int)Unsafe.ByteOffset(ref searchSpace, ref currentSearchSpace) / Slot.Size;
+
+                    var found = TryFind(at, matches, key, preamble, out data);
+                    if (found != NotFound)
+                    {
+                        return found;
+                    }
+                }
+
+                currentSearchSpace = ref Unsafe.Add(ref currentSearchSpace, Vector256<ushort>.Count * batch);
+            }
+
+            // there might be a leftover here! Optimize by checking whether it can be handled with a mask. If it can, loop one more time
         }
 
-        while (index != notFound)
+        // Leftover handling
+        currentSearchSpace = ref Unsafe.Add(ref currentSearchSpace, Slot.HashShiftForSearch);
+
+        ref var end = ref Unsafe.Add(ref searchSpace, count);
+        while (!Unsafe.IsAddressGreaterThan(ref currentSearchSpace, ref end))
         {
-            // move offset to the given position
-            offset += index;
-
-            if ((offset & Slot.HashShiftForSearch) == Slot.HashShiftForSearch)
+            if (currentSearchSpace == hash)
             {
-                var i = offset / 2;
-
-                ref var slot = ref this[i];
-
-                // Preamble check is sufficient as IsDeleted is a special value of the preamble
-                if ( /*slot.IsDeleted == false &&*/ slot.KeyPreamble == preamble)
+                var at = (int)Unsafe.ByteOffset(ref searchSpace, ref currentSearchSpace) / Slot.Size;
+                var found = TryFind(at, 1, key, preamble, out data);
+                if (found != NotFound)
                 {
-                    var actual = GetSlotPayload(ref slot);
-
-                    if (slot.HasKeyBytes)
-                    {
-                        if (NibblePath.TryReadFrom(actual, key, out var leftover))
-                        {
-                            data = leftover;
-                            return i;
-                        }
-                    }
-                    else
-                    {
-                        // The key is contained in the hash, all is equal and good to go!
-                        data = actual;
-                        return i;
-                    }
+                    return found;
                 }
             }
 
-            if (index + 1 >= span.Length)
+            currentSearchSpace = ref Unsafe.Add(ref currentSearchSpace, Slot.Size / sizeof(ushort));
+        }
+
+        data = default;
+        return NotFound;
+    }
+
+    private int TryFind(int at, uint matches, in NibblePath key, byte preamble, out Span<byte> data)
+    {
+        var search = matches;
+        while (search != 0)
+        {
+            var index = BitOperations.TrailingZeroCount(matches);
+
+            // remove the match flag
+            search ^= (uint)(1 << index);
+
+            var i = index + at;
+
+            ref var slot = ref this[i];
+
+            // Preamble check is sufficient as IsDeleted is a special value of the preamble
+            if ( /*slot.IsDeleted == false &&*/ slot.KeyPreamble == preamble)
             {
-                // the span is empty and there's not place to move forward
-                break;
+                var actual = GetSlotPayload(ref slot);
+
+                if (slot.HasKeyBytes)
+                {
+                    if (NibblePath.TryReadFrom(actual, key, out var leftover))
+                    {
+                        data = leftover;
+                        return i;
+                    }
+                }
+                else
+                {
+                    // The key is contained in the hash, all is equal and good to go!
+                    data = actual;
+                    return i;
+                }
             }
-
-            // move next: ushorts sliced to the next
-            // offset moved by 1 to align
-            span = span.Slice(index + 1);
-            offset += 1;
-
-            // move to next index
-            index = span.IndexOf(hash);
         }
 
         data = default;
