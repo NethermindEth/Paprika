@@ -466,8 +466,7 @@ public readonly ref struct SlottedArray
         if (Vector256.IsHardwareAccelerated)
         {
             // Consume 2 vectors at the time as each vector will have half of it shuffled away
-            const int batch = 2;
-            var batchSize = Vector256<ushort>.Count * batch;
+            var batchSize = Vector256<ushort>.Count;
 
             // Aligned count to the batch size.
             var alignedCount = (count + (batchSize - 1)) & -batchSize;
@@ -482,26 +481,19 @@ public readonly ref struct SlottedArray
             {
                 // There's more than 2 vectors to scan, use shuffling approach.
                 // Pack lower with first hashes, then higher with high
-                var a = Vector256.LoadUnsafe(ref currentSearchSpace);
-                var shuffleLow = Vector256.Create((ushort)1, 3, 5, 7, 9, 11, 13, 15, 0, 0, 0, 0, 0, 0, 0, 0);
-                var lower = Vector256.Shuffle(a, shuffleLow).GetLower();
+                var value = Vector256.LoadUnsafe(ref currentSearchSpace);
 
-                var b = Vector256.LoadUnsafe(ref currentSearchSpace, (UIntPtr)Vector256<ushort>.Count);
-                var shuffleHigh = Vector256.Create((ushort)0, 0, 0, 0, 0, 0, 0, 0, 1, 3, 5, 7, 9, 11, 13, 15);
-                var higher = Vector256.Shuffle(b, shuffleHigh).GetUpper();
-
-                var combined = Vector256.Create(lower, higher);
-
-                if (Vector256.EqualsAny(combined, search))
+                if (Vector256.EqualsAny(value, search))
                 {
-                    var matches = Vector256.Equals(combined, search).ExtractMostSignificantBits();
+                    var matches = Vector256.Equals(value, search).ExtractMostSignificantBits();
+                    matches &= 0xAAAAAAAA; // 0b101010 aligned with placement of Slot.Hash
 
                     // Check if this was not a test over the boundary
                     if (Unsafe.IsAddressGreaterThan(ref Unsafe.Add(ref currentSearchSpace, batchSize), ref end))
                     {
                         // It was and it requires removing some bits that might be over the boundary.
                         var shift = count - (alignedCount - batchSize);
-                        matches &= (1U << shift) - 1;
+                        matches &= (1U << (shift * 2)) - 1;
                         if (matches == 0)
                         {
                             data = default;
@@ -509,11 +501,14 @@ public readonly ref struct SlottedArray
                         }
                     }
 
-                    var at = (int)Unsafe.ByteOffset(ref searchSpace, ref currentSearchSpace) / Slot.Size;
-                    var found = TryFind(at, matches, key, preamble, out data);
-                    if (found != NotFound)
+                    if (matches > 0)
                     {
-                        return found;
+                        var at = (int)Unsafe.ByteOffset(ref searchSpace, ref currentSearchSpace) / Slot.Size;
+                        var found = TryFind(at, matches, key, preamble, out data);
+                        if (found != NotFound)
+                        {
+                            return found;
+                        }    
                     }
                 }
 
@@ -569,10 +564,10 @@ public readonly ref struct SlottedArray
 
         do
         {
-            var index = BitOperations.TrailingZeroCount(search);
+            var index = (BitOperations.TrailingZeroCount(search) - 1) >> 1;
 
             // remove the match flag
-            search ^= (uint)(1 << index);
+            search ^= (uint)(0b10 << (index * 2));
 
             var i = index + at;
 
