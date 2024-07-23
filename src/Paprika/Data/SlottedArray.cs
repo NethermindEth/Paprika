@@ -458,7 +458,7 @@ public readonly ref struct SlottedArray
         // As hash is held as ushort (2 bytes) at a Slot struct (4 bytes), we can use shuffle instruction to extract them.
         // Hashes will be at indexes 1, 3, 5, ... so with shuffle indexes can be shuffled to lower (first vector)
         // and upper (second vector).
-        // This amortizes the comparison making 2x less comparisons and no false matches (only hashes are compared).
+        // This amortizes the comparison making 2x fewer comparisons and no false matches (only hashes are compared).
         // When found, TryFind is executed with all the matches from the given 2*vector size batch.
 
         if (Vector256.IsHardwareAccelerated)
@@ -498,7 +498,7 @@ public readonly ref struct SlottedArray
                 currentSearchSpace = ref Unsafe.Add(ref currentSearchSpace, Vector256<ushort>.Count * batch);
             }
 
-            // there might be a leftover here! Optimize by checking whether it can be handled with a mask. If it can, loop one more time
+            // There might be a leftover here! Optimize by checking whether it can be handled with a mask. If it can, loop one more time
         }
 
         // Leftover handling
@@ -532,7 +532,7 @@ public readonly ref struct SlottedArray
 
         do
         {
-            var index = BitOperations.TrailingZeroCount(matches);
+            var index = BitOperations.TrailingZeroCount(search);
 
             // remove the match flag
             search ^= (uint)(1 << index);
