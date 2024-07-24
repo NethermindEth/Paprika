@@ -7,7 +7,7 @@ using static System.Buffers.Binary.BinaryPrimitives;
 
 namespace Paprika.Benchmarks;
 
-[DisassemblyDiagnoser(maxDepth: 2)]
+// [DisassemblyDiagnoser(maxDepth: 2)]
 public class SlottedArrayBenchmarks
 {
     private readonly byte[] _onePage = new byte[Page.PageSize];

@@ -32,13 +32,18 @@ public readonly ref struct NibblePath
     };
 
     /// <summary>
+    /// Exposes <see cref="Singles"/> for tests only.
+    /// </summary>
+    public static ReadOnlySpan<byte> SinglesForTests => Singles;
+
+    /// <summary>
     /// Creates a <see cref="NibblePath"/> with length of 1.
     /// </summary>
     /// <param name="nibble">The nibble that should be in the path.</param>
     /// <param name="odd">The oddity.</param>
     /// <returns>The path</returns>
     /// <remarks>
-    /// Highly optimized, branchless, just a few moves and adds.
+    /// Highly optimized, branch-less, just a few moves and adds.
     /// </remarks>
     public static NibblePath Single(byte nibble, int odd)
     {
@@ -50,7 +55,7 @@ public readonly ref struct NibblePath
     }
 
     public const int MaxLengthValue = byte.MaxValue / 2 + 2;
-    public const int NibblePerByte = 2;
+    private const int NibblePerByte = 2;
     public const int NibbleShift = 8 / NibblePerByte;
     public const int NibbleMask = 15;
 
@@ -156,19 +161,11 @@ public readonly ref struct NibblePath
     }
 
     /// <summary>
-    /// Creates the nibble path from preamble and raw slice
-    /// </summary>
-    public static NibblePath FromRaw(byte preamble, ReadOnlySpan<byte> slice)
-    {
-        return new NibblePath(slice, preamble & OddBit, preamble >> LengthShift);
-    }
-
-    /// <summary>
     /// </summary>
     /// <param name="key"></param>
     /// <param name="nibbleFrom"></param>
     /// <returns>
-    /// The Keccak needs to be "in" here, as otherwise a copy would be create and the ref
+    /// The Keccak needs to be "in" here, as otherwise a copy would be created and the ref
     /// would point to a garbage memory.
     /// </returns>
     public static NibblePath FromKey(in Keccak key, int nibbleFrom = 0)
@@ -236,7 +233,8 @@ public readonly ref struct NibblePath
         var length = (int)Length;
         var spanLength = GetSpanLength(_odd, length);
 
-        destination[0] = (byte)(odd | (length << LengthShift));
+        destination[0] = (byte)(odd | (length << LengthShift)); // The first byte is used for oddity and length
+        // But, if we store length up to 6 in the preamble, we can directly store the remaining trimmed nibbles here.
 
         ref var destStart = ref Unsafe.Add(ref MemoryMarshal.GetReference(destination), PreambleLength);
         if (spanLength == sizeof(byte))
@@ -371,7 +369,7 @@ public readonly ref struct NibblePath
     }
 
     /// <summary>
-    /// Appends the <see cref="other1"/> and then <see cref="other2"/> path using the <paramref name="workingSet"/> as the working memory.
+    /// Appends <see cref="other1"/> and then <see cref="other2"/> path using the <paramref name="workingSet"/> as the working memory.
     /// </summary>
     [SkipLocalsInit]
     public NibblePath Append(scoped in NibblePath other1, int hash, Span<byte> workingSet)
@@ -438,6 +436,12 @@ public readonly ref struct NibblePath
 
     public int RawSpanLength => GetSpanLength(_odd, Length);
 
+    public static ReadOnlySpan<byte> ReadFromWithLength(ReadOnlySpan<byte> source, int length, int odd, out NibblePath nibblePath)
+    {
+        nibblePath = new NibblePath(source, odd, length);
+        return source.Slice(GetSpanLength(odd, length));
+    }
+
     public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out NibblePath nibblePath)
     {
         var b = (int)source[0];
@@ -447,6 +451,12 @@ public readonly ref struct NibblePath
 
         source = source.Slice(PreambleLength);
 
+        nibblePath = new NibblePath(source, odd, length);
+        return source.Slice(GetSpanLength(odd, length));
+    }
+
+    public static Span<byte> ReadFromWithLength(Span<byte> source, int length, byte odd, out NibblePath nibblePath)
+    {
         nibblePath = new NibblePath(source, odd, length);
         return source.Slice(GetSpanLength(odd, length));
     }
@@ -472,6 +482,12 @@ public readonly ref struct NibblePath
         }
 
         leftover = ReadFrom(source, out var actualKey);
+        return actualKey.Equals(expected);
+    }
+
+    public static bool TryReadFromWithLength(Span<byte> source, in NibblePath expected, int length, byte isOdd, out Span<byte> leftover)
+    {
+        leftover = ReadFromWithLength(source, length, isOdd, out var actualKey);
         return actualKey.Equals(expected);
     }
 
