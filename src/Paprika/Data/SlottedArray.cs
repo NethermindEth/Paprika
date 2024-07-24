@@ -592,14 +592,15 @@ public readonly ref struct SlottedArray
     /// <summary>
     /// Gets the payload pointed to by the given slot without the length prefix.
     /// </summary>
+    [SkipLocalsInit]
     private Span<byte> GetSlotPayload(int index)
     {
         // assert whether the slot has a previous, if not use data.length
         var previousSlotAddress = index > 0 ? GetSlotRef(index - 1).ItemAddress : _data.Length;
-        ref var slot = ref GetSlotRef(index);
-        var length = previousSlotAddress - slot.ItemAddress;
+        var addr = GetSlotRef(index).ItemAddress;
+        var length = previousSlotAddress - addr;
 
-        return _data.Slice(slot.ItemAddress, length);
+        return _data.Slice(addr, length);
     }
 
     /// <summary>
