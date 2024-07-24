@@ -18,8 +18,8 @@ namespace Paprika.Data;
 /// The map is fixed in since as it's page dependent, hence the name.
 /// It is a modified version of a slot array, that does not externalize slot indexes.
 ///
-/// It keeps an internal map, now implemented with a not-the-best loop over slots.
-/// With the use of key prefix, it should be small enough and fast enough for now.
+/// It keeps an internal map, that is aligned with the local hardware vector size, so that even vectors (0th, 2nd, 4th...)
+/// are used for hashes, while odd (1st, 3rd, 5th...) are used to store slots.
 /// </remarks>
 public readonly ref struct SlottedArray
 {
@@ -29,31 +29,47 @@ public readonly ref struct SlottedArray
     private readonly ref Header _header;
     private readonly Span<byte> _data;
 
+    private static int VectorSize => Vector256.IsHardwareAccelerated ? Vector256<byte>.Count : Vector128<byte>.Count;
+
+    private static int DoubleVectorSize => VectorSize * 2;
+
+    private static int AlignToDoubleVectorSize(int count) => (count + (DoubleVectorSize - 1)) & -DoubleVectorSize;
+
+
     public SlottedArray(Span<byte> buffer)
     {
+        Debug.Assert(buffer.Length > MinimalSizeWithNoData,
+            $"The buffer should be reasonably big, more than {MinimalSizeWithNoData}");
+
         _header = ref Unsafe.As<byte, Header>(ref MemoryMarshal.GetReference(buffer));
         _data = buffer.Slice(Header.Size);
     }
 
-    private readonly ref Slot this[int index]
+    public static int MinimalSizeWithNoData => DoubleVectorSize + Header.Size;
+
+    private ref ushort GetHashRef(int index)
     {
-        get
-        {
-            var offset = index * Slot.Size;
-            if (offset >= _data.Length - Slot.Size)
-            {
-                ThrowIndexOutOfRangeException();
-            }
+        // Hashes are at [0, VectorSize), then [VectorSize*2, VectorSize*3), then [VectorSize*4, VectorSize*5)
+        // To extract them extract the higher part and multiply by two, then add the lower part.
 
-            return ref Unsafe.As<byte, Slot>(ref Unsafe.Add(ref MemoryMarshal.GetReference(_data), offset));
+        var uShortsPerVector = VectorSize / 2;
+        var mask = uShortsPerVector - 1;
+        var offset = (index & ~mask) * 2 + (index & mask);
 
-            [DoesNotReturn]
-            [StackTraceHidden]
-            static void ThrowIndexOutOfRangeException()
-            {
-                throw new IndexOutOfRangeException();
-            }
-        }
+        return ref Unsafe.Add(ref Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(_data)), offset);
+    }
+
+    private ref Slot GetSlotRef(int index)
+    {
+        // Slots are at [VectorSize, VectorSize*2), then [VectorSize*3, VectorSize*4), then [VectorSize*5, VectorSize*6) 
+        // To extract them extract the higher part and multiply by two, then add the lower part.
+        // Additionally, add one ushorts per vector
+        var uShortsPerVector = VectorSize / 2;
+
+        var mask = uShortsPerVector - 1;
+        var offset = (index & ~mask) * 2 + (index & mask) + uShortsPerVector;
+
+        return ref Unsafe.Add(ref Unsafe.As<byte, Slot>(ref MemoryMarshal.GetReference(_data)), offset);
     }
 
     public bool TrySet(in NibblePath key, ReadOnlySpan<byte> data)
@@ -81,7 +97,7 @@ public readonly ref struct SlottedArray
         // does not exist yet, calculate total memory needed
         var total = GetTotalSpaceRequired(preamble, trimmed, data);
 
-        if (_header.Taken + total + Slot.Size > _data.Length)
+        if (_header.TakenAfterOneMoreSlot + total > _data.Length)
         {
             if (_header.Deleted == 0)
             {
@@ -93,18 +109,20 @@ public readonly ref struct SlottedArray
             Defragment();
 
             // re-evaluate again
-            if (_header.Taken + total + Slot.Size > _data.Length)
+            if (_header.TakenAfterOneMoreSlot + total > _data.Length)
             {
                 // not enough memory
                 return false;
             }
         }
 
-        var at = _header.Low;
-        ref var slot = ref this[at / Slot.Size];
+        var at = _header.Low / Slot.TotalSize;
 
-        // write slot
-        slot.Hash = hash;
+        // Write hash at its place
+        GetHashRef(at) = hash;
+
+        // Writing slot at its place
+        ref var slot = ref GetSlotRef(at);
         slot.KeyPreamble = preamble;
         slot.ItemAddress = (ushort)(_data.Length - _header.High - total);
 
@@ -122,7 +140,7 @@ public readonly ref struct SlottedArray
         }
 
         // commit low and high
-        _header.Low += Slot.Size;
+        _header.Low += Slot.TotalSize;
         _header.High += (ushort)total;
 
         return true;
@@ -131,7 +149,7 @@ public readonly ref struct SlottedArray
     /// <summary>
     /// Gets how many slots are used in the map.
     /// </summary>
-    public int Count => _header.Low / Slot.Size;
+    public int Count => _header.Low / Slot.TotalSize;
 
     public int CapacityLeft => _data.Length - _header.Taken;
 
@@ -173,13 +191,13 @@ public readonly ref struct SlottedArray
             int index = _index + 1;
             var to = _map.Count;
 
-            ref var slot = ref _map[index];
+            ref var slot = ref _map.GetSlotRef(index);
 
             while (index < to && slot.IsDeleted) // filter out deleted
             {
                 // move by 1
                 index += 1;
-                slot = ref Unsafe.Add(ref slot, 1);
+                slot = ref _map.GetSlotRef(index);
             }
 
             if (index < to)
@@ -196,9 +214,11 @@ public readonly ref struct SlottedArray
 
         private void Build(out Item value)
         {
-            ref var slot = ref _map[_index];
-            var span = _map.GetSlotPayload(ref slot);
-            var key = Slot.UnPrepareKey(slot.Hash, slot.KeyPreamble, span, _bytes.Span, out var data);
+            ref var slot = ref _map.GetSlotRef(_index);
+            var hash = _map.GetHashRef(_index);
+
+            var span = _map.GetSlotPayload(_index);
+            var key = Slot.UnPrepareKey(hash, slot.KeyPreamble, span, _bytes.Span, out var data);
 
             value = new Item(key, data, _index);
         }
@@ -225,16 +245,16 @@ public readonly ref struct SlottedArray
 
         for (int i = 0; i < to; i++)
         {
-            ref var slot = ref this[i];
+            ref var slot = ref GetSlotRef(i);
             if (slot.IsDeleted)
                 continue;
 
             if (slot.HasAtLeastOneNibble == false)
                 continue;
 
-            var nibble = slot.Nibble0;
+            var nibble = slot.GetNibble0(GetHashRef(i));
             ref readonly var map = ref MapSource.GetMap(destination, nibble);
-            var payload = GetSlotPayload(ref slot);
+            var payload = GetSlotPayload(i);
 
             Span<byte> data;
 
@@ -249,10 +269,11 @@ public readonly ref struct SlottedArray
                 data = payload;
             }
 
+            var hash = GetHashRef(i);
             if (data.IsEmpty && treatEmptyAsTombstone)
             {
                 // special case for tombstones in overflows
-                var index = map.TryGetImpl(trimmed, slot.Hash, slot.KeyPreamble, out _);
+                var index = map.TryGetImpl(trimmed, hash, slot.KeyPreamble, out _);
                 if (index != NotFound)
                 {
                     map.DeleteImpl(index);
@@ -260,7 +281,7 @@ public readonly ref struct SlottedArray
 
                 slot.MarkAsDeleted();
             }
-            else if (map.TrySetImpl(slot.Hash, slot.KeyPreamble, trimmed, data))
+            else if (map.TrySetImpl(hash, slot.KeyPreamble, trimmed, data))
             {
                 slot.MarkAsDeleted();
                 moved++;
@@ -283,15 +304,15 @@ public readonly ref struct SlottedArray
     {
         Debug.Assert(buckets.Length == BucketCount);
 
-        var to = _header.Low / Slot.Size;
+        var to = _header.Low / Slot.TotalSize;
         for (var i = 0; i < to; i++)
         {
-            ref var slot = ref this[i];
+            ref var slot = ref GetSlotRef(i);
 
             // extract only not deleted and these which have at least one nibble
             if (slot.IsDeleted == false && slot.HasAtLeastOneNibble)
             {
-                buckets[slot.Nibble0] += 1;
+                buckets[slot.GetNibble0(GetHashRef(i))] += 1;
             }
         }
     }
@@ -329,8 +350,8 @@ public readonly ref struct SlottedArray
 
     private void DeleteImpl(int index, bool collectTombstones = true)
     {
-        // mark as deleted first
-        this[index].MarkAsDeleted();
+        // Mark as deleted first
+        MarkAsDeleted(index);
         _header.Deleted++;
 
         if (collectTombstones)
@@ -339,10 +360,24 @@ public readonly ref struct SlottedArray
         }
     }
 
+    private void MarkAsDeleted(int index)
+    {
+        GetSlotRef(index).MarkAsDeleted();
+
+        // Provide a different hash so that further searches with TryGet won't be hitting this slot.
+        //
+        // We could use a constant value, but then on a collision with an actual value the tail
+        // performance would be terrible.
+        //
+        // The easiest way is to negate the hash that makes it not equal and yet is not a single value.
+        ref var hash = ref GetHashRef(index);
+        hash = (ushort)~hash;
+    }
+
     private void Defragment()
     {
         // As data were fitting before, the will fit after so all the checks can be skipped
-        var count = _header.Low / Slot.Size;
+        var count = _header.Low / Slot.TotalSize;
 
         // The pointer where the writing in the array ended, move it up when written.
         var writeAt = 0;
@@ -352,7 +387,7 @@ public readonly ref struct SlottedArray
 
         for (int i = 0; i < count; i++)
         {
-            var slot = this[i];
+            ref var slot = ref GetSlotRef(i);
             var addr = slot.ItemAddress;
 
             if (!slot.IsDeleted)
@@ -372,10 +407,12 @@ public readonly ref struct SlottedArray
                     writtenTo = (ushort)(writtenTo - source.Length);
                     var destination = _data.Slice(writtenTo, source.Length);
                     source.CopyTo(destination);
-                    ref var destinationSlot = ref this[writeAt];
+                    ref var destinationSlot = ref GetSlotRef(writeAt);
+
+                    // Copy hash
+                    GetHashRef(writeAt) = GetHashRef(i);
 
                     // Copy everything, just overwrite the address
-                    destinationSlot.Hash = slot.Hash;
                     destinationSlot.KeyPreamble = slot.KeyPreamble;
                     destinationSlot.ItemAddress = writtenTo;
 
@@ -388,7 +425,7 @@ public readonly ref struct SlottedArray
         }
 
         // Finalize by setting the header
-        _header.Low = (ushort)(newCount * Slot.Size);
+        _header.Low = (ushort)(newCount * Slot.TotalSize);
         _header.High = (ushort)(_data.Length - writtenTo);
         _header.Deleted = 0;
     }
@@ -401,18 +438,19 @@ public readonly ref struct SlottedArray
         // start with the last written and perform checks and cleanup till all the deleted are gone
         var index = Count - 1;
 
-        while (index >= 0 && this[index].IsDeleted)
+        while (index >= 0 && GetSlotRef(index).IsDeleted)
         {
             // undo writing low
-            _header.Low -= Slot.Size;
+            _header.Low -= Slot.TotalSize;
 
             // undo writing high
-            var slice = GetSlotPayload(ref this[index]);
+            var slice = GetSlotPayload(index);
             var total = slice.Length;
             _header.High = (ushort)(_header.High - total);
 
             // cleanup
-            this[index] = default;
+            // Hash is already replaced with its delete. Clean the slot
+            GetSlotRef(index) = default;
             _header.Deleted--;
 
             // move back by one to see if it's deleted as well
@@ -447,109 +485,41 @@ public readonly ref struct SlottedArray
         "key encoding is delayed but it might be called twice, here + TrySet")]
     private int TryGetImpl(in NibblePath key, ushort hash, byte preamble, out Span<byte> data)
     {
-        // Count is the number of ushort hashes to scan from Slots.
-        // Each Slot has the hash as the second one.
-        var count = _header.Low / sizeof(ushort);
+        var aligned = AlignToDoubleVectorSize(_header.Low);
+        var count = _header.Low / Slot.TotalSize;
 
-        ref var searchSpace = ref Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(_data));
-        ref var end = ref Unsafe.Add(ref searchSpace, count);
-
-        ref var currentSearchSpace = ref searchSpace;
-
-        // Vectorized search use the same approach, with shuffling batches of two vectors at the time.
-        // As hash is held as ushort (2 bytes) at a Slot struct (4 bytes), we can use shuffle instruction to extract them.
-        // Hashes will be at indexes 1, 3, 5, ... so with shuffle indexes can be shuffled to lower (first vector)
-        // and upper (second vector).
-        // This amortizes the comparison making 2x fewer comparisons and no false matches (only hashes are compared).
-        // When found, TryFind is executed with all the matches from the given 2*vector size batch.
+        ref var d = ref Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(_data));
 
         if (Vector256.IsHardwareAccelerated)
         {
-            // Consume 2 vectors at the time as each vector will have half of it shuffled away
-            var batchSize = Vector256<ushort>.Count;
-
-            // Aligned count to the batch size.
-            var alignedCount = (count + (batchSize - 1)) & -batchSize;
-
-            // if aligned count ends before, add batch size to make it aligned.
-            ref var loopEnd = ref Unsafe.Add(ref searchSpace,
-                alignedCount <= _data.Length ? alignedCount : alignedCount - batchSize);
-
             var search = Vector256.Create(hash);
+            var jump = DoubleVectorSize / sizeof(ushort);
 
-            while (Unsafe.IsAddressLessThan(ref currentSearchSpace, ref loopEnd))
+            for (var i = 0; i < aligned; i += jump)
             {
-                // There's more than 2 vectors to scan, use shuffling approach.
-                // Pack lower with first hashes, then higher with high
-                var value = Vector256.LoadUnsafe(ref currentSearchSpace);
-
+                var value = Vector256.LoadUnsafe(ref d, (UIntPtr)i);
                 if (Vector256.EqualsAny(value, search))
                 {
                     var matches = Vector256.Equals(value, search).ExtractMostSignificantBits();
-                    matches &= 0xAAAAAAAA; // 0b101010 aligned with placement of Slot.Hash
 
-                    // Check if this was not a test over the boundary
-                    if (Unsafe.IsAddressGreaterThan(ref Unsafe.Add(ref currentSearchSpace, batchSize), ref end))
+                    if (i + jump > aligned)
                     {
-                        // It was and it requires removing some bits that might be over the boundary.
-                        var shift = count - (alignedCount - batchSize);
-                        matches &= (1U << (shift * 2)) - 1;
-                        if (matches == 0)
-                        {
-                            data = default;
-                            return NotFound;
-                        }
+                        // This is the last in batch, masking is required to remove potential hits that are false positive
+                        var shift = count & (VectorSize - 1);
+                        var mask = (1U << shift) - 1;
+                        matches &= mask;
                     }
 
                     if (matches > 0)
                     {
-                        var at = (int)Unsafe.ByteOffset(ref searchSpace, ref currentSearchSpace) / Slot.Size;
-                        var found = TryFind(at, matches, key, preamble, out data);
+                        var found = TryFind(i / sizeof(ushort), matches, key, preamble, out data);
                         if (found != NotFound)
                         {
                             return found;
-                        }    
+                        }
                     }
                 }
-
-                currentSearchSpace = ref Unsafe.Add(ref currentSearchSpace, batchSize);
             }
-        }
-
-        if (!Unsafe.IsAddressLessThan(ref currentSearchSpace, ref end))
-        {
-            data = default;
-            return NotFound;
-        }
-        else
-        {
-            return SlowTail(key, hash, preamble, out data, ref currentSearchSpace, ref end, ref searchSpace);
-        }
-    }
-
-    /// <summary>
-    /// Slow that is just a scan over the leftovers.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private int SlowTail(in NibblePath key, ushort hash, byte preamble, out Span<byte> data, ref ushort currentSearchSpace, ref ushort end,
-        ref ushort searchSpace)
-    {
-        // Leftover handling
-        ref var search = ref Unsafe.Add(ref currentSearchSpace, Slot.HashShiftForSearch);
-
-        while (!Unsafe.IsAddressGreaterThan(ref search, ref end))
-        {
-            if (search == hash)
-            {
-                var at = (int)Unsafe.ByteOffset(ref searchSpace, ref search) / Slot.Size;
-                var found = TryFind(at, 1, key, preamble, out data);
-                if (found != NotFound)
-                {
-                    return found;
-                }
-            }
-
-            search = ref Unsafe.Add(ref currentSearchSpace, Slot.Size / sizeof(ushort));
         }
 
         data = default;
@@ -564,19 +534,19 @@ public readonly ref struct SlottedArray
 
         do
         {
-            var index = (BitOperations.TrailingZeroCount(search) - 1) >> 1;
+            var index = BitOperations.TrailingZeroCount(search);
 
             // remove the match flag
-            search ^= (uint)(0b10 << (index * 2));
+            search ^= 1U << index;
 
             var i = index + at;
 
-            ref var slot = ref this[i];
+            ref var slot = ref GetSlotRef(i);
 
             // Preamble check is sufficient as IsDeleted is a special value of the preamble
             if ( /*slot.IsDeleted == false &&*/ slot.KeyPreamble == preamble)
             {
-                var actual = GetSlotPayload(ref slot);
+                var actual = GetSlotPayload(i);
 
                 if (slot.HasKeyBytes)
                 {
@@ -602,14 +572,13 @@ public readonly ref struct SlottedArray
     /// <summary>
     /// Gets the payload pointed to by the given slot without the length prefix.
     /// </summary>
-    private Span<byte> GetSlotPayload(ref Slot slot)
+    private Span<byte> GetSlotPayload(int index)
     {
         // assert whether the slot has a previous, if not use data.length
-        var previousSlotAddress = Unsafe.IsAddressLessThan(ref this[0], ref slot)
-            ? Unsafe.Add(ref slot, -1).ItemAddress
-            : _data.Length;
-
+        var previousSlotAddress = index > 0 ? GetSlotRef(index - 1).ItemAddress : _data.Length;
+        ref var slot = ref GetSlotRef(index);
         var length = previousSlotAddress - slot.ItemAddress;
+
         return _data.Slice(slot.ItemAddress, length);
     }
 
@@ -626,19 +595,18 @@ public readonly ref struct SlottedArray
         Slot.PrepareKey(key, out preamble, out trimmed);
 
     /// <summary>
-    /// The slot is a size of <see cref="Size"/> bytes.
-    ///
-    /// It consists of two ushort parts,
-    /// 1. <see cref="Raw"/> and
-    /// 2. <see cref="Hash"/>.
-    ///
-    /// <see cref="Hash"/> is a result of <see cref="PrepareKey"/> that returns the value to be memoized in a slot. It only 2 bytes so collision may occur.
-    /// <see cref="Raw"/> encodes all the metadata related to the slot.
+    /// The slot is a size of <see cref="Size"/> bytes and represents non-hash part of the entry.
+    /// The separation is done to make the search as vector aligned as possible.
     /// </summary>
     [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     private struct Slot
     {
-        public const int Size = 4;
+        /// <summary>
+        /// The size of <see cref="Slot"/> with hash combined.
+        /// </summary>
+        public const int TotalSize = Size + sizeof(ushort);
+
+        public const int Size = 2;
 
         /// <summary>
         /// The address currently requires 12 bits [0-11] to address whole page. 
@@ -665,14 +633,6 @@ public readonly ref struct SlottedArray
         public void MarkAsDeleted()
         {
             KeyPreamble = KeyPreambleDelete;
-
-            // Provide a different hash so that further searches with TryGet won't be hitting this slot.
-            //
-            // We could use a constant value, but then on a collision with an actual value the tail
-            // performance would be terrible.
-            //
-            // The easiest way is to negate the hash that makes it not equal and yet is not a single value.
-            Hash = (ushort)~Hash;
         }
 
         // Preamble uses all bits that AddressMask does not
@@ -697,19 +657,16 @@ public readonly ref struct SlottedArray
         public bool HasAtLeastOneNibble => KeyPreamble != KeyPreambleEmpty;
 
         // Shift by 12, unless it's odd. If odd, shift by 8
-        public byte Nibble0
+        public byte GetNibble0(ushort hash)
         {
-            get
-            {
-                var count = KeyPreamble >> KeyPreambleLengthShift;
+            var count = KeyPreamble >> KeyPreambleLengthShift;
 
-                // Remove the length mask
-                var hash = (ushort)(Hash ^ GetHashMask(count));
+            // Remove the length mask
+            var h = (ushort)(hash ^ GetHashMask(count));
 
-                return (byte)(0x0F & (hash >> (3 * NibblePath.NibbleShift -
-                                               ((Raw >> KeyPreambleShift) & KeyPreambleOddBit) *
-                                               NibblePath.NibbleShift)));
-            }
+            return (byte)(0x0F & (h >> (3 * NibblePath.NibbleShift -
+                                        ((Raw >> KeyPreambleShift) & KeyPreambleOddBit) *
+                                        NibblePath.NibbleShift)));
         }
 
         public byte KeyPreamble
@@ -723,20 +680,9 @@ public readonly ref struct SlottedArray
         private ushort Raw;
 
         /// <summary>
-        /// Used for vectorized search
-        /// </summary>
-        public const int HashShiftForSearch = 1;
-
-        /// <summary>
         /// The memorized result of <see cref="PrepareKey"/> of this item.
         /// </summary>
-        public ushort Hash;
-
-        public override readonly string ToString()
-        {
-            return
-                $"{nameof(Hash)}: {Hash}, {nameof(ItemAddress)}: {ItemAddress}";
-        }
+        public readonly override string ToString() => $"{nameof(ItemAddress)}: {ItemAddress}";
 
         /// <summary>
         /// Mask selected in a way that it can be shifted by 0, 1, 2 and
@@ -951,6 +897,8 @@ public readonly ref struct SlottedArray
         public ushort Deleted;
 
         public readonly ushort Taken => (ushort)(Low + High);
+
+        public readonly ushort TakenAfterOneMoreSlot => (ushort)(AlignToDoubleVectorSize(Low + Slot.TotalSize) + High);
     }
 }
 
