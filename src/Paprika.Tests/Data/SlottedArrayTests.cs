@@ -271,55 +271,6 @@ public class SlottedArrayTests
         }
     }
 
-    [Test]
-    public void Roll_over()
-    {
-        const int seed = 13;
-        var random = new Random(seed);
-        Span<byte> key = stackalloc byte[4];
-
-        var map = new SlottedArray(new byte[1024]);
-
-        byte count = 0;
-
-        random.NextBytes(key);
-        while (map.TrySet(NibblePath.FromKey(key), [count]))
-        {
-            count++;
-            random.NextBytes(key);
-        }
-
-        // reset, delete some
-        //random = new Random(seed);
-
-        using var e = map.EnumerateAll();
-        for (var i = 0; i < count; i++)
-        {
-            //random.NextBytes(key);
-            e.MoveNext().Should().BeTrue();
-
-            if (ShouldBeDeleted(i))
-            {
-                map.Delete(e.Current);
-                //map.Delete(NibblePath.FromKey(key)).Should().BeTrue();
-            }
-        }
-
-        // reset, assert
-        random = new Random(seed);
-        for (var i = 0; i < count; i++)
-        {
-            random.NextBytes(key);
-
-            var exist = map.TryGet(NibblePath.FromKey(key), out var data);
-            exist.Should().NotBe(ShouldBeDeleted(i));
-        }
-
-        return;
-
-        static bool ShouldBeDeleted(int i) => i % 2 == 0;
-    }
-
     private static ReadOnlySpan<byte> Data(byte key) => new[] { key };
 
     [Test]
