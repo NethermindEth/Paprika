@@ -531,9 +531,51 @@ public readonly ref struct SlottedArray
                 }
             }
         }
+        else if (Vector128.IsHardwareAccelerated)
+        {
+            var search = Vector128.Create(hash);
+            var jump = DoubleVectorSize / sizeof(ushort);
+
+            for (var i = 0; i < aligned; i += jump)
+            {
+                var value = Vector128.LoadUnsafe(ref d, (UIntPtr)i);
+                if (Vector128.EqualsAny(value, search))
+                {
+                    var matches = Vector128.Equals(value, search).ExtractMostSignificantBits();
+
+                    if (i + jump >= aligned)
+                    {
+                        // This is the last in batch, masking is required to remove potential hits that are false positive
+                        var shift = count & (VectorSize - 1);
+                        var mask = (1U << shift) - 1;
+                        matches &= mask;
+                    }
+
+                    if (matches > 0)
+                    {
+                        var found = TryFind(i / VectorsByBatch, matches, key, preamble, out data);
+                        if (found != NotFound)
+                        {
+                            return found;
+                        }
+                    }
+                }
+            }
+        }
+        else
+        {
+            ThrowNoVectorSupport();
+        }
 
         data = default;
         return NotFound;
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        void ThrowNoVectorSupport()
+        {
+            throw new NotSupportedException(
+                $"This platform does not support {nameof(Vector256)} nor {nameof(Vector128)}");
+        }
     }
 
     private int TryFind(int at, uint matches, in NibblePath key, byte preamble, out Span<byte> data)
