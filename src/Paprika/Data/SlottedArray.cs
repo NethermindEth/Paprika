@@ -37,7 +37,7 @@ public readonly ref struct SlottedArray
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int AlignToDoubleVectorSize(int count) => (count + (DoubleVectorSize - 1)) & -DoubleVectorSize;
-    
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int AlignToVectorSize(int count) => (count + (VectorSize - 1)) & -VectorSize;
 
@@ -491,6 +491,7 @@ public readonly ref struct SlottedArray
     private int TryGetImpl(in NibblePath key, ushort hash, byte preamble, out Span<byte> data)
     {
         var count = _header.Low / Slot.TotalSize;
+        var jump = DoubleVectorSize / sizeof(ushort);
         var aligned = AlignToDoubleVectorSize(_header.Low) / sizeof(ushort);
 
         ref var d = ref Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(_data));
@@ -498,7 +499,6 @@ public readonly ref struct SlottedArray
         if (Vector256.IsHardwareAccelerated)
         {
             var search = Vector256.Create(hash);
-            var jump = DoubleVectorSize / sizeof(ushort);
 
             for (var i = 0; i < aligned; i += jump)
             {
@@ -509,9 +509,13 @@ public readonly ref struct SlottedArray
 
                     if (i + jump >= aligned)
                     {
+                        // Undoing the multiplication done above to calculate aligned, to get the number of items.
+                        var alignedCount = aligned / VectorsByBatch;
+                        var toClear = alignedCount - count;
+
                         // This is the last in batch, masking is required to remove potential hits that are false positive
-                        var shift = count & (VectorSize - 1);
-                        var mask = (1U << shift) - 1;
+                        var hashesPerVector = VectorSize / sizeof(ushort);
+                        var mask = (1U << hashesPerVector - toClear) - 1;
                         matches &= mask;
                     }
 
@@ -529,7 +533,6 @@ public readonly ref struct SlottedArray
         else if (Vector128.IsHardwareAccelerated)
         {
             var search = Vector128.Create(hash);
-            var jump = DoubleVectorSize / sizeof(ushort);
 
             for (var i = 0; i < aligned; i += jump)
             {
@@ -540,9 +543,13 @@ public readonly ref struct SlottedArray
 
                     if (i + jump >= aligned)
                     {
+                        // Undoing the multiplication done above to calculate aligned, to get the number of items.
+                        var alignedCount = aligned / VectorsByBatch;
+                        var toClear = alignedCount - count;
+
                         // This is the last in batch, masking is required to remove potential hits that are false positive
-                        var shift = count & (VectorSize - 1);
-                        var mask = (1U << shift) - 1;
+                        var hashesPerVector = VectorSize / sizeof(ushort);
+                        var mask = (1U << hashesPerVector - toClear) - 1;
                         matches &= mask;
                     }
 

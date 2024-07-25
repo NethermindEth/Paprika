@@ -271,6 +271,36 @@ public class SlottedArrayTests
         }
     }
 
+    [Test(Description = "Make a lot of requests to make breach the vector count")]
+    public void Set_Get_With_Specific_Lengths([Values(8, 16, 32, 64, 68, 72)] int count)
+    {
+        const int keyLength = 2;
+
+        Span<byte> keys = stackalloc byte[count * 2];
+        for (byte i = 0; i < count; i++)
+        {
+            keys[i * keyLength] = i;
+            keys[i * keyLength + 1] = i;
+        }
+
+        var map = new SlottedArray(new byte[Page.PageSize]);
+
+        for (var i = 0; i < count; i++)
+        {
+            map.SetAssert(GetKey(keys, i), GetValue(i));
+        }
+
+        for (var i = 0; i < count; i++)
+        {
+            map.GetAssert(GetKey(keys, i), GetValue(i));
+        }
+
+        return;
+
+        static NibblePath GetKey(Span<byte> keys, int i) => NibblePath.FromKey(keys.Slice(i * keyLength, keyLength));
+        static ReadOnlySpan<byte> GetValue(int i) => new byte[(byte)(i & 255)];
+    }
+
     private static ReadOnlySpan<byte> Data(byte key) => new[] { key };
 
     [Test]
@@ -669,7 +699,8 @@ file static class FixedMapTestExtensions
 
     public static void GetAssert(this SlottedArray map, in NibblePath key, ReadOnlySpan<byte> expected)
     {
-        map.TryGet(key, out var actual).Should().BeTrue();
+        var retrieved = map.TryGet(key, out var actual);
+        retrieved.Should().BeTrue();
         actual.SequenceEqual(expected).Should().BeTrue("Actual data should equal expected");
     }
 
