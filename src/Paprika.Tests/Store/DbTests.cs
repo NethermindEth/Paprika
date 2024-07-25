@@ -1,8 +1,6 @@
 using System.Buffers.Binary;
-using System.Diagnostics;
 using FluentAssertions;
 using Nethermind.Int256;
-using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Store;
 using static Paprika.Tests.Values;
@@ -198,7 +196,7 @@ public class DbTests
         using var db = PagedDb.NativeMemoryDb(size);
 
         const int batches = 25;
-        const int storageSlots = 5_000;
+        const int storageSlots = 10_000;
         const int storageKeyLength = 32;
 
         var value = new byte[32];
@@ -210,21 +208,13 @@ public class DbTests
 
         var readBatches = new List<IReadOnlyBatch>();
 
-        //for (var i = 0; i < batches; i++)
+        for (var i = 0; i < batches; i++)
         {
             using var batch = db.BeginNextBatch();
 
             for (var slot = 0; slot < storageSlots; slot++)
             {
-                if (slot >= 4890)
-                    Debugger.Break();
-
                 batch.SetStorage(account, GetStorageAddress(slot), value);
-
-                if (slot >= 4890)
-                {
-                    batch.AssertStorageValue(account, GetStorageAddress(4890), value);
-                }
             }
 
             await batch.Commit(CommitOptions.FlushDataAndRoot);
