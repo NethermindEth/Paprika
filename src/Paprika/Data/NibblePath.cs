@@ -646,7 +646,7 @@ public readonly ref struct NibblePath
 
     public bool Equals(in NibblePath other)
     {
-        if (other.Length != Length || (other._odd & OddBit) != (_odd & OddBit))
+        if (((other.Length ^ Length) | (other._odd ^ _odd)) > 0)
             return false;
 
         return FindFirstDifferentNibble(other) == Length;
