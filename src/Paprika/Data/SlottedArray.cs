@@ -148,8 +148,6 @@ public readonly ref struct SlottedArray
         _header.Low += Slot.TotalSize;
         _header.High += (ushort)total;
 
-        //AssertAllSlots();
-
         return true;
     }
 
@@ -365,8 +363,6 @@ public readonly ref struct SlottedArray
         {
             CollectTombstones();
         }
-
-        //AssertAllSlots();
     }
 
     private void MarkAsDeleted(int index)
@@ -437,8 +433,6 @@ public readonly ref struct SlottedArray
         _header.Low = (ushort)(newCount * Slot.TotalSize);
         _header.High = (ushort)(_data.Length - writtenTo);
         _header.Deleted = 0;
-
-        //AssertAllSlots();
     }
 
     /// <summary>
@@ -467,8 +461,6 @@ public readonly ref struct SlottedArray
             // move back by one to see if it's deleted as well
             index--;
         }
-
-        //AssertAllSlots();
     }
 
     public bool TryGet(scoped in NibblePath key, out ReadOnlySpan<byte> data)
@@ -624,16 +616,6 @@ public readonly ref struct SlottedArray
         return NotFound;
     }
 
-    private void AssertAllSlots()
-    {
-        var count = _header.Low / Slot.TotalSize;
-    
-        for (int i = 0; i < count; i++)
-        {
-            Debug.Assert(GetSlotPayload(i).Length >= 0);
-        }
-    }
-
     /// <summary>
     /// Gets the payload pointed to by the given slot without the length prefix.
     /// </summary>
@@ -644,12 +626,6 @@ public readonly ref struct SlottedArray
         var previousSlotAddress = index > 0 ? GetSlotRef(index - 1).ItemAddress : _data.Length;
         var addr = GetSlotRef(index).ItemAddress;
         var length = previousSlotAddress - addr;
-
-        if (length < 0)
-        {
-            AssertAllSlots();
-        }
-        
         return _data.Slice(addr, length);
     }
 
