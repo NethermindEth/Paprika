@@ -37,6 +37,9 @@ public readonly ref struct SlottedArray
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int AlignToDoubleVectorSize(int count) => (count + (DoubleVectorSize - 1)) & -DoubleVectorSize;
+    
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int AlignToVectorSize(int count) => (count + (VectorSize - 1)) & -VectorSize;
 
     public SlottedArray(Span<byte> buffer)
     {
@@ -495,8 +498,8 @@ public readonly ref struct SlottedArray
         "key encoding is delayed but it might be called twice, here + TrySet")]
     private int TryGetImpl(in NibblePath key, ushort hash, byte preamble, out Span<byte> data)
     {
-        var aligned = AlignToDoubleVectorSize(_header.Low);
         var count = _header.Low / Slot.TotalSize;
+        var aligned = AlignToDoubleVectorSize(_header.Low) / sizeof(ushort);
 
         ref var d = ref Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(_data));
 
@@ -621,15 +624,15 @@ public readonly ref struct SlottedArray
         return NotFound;
     }
 
-    // private void AssertAllSlots()
-    // {
-    //     var count = _header.Low / Slot.TotalSize;
-    //
-    //     for (int i = 0; i < count; i++)
-    //     {
-    //         Debug.Assert(GetSlotPayload(i).Length >= 0);
-    //     }
-    // }
+    private void AssertAllSlots()
+    {
+        var count = _header.Low / Slot.TotalSize;
+    
+        for (int i = 0; i < count; i++)
+        {
+            Debug.Assert(GetSlotPayload(i).Length >= 0);
+        }
+    }
 
     /// <summary>
     /// Gets the payload pointed to by the given slot without the length prefix.
@@ -642,6 +645,11 @@ public readonly ref struct SlottedArray
         var addr = GetSlotRef(index).ItemAddress;
         var length = previousSlotAddress - addr;
 
+        if (length < 0)
+        {
+            AssertAllSlots();
+        }
+        
         return _data.Slice(addr, length);
     }
 

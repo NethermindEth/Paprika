@@ -662,7 +662,8 @@ file static class FixedMapTestExtensions
 
     public static void GetAssert(this SlottedArray map, in ReadOnlySpan<byte> key, ReadOnlySpan<byte> expected)
     {
-        map.TryGet(NibblePath.FromKey(key), out var actual).Should().BeTrue();
+        var retrieved = map.TryGet(NibblePath.FromKey(key), out var actual);
+        retrieved.Should().BeTrue();
         actual.SequenceEqual(expected).Should().BeTrue("Actual data should equal expected");
     }
 
