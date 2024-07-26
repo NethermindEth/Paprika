@@ -1,7 +1,6 @@
 using System.Buffers.Binary;
 using FluentAssertions;
 using Nethermind.Int256;
-using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Store;
 using static Paprika.Tests.Values;
