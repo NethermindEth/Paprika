@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using BenchmarkDotNet.Attributes;
+using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store;
 
@@ -79,6 +80,51 @@ public unsafe class SlottedArrayBenchmarks
         if (map.TryGet(key, out _)) count += 1;
         if (map.TryGet(key, out _)) count += 1;
         return count;
+    }
+
+    [Benchmark(OperationsPerInvoke = 2)]
+    [Arguments(0, 0)]
+    [Arguments(0, 1)]
+    [Arguments(1, 1)]
+    [Arguments(0, 2)]
+    [Arguments(1, 2)]
+    [Arguments(0, 3)]
+    [Arguments(1, 3)]
+    [Arguments(0, 4)]
+    [Arguments(1, 4)]
+    [Arguments(0, 6)]
+    [Arguments(1, 6)]
+    [Arguments(0, 32)]
+    [Arguments(1, 31)]
+    [Arguments(1, 30)]
+    public int Prepare_Key(int sliceFrom, int length)
+    {
+        var key = NibblePath.FromKey(Keccak.EmptyTreeHash).Slice(sliceFrom, length);
+
+        // spin: 1
+        var hash = SlottedArray.PrepareKeyForTests(key, out var preamble, out var trimmed);
+
+        // spin: 2
+        var hash2 = SlottedArray.PrepareKeyForTests(key, out var preamble2, out var trimmed2);
+
+        return
+            hash + preamble + trimmed.Length +
+            hash2 + preamble2 + trimmed2.Length;
+    }
+
+    [Benchmark]
+    public int EnumerateAll()
+    {
+        var map = new SlottedArray(new Span<byte>(_map, Page.PageSize));
+
+        var length = 0;
+        foreach (var item in map.EnumerateAll())
+        {
+            length += item.Key.Length;
+            length += item.RawData.Length;
+        }
+
+        return length;
     }
 
     private NibblePath GetKey(byte i, bool odd)

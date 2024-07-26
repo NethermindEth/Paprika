@@ -1,5 +1,3 @@
-using System.Runtime.InteropServices;
-using System.Runtime.Intrinsics;
 using FluentAssertions;
 using Paprika.Crypto;
 using Paprika.Data;
