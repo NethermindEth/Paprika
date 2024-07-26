@@ -652,7 +652,7 @@ public readonly ref struct NibblePath
         ref var left = ref _span;
         ref var right = ref other._span;
         var length = Length;
-        
+
         if (other._odd == OddBit)
         {
             // This means first byte is not a whole byte
@@ -665,7 +665,7 @@ public readonly ref struct NibblePath
             // Move beyond first
             left = ref Unsafe.Add(ref left, 1);
             right = ref Unsafe.Add(ref right, 1);
-            
+
             // One nibble already consumed, reduce the length
             length -= 1;
         }
@@ -673,23 +673,23 @@ public readonly ref struct NibblePath
         if ((length & OddBit) == OddBit)
         {
             const int highNibbleMask = NibbleMask << NibbleShift;
-            
+
             // Length is odd, which requires checking the last byte but only the first nibble
-            if (((Unsafe.Add(ref left, length >> 1) ^ Unsafe.Add(ref right, length >> 1)) 
+            if (((Unsafe.Add(ref left, length >> 1) ^ Unsafe.Add(ref right, length >> 1))
                  & highNibbleMask) > 0)
             {
                 return false;
             }
-            
+
             // Last nibble already consumed, reduce the length
             length -= 1;
         }
 
         if (length == 0)
             return true;
-        
+
         Debug.Assert(length % 2 == 0);
-        
+
         var leftSpan = MemoryMarshal.CreateReadOnlySpan(ref left, length >> 1);
         var rightSpan = MemoryMarshal.CreateReadOnlySpan(ref right, length >> 1);
 
