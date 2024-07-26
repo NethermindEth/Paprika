@@ -646,10 +646,54 @@ public readonly ref struct NibblePath
 
     public bool Equals(in NibblePath other)
     {
-        if (other.Length != Length || (other._odd & OddBit) != (_odd & OddBit))
+        if (((other.Length ^ Length) | (other._odd ^ _odd)) > 0)
             return false;
 
-        return FindFirstDifferentNibble(other) == Length;
+        ref var left = ref _span;
+        ref var right = ref other._span;
+        var length = Length;
+
+        if (other._odd == OddBit)
+        {
+            // This means first byte is not a whole byte
+            if (((left ^ right) & NibbleMask) > 0)
+            {
+                // First nibble differs
+                return false;
+            }
+
+            // Move beyond first
+            left = ref Unsafe.Add(ref left, 1);
+            right = ref Unsafe.Add(ref right, 1);
+
+            // One nibble already consumed, reduce the length
+            length -= 1;
+        }
+
+        if ((length & OddBit) == OddBit)
+        {
+            const int highNibbleMask = NibbleMask << NibbleShift;
+
+            // Length is odd, which requires checking the last byte but only the first nibble
+            if (((Unsafe.Add(ref left, length >> 1) ^ Unsafe.Add(ref right, length >> 1))
+                 & highNibbleMask) > 0)
+            {
+                return false;
+            }
+
+            // Last nibble already consumed, reduce the length
+            length -= 1;
+        }
+
+        if (length == 0)
+            return true;
+
+        Debug.Assert(length % 2 == 0);
+
+        var leftSpan = MemoryMarshal.CreateReadOnlySpan(ref left, length >> 1);
+        var rightSpan = MemoryMarshal.CreateReadOnlySpan(ref right, length >> 1);
+
+        return leftSpan.SequenceEqual(rightSpan);
     }
 
     public override int GetHashCode()
