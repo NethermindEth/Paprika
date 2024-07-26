@@ -963,10 +963,10 @@ public class Blockchain : IAsyncDisposable
                 {
                     case Node.Type.Leaf:
                         if (leaf.Path.Length > NibblePath.KeccakNibbleCount) return false;
-                        existingHash = ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateHash(path, this);
+                        existingHash = ((ComputeMerkleBehavior)_blockchain._preCommit).GetHash(path, this);
                         return true;
                     default:
-                        existingHash = ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateHash(path, this);
+                        existingHash = ((ComputeMerkleBehavior)_blockchain._preCommit).GetHash(path, this);
                         return true;
                 }
             }
@@ -1156,8 +1156,8 @@ public class Blockchain : IAsyncDisposable
                 case Node.Type.Leaf:
                 {
                     var keccak = context.IsStorage
-                        ? ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateStorageHash(this, context.AccountHash, path)
-                        : ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateHash(path, this);
+                        ? ((ComputeMerkleBehavior)_blockchain._preCommit).GetStorageHash(this, context.AccountHash, path)
+                        : ((ComputeMerkleBehavior)_blockchain._preCommit).GetHash(path, this);
 
                     visitor.VisitLeaf(path, keccak, leaf.Path, context, this);
 
@@ -1184,8 +1184,8 @@ public class Blockchain : IAsyncDisposable
                 case Node.Type.Extension:
                 {
                     var keccak = context.IsStorage
-                        ? ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateStorageHash(this, context.AccountHash, path)
-                        : ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateHash(path, this);
+                        ? ((ComputeMerkleBehavior)_blockchain._preCommit).GetStorageHash(this, context.AccountHash, path)
+                        : ((ComputeMerkleBehavior)_blockchain._preCommit).GetHash(path, this);
 
                     visitor.VisitExtension(path, keccak, ext, context, this);
 
@@ -1199,8 +1199,8 @@ public class Blockchain : IAsyncDisposable
                 case Node.Type.Branch:
                 {
                     var keccak = context.IsStorage
-                        ? ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateStorageHash(this, context.AccountHash, path)
-                        : ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateHash(path, this);
+                        ? ((ComputeMerkleBehavior)_blockchain._preCommit).GetStorageHash(this, context.AccountHash, path)
+                        : ((ComputeMerkleBehavior)_blockchain._preCommit).GetHash(path, this);
 
                         visitor.VisitBranch(path, keccak, context, this);
 
@@ -1997,6 +1997,11 @@ public class Blockchain : IAsyncDisposable
             throw new NotImplementedException();
         }
 
+        public Keccak GetStorageHash(in Keccak account, in NibblePath path)
+        {
+            throw new NotImplementedException();
+        }
+
         public void Commit(bool ensureHash)
         {
             ThrowOnFinalized();
@@ -2169,6 +2174,7 @@ public class Blockchain : IAsyncDisposable
             committed.Apply(batch);
             _current.Dispose();
 
+            //batch.VerifyDbPagesOnCommit();
             batch.Commit(CommitOptions.DangerNoWrite);
 
             IReadOnlyBatch readOnly = _db.BeginReadOnlyBatch();
@@ -2182,7 +2188,7 @@ public class Blockchain : IAsyncDisposable
             ThrowOnFinalized();
 
             //enforce hash calculation
-            Hash = ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateHash(NibblePath.Empty, this);
+            Hash = ((ComputeMerkleBehavior)_blockchain._preCommit).GetHash(NibblePath.Empty, this);
 
             using var batch = _db.BeginNextBatch();
             batch.SetMetadata(blockNumber, Hash);
@@ -2199,7 +2205,12 @@ public class Blockchain : IAsyncDisposable
 
         public Keccak GetHash(in NibblePath path)
         {
-            return ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateHash(path, this);
+            return ((ComputeMerkleBehavior)_blockchain._preCommit).GetHash(path, this);
+        }
+
+        public Keccak GetStorageHash(in Keccak account, in NibblePath path)
+        {
+            return ((ComputeMerkleBehavior)_blockchain._preCommit).GetStorageHash(this, account, path);
         }
 
         public void Discard()
