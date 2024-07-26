@@ -54,7 +54,7 @@ public unsafe class SlottedArrayBenchmarks
                 throw new Exception("Not enough memory");
             }
         }
-        
+
         // Hash colliding
         _hashCollidingKeys = AllocAlignedPage();
 
@@ -68,11 +68,11 @@ public unsafe class SlottedArrayBenchmarks
 
             // 1th differentiate with the first
             hashCollidingKeys[i * BytesPerKeyHashColliding + 1] = i;
-            
+
             // 2nd divide by 2 to collide
             hashCollidingKeys[i * BytesPerKeyHashColliding + 2] = (byte)(i / 2);
         }
-        
+
         _hashCollidingMap = AllocAlignedPage();
 
         var hashColliding = new SlottedArray(new Span<byte>(_hashCollidingMap, Page.PageSize));
@@ -84,7 +84,7 @@ public unsafe class SlottedArrayBenchmarks
                 throw new Exception("Not enough memory");
             }
         }
-        
+
         return;
 
         static void* AllocAlignedPage()
@@ -120,7 +120,7 @@ public unsafe class SlottedArrayBenchmarks
         if (map.TryGet(key, out _)) count += 1;
         return count;
     }
-    
+
     [Benchmark(OperationsPerInvoke = 4)]
     [Arguments((byte)1)]
     [Arguments((byte)2)]
@@ -194,13 +194,13 @@ public unsafe class SlottedArrayBenchmarks
 
         return NibblePath.FromKey(slice, odd ? 1 : 0, 4);
     }
-    
+
     private NibblePath GetHashCollidingKey(byte i)
     {
         var span = new Span<byte>(_hashCollidingKeys, BytesPerKeyHashColliding * HashCollidingKeyCount);
         var slice = span.Slice(i * BytesPerKeyHashColliding, BytesPerKeyHashColliding);
 
         // Use full key
-        return NibblePath.FromKey(slice,  0, BytesPerKeyHashColliding * NibblePath.NibblePerByte);
+        return NibblePath.FromKey(slice, 0, BytesPerKeyHashColliding * NibblePath.NibblePerByte);
     }
 }
