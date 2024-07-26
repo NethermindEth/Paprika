@@ -19,6 +19,8 @@ public interface IRawState : IReadOnlyWorldState
 
     Keccak GetHash(in NibblePath path);
 
+    Keccak GetStorageHash(in Keccak account, in NibblePath path);
+
     /// <summary>
     /// Commits the pending changes.
     /// </summary>
