@@ -253,130 +253,77 @@ public struct PageHeader
 
 ### SlottedArray
 
-The `SlottedArray` component is responsible for storing data in-page. It is capable of mapping a `NibblePath` to a value represented by `ReadOnlySpan<byte>`. Empyt values are allowed.
+The `SlottedArray` component is responsible for storing data in a page. It is capable of mapping a `NibblePath` to a value represented by `ReadOnlySpan<byte>`. Empty values are allowed as they are treated as tombstones. The tombstoning is needed to provide the write-through buffering capability, so that a value can be marked as deleted only later to be flushed down.
 
 #### SlottedArray layout
 
-`SlottedArray` needs to store values with variant lengths over a fixed `Span<byte>` provided by the page. To make it work, Paprika uses a modified pattern of the slot array, used by major players in the world of B+ oriented databases (see: [PostgreSQL page layout](https://www.postgresql.org/docs/current/storage-page-layout.html#STORAGE-PAGE-LAYOUT-FIGURE)). How it works then?
+`SlottedArray` needs to store values with variant lengths over a fixed `Span<byte>` provided by the page. To make it work, Paprika uses a modified pattern of the slot array, used by major players in the world of B+ oriented databases (see: [PostgreSQL page layout](https://www.postgresql.org/docs/current/storage-page-layout.html#STORAGE-PAGE-LAYOUT-FIGURE)).
 
 The slot array pattern uses a fixed-size buffer that is provided within the page. It allocates chunks of it from two directions:
 
 1. from `0` forward
 2. from the end downward
 
-The first direction, from `0` is used for fixed-size structures that represent slots. Each slot has some metadata, including the most important one, the offset to the start of data. The direction from the end is used to store var length payloads. Paprika diverges from the usual slot array though. The slot array assumes that it's up to the higher level to map the slot identifiers to keys. What the page provides is just a container for tuples that stores them and maps them to the `CTID`s (see: [PostgreSQL system columns](https://www.postgresql.org/docs/current/ddl-system-columns.html)). How Paprika uses this approach
+The first direction, from `0` is used for fixed-size structures that represent slots. Each slot has some metadata, including the most important one, the offset to the start of data. The direction from the end is used to store var length payloads. Paprika diverges from the usual slot array though. The slot array assumes that it's up to the higher level to map the slot identifiers to keys. What the page provides is just a container for tuples that stores them and maps them to the `CTID`s (see: [PostgreSQL system columns](https://www.postgresql.org/docs/current/ddl-system-columns.html)).
 
-In Paprika, each page level represents a cutoff in the nibble path to make it aligned to the Merkle construct. The key management could be extracted out of the `SlottedArray` component, but it would make it less self-contained. `SlottedArray` then provides `TrySet` and `TryGet` methods that accept nibble paths. This impacts the design of the slot, which is as follows:
+Paprika provides a vector-aligned slotted array, that stores lookup data from the beginning and the actual payload from the end. What makes it special is that Paprika uses vectorized instructions (`Vector256` or `Vector128` depending on the architecture) and alignment to its sizes to make the search as efficient as possible. The space that a given slotted array occupies will be then split into the following:
 
-```csharp
-private struct Slot
-{
-    public const int Size = 4;
+1. `Header`
+1. `Vector` of key hashes
+1. `Vector` of `Slot` entries
+1. `Vector` of key hashes
+1. `Vector` of `Slot` entries
+1. ...
+1. ...
+1. data
 
-    /// <summary>
-    /// The address currently requires 12 bits [0-11] to address whole page. 
-    /// </summary>
-    private const ushort AddressMask = Page.PageSize - 1;
+where each `Vector` is aligned to a machine that it runs on (`Vector` will be 32 bytes on modern `x64` and 16 bytes on `ARM`) and `Vector`s are allocated in pairs (hashes + corresponding slots). Keeping hashes and slots in separate chunks, allows for a fast vectorized search over hashes, without the need to scan over slot entries. The entries are inspected only on the hash match.
 
-    /// <summary>
-    /// The address of this item.
-    /// </summary>
-    public ushort ItemAddress { /* bitwise magic */ } 
-    
-    /// <summary>
-    /// Whether the given entry is deleted or not
-    /// </summary>
-    public bool IsDeleted => KeyPreamble == KeyPreambleDelete;
+The `Header` consists of 8 bytes and keeps track of `hi` and `lo` as in a usual `SlottedArray`.
 
-    public byte KeyPreamble { /* bitwise magic */ } 
+##### Slot
 
-    private ushort Raw;
+A `Slot` occupies `2 bytes` and represents several values needed to keep track of the value stored in an array. It uses bit-wise operations to store all the information in 2 bytes:
 
-    /// <summary>
-    /// Used for vectorized search
-    /// </summary>
-    public const int HashShiftForSearch = 1;
+1. `ItemAddress` - represents the address to go to for the data of the given slot (address currently requires 12 bits [0-11] to address the whole 4 kb page)
+2. `Preamble` - shows whether there are some bytes left for the key or other
+3. `IsDeleted`- whether the item was deleted in the array but not GCed yet
 
-    /// <summary>
-    /// The memorized result of <see cref="PrepareKey"/> of this item.
-    /// </summary>
-    public ushort Hash;
-
-    /// <summary>
-    /// Prepares the key for the search. 
-    /// </summary>
-    public static ushort PrepareKey(/* ... */)
-    {
-        // ...
-    }
-
-    public static NibblePath UnPrepareKey(/* ... */)
-    {
-        // ...
-    }
-}
-```
-
-The slot is 4 bytes long. Using the `PrepareKey` method, some of the nibbles are extrated from the key as a `Hash` for fast comparisons. It has the actual `ItemAddress` that points to the beginning of the payload. The length of the item is calculated by subtracting the address from the previous slot address. The drawback of this design is a linear search across all the slots when an item must be found. With the expected number of items per page, which should be no bigger than 100, it gives 400 bytes of slots to search through. This should be ok-ish with modern processors as the search uses the vectorized index search. Additionally, it adds some checks for the preamble so that the collissions should not be that likely. 
-
-With this, the `SlottedArray` memory representation looks like the following.
-
-```bash
-┌───────────────┬───────┬───────┬───────────────────────────────┐
-│HEADER         │Slot 0 │Slot 1 │                               │
-│               │       │       │                               │
-│High           │Prefix │Prefix │                               │
-│Low            │Addr   │Addr   │ ► ► ►                         │
-│Deleted        │   │   │   │   │                               │
-│               │   │   │   │   │                               │
-├───────────────┴───┼───┴───┼───┘                               │
-│                   │       │                                   │
-│                ┌──┼───────┘                                   │
-│                │  │                                           │
-│                │  │                                           │
-│                │  └──────────┐                                │
-│                │             │                                │
-│                ▼             ▼                                │
-│                ┌─────────────┬────────────────────────────────┤
-│                │             │                                │
-│                │             │                                │
-│          ◄ ◄ ◄ │    DATA     │             DATA               │
-│                │ for slot1   │          for slot 0            │
-│                │             │                                │
-└────────────────┴─────────────┴────────────────────────────────┘
-```
+The `Slot` provides a method called `PrepareKey` that is responsible for extracting the `hash` for the given `NibblePath` key, returning a trimmed version of the key (what goes in the hash is extracted away) and a preamble. There's another counterpart method called `UnPrepareKey` that does the opposite. While `PrepareKey` is used for all the operations like `TrySet` and `TryGet`, `UnPrepareKey` is used only to materialize back the keys. This happens for example when a `SlottedArray` is enumerated. In other cases, the caller does not need to reconstruct the key as they have it.
 
 The `SlottedArray` can wrap an arbitrary span of memory so it can be used for any page that wants to store data by key.
 
 #### Deletion and tombstones
 
-`SlottedArray` uses a tombstoning to mark the given entry as deleted. It's much cheaper to mark something as deleted and collect garbage from time to time than to compress it every single time. The marker of deleteion is frequently called a `tombstone`. To decide whether or not a GC should be called when there's not enough place to just append data, a counter of tombstones is held. If non zero, GC can be used to reclaim memory.
+When deleting an item `SlottedArray` marks a given slot as deleted. Then tries to collect deleted from the last one. Eventually, when the deleted space is scattered across the map, it will run a `Defragment` procedure that copies what is alive and removes all the gaps.
+
+When a slot is marked as deleted, its hash is set to `~hash`. This is done to prevent it from being searched when performing the vectorized search over hashes. The negation is used so that there's no single value that will make all the deletes collide with the same entry.
 
 #### Iteration
 
-`SlottedArray` allows an efficient iteration over each entries using the `map.EnumerateAll()` method. It provides the caller with a `ref struct Enumerator` that does not allocate and allows traversing the map. It's worth to mention that the enumerator allows to delete an entry when enumerating by calling the delete method with the item from the enumerator `map.Delete(item)`. Again, it's based on the tombstoning mentioned above and just marks the data as deleted.
+`SlottedArray` allows an efficient iteration of its entries using the `map.EnumerateAll()` method. It provides the caller with a `ref struct Enumerator` that does not allocate and allows traversing the map. There's a special feature of the enumerator that allows deleting an entry when enumerating by calling the delete method with the item from the enumerator `map.Delete(item)`. Again, it's based on marking slots as deleted.
 
 ### Merkle construct
 
 From Ethereum's point of view, any storage mechanism needs to be able to calculate the `StateRootHash`. This hash allows us to verify whether the block state is valid. How it is done and what is used underneath is not important as long as the store mechanism can provide the answer to the ultimate question: _what is the StateRootHash of the given block?_
 
-To address this `Merkle` is implemented as a pre-commit hook. This hook is run when a block is committed to the blockchain. After all, from the point of execution there's no reason to run it before. Merkleization of the tree is split into the following steps executed sequentially:
+To address this `Merkle` is implemented as a pre-commit hook. This hook is run when a block is committed to the blockchain. After all, from the point of execution, there's no reason to run it before. Merkleization of the tree is split into the following steps executed sequentially:
 
 1. Visit all Storage operations (SSTORE). For each key:
-   1. remember `Account` that `Storage`` belongs to
-   1. walk through the MPT of Account Storage to create/amend Trie nodes. This part is marking paths as dirty
+   1. remember `Account` that `Storage` belongs to
+   1. walk through the MPT of Account Storage to create/amend Trie nodes. This part marks paths as dirty
 1. Visit all State operations. For each key:
    1. check if it was one of the Storage operations. If yes, remove it from the set above
    1. walk through the MPT of Account State to create/amend Trie nodes
 1. Visit all the accounts that were not accessed in 2., but were remembered in 1, meaning Accounts that had their storage modified but no changes to codehash, balance, nonce. For each key:
    1. walk through the MPT of Account State to create/amend Trie nodes
 1. Calculate the Root Hash
-   1. for each of accounts that had their storage modified (from 1.),
+   1. for each of the accounts that had their storage modified (from 1.),
       1. calculate the storage root hash
       1. store it in the account (decode account, encode, set)
    1. calculate the root hash of the State. **Parallel**
 
-It's worth to mention that even though `RLP` of branches is not stored in the database, its transient form is memoized in memory. This greatly improves the overall performance of Merkleization as reduced the number of fetched data from the database (no calls for children). Of course it requires cache invalidation which is done whenever marking the paths is done.
+Even though `RLP` of branches is not stored in the database, its transient form is memoized in memory. This greatly improves the overall performance of Merkleization as reduces the number of fetched data from the database (no calls for children). Of course, it requires cache invalidation which is done whenever marking the paths is done.
 
 ## Examples
 

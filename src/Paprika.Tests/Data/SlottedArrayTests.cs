@@ -1,8 +1,7 @@
 using FluentAssertions;
-using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
-using Paprika.Merkle;
+using Paprika.Store;
 
 namespace Paprika.Tests.Data;
 
@@ -22,7 +21,7 @@ public class SlottedArrayTests
     {
         var key0 = Values.Key0.Span;
 
-        Span<byte> span = stackalloc byte[48];
+        Span<byte> span = stackalloc byte[SlottedArray.MinimalSizeWithNoData + key0.Length + Data0.Length];
         var map = new SlottedArray(span);
 
         map.SetAssert(key0, Data0);
@@ -120,7 +119,7 @@ public class SlottedArrayTests
     {
         var key0 = Values.Key0.Span;
 
-        Span<byte> span = stackalloc byte[48];
+        Span<byte> span = stackalloc byte[128];
         var map = new SlottedArray(span);
 
         var data = ReadOnlySpan<byte>.Empty;
@@ -151,7 +150,7 @@ public class SlottedArrayTests
     public Task Defragment_when_no_more_space()
     {
         // by trial and error, found the smallest value that will allow to put these two
-        Span<byte> span = stackalloc byte[88];
+        Span<byte> span = stackalloc byte[SlottedArray.MinimalSizeWithNoData + 88];
         var map = new SlottedArray(span);
 
         var key0 = Values.Key0.Span;
@@ -179,7 +178,7 @@ public class SlottedArrayTests
     public Task Update_in_situ()
     {
         // by trial and error, found the smallest value that will allow to put these two
-        Span<byte> span = stackalloc byte[48];
+        Span<byte> span = stackalloc byte[128];
         var map = new SlottedArray(span);
 
         var key1 = Values.Key1.Span;
@@ -196,11 +195,11 @@ public class SlottedArrayTests
     [Test]
     public Task Update_in_resize()
     {
-        // Update the value, with the next one being bigger.
-        Span<byte> span = stackalloc byte[56];
-        var map = new SlottedArray(span);
-
         var key0 = Values.Key0.Span;
+
+        // Update the value, with the next one being bigger.
+        Span<byte> span = stackalloc byte[SlottedArray.MinimalSizeWithNoData + key0.Length + Data0.Length];
+        var map = new SlottedArray(span);
 
         map.SetAssert(key0, Data0);
         map.SetAssert(key0, Data2);
@@ -214,7 +213,7 @@ public class SlottedArrayTests
     [Test]
     public Task Small_keys_compression()
     {
-        Span<byte> span = stackalloc byte[256];
+        Span<byte> span = stackalloc byte[512];
         var map = new SlottedArray(span);
 
         Span<byte> key = stackalloc byte[1];
@@ -242,6 +241,62 @@ public class SlottedArrayTests
 
         // verify
         return Verify(span.ToArray());
+    }
+
+    [Test(Description = "Make a lot of requests to make breach the vector count")]
+    public void Breach_VectorSize_with_key_count()
+    {
+        const int seed = 13;
+        var random = new Random(seed);
+        Span<byte> key = stackalloc byte[4];
+
+        var map = new SlottedArray(new byte[Page.PageSize]);
+
+        const int count = 257;
+
+        for (var i = 0; i < count; i++)
+        {
+            random.NextBytes(key);
+            map.SetAssert(key, [(byte)(i & 255)]);
+        }
+
+        // reset
+        random = new Random(seed);
+        for (var i = 0; i < count; i++)
+        {
+            random.NextBytes(key);
+            map.GetAssert(key, [(byte)(i & 255)]);
+        }
+    }
+
+    [Test(Description = "Make a lot of requests to make breach the vector count")]
+    public void Set_Get_With_Specific_Lengths([Values(8, 16, 32, 64, 68, 72)] int count)
+    {
+        const int keyLength = 2;
+
+        Span<byte> keys = stackalloc byte[count * 2];
+        for (byte i = 0; i < count; i++)
+        {
+            keys[i * keyLength] = i;
+            keys[i * keyLength + 1] = i;
+        }
+
+        var map = new SlottedArray(new byte[Page.PageSize]);
+
+        for (var i = 0; i < count; i++)
+        {
+            map.SetAssert(GetKey(keys, i), GetValue(i));
+        }
+
+        for (var i = 0; i < count; i++)
+        {
+            map.GetAssert(GetKey(keys, i), GetValue(i));
+        }
+
+        return;
+
+        static NibblePath GetKey(Span<byte> keys, int i) => NibblePath.FromKey(keys.Slice(i * keyLength, keyLength));
+        static ReadOnlySpan<byte> GetValue(int i) => new byte[(byte)(i & 255)];
     }
 
     private static ReadOnlySpan<byte> Data(byte key) => new[] { key };
@@ -454,14 +509,14 @@ public class SlottedArrayTests
     public void Move_to_8()
     {
         var original = new SlottedArray(stackalloc byte[512]);
-        var copy0 = new SlottedArray(stackalloc byte[64]);
-        var copy1 = new SlottedArray(stackalloc byte[64]);
-        var copy2 = new SlottedArray(stackalloc byte[64]);
-        var copy3 = new SlottedArray(stackalloc byte[64]);
-        var copy4 = new SlottedArray(stackalloc byte[64]);
-        var copy5 = new SlottedArray(stackalloc byte[64]);
-        var copy6 = new SlottedArray(stackalloc byte[64]);
-        var copy7 = new SlottedArray(stackalloc byte[64]);
+        var copy0 = new SlottedArray(stackalloc byte[128]);
+        var copy1 = new SlottedArray(stackalloc byte[128]);
+        var copy2 = new SlottedArray(stackalloc byte[128]);
+        var copy3 = new SlottedArray(stackalloc byte[128]);
+        var copy4 = new SlottedArray(stackalloc byte[128]);
+        var copy5 = new SlottedArray(stackalloc byte[128]);
+        var copy6 = new SlottedArray(stackalloc byte[128]);
+        var copy7 = new SlottedArray(stackalloc byte[128]);
 
         var key0 = NibblePath.Empty;
         var key1 = NibblePath.Parse("1");
@@ -635,13 +690,15 @@ file static class FixedMapTestExtensions
 
     public static void GetAssert(this SlottedArray map, in ReadOnlySpan<byte> key, ReadOnlySpan<byte> expected)
     {
-        map.TryGet(NibblePath.FromKey(key), out var actual).Should().BeTrue();
+        var retrieved = map.TryGet(NibblePath.FromKey(key), out var actual);
+        retrieved.Should().BeTrue();
         actual.SequenceEqual(expected).Should().BeTrue("Actual data should equal expected");
     }
 
     public static void GetAssert(this SlottedArray map, in NibblePath key, ReadOnlySpan<byte> expected)
     {
-        map.TryGet(key, out var actual).Should().BeTrue();
+        var retrieved = map.TryGet(key, out var actual);
+        retrieved.Should().BeTrue();
         actual.SequenceEqual(expected).Should().BeTrue("Actual data should equal expected");
     }
 
