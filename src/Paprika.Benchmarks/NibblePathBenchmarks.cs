@@ -25,7 +25,16 @@ public class NibblePathBenchmarks
     }
 
     [Benchmark(OperationsPerInvoke = 2)]
-    public bool Equals_equal_sliced()
+    [Arguments(0, 1)]
+    [Arguments(1, 1)]
+    [Arguments(0, 16)]
+    [Arguments(1, 16)]
+    [Arguments(0, 32)]
+    [Arguments(1, 32)]
+    [Arguments(0, 48)]
+    [Arguments(1, 48)]
+    [Arguments(0, NibblePath.KeccakNibbleCount)]
+    public bool Equals(int slice, int length)
     {
         // hammer odd and not
         var a = NibblePath.FromKey(A1);
