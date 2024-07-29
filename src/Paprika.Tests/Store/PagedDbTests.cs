@@ -177,8 +177,8 @@ public class PagedDbTests
                 BinaryPrimitives.WriteInt32LittleEndian(expected, i);
 
                 var storageCell = Key.StorageCell(NibblePath.FromKey(keccak), keccak);
-                read.TryGet(storageCell, out var actual)
-                    .Should().BeTrue();
+                var retrieved = read.TryGet(storageCell, out var actual);
+                retrieved.Should().BeTrue();
 
                 actual.SequenceEqual(expected).Should().BeTrue();
             }

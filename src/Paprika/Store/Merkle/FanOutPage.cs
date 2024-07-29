@@ -122,7 +122,9 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
                 continue;
             }
 
-            SetInChild(ref child, item.Key, item.RawData, batch);
+
+            var sliced = item.Key.SliceFrom(ConsumedNibbles);
+            SetInChild(ref child, sliced, item.RawData, batch);
             slotted.Delete(item);
         }
     }
