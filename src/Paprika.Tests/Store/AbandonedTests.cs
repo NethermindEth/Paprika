@@ -84,14 +84,14 @@ public class AbandonedTests : BasePageTests
     private const int HistoryDepth = 2;
 
     [TestCase(20, 1, 10_000, false, TestName = "Accounts - 1")]
-    [TestCase(464, 100, 10_000, false, TestName = "Accounts - 100")]
-    [TestCase(17607, 4000, 200, false,
+    [TestCase(428, 100, 10_000, false, TestName = "Accounts - 100")]
+    [TestCase(16447, 4000, 200, false,
         TestName = "Accounts - 4000 to get a bit reuse",
         Category = Categories.LongRunning)]
-    [TestCase(43978, 10_000, 50, false,
+    [TestCase(41074, 10_000, 50, false,
         TestName = "Accounts - 10000 to breach the AbandonedPage",
         Category = Categories.LongRunning)]
-    [TestCase(98577, 20_000, 50, true,
+    [TestCase(97810, 20_000, 50, true,
         TestName = "Storage - 20_000 accounts with a single storage slot",
         Category = Categories.LongRunning)]
     public async Task Reuse_in_limited_environment(int pageCount, int accounts, int repeats, bool isStorage)
@@ -99,7 +99,7 @@ public class AbandonedTests : BasePageTests
         var keccaks = Initialize(accounts);
 
         // set big value
-        var accountValue = new byte[3000];
+        var accountValue = new byte[2048];
         new Random(17).NextBytes(accountValue);
 
         using var db = PagedDb.NativeMemoryDb(pageCount * Page.PageSize, HistoryDepth);
