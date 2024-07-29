@@ -8,7 +8,7 @@ public struct MerkleNodes
 {
     private const int ConsumedNibbles = 2;
     private const int MerkleKeysPerPage = 6;
-    
+
     // 4 to align to 8
     private const int Count = 4;
     public const int Size = DbAddress.Size * Count;
@@ -41,7 +41,7 @@ public struct MerkleNodes
 
         return true;
     }
-    
+
     public bool TryGet(scoped in NibblePath key, out ReadOnlySpan<byte> data, IReadOnlyBatchContext batch)
     {
         if (key.Length >= ConsumedNibbles)
@@ -49,7 +49,7 @@ public struct MerkleNodes
             data = default;
             return false;
         }
-        
+
         var id = GetId(key);
         ref var bucket = ref Buckets[id / MerkleKeysPerPage];
 
@@ -57,7 +57,7 @@ public struct MerkleNodes
         var map = page.Map;
 
         map.TryGet(id, out data);
-        
+
         // Always return true as this is a check whether the component was able to proceed with the query.
         return true;
     }

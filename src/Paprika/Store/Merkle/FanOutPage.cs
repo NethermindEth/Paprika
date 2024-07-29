@@ -38,7 +38,7 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
         {
             return page;
         }
-        
+
         var isDelete = data.IsEmpty;
 
         Debug.Assert(key.Length >= ConsumedNibbles, "Key is meant for the next level");
@@ -72,14 +72,14 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
         {
             // Try set again
             if (slotted.TrySet(key, data))
-                return page;    
+                return page;
         }
 
-        // None of the existing children accepted enough data to allow to store it
-        FlushDownToNew(slotted, batch);
-
-        // Room is provided, just set.
-        slotted.Set(key, data);
+        // Try create new till flushed down
+        do
+        {
+            FlushDownToTheBiggestNewChild(slotted, batch);
+        } while (slotted.TrySet(key, data) == false);
 
         return page;
     }
@@ -87,7 +87,7 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
     private bool TryFlushDownToExisting(in SlottedArray slotted, IBatchContext batch)
     {
         var anyFlushes = false;
-        
+
         foreach (var item in slotted.EnumerateAll())
         {
             var index = GetIndex(item.Key);
@@ -104,20 +104,50 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
 
         return anyFlushes;
     }
-    
-    private void FlushDownToNew(in SlottedArray slotted, IBatchContext batch)
+
+    private void FlushDownToTheBiggestNewChild(in SlottedArray slotted, IBatchContext batch)
     {
+        var biggest = FindMostFrequentIndex(slotted);
+
+        ref var child = ref Data.Buckets[biggest];
+
+        Debug.Assert(child.IsNull, "Only non existing should be scanned after TryFlush above");
+
+        // Gather stats first
         foreach (var item in slotted.EnumerateAll())
         {
             var index = GetIndex(item.Key);
-            ref var addr = ref Data.Buckets[index];
+            if (index != biggest)
+            {
+                continue;
+            }
 
-            Debug.Assert(addr.IsNull, "Only keys that were not previously flushed down should be in the map");
-
-            var sliced = item.Key.SliceFrom(ConsumedNibbles);
-            SetInChild(ref addr, sliced, item.RawData, batch);
+            SetInChild(ref child, item.Key, item.RawData, batch);
             slotted.Delete(item);
         }
+    }
+
+    private static int FindMostFrequentIndex(in SlottedArray map)
+    {
+        // Gather stats first
+        const int count = 256;
+        Span<ushort> stats = stackalloc ushort[count];
+
+        foreach (var item in map.EnumerateAll())
+        {
+            stats[GetIndex(item.Key)]++;
+        }
+
+        var biggestIndex = 0;
+        for (int i = 1; i < count; i++)
+        {
+            if (stats[i] > stats[biggestIndex])
+            {
+                biggestIndex = i;
+            }
+        }
+
+        return biggestIndex;
     }
 
     private void SetInChild(ref DbAddress addr, in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
@@ -146,7 +176,7 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
     {
         if (Data.MerkleNodes.TryGet(key, out result, batch))
             return true;
-        
+
         // Try search write-through data
         if (new SlottedArray(Data.DataSpan).TryGet(key, out result))
         {

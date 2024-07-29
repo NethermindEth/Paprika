@@ -6,8 +6,10 @@ using Paprika.Data;
 namespace Paprika.Store.Merkle;
 
 /// <summary>
-/// Represents the lowest level of the Paprika tree. No buckets, no nothing, just data.
+/// A Merkle leaf page that keeps two levels of Merkle data in <see cref="Payload.MerkleNodes"/>
+/// while the rest in <see cref="Map"/>. Once it cannot contain the data, it turns into a <see cref="FanOutPage"/>.  
 /// </summary>
+/// <param name="page"></param>
 [method: DebuggerStepThrough]
 public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 {
@@ -24,6 +26,11 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
             // the page is from another batch, meaning, it's readonly. Copy
             var writable = batch.GetWritableCopy(page);
             return new LeafPage(writable).Set(key, data, batch);
+        }
+
+        if (Data.MerkleNodes.TrySet(key, data, batch))
+        {
+            return page;
         }
 
         if (data.IsEmpty)
@@ -59,16 +66,38 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         return updated.Set(key, data, batch);
     }
 
+    public bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
+    {
+        if (Data.MerkleNodes.TryGet(key, out result, batch))
+            return true;
+
+        // Try search write-through data
+        return new SlottedArray(Data.DataSpan).TryGet(key, out result);
+    }
+
+    /// <summary>
+    /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
+    /// These buckets are used to store up to <see cref="DataSize"/> entries before flushing them down as other pages
+    /// like page split.
+    /// </summary>
     [StructLayout(LayoutKind.Explicit, Size = Size)]
     private struct Payload
     {
         private const int Size = Page.PageSize - PageHeader.Size;
-        private const int DataSize = Size;
+
+        /// <summary>
+        /// The size of the raw byte data held in this page. Must be long aligned.
+        /// </summary>
+        private const int DataSize = Size - MerkleNodes.Size;
+
+        private const int DataOffset = Size - DataSize;
+
+        [FieldOffset(0)] public MerkleNodes MerkleNodes;
 
         /// <summary>
         /// The first item of map of frames to allow ref to it.
         /// </summary>
-        [FieldOffset(0)] private byte DataStart;
+        [FieldOffset(DataOffset)] private byte DataStart;
 
         /// <summary>
         /// Writable area.
@@ -76,15 +105,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
         public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
     }
 
-    public bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
-    {
-        batch.AssertRead(Header);
-
-        return Map.TryGet(key, out result);
-    }
-
     private SlottedArray Map => new(Data.DataSpan);
-
 
     public void Report(IReporter reporter, IPageResolver resolver, int pageLevel, int trimmedNibbles)
     {
