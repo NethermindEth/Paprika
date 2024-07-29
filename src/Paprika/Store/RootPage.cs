@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Store.Merkle;
 
 namespace Paprika.Store;
 
@@ -69,7 +70,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         private DbAddress StoragePayload;
 
 
-        public FanOutList<MerkleFanOutPage, MerkleFanOutType> Storage
+        public FanOutList<Merkle.FanOutPage, MerkleFanOutType> Storage
         {
             [DebuggerStepThrough]
             get => new(MemoryMarshal.CreateSpan(ref StoragePayload, FanOutList.FanOut));
@@ -104,7 +105,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         var stateRoot = Data.StateRoot;
         if (stateRoot.IsNull == false)
         {
-            new MerkleStateRootPage(resolver.GetAt(stateRoot)).Accept(visitor, resolver, stateRoot);
+            new StateRootPage(resolver.GetAt(stateRoot)).Accept(visitor, resolver, stateRoot);
         }
 
         Data.Ids.Accept(visitor, resolver);
@@ -127,7 +128,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
                 return false;
             }
 
-            return new MerkleStateRootPage(batch.GetAt(Data.StateRoot)).TryGet(batch, key.Path, out result);
+            return new StateRootPage(batch.GetAt(Data.StateRoot)).TryGet(batch, key.Path, out result);
         }
 
         Span<byte> idSpan = stackalloc byte[sizeof(uint)];
@@ -239,7 +240,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
     private static void SetAtRoot(IBatchContext batch, in NibblePath path, in ReadOnlySpan<byte> rawData, ref DbAddress root)
     {
         var data = batch.TryGetPageAlloc(ref root, PageType.Standard);
-        var updated = new MerkleStateRootPage(data).Set(path, rawData, batch);
+        var updated = new StateRootPage(data).Set(path, rawData, batch);
         root = batch.GetAddress(updated);
     }
 }

@@ -3,15 +3,15 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
 
-namespace Paprika.Store;
+namespace Paprika.Store.Merkle;
 
 /// <summary>
 /// Represents the lowest level of the Paprika tree. No buckets, no nothing, just data.
 /// </summary>
 [method: DebuggerStepThrough]
-public readonly unsafe struct MerkleLeafPage(Page page) : IPageWithData<MerkleLeafPage>
+public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 {
-    public static MerkleLeafPage Wrap(Page page) => Unsafe.As<Page, MerkleLeafPage>(ref page);
+    public static LeafPage Wrap(Page page) => Unsafe.As<Page, LeafPage>(ref page);
 
     private ref PageHeader Header => ref page.Header;
 
@@ -23,7 +23,7 @@ public readonly unsafe struct MerkleLeafPage(Page page) : IPageWithData<MerkleLe
         {
             // the page is from another batch, meaning, it's readonly. Copy
             var writable = batch.GetWritableCopy(page);
-            return new MerkleLeafPage(writable).Set(key, data, batch);
+            return new LeafPage(writable).Set(key, data, batch);
         }
 
         if (data.IsEmpty)
@@ -48,11 +48,11 @@ public readonly unsafe struct MerkleLeafPage(Page page) : IPageWithData<MerkleLe
         header.PageType = PageType.MerkleFanOut;
         header.Level = page.Header.Level; // same level
 
-        var updated = new MerkleFanOutPage(@new);
+        var updated = new FanOutPage(@new);
 
         foreach (var item in Map.EnumerateAll())
         {
-            updated = new MerkleFanOutPage(updated.Set(item.Key, item.RawData, batch));
+            updated = new FanOutPage(updated.Set(item.Key, item.RawData, batch));
         }
 
         // Set this value and return data page

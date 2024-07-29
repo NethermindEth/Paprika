@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 using Paprika.Data;
 using Paprika.Merkle;
 
-namespace Paprika.Store;
+namespace Paprika.Store.Merkle;
 
 /// <summary>
 /// A Merkle fan-out page keeps two levels of Merkle data in the overflow pages
@@ -12,9 +12,9 @@ namespace Paprika.Store;
 /// </summary>
 /// <param name="page"></param>
 [method: DebuggerStepThrough]
-public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<MerkleFanOutPage>
+public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
 {
-    public static MerkleFanOutPage Wrap(Page page) => Unsafe.As<Page, MerkleFanOutPage>(ref page);
+    public static FanOutPage Wrap(Page page) => Unsafe.As<Page, FanOutPage>(ref page);
 
     private const int ConsumedNibbles = ComputeMerkleBehavior.SkipRlpMemoizationForTopLevelsCount;
     private const int BucketCount = 16 * 16;
@@ -31,28 +31,15 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
         {
             // the page is from another batch, meaning, it's readonly. Copy
             var writable = batch.GetWritableCopy(page);
-            return new MerkleFanOutPage(writable).Set(key, data, batch);
+            return new FanOutPage(writable).Set(key, data, batch);
         }
 
-        var isDelete = data.IsEmpty;
-
-        ref var local = ref TryFindLocal(key, out var id);
-        if (Unsafe.IsNullRef(ref local) == false)
+        if (Data.MerkleNodes.TrySet(key, data, batch))
         {
-            var p = new UShortPage(batch.EnsureWritableExists(ref local));
-            var map = p.Map;
-
-            if (isDelete)
-            {
-                map.Delete(id);
-            }
-            else
-            {
-                map.Set(id, data);
-            }
-
             return page;
         }
+        
+        var isDelete = data.IsEmpty;
 
         Debug.Assert(key.Length >= ConsumedNibbles, "Key is meant for the next level");
 
@@ -67,29 +54,29 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
             return page;
         }
 
-        // Write through optimization
-        // // If child exists and was written this batch, just pass through
-        // if (childAddr.IsNull == false && batch.WasWritten(childAddr))
-        // {
-        //     // Delete locally to ensure no cache
-        //     slotted.Delete(key);
-        //     SetInChild(ref childAddr, key.SliceFrom(ConsumedNibbles), data, batch);
-        //     return page;
-        // }
+        // Write through optimization for cases
+        // where the child exist and was written during this batch
+        if (childAddr.IsNull == false && batch.WasWritten(childAddr))
+        {
+            slotted.Delete(key);
+            SetInChild(ref childAddr, key.SliceFrom(ConsumedNibbles), data, batch);
+            return page;
+        }
 
         // Try set in page in write-through cache
         if (slotted.TrySet(key, data))
             return page;
 
         // Map is filled, flush down items, first to existent children
-        FlushDown(slotted, batch, true);
+        if (TryFlushDownToExisting(slotted, batch))
+        {
+            // Try set again
+            if (slotted.TrySet(key, data))
+                return page;    
+        }
 
-        // Try set again
-        if (slotted.TrySet(key, data))
-            return page;
-
-        // This means that there are child pages that should be flushed but were not
-        FlushDown(slotted, batch, false);
+        // None of the existing children accepted enough data to allow to store it
+        FlushDownToNew(slotted, batch);
 
         // Room is provided, just set.
         slotted.Set(key, data);
@@ -97,15 +84,35 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
         return page;
     }
 
-    private void FlushDown(in SlottedArray slotted, IBatchContext batch, bool toExistingOnly)
+    private bool TryFlushDownToExisting(in SlottedArray slotted, IBatchContext batch)
+    {
+        var anyFlushes = false;
+        
+        foreach (var item in slotted.EnumerateAll())
+        {
+            var index = GetIndex(item.Key);
+            ref var addr = ref Data.Buckets[index];
+
+            if (addr.IsNull)
+                continue;
+
+            var sliced = item.Key.SliceFrom(ConsumedNibbles);
+            SetInChild(ref addr, sliced, item.RawData, batch);
+            slotted.Delete(item);
+            anyFlushes = true;
+        }
+
+        return anyFlushes;
+    }
+    
+    private void FlushDownToNew(in SlottedArray slotted, IBatchContext batch)
     {
         foreach (var item in slotted.EnumerateAll())
         {
             var index = GetIndex(item.Key);
             ref var addr = ref Data.Buckets[index];
 
-            if (toExistingOnly && addr.IsNull)
-                continue;
+            Debug.Assert(addr.IsNull, "Only keys that were not previously flushed down should be in the map");
 
             var sliced = item.Key.SliceFrom(ConsumedNibbles);
             SetInChild(ref addr, sliced, item.RawData, batch);
@@ -121,7 +128,7 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
 
             child.Header.Level = (byte)(Header.Level + ConsumedNibbles);
             child.Header.PageType = PageType.MerkleLeaf;
-            new MerkleLeafPage(child).Set(key, data, batch);
+            new LeafPage(child).Set(key, data, batch);
 
             return;
         }
@@ -129,35 +136,18 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
         var existing = batch.GetAt(addr);
         var updated =
             existing.Header.PageType == PageType.MerkleLeaf
-                ? new MerkleLeafPage(existing).Set(key, data, batch)
-                : new MerkleFanOutPage(existing).Set(key, data, batch);
+                ? new LeafPage(existing).Set(key, data, batch)
+                : new FanOutPage(existing).Set(key, data, batch);
 
         addr = batch.GetAddress(updated);
     }
 
-    private ref DbAddress TryFindLocal(in NibblePath key, out ushort id)
-    {
-        if (key.Length >= ConsumedNibbles)
-        {
-            id = default;
-            return ref Unsafe.NullRef<DbAddress>();
-        }
-
-        id = (ushort)(key.IsEmpty ? 0 : key.FirstNibble + 1);
-        const int merklePerPage = 6;
-        return ref Data.LocalMerkleNodes[id / merklePerPage];
-    }
-
     public bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
     {
-        ref var local = ref TryFindLocal(key, out var id);
-        if (Unsafe.IsNullRef(ref local) == false)
-        {
-            var p = new UShortPage(batch.GetAt(local));
-            return p.Map.TryGet(id, out result);
-        }
-
-        // Try search write-through
+        if (Data.MerkleNodes.TryGet(key, out result, batch))
+            return true;
+        
+        // Try search write-through data
         if (new SlottedArray(Data.DataSpan).TryGet(key, out result))
         {
             return true;
@@ -176,8 +166,8 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
         var sliced = key.SliceFrom(ConsumedNibbles);
 
         return child.Header.PageType == PageType.MerkleLeaf
-            ? new MerkleLeafPage(child).TryGet(batch, sliced, out result)
-            : new MerkleFanOutPage(child).TryGet(batch, sliced, out result);
+            ? new LeafPage(child).TryGet(batch, sliced, out result)
+            : new FanOutPage(child).TryGet(batch, sliced, out result);
     }
 
     /// <summary>
@@ -190,13 +180,11 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
     {
         private const int Size = Page.PageSize - PageHeader.Size;
         private const int BucketSize = BucketCount * DbAddress.Size;
-        private const int LocalMerkleNodeCount = 4; // 4 to align to 8
-        private const int LocalMerkleNodeSize = DbAddress.Size * LocalMerkleNodeCount;
 
         /// <summary>
         /// The size of the raw byte data held in this page. Must be long aligned.
         /// </summary>
-        private const int DataSize = Size - BucketSize - LocalMerkleNodeSize;
+        private const int DataSize = Size - BucketSize - MerkleNodes.Size;
 
         private const int DataOffset = Size - DataSize;
 
@@ -207,8 +195,7 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
 
         public Span<DbAddress> Buckets => MemoryMarshal.CreateSpan(ref Bucket, BucketCount);
 
-        [FieldOffset(BucketSize)] private DbAddress LocalMerkleNode;
-        public Span<DbAddress> LocalMerkleNodes => MemoryMarshal.CreateSpan(ref LocalMerkleNode, LocalMerkleNodeCount);
+        [FieldOffset(BucketSize)] public MerkleNodes MerkleNodes;
 
         /// <summary>
         /// The first item of map of frames to allow ref to it.
@@ -233,9 +220,9 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
                 var child = resolver.GetAt(bucket);
 
                 if (child.Header.PageType == PageType.MerkleLeaf)
-                    new MerkleLeafPage(child).Report(reporter, resolver, lvl, consumedNibbles);
+                    new LeafPage(child).Report(reporter, resolver, lvl, consumedNibbles);
                 else
-                    new MerkleFanOutPage(child).Report(reporter, resolver, lvl, consumedNibbles);
+                    new FanOutPage(child).Report(reporter, resolver, lvl, consumedNibbles);
             }
         }
 
@@ -256,9 +243,9 @@ public readonly unsafe struct MerkleFanOutPage(Page page) : IPageWithData<Merkle
 
                 var child = resolver.GetAt(bucket);
                 if (child.Header.PageType == PageType.MerkleLeaf)
-                    new MerkleLeafPage(child).Accept(visitor, resolver, bucket);
+                    new LeafPage(child).Accept(visitor, resolver, bucket);
                 else
-                    new MerkleFanOutPage(child).Accept(visitor, resolver, bucket);
+                    new FanOutPage(child).Accept(visitor, resolver, bucket);
             }
         }
     }

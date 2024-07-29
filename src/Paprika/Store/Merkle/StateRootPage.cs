@@ -4,12 +4,12 @@ using System.Runtime.InteropServices;
 using Paprika.Data;
 using Paprika.Merkle;
 
-namespace Paprika.Store;
+namespace Paprika.Store.Merkle;
 
 [method: DebuggerStepThrough]
-public readonly unsafe struct MerkleStateRootPage(Page page) : IPageWithData<MerkleStateRootPage>
+public readonly unsafe struct StateRootPage(Page page) : IPageWithData<StateRootPage>
 {
-    public static MerkleStateRootPage Wrap(Page page) => Unsafe.As<Page, MerkleStateRootPage>(ref page);
+    public static StateRootPage Wrap(Page page) => Unsafe.As<Page, StateRootPage>(ref page);
 
     private const int ConsumedNibbles = ComputeMerkleBehavior.SkipRlpMemoizationForTopLevelsCount;
     private const int BucketCount = 16 * 16;
@@ -27,7 +27,7 @@ public readonly unsafe struct MerkleStateRootPage(Page page) : IPageWithData<Mer
         {
             // the page is from another batch, meaning, it's readonly. Copy
             var writable = batch.GetWritableCopy(page);
-            return new MerkleStateRootPage(writable).Set(key, data, batch);
+            return new StateRootPage(writable).Set(key, data, batch);
         }
 
         if (key.Length < ConsumedNibbles)
@@ -56,11 +56,11 @@ public readonly unsafe struct MerkleStateRootPage(Page page) : IPageWithData<Mer
             var child = batch.GetNewPage(out addr, true);
             child.Header.Level = ConsumedNibbles;
             child.Header.PageType = PageType.MerkleFanOut;
-            new MerkleFanOutPage(child).Set(sliced, data, batch);
+            new FanOutPage(child).Set(sliced, data, batch);
         }
         else
         {
-            addr = batch.GetAddress(new MerkleFanOutPage(batch.GetAt(addr)).Set(sliced, data, batch));
+            addr = batch.GetAddress(new FanOutPage(batch.GetAt(addr)).Set(sliced, data, batch));
         }
 
         return page;
@@ -117,7 +117,7 @@ public readonly unsafe struct MerkleStateRootPage(Page page) : IPageWithData<Mer
             return false;
         }
 
-        return new MerkleFanOutPage(batch.GetAt(addr)).TryGet(batch, key.SliceFrom(ConsumedNibbles), out result);
+        return new FanOutPage(batch.GetAt(addr)).TryGet(batch, key.SliceFrom(ConsumedNibbles), out result);
     }
 
     public void Report(IReporter reporter, IPageResolver resolver, int pageLevel, int trimmedNibbles)
@@ -132,7 +132,7 @@ public readonly unsafe struct MerkleStateRootPage(Page page) : IPageWithData<Mer
 
             var child = resolver.GetAt(bucket);
 
-            new MerkleFanOutPage(child).Report(reporter, resolver, lvl, consumedNibbles);
+            new FanOutPage(child).Report(reporter, resolver, lvl, consumedNibbles);
         }
 
         var slotted = new SlottedArray(Data.DataSpan);
@@ -152,7 +152,7 @@ public readonly unsafe struct MerkleStateRootPage(Page page) : IPageWithData<Mer
 
                 var child = resolver.GetAt(bucket);
                 if (child.Header.PageType == PageType.Leaf)
-                    new LeafPage(child).Accept(visitor, resolver, bucket);
+                    new Store.LeafPage(child).Accept(visitor, resolver, bucket);
                 else
                     new DataPage(child).Accept(visitor, resolver, bucket);
             }

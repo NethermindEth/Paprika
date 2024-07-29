@@ -11,6 +11,7 @@ using Paprika.Store.PageManagers;
 using Paprika.Utils;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
+using Paprika.Store.Merkle;
 
 namespace Paprika.Store;
 
@@ -494,7 +495,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
             if (data.StateRoot.IsNull == false)
             {
-                new MerkleStateRootPage(GetAt(root.Data.StateRoot)).Report(state, this, 0, 0);
+                new StateRootPage(GetAt(root.Data.StateRoot)).Report(state, this, 0, 0);
             }
 
             data.Storage.Report(storage, this, 0, 0);
