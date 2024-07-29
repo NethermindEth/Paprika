@@ -104,6 +104,29 @@ public class UshortSlottedArrayTests
             key++;
         }
     }
+
+    [Test]
+    public void EnumerateAll()
+    {
+        // by trial and error, found the smallest value that will allow to put these two
+        Span<byte> span = stackalloc byte[24];
+        var map = new UShortSlottedArray(span);
+
+        map.SetAssert(Key0, Data0);
+        map.SetAssert(Key1, Data1);
+
+        var e = map.EnumerateAll().GetEnumerator();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Should().Be(Key0);
+        e.Current.RawData.SequenceEqual(Data0).Should().BeTrue();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Should().Be(Key1);
+        e.Current.RawData.SequenceEqual(Data1).Should().BeTrue();
+
+        e.MoveNext().Should().BeFalse();
+    }
 }
 
 file static class Extensions

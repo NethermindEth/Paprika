@@ -57,10 +57,19 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
         var updated = new FanOutPage(@new);
 
+        // Set values
         foreach (var item in Map.EnumerateAll())
         {
             updated = new FanOutPage(updated.Set(item.Key, item.RawData, batch));
         }
+
+        // // Set Merkle
+        // foreach (var item in Data.MerkleNodes.EnumerateAll())
+        // {
+        //     updated = new FanOutPage(updated.Set(item.Key, item.RawData, batch));
+        // }
+        //
+        // Data.MerkleNodes
 
         // Set this value and return data page
         return updated.Set(key, data, batch);

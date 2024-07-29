@@ -93,6 +93,68 @@ public readonly ref struct UShortSlottedArray
         return true;
     }
 
+    public Enumerator EnumerateAll() =>
+        new(this);
+
+    public ref struct Enumerator
+    {
+        /// <summary>The map being enumerated.</summary>
+        private readonly UShortSlottedArray _map;
+
+        /// <summary>The next index to yield.</summary>
+        private int _index;
+
+        private Item _current;
+
+        internal Enumerator(UShortSlottedArray map)
+        {
+            _map = map;
+            _index = -1;
+        }
+
+        /// <summary>Advances the enumerator to the next element of the span.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool MoveNext()
+        {
+            var index = _index + 1;
+            var to = _map.Count;
+
+            ref var slot = ref _map[index];
+
+            while (index < to && slot.IsDeleted) // filter out deleted
+            {
+                // move by 1
+                index += 1;
+                slot = ref _map[index];
+            }
+
+            if (index < to)
+            {
+                _index = index;
+                _current = new Item(slot.Key, _map.GetSlotPayload(ref slot), _index);
+                return true;
+            }
+
+            return false;
+        }
+
+        public readonly Item Current => _current;
+
+        public readonly void Dispose()
+        {
+        }
+
+        public readonly ref struct Item(ushort key, ReadOnlySpan<byte> rawData, int index)
+        {
+            public int Index { get; } = index;
+            public ushort Key { get; } = key;
+            public ReadOnlySpan<byte> RawData { get; } = rawData;
+        }
+
+        // a shortcut to not allocate, just copy the enumerator
+        public readonly Enumerator GetEnumerator() => this;
+    }
+
     private readonly ref Slot this[int index]
     {
         get
