@@ -751,10 +751,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
         public override bool WasWritten(DbAddress addr) => _written.Contains(addr);
 
-        public override void RegisterForFutureReuse(Page page)
+        public void RegisterForFutureReuse(DbAddress addr)
         {
-            var addr = _db.GetAddress(page);
-
 #if TRACKING_REUSED_PAGES
             // register at this batch
             ref var batchId =
@@ -769,6 +767,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 #endif
             _abandoned.Add(addr);
         }
+
+        public override void RegisterForFutureReuse(Page page) => RegisterForFutureReuse(_db.GetAddress(page));
 
         public override void NoticeAbandonedPageReused(Page page)
         {
