@@ -39,8 +39,6 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
             return page;
         }
 
-        var isDelete = data.IsEmpty;
-
         Debug.Assert(key.Length >= ConsumedNibbles, "Key is meant for the next level");
 
         var childIndex = GetIndex(key);
@@ -48,7 +46,7 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
         var slotted = new SlottedArray(Data.DataSpan);
 
         // If it's a delete and child does not exist, delete in-situ
-        if (isDelete && childAddr.IsNull)
+        if (data.IsEmpty && childAddr.IsNull)
         {
             slotted.Delete(key);
             return page;
@@ -75,7 +73,7 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
                 return page;
         }
 
-        // Try create new till flushed down
+        // Try to create a new till there's a space for the new
         do
         {
             FlushDownToTheBiggestNewChild(slotted, batch);

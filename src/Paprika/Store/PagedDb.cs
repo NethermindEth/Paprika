@@ -749,8 +749,6 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             return claimed;
         }
 
-        public override bool WasWritten(DbAddress addr) => _written.Contains(addr);
-
         public void RegisterForFutureReuse(DbAddress addr)
         {
 #if TRACKING_REUSED_PAGES
