@@ -311,7 +311,7 @@ public readonly ref struct SlottedArray /*: IClearable */
     /// <summary>
     /// Gets the aggregated count of entries per nibble.
     /// </summary>
-    public void GatherCountStatistics(Span<ushort> buckets)
+    public void GatherCountStats1Nibble(Span<ushort> buckets)
     {
         Debug.Assert(buckets.Length == BucketCount);
 
@@ -324,6 +324,28 @@ public readonly ref struct SlottedArray /*: IClearable */
             if (slot.IsDeleted == false && slot.HasAtLeastOneNibble)
             {
                 buckets[slot.GetNibble0(GetHashRef(i))] += 1;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the aggregated count of entries for 2 nibble buckets.
+    /// The 0th nibble is shifted left <see cref="NibblePath.NibbleShift"/> then 1st is added.
+    /// </summary>
+    public void GatherCountStats2Nibbles(Span<ushort> buckets)
+    {
+        Debug.Assert(buckets.Length == BucketCount * BucketCount);
+
+        var to = _header.Low / Slot.TotalSize;
+
+        for (var i = 0; i < to; i++)
+        {
+            ref var slot = ref GetSlotRef(i);
+
+            // extract only not deleted and these which have at least one nibble
+            if (slot.IsDeleted == false && slot.HasAtLeastTwoNibbles)
+            {
+                buckets[slot.GetNibble0And1(GetHashRef(i))] += 1;
             }
         }
     }
@@ -720,6 +742,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         private const int HashByteShift = 8;
 
         public bool HasAtLeastOneNibble => KeyPreamble != KeyPreambleEmpty;
+        public bool HasAtLeastTwoNibbles => KeyPreamble >> KeyPreambleLengthShift >= 2;
 
         // Shift by 12, unless it's odd. If odd, shift by 8
         public byte GetNibble0(ushort hash)
@@ -732,6 +755,22 @@ public readonly ref struct SlottedArray /*: IClearable */
             return (byte)(0x0F & (h >> (3 * NibblePath.NibbleShift -
                                         ((Raw >> KeyPreambleShift) & KeyPreambleOddBit) *
                                         NibblePath.NibbleShift)));
+        }
+
+        public byte GetNibble0And1(ushort hash)
+        {
+            var count = KeyPreamble >> KeyPreambleLengthShift;
+            var odd = (Raw >> KeyPreambleShift) & KeyPreambleOddBit;
+
+            // Remove length masks
+            var h = (ushort)(hash ^ GetHashMask(count));
+
+            const int shift = NibblePath.NibbleShift;
+
+            var nibble0 = (byte)(0x0F & (h >> (3 * shift - odd * shift)));
+            var nibble1 = (byte)(0x0F & (h >> (2 * shift - odd * shift)));
+
+            return (byte)((nibble0 << shift) + nibble1);
         }
 
         public byte KeyPreamble

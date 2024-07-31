@@ -133,13 +133,10 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
         const int count = 256;
         Span<ushort> stats = stackalloc ushort[count];
 
-        foreach (var item in map.EnumerateAll())
-        {
-            stats[GetIndex(item.Key)]++;
-        }
+        map.GatherCountStats2Nibbles(stats);
 
         var biggestIndex = 0;
-        for (int i = 1; i < count; i++)
+        for (var i = 1; i < count; i++)
         {
             if (stats[i] > stats[biggestIndex])
             {

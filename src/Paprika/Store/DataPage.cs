@@ -202,7 +202,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
         Span<ushort> stats = stackalloc ushort[count];
 
-        map.GatherCountStatistics(stats);
+        map.GatherCountStats1Nibble(stats);
 
         byte biggestIndex = 0;
         for (byte i = 1; i < count; i++)
