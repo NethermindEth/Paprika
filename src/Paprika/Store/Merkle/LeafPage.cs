@@ -11,13 +11,19 @@ namespace Paprika.Store.Merkle;
 /// </summary>
 /// <param name="page"></param>
 [method: DebuggerStepThrough]
-public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
+public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>, IClearable
 {
     public static LeafPage Wrap(Page page) => Unsafe.As<Page, LeafPage>(ref page);
 
     private ref PageHeader Header => ref page.Header;
 
     private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
+
+    public void Clear()
+    {
+        Data.MerkleNodes.Clear();
+        Map.Clear();
+    }
 
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {

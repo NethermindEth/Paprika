@@ -154,12 +154,18 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
     {
         if (addr.IsNull)
         {
-            var child = batch.GetNewPage(out addr, true);
+            // Do not clear, clear by calling the clear method before set.
+            var child = batch.GetNewPage(out addr, false);
 
             child.Header.Level = (byte)(Header.Level + ConsumedNibbles);
             child.Header.PageType = PageType.MerkleLeaf;
-            new LeafPage(child).Set(key, data, batch);
 
+            var leaf = new LeafPage(child);
+
+            // Required as page was allocated without clearing
+            leaf.Clear();
+
+            leaf.Set(key, data, batch);
             return;
         }
 

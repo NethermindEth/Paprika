@@ -93,6 +93,14 @@ public readonly ref struct UShortSlottedArray
         return true;
     }
 
+    /// <summary>
+    /// Clears the map.
+    /// </summary>
+    public void Clear()
+    {
+        _header = default;
+    }
+
     public Enumerator EnumerateAll() =>
         new(this);
 

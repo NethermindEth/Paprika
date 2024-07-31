@@ -20,6 +20,14 @@ public struct MerkleNodes
 
     private Span<DbAddress> Buckets => MemoryMarshal.CreateSpan(ref Nodes, ActualCount);
 
+    /// <summary>
+    /// Clears the data.
+    /// </summary>
+    public void Clear()
+    {
+        Buckets.Clear();
+    }
+
     public bool TrySet(in NibblePath key, ReadOnlySpan<byte> data, IBatchContext batch)
     {
         if (key.Length >= ConsumedNibbles)
@@ -33,7 +41,7 @@ public struct MerkleNodes
 
         ref var bucket = ref Buckets[at];
 
-        var page = new UShortPage(batch.EnsureWritableExists(ref bucket));
+        var page = GetUShortPage(batch, ref bucket);
         var map = page.Map;
 
         if (data.IsEmpty)
@@ -46,6 +54,28 @@ public struct MerkleNodes
         }
 
         return true;
+    }
+
+    private static UShortPage GetUShortPage(IBatchContext batch, ref DbAddress bucket)
+    {
+        if (!bucket.IsNull)
+        {
+            return new UShortPage(batch.EnsureWritableCopy(ref bucket));
+        }
+
+        // Does not exist, requires getting a new.
+        // Don't clear the page, create it and then clear the underlying map only.
+        var raw = batch.GetNewPage(out bucket, false);
+
+        // Header set
+        raw.Header.PageType = PageType.MerkleLeafUShort;
+
+        var p = new UShortPage(raw);
+
+        // Clear only map
+        p.Map.Clear();
+
+        return p;
     }
 
     public bool TryGet(scoped in NibblePath key, out ReadOnlySpan<byte> data, IReadOnlyBatchContext batch)

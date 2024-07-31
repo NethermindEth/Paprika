@@ -21,7 +21,7 @@ namespace Paprika.Data;
 /// It keeps an internal map, that is aligned with the local hardware vector size, so that even vectors (0th, 2nd, 4th...)
 /// are used for hashes, while odd (1st, 3rd, 5th...) are used to store slots.
 /// </remarks>
-public readonly ref struct SlottedArray
+public readonly ref struct SlottedArray /*: IClearable */
 {
     public const int Alignment = 8;
     public const int HeaderSize = Header.Size;
