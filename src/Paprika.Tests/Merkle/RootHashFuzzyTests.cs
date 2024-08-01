@@ -98,6 +98,8 @@ public class RootHashFuzzyTests
         using var merkle = new ComputeMerkleBehavior(ComputeMerkleBehavior.ParallelismNone);
         await using var blockchain = new Blockchain(db, merkle, null, new CacheBudget.Options(2000, 4), new CacheBudget.Options(2000, 4));
 
+        // blockchain.VerifyDbIntegrityOnCommit();
+
         // set
         generator.Run(blockchain, 513, false, true);
 

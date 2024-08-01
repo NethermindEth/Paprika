@@ -132,5 +132,7 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>, ICl
     public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
         using var scope = visitor.On(this, addr);
+
+        Data.MerkleNodes.Accept(visitor, resolver);
     }
 }

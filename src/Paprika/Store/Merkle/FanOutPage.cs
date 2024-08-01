@@ -280,6 +280,8 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
                 else
                     new FanOutPage(child).Accept(visitor, resolver, bucket);
             }
+
+            Data.MerkleNodes.Accept(visitor, resolver);
         }
     }
 }

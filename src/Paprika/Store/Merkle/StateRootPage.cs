@@ -151,10 +151,17 @@ public readonly unsafe struct StateRootPage(Page page) : IPageWithData<StateRoot
                 }
 
                 var child = resolver.GetAt(bucket);
-                if (child.Header.PageType == PageType.Leaf)
-                    new Store.LeafPage(child).Accept(visitor, resolver, bucket);
-                else
-                    new DataPage(child).Accept(visitor, resolver, bucket);
+                switch (child.Header.PageType)
+                {
+                    case PageType.MerkleFanOut:
+                        new FanOutPage(child).Accept(visitor, resolver, bucket);
+                        break;
+                    case PageType.MerkleLeaf:
+                        new LeafPage(child).Accept(visitor, resolver, bucket);
+                        break;
+                    default:
+                        throw new Exception($"Type {child.Header.PageType} not handled");
+                }
             }
         }
     }

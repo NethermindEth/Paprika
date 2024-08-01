@@ -201,4 +201,15 @@ public struct MerkleNodes
             }
         }
     }
+
+    public void Accept(IPageVisitor visitor, IPageResolver resolver)
+    {
+        foreach (var addr in Buckets)
+        {
+            if (addr.IsNull == false)
+            {
+                using var v = visitor.On(new UShortPage(resolver.GetAt(addr)), addr);
+            }
+        }
+    }
 }
