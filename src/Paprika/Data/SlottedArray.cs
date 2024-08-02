@@ -155,7 +155,6 @@ public readonly ref struct SlottedArray
 
     public int CapacityLeft => _data.Length - _header.Taken;
 
-
     public Enumerator EnumerateAll() =>
         new(this);
 
