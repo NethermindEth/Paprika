@@ -99,7 +99,7 @@ public class AbandonedTests : BasePageTests
         var keccaks = Initialize(accounts);
 
         // set big value
-        var accountValue = new byte[2048];
+        var accountValue = new byte[2900];
         new Random(17).NextBytes(accountValue);
 
         using var db = PagedDb.NativeMemoryDb(pageCount * Page.PageSize, HistoryDepth);
