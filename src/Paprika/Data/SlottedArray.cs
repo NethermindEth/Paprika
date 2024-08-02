@@ -43,6 +43,9 @@ public readonly ref struct SlottedArray
         Debug.Assert(buffer.Length > MinimalSizeWithNoData,
             $"The buffer should be reasonably big, more than {MinimalSizeWithNoData}");
 
+        Debug.Assert(buffer.Length < Slot.MaximumAddressableSize,
+            $"The buffer should be reasonably big, more than {MinimalSizeWithNoData}");
+
         _header = ref Unsafe.As<byte, Header>(ref MemoryMarshal.GetReference(buffer));
         _data = buffer.Slice(Header.Size);
     }
@@ -666,12 +669,12 @@ public readonly ref struct SlottedArray
         /// <summary>
         /// The address currently allows to address 8kb of data 
         /// </summary>
-        private const int MaxSize = 8 * 1024;
+        public const int MaximumAddressableSize = 8 * 1024;
 
         /// <summary>
         /// The addressing requires 13 bits [0-12] to address whole page, leaving 3 bits for other purposes.
         /// </summary>
-        private const ushort AddressMask = MaxSize - 1;
+        private const ushort AddressMask = MaximumAddressableSize - 1;
 
         /// <summary>
         /// The address of this item.
@@ -794,7 +797,7 @@ public readonly ref struct SlottedArray
                     hash = (ushort)(((b & 0x0F) << HashByteShift) +
                                     (Unsafe.Add(ref b, 1) & 0xF0)
                                     + (Length2 << OddLengthShift)
-                                    );
+                        );
                     break;
                 // length 3:
                 case 6:
