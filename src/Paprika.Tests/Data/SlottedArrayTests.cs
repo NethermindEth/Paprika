@@ -620,9 +620,9 @@ public class SlottedArrayTests
         Unique("BE0C2");
 
         // 6 nibbles, with last changed
-        Unique("AD00C3");
-        Unique("AE00B3");
-        Unique("BE00C3");
+        Unique("AD00C4");
+        Unique("AE00B4");
+        Unique("BE00C4");
 
         return;
 
