@@ -16,7 +16,7 @@ namespace Paprika.Store;
 /// - odd index should be read and shifted right by <see cref="HalfByteShift"/>.
 ///         
 /// </remarks>
-public class DbAddressList
+public static class DbAddressList
 {
     public static readonly DbAddress Max = DbAddress.Page(ValueMask);
 
@@ -82,6 +82,45 @@ public class DbAddressList
         public DbAddress this[int index] { get; set; }
         public static abstract int Length { get; }
     }
+
+    public ref struct Enumerator<TList>
+        where TList : struct, IDbAddressList
+    {
+        private readonly ref readonly TList _list;
+        private int _index;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal Enumerator(in TList list)
+        {
+            _list = ref list;
+            _index = -1;
+        }
+
+        /// <summary>Advances the enumerator to the next element of the span.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool MoveNext()
+        {
+            var index = _index + 1;
+            if (index < TList.Length)
+            {
+                _index = index;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>Gets the element at the current position of the enumerator.</summary>
+        public DbAddress Current
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => _list[_index];
+        }
+    }
+
+    public static Enumerator<Of16> GetEnumerator(this in Of16 list) => new(list);
+    public static Enumerator<Of256> GetEnumerator(this in Of256 list) => new(list);
+    public static Enumerator<Of1024> GetEnumerator(this in Of1024 list) => new(list);
 
     [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     public struct Of16 : IDbAddressList
