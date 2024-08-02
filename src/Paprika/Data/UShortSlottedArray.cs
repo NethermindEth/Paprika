@@ -302,8 +302,15 @@ public readonly ref struct UShortSlottedArray
     {
         public const int Size = 4;
 
-        // ItemAddress, requires 12 bits [0-11] to address whole page 
-        private const ushort AddressMask = Page.PageSize - 1;
+        /// <summary>
+        /// The address currently allows to address 8kb of data.
+        /// </summary>
+        public const int MaximumAddressableSize = 8 * 1024;
+
+        /// <summary>
+        /// The addressing requires 13 bits [0-12] to address whole page, leaving 3 bits for other purposes.
+        /// </summary>
+        private const ushort AddressMask = MaximumAddressableSize - 1;
 
         /// <summary>
         /// The address of this item.
@@ -314,7 +321,7 @@ public readonly ref struct UShortSlottedArray
             set => Raw = (ushort)((Raw & ~AddressMask) | value);
         }
 
-        private const ushort DeletedMask = 0b0001_0000_0000_0000;
+        private const ushort DeletedMask = 0b0010_0000_0000_0000;
 
         /// <summary>
         /// The data type contained in this slot.

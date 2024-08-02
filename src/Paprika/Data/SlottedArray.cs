@@ -44,7 +44,7 @@ public readonly ref struct SlottedArray
             $"The buffer should be reasonably big, more than {MinimalSizeWithNoData}");
 
         Debug.Assert(buffer.Length < Slot.MaximumAddressableSize,
-            $"The buffer should be reasonably big, more than {MinimalSizeWithNoData}");
+            $"The buffer should be smaller than {Slot.MaximumAddressableSize}");
 
         _header = ref Unsafe.As<byte, Header>(ref MemoryMarshal.GetReference(buffer));
         _data = buffer.Slice(Header.Size);

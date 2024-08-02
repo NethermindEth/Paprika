@@ -250,7 +250,7 @@ public class SlottedArrayTests
         var random = new Random(seed);
         Span<byte> key = stackalloc byte[4];
 
-        var map = new SlottedArray(new byte[Page.PageSize]);
+        var map = new SlottedArray(new byte[3 * 1024]);
 
         const int count = 257;
 
@@ -281,7 +281,7 @@ public class SlottedArrayTests
             keys[i * keyLength + 1] = i;
         }
 
-        var map = new SlottedArray(new byte[Page.PageSize]);
+        var map = new SlottedArray(new byte[3 * 1024]);
 
         for (var i = 0; i < count; i++)
         {
