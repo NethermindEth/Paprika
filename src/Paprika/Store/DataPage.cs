@@ -78,7 +78,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         var nibble = FindMostFrequentNibble(map);
 
         // Try get the child page
-        ref var address = ref Data.Buckets[nibble];
+        var address = Data.Buckets[nibble];
         Page child;
 
         if (address.IsNull)
@@ -97,7 +97,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         }
 
         child = FlushDown(map, nibble, child, batch);
-        address = batch.GetAddress(child);
+        Data.Buckets[nibble] = batch.GetAddress(child);
 
         // The page has some of the values flushed down, try to add again.
         return Set(key, data, batch);
@@ -225,7 +225,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
     public struct Payload
     {
         public const int Size = Page.PageSize - PageHeader.Size;
-        private const int BucketSize = BucketCount * DbAddress.Size;
+        private const int BucketSize = DbAddressList.Of16.Size;
 
         /// <summary>
         /// The size of the raw byte data held in this page. Must be long aligned.
@@ -234,12 +234,8 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
         private const int DataOffset = Size - DataSize;
 
-        /// <summary>
-        /// The first field of buckets.
-        /// </summary>
-        [FieldOffset(0)] private DbAddress Bucket;
-
-        public Span<DbAddress> Buckets => MemoryMarshal.CreateSpan(ref Bucket, BucketCount);
+        [FieldOffset(0)]
+        public DbAddressList.Of16 Buckets;
 
         /// <summary>
         /// The first item of map of frames to allow ref to it.
@@ -324,8 +320,6 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
                     new DataPage(child).Report(reporter, resolver, pageLevel + 1, trimmedNibbles + 1);
             }
         }
-
-
     }
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)

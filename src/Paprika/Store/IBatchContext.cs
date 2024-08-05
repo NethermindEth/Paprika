@@ -158,4 +158,17 @@ public interface IPageResolver
             }
         }
     }
+
+    void Prefetch<TAddressList>(in TAddressList addresses)
+        where TAddressList : struct, DbAddressList.IDbAddressList
+    {
+        for (var i = 0; i < TAddressList.Length; i++)
+        {
+            var addr = addresses[i];
+            if (!addr.IsNull)
+            {
+                Prefetch(addr);
+            }
+        }
+    }
 }
