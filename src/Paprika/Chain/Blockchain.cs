@@ -973,8 +973,10 @@ public class Blockchain : IAsyncDisposable
             return false;
         }
 
-        public bool IsNonBoundaryHash(in NibblePath accountPath, in NibblePath storagePath)
+        public bool IsNonBoundaryHash(in NibblePath accountPath, in Keccak accountHash, in NibblePath storagePath, out Keccak existingHash)
         {
+            existingHash = Keccak.EmptyTreeHash;
+            
             var key = Key.Raw(accountPath, DataType.Merkle, storagePath);
             using var owner = Get(key);
             if (!owner.Span.IsEmpty)
@@ -983,12 +985,15 @@ public class Blockchain : IAsyncDisposable
                 switch (type)
                 {
                     case Node.Type.Leaf:
-                        return leaf.Path.Length <= 64;
+                        if (leaf.Path.Length > 64) return false;
+                        existingHash = ((ComputeMerkleBehavior)_blockchain._preCommit).GetStorageHash(this, accountHash, storagePath);
+                        return true;
                     default:
+                        existingHash = ((ComputeMerkleBehavior)_blockchain._preCommit).GetStorageHash(this, accountHash, storagePath);
                         return true;
                 }
             }
-            return false;
+            return true;
         }
 
         /// <summary>
@@ -1049,6 +1054,7 @@ public class Blockchain : IAsyncDisposable
         {
             SetImpl(key, payLoad, EntryType.Proof, key.Type == DataType.Account ? _state : _storage);
         }
+
         public void RemoveMerkle(in Key key)
         {
             SetImpl(key, Span<byte>.Empty, EntryType.Persistent, _preCommit);
@@ -1973,9 +1979,7 @@ public class Blockchain : IAsyncDisposable
 #if SNAP_SYNC_SUPPORT
 
             var path = NibblePath.FromKey(account);
-            //if (_current.IsNonBoundaryHash(path, storage, out Keccak existingHash) && existingHash == boundaryNodeKeccak)
-            //    return;
-            if (_current.IsNonBoundaryHash(path, storage))
+            if (_current.IsNonBoundaryHash(path, account, storage, out Keccak existingHash) && existingHash == boundaryNodeKeccak)
                 return;
 
             var payload = SnapSync.WriteBoundaryValue(boundaryNodeKeccak, stackalloc byte[SnapSync.BoundaryValueSize]);
@@ -1998,6 +2002,21 @@ public class Blockchain : IAsyncDisposable
         }
 
         public Keccak GetStorageHash(in Keccak account, in NibblePath path)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void CheckBoundaryProof(in Keccak account, in NibblePath storagePath)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void CreateProofBranch(in Keccak account, in NibblePath storagePath, byte[] childNibbles, Keccak[] childHashes)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void CreateProofExtension(in Keccak account, in NibblePath storagePath, in NibblePath extPath)
         {
             throw new NotImplementedException();
         }
@@ -2141,17 +2160,44 @@ public class Blockchain : IAsyncDisposable
 #if SNAP_SYNC_SUPPORT
 
             var path = NibblePath.FromKey(account);
-            //if (_current.IsNonBoundaryHash(path, storage, out Keccak existingHash) && existingHash == boundaryNodeKeccak)
-            //    return;
-            if (_current.IsNonBoundaryHash(path, storage))
+            if (_current.IsNonBoundaryHash(path, account, storage, out Keccak existingHash) && existingHash == boundaryNodeKeccak)
                 return;
 
+            _current.RemoveMerkle(Key.Raw(path, DataType.Merkle, storage));
             var payload = SnapSync.WriteBoundaryValue(boundaryNodeKeccak, stackalloc byte[SnapSync.BoundaryValueSize]);
-
             _current.SetKeyForProof(Key.StorageCell(path, storage), payload);
 #endif
         }
 
+        public void CreateProofBranch(in Keccak account, in NibblePath storagePath, byte[] childNibbles, Keccak[] childHashes)
+        {
+            Key key = account == Keccak.Zero ? Key.Merkle(storagePath) : Key.Raw(NibblePath.FromKey(account), DataType.Merkle, storagePath);
+
+            NibbleSet set = new NibbleSet();
+            Span<byte> rlpMemoization = stackalloc byte[RlpMemo.Size];
+            RlpMemo memo = new RlpMemo(rlpMemoization);
+
+            for (int i = 0; i < childNibbles.Length; i++)
+            {
+                set[childNibbles[i]] = true;
+                if (childHashes[i] != Keccak.Zero)
+                    memo.Set(childHashes[i], childNibbles[i]);
+            }
+            _current.SetBranch(key, set, memo.Raw);
+        }
+
+        public void CreateProofExtension(in Keccak account, in NibblePath storagePath, in NibblePath extPath)
+        {
+            Key key = account == Keccak.Zero ? Key.Merkle(storagePath) : Key.Raw(NibblePath.FromKey(account), DataType.Merkle, storagePath);
+
+            _current.SetExtension(key, extPath);
+        }
+
+        public void CheckBoundaryProof(in Keccak account, in NibblePath storagePath)
+        {
+            var path = NibblePath.FromKey(account);
+            _current.RemoveMerkle(Key.Raw(path, DataType.Merkle, storagePath));
+        }
 
         public void SetAccount(in Keccak address, in Account account) => _current.SetAccount(address, account);
 
