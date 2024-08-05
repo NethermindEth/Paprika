@@ -17,10 +17,10 @@ namespace Paprika.Store;
 /// <see cref="Payload.StateRoot"/> is <see cref="FanOutPage"/> that splits accounts into 256 buckets.
 /// This makes the updates update more pages, but adds a nice fan out for fast searches.
 /// Account ids:
-/// <see cref="Payload.Ids"/> is a <see cref="FanOutList"/> of <see cref="FanOutPage"/>s. This gives 64k buckets on two levels. Searches should search no more than 3 levels of pages.
+/// <see cref="Payload.Ids"/> is a <see cref="FanOutListOf256{TPage,TPageType}"/> of <see cref="FanOutPage"/>s. This gives 64k buckets on two levels. Searches should search no more than 3 levels of pages.
 ///
 /// Storage:
-/// <see cref="Payload.Storage"/> is a <see cref="FanOutList"/> of <see cref="FanOutPage"/>s. This gives 64k buckets on two levels. 
+/// <see cref="Payload.Storage"/> is a <see cref="FanOutListOf256{TPage,TPageType}"/> of <see cref="FanOutPage"/>s. This gives 64k buckets on two levels. 
 /// </remarks>
 public readonly unsafe struct RootPage(Page root) : IPage
 {
@@ -65,20 +65,20 @@ public readonly unsafe struct RootPage(Page root) : IPage
         /// Storage.
         /// </summary>
         [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size)]
-        private DbAddress StoragePayload;
+        private DbAddressList.Of256 StoragePayload;
 
-        public FanOutList<StorageFanOutPage<DataPage>, StandardType> Storage => new(MemoryMarshal.CreateSpan(ref StoragePayload, FanOutList.FanOut));
+        public FanOutListOf256<StorageFanOutPage<DataPage>, StandardType> Storage => new(ref StoragePayload);
 
         /// <summary>
         /// Identifiers
         /// </summary>
-        [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + FanOutList.Size)]
-        private DbAddress IdsPayload;
+        [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + DbAddressList.Of256.Size)]
+        private DbAddressList.Of256 IdsPayload;
 
-        public FanOutList<FanOutPage, IdentityType> Ids => new(MemoryMarshal.CreateSpan(ref IdsPayload, FanOutList.FanOut));
+        public FanOutListOf256<FanOutPage, IdentityType> Ids => new(ref IdsPayload);
 
         public const int AbandonedStart =
-            DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + FanOutList.Size * 2;
+            DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + DbAddressList.Of256.Size * 2;
 
         /// <summary>
         /// The start of the abandoned pages.
