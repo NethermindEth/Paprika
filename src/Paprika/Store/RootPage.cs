@@ -77,7 +77,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + DbAddressList.Of256.Size)]
         private DbAddressList.Of256 IdsPayload;
 
-        public FanOutListOf256<FanOutPage, IdentityType> Ids => new(ref IdsPayload);
+        public FanOutListOf256<DataPage, IdentityType> Ids => new(ref IdsPayload);
 
         public const int AbandonedStart =
             DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + DbAddressList.Of256.Size * 2;

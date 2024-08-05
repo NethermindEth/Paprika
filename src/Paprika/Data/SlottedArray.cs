@@ -340,7 +340,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         for (var i = 0; i < to; i++)
         {
             ref var slot = ref GetSlotRef(i);
-            
+
             // extract only not deleted and these which have at least one nibble
             if (slot.IsDeleted == false)
             {
@@ -765,7 +765,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         private const int HashByteShift = 8;
 
         public bool HasAtLeastOneNibble => (KeyPreamble >> KeyPreambleLengthShift) > KeyPreambleLength0;
-        
+
         public bool HasAtLeastTwoNibbles(ushort hash, byte preamble)
         {
             return (KeyPreamble >> KeyPreambleLengthShift) switch

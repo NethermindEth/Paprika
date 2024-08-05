@@ -25,7 +25,7 @@ public readonly ref struct FanOutListOf256<TPage, TPageType>(ref DbAddressList.O
             return false;
         }
 
-        return TPage.Wrap(batch.GetAt(addr)).TryGet(batch, key.SliceFrom(ConsumedNibbles), out result);
+        return FanOutPage<TPage, TPageType>.Wrap(batch.GetAt(addr)).TryGet(batch, key.SliceFrom(ConsumedNibbles), out result);
     }
 
     private static int GetIndex(scoped in NibblePath key) => (key.GetAt(0) << NibblePath.NibbleShift) + key.GetAt(1);
@@ -42,15 +42,15 @@ public readonly ref struct FanOutListOf256<TPage, TPageType>(ref DbAddressList.O
             var newPage = batch.GetNewPage(out addr, true);
             _addresses[index] = addr;
 
-            newPage.Header.PageType = TPageType.Type;
-            newPage.Header.Level = 0;
+            newPage.Header.PageType = PageType.FanOutPage;
+            newPage.Header.Level = 2;
 
-            TPage.Wrap(newPage).Set(sliced, data, batch);
+            FanOutPage<TPage, TPageType>.Wrap(newPage).Set(sliced, data, batch);
             return;
         }
 
         // The page exists, update
-        var updated = TPage.Wrap(batch.GetAt(addr)).Set(sliced, data, batch);
+        var updated = FanOutPage<TPage, TPageType>.Wrap(batch.GetAt(addr)).Set(sliced, data, batch);
         _addresses[index] = batch.GetAddress(updated);
     }
 
@@ -63,7 +63,7 @@ public readonly ref struct FanOutListOf256<TPage, TPageType>(ref DbAddressList.O
             var bucket = _addresses[i];
             if (!bucket.IsNull)
             {
-                TPage.Wrap(resolver.GetAt(bucket)).Report(reporter, resolver, level + 1, consumedNibbles);
+                FanOutPage<TPage, TPageType>.Wrap(resolver.GetAt(bucket)).Report(reporter, resolver, level + 1, consumedNibbles);
             }
         }
     }
@@ -75,8 +75,9 @@ public readonly ref struct FanOutListOf256<TPage, TPageType>(ref DbAddressList.O
             var bucket = _addresses[i];
             if (!bucket.IsNull)
             {
-                TPage.Wrap(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
+                FanOutPage<TPage, TPageType>.Wrap(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
             }
         }
     }
 }
+
