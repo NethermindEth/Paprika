@@ -58,9 +58,8 @@ public readonly ref struct FanOutListOf256<TPage, TPageType>(ref DbAddressList.O
     {
         var consumedNibbles = trimmedNibbles + ConsumedNibbles;
 
-        for (var i = 0; i < DbAddressList.Of256.Count; i++)
+        foreach (var bucket in _addresses)
         {
-            var bucket = _addresses[i];
             if (!bucket.IsNull)
             {
                 FanOutPage<TPage, TPageType>.Wrap(resolver.GetAt(bucket)).Report(reporter, resolver, level + 1, consumedNibbles);
@@ -70,9 +69,8 @@ public readonly ref struct FanOutListOf256<TPage, TPageType>(ref DbAddressList.O
 
     public void Accept(IPageVisitor visitor, IPageResolver resolver)
     {
-        for (var i = 0; i < DbAddressList.Of256.Count; i++)
+        foreach (var bucket in _addresses)
         {
-            var bucket = _addresses[i];
             if (!bucket.IsNull)
             {
                 FanOutPage<TPage, TPageType>.Wrap(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
