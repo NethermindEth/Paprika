@@ -21,6 +21,11 @@ public interface IRawState : IReadOnlyWorldState
 
     Keccak GetStorageHash(in Keccak account, in NibblePath path);
 
+    void CheckBoundaryProof(in Keccak account, in NibblePath storagePath);
+
+    void CreateProofBranch(in Keccak account, in NibblePath storagePath, byte[] childNibbles, Keccak[] childHashes);
+    void CreateProofExtension(in Keccak account, in NibblePath storagePath, in NibblePath extPath);
+
     /// <summary>
     /// Commits the pending changes.
     /// </summary>
