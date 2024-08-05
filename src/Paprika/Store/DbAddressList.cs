@@ -34,22 +34,10 @@ public static class DbAddressList
         var odd = index & Oddity;
         var i = index >> 1;
 
-        ref var slot = ref Unsafe.Add(ref b, i * BytesPer2Addresses);
+        ref var slot = ref Unsafe.Add(ref b, i * BytesPer2Addresses +
+                                             odd * ShiftToOdd); // branchless shift for odds
 
-        uint value;
-
-        if (odd == Oddity)
-        {
-            // odd
-            slot = ref Unsafe.Add(ref slot, ShiftToOdd);
-            value = Unsafe.ReadUnaligned<uint>(ref slot) >> HalfByteShift;
-        }
-        else
-        {
-            // even
-            value = Unsafe.ReadUnaligned<uint>(ref slot);
-        }
-
+        uint value = Unsafe.ReadUnaligned<uint>(ref slot) >> (HalfByteShift * odd); // branchless shift for odds 
         return DbAddress.Page(value & ValueMask);
     }
 
