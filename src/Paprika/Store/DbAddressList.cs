@@ -111,6 +111,34 @@ public static class DbAddressList
     public static Enumerator<Of1024> GetEnumerator(this in Of1024 list) => new(list);
 
     [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
+    public struct Of4 : IDbAddressList
+    {
+        public const int Count = 4;
+        public const int Size = DbAddress.Size * Count;
+
+        private DbAddress _b;
+
+        public DbAddress this[int index]
+        {
+            get
+            {
+                Debug.Assert(index is >= 0 and < Count);
+                return Unsafe.Add(ref _b, index);
+            }
+            set
+            {
+                Debug.Assert(index is >= 0 and < Count);
+                Unsafe.Add(ref _b, index) = value;
+            }
+        }
+
+        public static int Length => Count;
+
+        public ReadOnlySpan<DbAddress>.Enumerator GetEnumerator() =>
+            MemoryMarshal.CreateReadOnlySpan(ref _b, Count).GetEnumerator();
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     public struct Of16 : IDbAddressList
     {
         public const int Count = 16;

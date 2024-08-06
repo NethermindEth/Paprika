@@ -499,7 +499,6 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             }
 
             data.Storage.Report(storage, this, 0, 0);
-            data.Ids.Report(ids, this, 0, 0);
         }
 
         public uint BatchId => root.Header.BatchId;
