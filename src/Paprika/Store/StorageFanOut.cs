@@ -34,7 +34,7 @@ public static class StorageFanOut
 
         var at = (key.UnsafeSpan << TwoNibbleShift) + key.GetAt(2) & NibbleHalfLower;
 
-        Debug.Assert(at < DbAddressList.Of1024.Count);
+        Debug.Assert(0 <= at && at < DbAddressList.Of1024.Count);
         return at;
     }
 
