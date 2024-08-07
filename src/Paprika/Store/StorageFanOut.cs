@@ -79,6 +79,7 @@ public static class StorageFanOut
         {
             Debug.Assert(key.IsOdd == false);
 
+            // Consume 2 first nibbles as raw byte, shift and add lower half
             var at = (key.UnsafeSpan << NibbleHalfShift) + (key.GetAt(2) & NibbleHalfLower);
 
             Debug.Assert(0 <= at && at < DbAddressList.Of1024.Count);
@@ -203,14 +204,23 @@ public static class StorageFanOut
                 return hi;
             }
 
-            var at = (hi << TwoNibbleShift) + Unsafe.Add(ref key.UnsafeSpan, 1);
+            var at = (hi << TwoNibbleShift) + // 0.5 nibble
+                     (key.GetAt(1) << NibblePath.NibbleShift) + // 1 nibble 
+                     key.GetAt(2); // 1 nibble
             Debug.Assert(0 <= at && at < DbAddressList.Of1024.Count);
 
             sliced = key.SliceFrom(Level1ConsumedNibblesForStorage);
             return at;
         }
 
+        /// <summary>
+        /// This is effectively 0.5 of the nibble as the 1.5 is consumed on the higher level.
+        /// </summary>
         private const int Level1ConsumedNibblesForIds = 1;
+
+        /// <summary>
+        /// This is effectively 1.5 of the nibble as the 1.5 is consumed on the higher level.
+        /// </summary>
         private const int Level1ConsumedNibblesForStorage = 3;
 
         public void Report(IReporter reporter, IPageResolver resolver, int pageLevel, int trimmedNibbles)

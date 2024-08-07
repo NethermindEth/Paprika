@@ -63,7 +63,10 @@ public class RootHashFuzzyTests
 
     [Test]
     public async Task CalculateStateRootHash(
-        [Values(nameof(Accounts_1_Storage_100), nameof(Accounts_100_Storage_1), nameof(Accounts_1000_Storage_1))] string test,
+        [Values(
+            nameof(Accounts_1_Storage_100), nameof(Accounts_100_Storage_1),
+            nameof(Accounts_1000_Storage_1))]
+        string test,
         [Values(int.MaxValue, 23)] int commitEvery,
         [Values(true, false)] bool parallel)
     {
@@ -96,7 +99,8 @@ public class RootHashFuzzyTests
 
         using var db = PagedDb.NativeMemoryDb(1024 * 1024 * 1024, 2);
         using var merkle = new ComputeMerkleBehavior(ComputeMerkleBehavior.ParallelismNone);
-        await using var blockchain = new Blockchain(db, merkle, null, new CacheBudget.Options(2000, 4), new CacheBudget.Options(2000, 4));
+        await using var blockchain = new Blockchain(db, merkle, null, new CacheBudget.Options(2000, 4),
+            new CacheBudget.Options(2000, 4));
 
         // blockchain.VerifyDbIntegrityOnCommit();
 
@@ -245,7 +249,8 @@ public class RootHashFuzzyTests
             return rootHash;
         }
 
-        private void Next(ref int counter, int newBlockEvery, ref IWorldState block, Blockchain blockchain, bool autoFinalize)
+        private void Next(ref int counter, int newBlockEvery, ref IWorldState block, Blockchain blockchain,
+            bool autoFinalize)
         {
             counter++;
 

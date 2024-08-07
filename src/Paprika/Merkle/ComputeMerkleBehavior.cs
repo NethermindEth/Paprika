@@ -479,6 +479,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         {
             Account.ReadFrom(leafData.Span, out var account);
 
+            if (leafKey.Path[0] == 0 && leafKey.Path[1] == 1 && leafKey.Path[2] == 8)
+            {
+                Debugger.Break();
+            }
+
             if (ctx.Hint.HasFlag(ComputeHint.ForceStorageRootHashRecalculation))
             {
                 var prefixed = new PrefixingCommit(ctx.Commit);
@@ -490,6 +495,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             }
 
             Node.Leaf.KeccakOrRlp(leafPath, account, out keccakOrRlp);
+
             return;
         }
 

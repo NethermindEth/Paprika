@@ -89,7 +89,7 @@ public class AbandonedTests : BasePageTests
     [TestCase(41074, 10_000, 50, false,
         TestName = "Accounts - 10000 to breach the AbandonedPage",
         Category = Categories.LongRunning)]
-    [TestCase(133696, 20_000, 50, true,
+    [TestCase(88262, 20_000, 50, true,
         TestName = "Storage - 20_000 accounts with a single storage slot",
         Category = Categories.LongRunning)]
     public async Task Reuse_in_limited_environment(int pageCount, int accounts, int repeats, bool isStorage)

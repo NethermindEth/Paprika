@@ -171,6 +171,7 @@ public readonly ref struct NibblePath
     /// The Keccak needs to be "in" here, as otherwise a copy would be create and the ref
     /// would point to a garbage memory.
     /// </returns>
+    [DebuggerStepThrough]
     public static NibblePath FromKey(in Keccak key, int nibbleFrom = 0)
     {
         var count = Keccak.Size * NibblePerByte;
@@ -183,6 +184,7 @@ public readonly ref struct NibblePath
     /// </summary>
     public ref Keccak UnsafeAsKeccak => ref Unsafe.As<byte, Keccak>(ref _span);
 
+    [DebuggerStepThrough]
     private NibblePath(ReadOnlySpan<byte> key, int nibbleFrom, int length)
     {
         _span = ref Unsafe.Add(ref MemoryMarshal.GetReference(key), nibbleFrom / 2);
