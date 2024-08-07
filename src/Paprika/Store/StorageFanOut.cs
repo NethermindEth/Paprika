@@ -28,18 +28,6 @@ public static class StorageFanOut
     private const byte NibbleHalfShift = NibblePath.NibbleShift / 2;
     private const byte TwoNibbleShift = NibblePath.NibbleShift * 2;
 
-    private static int GetIndex0(scoped in NibblePath key)
-    {
-        Debug.Assert(key.IsOdd == false);
-
-        var at = (key.UnsafeSpan << TwoNibbleShift) + key.GetAt(2) & NibbleHalfLower;
-
-        Debug.Assert(0 <= at && at < DbAddressList.Of1024.Count);
-        return at;
-    }
-
-    private const int Level0ConsumedNibbles = 2;
-
     /// <summary>
     /// Provides a convenient data structure for <see cref="RootPage"/>,
     /// to hold a list of child addresses of <see cref="DbAddressList.IDbAddressList"/> but with addition of
@@ -52,7 +40,7 @@ public static class StorageFanOut
         public bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, Type type,
             out ReadOnlySpan<byte> result)
         {
-            var index = GetIndex0(key);
+            var index = GetIndex(key, out var sliced);
 
             var addr = _addresses[index];
             if (addr.IsNull)
@@ -62,14 +50,12 @@ public static class StorageFanOut
             }
 
             return Level1Page.Wrap(batch.GetAt(addr))
-                .TryGet(batch, key.SliceFrom(Level0ConsumedNibbles), type, out result);
+                .TryGet(batch, sliced, type, out result);
         }
 
         public void Set(in NibblePath key, Type type, in ReadOnlySpan<byte> data, IBatchContext batch)
         {
-            var index = GetIndex0(key);
-            var sliced = key.SliceFrom(Level0ConsumedNibbles);
-
+            var index = GetIndex(key, out var sliced);
             var addr = _addresses[index];
 
             if (addr.IsNull)
@@ -78,7 +64,7 @@ public static class StorageFanOut
                 _addresses[index] = addr;
 
                 newPage.Header.PageType = PageType.FanOutPage;
-                newPage.Header.Level = Level0ConsumedNibbles;
+                newPage.Header.Level = ConsumedNibbles;
 
                 Level1Page.Wrap(newPage).Set(sliced, type, data, batch);
                 return;
@@ -89,9 +75,23 @@ public static class StorageFanOut
             _addresses[index] = batch.GetAddress(updated);
         }
 
+        private static int GetIndex(scoped in NibblePath key, out NibblePath sliced)
+        {
+            Debug.Assert(key.IsOdd == false);
+
+            var at = (key.UnsafeSpan << TwoNibbleShift) + key.GetAt(2) & NibbleHalfLower;
+
+            Debug.Assert(0 <= at && at < DbAddressList.Of1024.Count);
+
+            sliced = key.SliceFrom(ConsumedNibbles);
+            return at;
+        }
+
+        private const int ConsumedNibbles = 2;
+
         public void Report(IReporter reporter, IPageResolver resolver, int level, int trimmedNibbles)
         {
-            var consumedNibbles = trimmedNibbles + Level0ConsumedNibbles;
+            var consumedNibbles = trimmedNibbles + ConsumedNibbles;
 
             foreach (var bucket in _addresses)
             {
@@ -131,7 +131,7 @@ public static class StorageFanOut
 
             var index = GetIndex(key, type, out var sliced);
 
-            var addr = (type == Type.Id) ? Data.Ids[index] : Data.Storage[index];
+            var addr = type == Type.Id ? Data.Ids[index] : Data.Storage[index];
 
             if (addr.IsNull)
             {
@@ -192,13 +192,18 @@ public static class StorageFanOut
 
         private static int GetIndex(scoped in NibblePath key, Type type, out NibblePath sliced)
         {
+            // Represents high part of the first nibble but lowered
+            var hi = (key.FirstNibble & NibbleHalfHigher) >> NibbleHalfShift;
+
+            Debug.Assert(0 <= hi && hi < 15);
+
             if (type == Type.Id)
             {
                 sliced = key.SliceFrom(Level1ConsumedNibblesForIds);
-                return (key.FirstNibble & NibbleHalfHigher) >> NibbleHalfShift;
+                return hi;
             }
 
-            var at = ((key.FirstNibble & NibbleHalfHigher) << (TwoNibbleShift - NibbleHalfShift)) + Unsafe.Add(ref key.UnsafeSpan, 1);
+            var at = (hi << TwoNibbleShift) + Unsafe.Add(ref key.UnsafeSpan, 1);
             Debug.Assert(at < DbAddressList.Of1024.Count);
 
             sliced = key.SliceFrom(Level1ConsumedNibblesForStorage);
