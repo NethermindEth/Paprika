@@ -79,7 +79,7 @@ public static class StorageFanOut
         {
             Debug.Assert(key.IsOdd == false);
 
-            var at = (key.UnsafeSpan << TwoNibbleShift) + key.GetAt(2) & NibbleHalfLower;
+            var at = (key.UnsafeSpan << NibbleHalfShift) + (key.GetAt(2) & NibbleHalfLower);
 
             Debug.Assert(0 <= at && at < DbAddressList.Of1024.Count);
 
@@ -204,7 +204,7 @@ public static class StorageFanOut
             }
 
             var at = (hi << TwoNibbleShift) + Unsafe.Add(ref key.UnsafeSpan, 1);
-            Debug.Assert(at < DbAddressList.Of1024.Count);
+            Debug.Assert(0 <= at && at < DbAddressList.Of1024.Count);
 
             sliced = key.SliceFrom(Level1ConsumedNibblesForStorage);
             return at;
