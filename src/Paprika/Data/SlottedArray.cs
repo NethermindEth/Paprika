@@ -161,18 +161,18 @@ public readonly ref struct SlottedArray
     public Enumerator EnumerateAll() =>
         new(this);
 
+    [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
+    private ref struct Chunk
+    {
+        private const int Size = 64;
+
+        private byte _start;
+
+        public Span<byte> Span => MemoryMarshal.CreateSpan(ref _start, Size);
+    }
+
     public ref struct Enumerator
     {
-        [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
-        private ref struct Chunk
-        {
-            public const int Size = 64;
-
-            private byte _start;
-
-            public Span<byte> Span => MemoryMarshal.CreateSpan(ref _start, Size);
-        }
-
         /// <summary>The map being enumerated.</summary>
         private readonly SlottedArray _map;
 
@@ -207,7 +207,7 @@ public readonly ref struct SlottedArray
             if (index < to)
             {
                 _index = index;
-                Build(out _current);
+                Build(slot, out _current);
                 return true;
             }
 
@@ -216,12 +216,11 @@ public readonly ref struct SlottedArray
 
         public readonly Item Current => _current;
 
-        private void Build(out Item value)
+        private void Build(Slot slot, out Item value)
         {
-            ref var slot = ref _map.GetSlotRef(_index);
             var hash = _map.GetHashRef(_index);
 
-            var span = _map.GetSlotPayload(_index);
+            var span = _map.GetSlotPayload(_index, slot);
             var key = Slot.UnPrepareKey(hash, slot.KeyPreamble, span, _bytes.Span, out var data);
 
             value = new Item(key, data, _index);
@@ -626,9 +625,12 @@ public readonly ref struct SlottedArray
     /// Gets the payload pointed to by the given slot without the length prefix.
     /// </summary>
     [SkipLocalsInit]
-    private Span<byte> GetSlotPayload(int index)
+    private Span<byte> GetSlotPayload(int index) => GetSlotPayload(index, GetSlotRef(index));
+
+    [SkipLocalsInit]
+    private Span<byte> GetSlotPayload(int index, Slot slot)
     {
-        var addr = GetSlotRef(index).ItemAddress;
+        var addr = slot.ItemAddress;
 
         // If this is the first, just slice of data
         if (index == 0)

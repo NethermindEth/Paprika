@@ -188,7 +188,6 @@ public unsafe class SlottedArrayBenchmarks
 
     private NibblePath GetKey(byte i, bool odd)
     {
-
         var span = new Span<byte>(_keys, BytesPerKey * KeyCount);
         var slice = span.Slice(i * BytesPerKey, BytesPerKey);
 
