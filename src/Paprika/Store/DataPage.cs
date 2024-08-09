@@ -16,7 +16,7 @@ namespace Paprika.Store;
 /// in the parent page, or they are flushed underneath.
 /// </remarks>
 [method: DebuggerStepThrough]
-public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
+public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, IClearable
 {
     private const int ConsumedNibbles = 1;
     private const int BucketCount = DbAddressList.Of16.Count;
@@ -111,7 +111,11 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
                 "Address should be null. If it wasn't it should be the case that it's found above");
 
             // Create a child
-            var child = batch.GetNewPage(out childAddr, true);
+
+            // Get new page without clearing. Clearing is done manually.
+            var child = batch.GetNewPage(out childAddr, false);
+            new DataPage(child).Clear();
+
             child.Header.PageType = PageType.Standard;
             child.Header.Level = (byte)(page.Header.Level + ConsumedNibbles);
             payload.Buckets[nibble] = childAddr;
@@ -119,6 +123,12 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             FlushDown(map, nibble, childAddr, batch);
             // Spin again to try to set.
         }
+    }
+
+    public void Clear()
+    {
+        new SlottedArray(Data.DataSpan).Clear();
+        Data.Buckets.Clear();
     }
 
     private static DbAddress EnsureExistingChildWritable(IBatchContext batch, ref Payload payload, byte nibble)
