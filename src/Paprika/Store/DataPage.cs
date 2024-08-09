@@ -93,7 +93,6 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
             }
 
             // First, try to flush the existing
-            Page child;
             if (TryFindMostFrequentExistingNibble(map, payload.Buckets, out var nibble))
             {
                 childAddr = EnsureExistingChildWritable(batch, ref payload, nibble);
@@ -112,7 +111,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
                 "Address should be null. If it wasn't it should be the case that it's found above");
 
             // Create a child
-            child = batch.GetNewPage(out childAddr, true);
+            var child = batch.GetNewPage(out childAddr, true);
             child.Header.PageType = PageType.Standard;
             child.Header.Level = (byte)(page.Header.Level + ConsumedNibbles);
             payload.Buckets[nibble] = childAddr;
@@ -129,7 +128,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
         Debug.Assert(childAddr.IsNull == false, "Should exist");
 
         batch.GetAt(childAddr);
-        var cowed = batch.EnsureWritableCopy(ref childAddr);
+        batch.EnsureWritableCopy(ref childAddr);
         payload.Buckets[nibble] = childAddr;
 
         return childAddr;
@@ -187,16 +186,9 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
     {
         Debug.Assert(batch.WasWritten(child));
 
-        foreach (var item in map.EnumerateAll())
+        foreach (var item in map.EnumerateNibble(nibble))
         {
-            var key = item.Key;
-            if (key.IsEmpty) // empty keys are left in page
-                continue;
-
-            if (key.FirstNibble != nibble)
-                continue;
-
-            var sliced = key.SliceFrom(ConsumedNibbles);
+            var sliced = item.Key.SliceFrom(ConsumedNibbles);
 
             Set(child, sliced, item.RawData, batch);
 

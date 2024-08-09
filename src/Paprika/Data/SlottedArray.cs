@@ -164,21 +164,21 @@ public readonly ref struct SlottedArray /*: IClearable */
 
     public int CapacityLeft => _data.Length - _header.Taken;
 
-    public Enumerator EnumerateAll() =>
-        new(this);
+    public Enumerator EnumerateAll() => new(this);
+    public NibbleEnumerator EnumerateNibble(byte nibble) => new(this, nibble);
+
+    [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
+    private ref struct Chunk
+    {
+        private const int Size = 64;
+
+        private byte _start;
+
+        public Span<byte> Span => MemoryMarshal.CreateSpan(ref _start, Size);
+    }
 
     public ref struct Enumerator
     {
-        [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
-        private ref struct Chunk
-        {
-            public const int Size = 64;
-
-            private byte _start;
-
-            public Span<byte> Span => MemoryMarshal.CreateSpan(ref _start, Size);
-        }
-
         /// <summary>The map being enumerated.</summary>
         private readonly SlottedArray _map;
 
@@ -198,7 +198,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool MoveNext()
         {
-            int index = _index + 1;
+            var index = _index + 1;
             var to = _map.Count;
 
             ref var slot = ref _map.GetSlotRef(index);
@@ -213,7 +213,7 @@ public readonly ref struct SlottedArray /*: IClearable */
             if (index < to)
             {
                 _index = index;
-                Build(out _current);
+                Build(slot, out _current);
                 return true;
             }
 
@@ -222,12 +222,10 @@ public readonly ref struct SlottedArray /*: IClearable */
 
         public readonly Item Current => _current;
 
-        private void Build(out Item value)
+        private void Build(Slot slot, out Item value)
         {
-            ref var slot = ref _map.GetSlotRef(_index);
             var hash = _map.GetHashRef(_index);
-
-            var span = _map.GetSlotPayload(_index);
+            var span = _map.GetSlotPayload(_index, slot);
             var key = Slot.UnPrepareKey(hash, slot.KeyPreamble, span, _bytes.Span, out var data);
 
             value = new Item(key, data, _index);
@@ -237,15 +235,84 @@ public readonly ref struct SlottedArray /*: IClearable */
         {
         }
 
-        public readonly ref struct Item(NibblePath key, ReadOnlySpan<byte> rawData, int index)
+        // a shortcut to not allocate, just copy the enumerator
+        public readonly Enumerator GetEnumerator() => this;
+    }
+
+    public ref struct NibbleEnumerator
+    {
+        /// <summary>The map being enumerated.</summary>
+        private readonly SlottedArray _map;
+
+        private readonly byte _nibble;
+
+        /// <summary>The next index to yield.</summary>
+        private int _index;
+
+        private Chunk _bytes;
+        private Item _current;
+
+        internal NibbleEnumerator(SlottedArray map, byte nibble)
         {
-            public int Index { get; } = index;
-            public NibblePath Key { get; } = key;
-            public ReadOnlySpan<byte> RawData { get; } = rawData;
+            _map = map;
+            _nibble = nibble;
+            _index = -1;
+        }
+
+        /// <summary>Advances the enumerator to the next element of the span.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool MoveNext()
+        {
+            var index = _index + 1;
+            var to = _map.Count;
+
+            var slot = _map.GetSlotRef(index);
+            var hash = _map.GetHashRef(index);
+
+            while (index < to && (slot.IsDeleted || slot.HasAtLeastOneNibble == false || slot.GetNibble0(hash) != _nibble)) // filter out deleted
+            {
+                // move by 1
+                index += 1;
+                slot = _map.GetSlotRef(index);
+                hash = _map.GetHashRef(index);
+            }
+
+            if (index < to)
+            {
+                _index = index;
+                Build(slot, hash, out _current);
+                return true;
+            }
+
+            return false;
+        }
+
+        public readonly Item Current => _current;
+
+        private void Build(Slot slot, ushort hash, out Item value)
+        {
+            var span = _map.GetSlotPayload(_index, slot);
+            var key = Slot.UnPrepareKey(hash, slot.KeyPreamble, span, _bytes.Span, out var data);
+
+            value = new Item(key, data, _index);
+        }
+
+        public readonly void Dispose()
+        {
         }
 
         // a shortcut to not allocate, just copy the enumerator
-        public readonly Enumerator GetEnumerator() => this;
+        public readonly NibbleEnumerator GetEnumerator() => this;
+    }
+
+    /// <summary>
+    /// An enumerator item.
+    /// </summary>
+    public readonly ref struct Item(NibblePath key, ReadOnlySpan<byte> rawData, int index)
+    {
+        public int Index { get; } = index;
+        public NibblePath Key { get; } = key;
+        public ReadOnlySpan<byte> RawData { get; } = rawData;
     }
 
     public void MoveNonEmptyKeysTo(in MapSource destination, bool treatEmptyAsTombstone = false)
@@ -382,7 +449,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         return false;
     }
 
-    public void Delete(in Enumerator.Item item) => DeleteImpl(item.Index);
+    public void Delete(in Item item) => DeleteImpl(item.Index);
 
     private void DeleteImpl(int index, bool collectTombstones = true)
     {
@@ -658,9 +725,12 @@ public readonly ref struct SlottedArray /*: IClearable */
     /// Gets the payload pointed to by the given slot without the length prefix.
     /// </summary>
     [SkipLocalsInit]
-    private Span<byte> GetSlotPayload(int index)
+    private Span<byte> GetSlotPayload(int index) => GetSlotPayload(index, GetSlotRef(index));
+
+    [SkipLocalsInit]
+    private Span<byte> GetSlotPayload(int index, Slot slot)
     {
-        var addr = GetSlotRef(index).ItemAddress;
+        var addr = slot.ItemAddress;
 
         // If this is the first, just slice of data
         if (index == 0)
