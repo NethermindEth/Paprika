@@ -26,7 +26,6 @@ public unsafe class SlottedArrayBenchmarks
     private readonly void* _hashCollidingKeys;
     private readonly void* _hashCollidingMap;
 
-
     public SlottedArrayBenchmarks()
     {
         // Create keys
@@ -178,6 +177,23 @@ public unsafe class SlottedArrayBenchmarks
 
         var length = 0;
         foreach (var item in map.EnumerateAll())
+        {
+            length += item.Key.Length;
+            length += item.RawData.Length;
+        }
+
+        return length;
+    }
+
+    [Benchmark]
+    [Arguments((byte)0)]
+    [Arguments((byte)1)]
+    public int EnumerateNibble(byte nibble)
+    {
+        var map = new SlottedArray(new Span<byte>(_map, Page.PageSize));
+
+        var length = 0;
+        foreach (var item in map.EnumerateNibble(nibble))
         {
             length += item.Key.Length;
             length += item.RawData.Length;
