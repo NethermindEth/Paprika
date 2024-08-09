@@ -175,14 +175,17 @@ public static class StorageFanOut
 
             if (addr.IsNull)
             {
-                var newPage = batch.GetNewPage(out addr, true);
+                // Clear manually
+                var newPage = batch.GetNewPage(out addr, false);
 
                 list[index] = addr;
 
                 newPage.Header.PageType = PageType.Standard;
                 newPage.Header.Level = (byte)(Header.Level + consumedNibbles);
 
-                DataPage.Wrap(newPage).Set(sliced, data, batch);
+                var dataPage = DataPage.Wrap(newPage);
+                dataPage.Clear();
+                dataPage.Set(sliced, data, batch);
                 return;
             }
 
