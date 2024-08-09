@@ -174,16 +174,9 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
     private static Page FlushDown(in SlottedArray map, byte nibble, Page destination, IBatchContext batch)
     {
-        foreach (var item in map.EnumerateAll())
+        foreach (var item in map.EnumerateNibble(nibble))
         {
-            var key = item.Key;
-            if (key.IsEmpty) // empty keys are left in page
-                continue;
-
-            if (key.FirstNibble != nibble)
-                continue;
-
-            var sliced = key.SliceFrom(ConsumedNibbles);
+            var sliced = item.Key.SliceFrom(ConsumedNibbles);
 
             destination = destination.Header.PageType == PageType.Leaf
                 ? new LeafPage(destination).Set(sliced, item.RawData, batch)
