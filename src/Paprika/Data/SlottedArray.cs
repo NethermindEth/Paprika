@@ -21,7 +21,7 @@ namespace Paprika.Data;
 /// It keeps an internal map, that is aligned with the local hardware vector size, so that even vectors (0th, 2nd, 4th...)
 /// are used for hashes, while odd (1st, 3rd, 5th...) are used to store slots.
 /// </remarks>
-public readonly ref struct SlottedArray
+public readonly ref struct SlottedArray /*: IClearable */
 {
     public const int Alignment = 8;
     public const int HeaderSize = Header.Size;
@@ -75,6 +75,12 @@ public readonly ref struct SlottedArray
         var offset = (index & ~mask) * 2 + (index & mask) + uShortsPerVector;
 
         return ref Unsafe.Add(ref Unsafe.As<byte, Slot>(ref MemoryMarshal.GetReference(_data)), offset);
+    }
+
+    public void Set(in NibblePath key, ReadOnlySpan<byte> data)
+    {
+        var succeeded = TrySet(key, data);
+        Debug.Assert(succeeded);
     }
 
     public bool TrySet(in NibblePath key, ReadOnlySpan<byte> data)
@@ -371,7 +377,7 @@ public readonly ref struct SlottedArray
     /// <summary>
     /// Gets the aggregated count of entries per nibble.
     /// </summary>
-    public void GatherCountStatistics(Span<ushort> buckets)
+    public void GatherCountStats1Nibble(Span<ushort> buckets)
     {
         Debug.Assert(buckets.Length == BucketCount);
 
@@ -384,6 +390,32 @@ public readonly ref struct SlottedArray
             if (slot.IsDeleted == false && slot.HasAtLeastOneNibble)
             {
                 buckets[slot.GetNibble0(GetHashRef(i))] += 1;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the aggregated count of entries for 2 nibble buckets.
+    /// The 0th nibble is shifted left <see cref="NibblePath.NibbleShift"/> then 1st is added.
+    /// </summary>
+    public void GatherCountStats2Nibbles(Span<ushort> buckets)
+    {
+        Debug.Assert(buckets.Length == BucketCount * BucketCount);
+
+        var to = _header.Low / Slot.TotalSize;
+
+        for (var i = 0; i < to; i++)
+        {
+            ref var slot = ref GetSlotRef(i);
+
+            // extract only not deleted and these which have at least one nibble
+            if (slot.IsDeleted == false)
+            {
+                var hash = GetHashRef(i);
+                if (slot.HasAtLeastTwoNibbles(hash, slot.KeyPreamble))
+                {
+                    buckets[slot.GetNibble0And1(hash)] += 1;
+                }
             }
         }
     }
@@ -804,12 +836,34 @@ public readonly ref struct SlottedArray
 
         public bool HasAtLeastOneNibble => (KeyPreamble >> KeyPreambleLengthShift) > KeyPreambleLength0;
 
+        public bool HasAtLeastTwoNibbles(ushort hash, byte preamble)
+        {
+            return (KeyPreamble >> KeyPreambleLengthShift) switch
+            {
+                KeyPreambleLength0 => false,
+                KeyPreambleLength3OrLess => GetLengthOf123(hash, preamble & KeyPreambleOddBit) >= 2,
+                _ => true
+            };
+        }
+
         public byte GetNibble0(ushort hash)
         {
             // Bitwise. Shift by 12, unless it's odd. If odd, shift by 8.
             return (byte)(0x0F & (hash >> (3 * NibblePath.NibbleShift -
                                            ((Raw >> KeyPreambleShift) & KeyPreambleOddBit) *
                                            NibblePath.NibbleShift)));
+        }
+
+        public byte GetNibble0And1(ushort hash)
+        {
+            var odd = (Raw >> KeyPreambleShift) & KeyPreambleOddBit;
+
+            const int shift = NibblePath.NibbleShift;
+
+            var nibble0 = (byte)(0x0F & (hash >> (3 * shift - odd * shift)));
+            var nibble1 = (byte)(0x0F & (hash >> (2 * shift - odd * shift)));
+
+            return (byte)((nibble0 << shift) + nibble1);
         }
 
         public byte KeyPreamble

@@ -28,6 +28,23 @@ public enum PageType : byte
     /// The overflow of the leaf, storing all the data.
     /// </summary>
     LeafOverflow = 5,
+
+    FanOutPage = 6,
+
+    /// <summary>
+    /// Merkle FanOut Page
+    /// </summary>
+    MerkleFanOut = 7,
+
+    /// <summary>
+    /// Merkle Leaf
+    /// </summary>
+    MerkleLeaf = 8,
+
+    /// <summary>
+    /// The UShort page to store Merkle
+    /// </summary>
+    MerkleLeafUShort = 9,
 }
 
 public interface IPageTypeProvider
@@ -38,6 +55,11 @@ public interface IPageTypeProvider
 public readonly struct StandardType : IPageTypeProvider
 {
     public static PageType Type => PageType.Standard;
+}
+
+public readonly struct MerkleFanOutType : IPageTypeProvider
+{
+    public static PageType Type => PageType.MerkleFanOut;
 }
 
 public readonly struct IdentityType : IPageTypeProvider

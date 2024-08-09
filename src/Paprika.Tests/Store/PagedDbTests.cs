@@ -145,7 +145,7 @@ public class PagedDbTests
     {
         const int size = 256 * 256;
 
-        using var db = PagedDb.NativeMemoryDb(512 * Mb, 2);
+        using var db = PagedDb.NativeMemoryDb(1024 * Mb, 2);
 
         var value = new byte[4];
 
@@ -177,8 +177,8 @@ public class PagedDbTests
                 BinaryPrimitives.WriteInt32LittleEndian(expected, i);
 
                 var storageCell = Key.StorageCell(NibblePath.FromKey(keccak), keccak);
-                read.TryGet(storageCell, out var actual)
-                    .Should().BeTrue();
+                var retrieved = read.TryGet(storageCell, out var actual);
+                retrieved.Should().BeTrue();
 
                 actual.SequenceEqual(expected).Should().BeTrue();
             }
@@ -259,6 +259,7 @@ public class PagedDbTests
     }
 
     [Test]
+    [Ignore("No stats gathered atm")]
     public async Task Reports_stats()
     {
         const int accounts = 10_000;

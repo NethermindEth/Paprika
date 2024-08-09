@@ -10,6 +10,8 @@ using Paprika.Data;
 using Paprika.Store.PageManagers;
 using Paprika.Utils;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
+using Paprika.Store.Merkle;
 
 namespace Paprika.Store;
 
@@ -493,11 +495,10 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
             if (data.StateRoot.IsNull == false)
             {
-                new Merkle.StateRootPage(GetAt(root.Data.StateRoot)).Report(state, this, 0, 0);
+                new StateRootPage(GetAt(root.Data.StateRoot)).Report(state, this, 0, 0);
             }
 
             data.Storage.Report(storage, this, 0, 0);
-            data.Ids.Report(ids, this, 0, 0);
         }
 
         public uint BatchId => root.Header.BatchId;
@@ -747,12 +748,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             return claimed;
         }
 
-        public override bool WasWritten(DbAddress addr) => _written.Contains(addr);
-
-        public override void RegisterForFutureReuse(Page page)
+        public void RegisterForFutureReuse(DbAddress addr)
         {
-            var addr = _db.GetAddress(page);
-
 #if TRACKING_REUSED_PAGES
             // register at this batch
             ref var batchId =
@@ -767,6 +764,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 #endif
             _abandoned.Add(addr);
         }
+
+        public override void RegisterForFutureReuse(Page page) => RegisterForFutureReuse(_db.GetAddress(page));
 
         public override void NoticeAbandonedPageReused(Page page)
         {
@@ -851,7 +850,21 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
         }
     }
 
-    public IDisposable On(RootPage page, DbAddress addr) => Mark(addr);
+    public IDisposable On<TPage>(in TPage page, DbAddress addr)
+    {
+        if (typeof(TPage) == typeof(AbandonedPage))
+        {
+            return On(As<TPage, AbandonedPage>(page), addr);
+        }
+
+        return Mark(addr);
+    }
+
+    private static TDestinationPage As<TPage, TDestinationPage>(in TPage page)
+        where TDestinationPage : IPage
+    {
+        return Unsafe.As<TPage, TDestinationPage>(ref Unsafe.AsRef(in page));
+    }
 
     public IDisposable On(AbandonedPage page, DbAddress addr)
     {
@@ -862,20 +875,6 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
 
         return Mark(addr);
     }
-
-    public IDisposable On(DataPage page, DbAddress addr) => Mark(addr);
-
-    public IDisposable On(FanOutPage page, DbAddress addr) => Mark(addr);
-
-    public IDisposable On(LeafPage page, DbAddress addr) => Mark(addr);
-
-    public IDisposable On<TNext>(StorageFanOutPage<TNext> page, DbAddress addr)
-        where TNext : struct, IPageWithData<TNext>
-        => Mark(addr);
-
-    public IDisposable On(LeafOverflowPage page, DbAddress addr) => Mark(addr);
-
-    public IDisposable On(Merkle.StateRootPage data, DbAddress addr) => Mark(addr);
 
     private IDisposable Mark(DbAddress addr)
     {
