@@ -68,7 +68,7 @@ public struct MerkleNodes
         var raw = batch.GetNewPage(out bucket, false);
 
         // Header set
-        raw.Header.PageType = PageType.MerkleLeafUShort;
+        raw.Header.PageType = PageType.UShort;
 
         var p = new UShortPage(raw);
 

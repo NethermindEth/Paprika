@@ -42,9 +42,9 @@ public enum PageType : byte
     MerkleLeaf = 8,
 
     /// <summary>
-    /// The UShort page to store Merkle
+    /// The <see cref="UShortPage"/>
     /// </summary>
-    MerkleLeafUShort = 9,
+    UShort = 9,
 }
 
 public interface IPageTypeProvider

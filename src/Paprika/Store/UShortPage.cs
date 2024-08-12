@@ -9,7 +9,7 @@ namespace Paprika.Store;
 /// The page used to store big chunks of data.
 /// </summary>
 [method: DebuggerStepThrough]
-public readonly unsafe struct UShortPage(Page page)
+public readonly unsafe struct UShortPage(Page page) : IPage, IClearable
 {
     private ref PageHeader Header => ref page.Header;
 
@@ -33,4 +33,5 @@ public readonly unsafe struct UShortPage(Page page)
     }
 
     public UShortSlottedArray Map => new(Data.DataSpan);
+    public void Clear() => Map.Clear();
 }
