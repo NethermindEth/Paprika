@@ -4,7 +4,6 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
 using Paprika.Data;
-using Paprika.Store.Merkle;
 
 namespace Paprika.Store;
 
@@ -15,14 +14,8 @@ namespace Paprika.Store;
 /// <remarks>
 /// Considerations for page types selected:
 ///
-/// State:
-/// <see cref="Payload.StateRoot"/> is <see cref="FanOutPage"/> that splits accounts into 256 buckets.
-/// This makes the updates update more pages, but adds a nice fan out for fast searches.
-/// Account ids:
-/// <see cref="Payload.Ids"/> is a <see cref="FanOutListOf256{TPage,TPageType}"/> of <see cref="FanOutPage"/>s. This gives 64k buckets on two levels. Searches should search no more than 3 levels of pages.
-///
-/// Storage:
-/// <see cref="Payload.Storage"/> is a <see cref="FanOutListOf256{TPage,TPageType}"/> of <see cref="FanOutPage"/>s. This gives 64k buckets on two levels. 
+/// State: <see cref="Payload.StateRoot"/> 
+/// Storage & Account Ids: <see cref="StorageFanOut.Level0"/>
 /// </remarks>
 public readonly unsafe struct RootPage(Page root) : IPage
 {

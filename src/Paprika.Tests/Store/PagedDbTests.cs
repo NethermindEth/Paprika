@@ -1,6 +1,5 @@
 using System.Buffers.Binary;
 using FluentAssertions;
-using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;

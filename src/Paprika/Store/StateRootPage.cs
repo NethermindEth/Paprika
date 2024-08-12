@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 using Paprika.Data;
 using Paprika.Merkle;
 
-namespace Paprika.Store.Merkle;
+namespace Paprika.Store;
 
 [method: DebuggerStepThrough]
 public readonly unsafe struct StateRootPage(Page page) : IPageWithData<StateRootPage>
@@ -55,12 +55,12 @@ public readonly unsafe struct StateRootPage(Page page) : IPageWithData<StateRoot
         {
             var child = batch.GetNewPage(out addr, true);
             child.Header.Level = ConsumedNibbles;
-            child.Header.PageType = PageType.MerkleFanOut;
-            new FanOutPage(child).Set(sliced, data, batch);
+            child.Header.PageType = PageType.Standard;
+            new DataPage(child).Set(sliced, data, batch);
         }
         else
         {
-            addr = batch.GetAddress(new FanOutPage(batch.GetAt(addr)).Set(sliced, data, batch));
+            addr = batch.GetAddress(new DataPage(batch.GetAt(addr)).Set(sliced, data, batch));
         }
 
         return page;
@@ -117,7 +117,7 @@ public readonly unsafe struct StateRootPage(Page page) : IPageWithData<StateRoot
             return false;
         }
 
-        return new FanOutPage(batch.GetAt(addr)).TryGet(batch, key.SliceFrom(ConsumedNibbles), out result);
+        return new DataPage(batch.GetAt(addr)).TryGet(batch, key.SliceFrom(ConsumedNibbles), out result);
     }
 
     public void Report(IReporter reporter, IPageResolver resolver, int pageLevel, int trimmedNibbles)
@@ -132,7 +132,7 @@ public readonly unsafe struct StateRootPage(Page page) : IPageWithData<StateRoot
 
             var child = resolver.GetAt(bucket);
 
-            new FanOutPage(child).Report(reporter, resolver, lvl, consumedNibbles);
+            new DataPage(child).Report(reporter, resolver, lvl, consumedNibbles);
         }
 
         var slotted = new SlottedArray(Data.DataSpan);
@@ -151,17 +151,8 @@ public readonly unsafe struct StateRootPage(Page page) : IPageWithData<StateRoot
                 }
 
                 var child = resolver.GetAt(bucket);
-                switch (child.Header.PageType)
-                {
-                    case PageType.MerkleFanOut:
-                        new FanOutPage(child).Accept(visitor, resolver, bucket);
-                        break;
-                    case PageType.MerkleLeaf:
-                        new LeafPage(child).Accept(visitor, resolver, bucket);
-                        break;
-                    default:
-                        throw new Exception($"Type {child.Header.PageType} not handled");
-                }
+                Debug.Assert(child.Header.PageType == PageType.Standard);
+                new DataPage(child).Accept(visitor, resolver, bucket);
             }
         }
     }

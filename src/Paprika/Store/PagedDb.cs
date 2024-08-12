@@ -11,7 +11,6 @@ using Paprika.Store.PageManagers;
 using Paprika.Utils;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
-using Paprika.Store.Merkle;
 
 namespace Paprika.Store;
 
