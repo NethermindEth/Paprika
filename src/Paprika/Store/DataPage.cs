@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
-using Paprika.Merkle;
 
 namespace Paprika.Store;
 
@@ -474,13 +473,19 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
 
         foreach (var bucket in Data.Buckets)
         {
-            if (!bucket.IsNull)
+            if (bucket.IsNull)
+                continue;
+
+            var child = resolver.GetAt(bucket);
+
+
+            if (IsFanOut)
             {
-                var child = resolver.GetAt(bucket);
-                if (child.Header.PageType == PageType.Leaf)
-                    new LeafPage(child).Report(reporter, resolver, pageLevel + 1, trimmedNibbles + 1);
-                else
-                    new DataPage(child).Report(reporter, resolver, pageLevel + 1, trimmedNibbles + 1);
+                new DataPage(child).Report(reporter, resolver, pageLevel + 1, trimmedNibbles + 1);
+            }
+            else
+            {
+                // TODO UshortPage
             }
         }
     }
@@ -497,11 +502,18 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 }
 
                 var child = resolver.GetAt(bucket);
-                if (child.Header.PageType == PageType.Leaf)
-                    new LeafPage(child).Accept(visitor, resolver, bucket);
-                else
+
+                if (IsFanOut)
+                {
                     new DataPage(child).Accept(visitor, resolver, bucket);
+                }
+                else
+                {
+                    new UShortPage(child).Accept(visitor, resolver, bucket);
+                }
             }
         }
     }
+
+    private bool IsFanOut => Header.Metadata == Modes.Fanout;
 }

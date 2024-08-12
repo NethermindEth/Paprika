@@ -34,4 +34,11 @@ public readonly unsafe struct UShortPage(Page page) : IPage, IClearable
 
     public UShortSlottedArray Map => new(Data.DataSpan);
     public void Clear() => Map.Clear();
+
+    public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
+    {
+        using (visitor.On(this, addr))
+        {
+        }
+    }
 }
