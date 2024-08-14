@@ -106,6 +106,8 @@ public static class StorageFanOut
 
         public void Accept(IPageVisitor visitor, IPageResolver resolver)
         {
+            using var scope = visitor.Scope(nameof(StorageFanOut));
+
             foreach (var bucket in _addresses)
             {
                 if (!bucket.IsNull)
@@ -251,19 +253,25 @@ public static class StorageFanOut
         {
             using var scope = visitor.On(this, addr);
 
-            foreach (var bucket in Data.Ids)
+            using (visitor.Scope(nameof(Data.Ids)))
             {
-                if (!bucket.IsNull)
+                foreach (var bucket in Data.Ids)
                 {
-                    DataPage.Wrap(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
+                    if (!bucket.IsNull)
+                    {
+                        DataPage.Wrap(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
+                    }
                 }
             }
 
-            foreach (var bucket in Data.Storage)
+            using (visitor.Scope(nameof(Data.Storage)))
             {
-                if (!bucket.IsNull)
+                foreach (var bucket in Data.Storage)
                 {
-                    DataPage.Wrap(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
+                    if (!bucket.IsNull)
+                    {
+                        DataPage.Wrap(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
+                    }
                 }
             }
         }

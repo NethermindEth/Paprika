@@ -9,11 +9,18 @@ public class TreeView : IPageVisitor, IDisposable
 
     private readonly Stack<TreeNode> _nodes = new();
 
-    private IDisposable Build(string name, DbAddress addr, int? capacityLeft = null)
+    private IDisposable Build(string name, DbAddress? addr, int? capacityLeft = null)
     {
-        var count = _nodes.Count;
-        var capacity = capacityLeft.HasValue ? $", space_left: {capacityLeft.Value}" : "";
-        var text = $"{count}: {name.Replace("Page", "")}, @{addr.Raw}{capacity}";
+        string text;
+        if (addr.HasValue)
+        {
+            var capacity = capacityLeft.HasValue ? $", space_left: {capacityLeft.Value}" : "";
+            text = $"{name.Replace("Page", "")}, @{addr.Value.Raw}{capacity}";
+        }
+        else
+        {
+            text = name;
+        }
 
         var node = new TreeNode(new Text(text));
 
@@ -30,7 +37,8 @@ public class TreeView : IPageVisitor, IDisposable
         return this;
     }
 
-    public IDisposable On<TPage>(in TPage page, DbAddress addr) => Build(nameof(TPage), addr);
+    public IDisposable On<TPage>(in TPage page, DbAddress addr) => Build(page.GetType().Name, addr);
+    public IDisposable Scope(string name) => Build(name, null);
 
     public void Dispose() => _nodes.TryPop(out _);
 }

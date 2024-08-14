@@ -25,7 +25,7 @@ public class PageStructurePrintingTests
         using var db = PagedDb.NativeMemoryDb(size);
 
         const int batches = 5;
-        const int storageSlots = 350_000;
+        const int storageSlots = 280_000;
 
         var value = new byte[32];
 
@@ -47,6 +47,7 @@ public class PageStructurePrintingTests
         var view = new TreeView();
         db.VisitRoot(view);
 
+        AnsiConsole.WriteLine($"DB size: {db.Megabytes:N0}MB");
         AnsiConsole.Write(view.Tree);
 
         return;

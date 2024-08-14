@@ -868,6 +868,8 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
         return Mark(addr);
     }
 
+    public IDisposable Scope(string name) => Disposable.Instance;
+
     private static TDestinationPage As<TPage, TDestinationPage>(in TPage page)
         where TDestinationPage : IPage
     {
