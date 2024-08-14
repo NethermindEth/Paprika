@@ -84,6 +84,9 @@ public class RootHashFuzzyTests
         blockchain.Finalize(rootHash);
         await flush;
 
+        using var read = db.BeginReadOnlyBatch();
+        read.VerifyNoPagesMissing();
+
         using var state = blockchain.StartReadOnly(rootHash);
         var recalculated = merkle.CalculateStateRootHash(state);
 

@@ -485,6 +485,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             return root.TryGet(key, this, out result);
         }
 
+        public void VerifyNoPagesMissing() => MissingPagesVisitor.VerifyNoPagesMissing(Root, db, this);
+
         public void Report(IReporter state, IReporter storage, IReporter ids, out long totalAbandoned)
         {
             ref readonly var data = ref root.Data;
@@ -576,6 +578,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             }
         }
 
+        public void VerifyNoPagesMissing() => MissingPagesVisitor.VerifyNoPagesMissing(_root, _db, this);
+
         public void SetMetadata(uint blockNumber, in Keccak blockHash)
         {
             _root.Data.Metadata = new Metadata(blockNumber, blockHash);
@@ -625,9 +629,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
             if (_verify)
             {
-                using var missing = new MissingPagesVisitor(_root, _db._historyDepth);
-                _root.Accept(missing, this);
-                missing.EnsureNoMissing(this);
+                VerifyNoPagesMissing();
             }
 
             // report metrics
@@ -838,7 +840,14 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
 {
     private readonly DbAddressSet _pages;
 
-    public MissingPagesVisitor(RootPage page, byte historyDepth)
+    public static void VerifyNoPagesMissing(RootPage root, PagedDb db, IReadOnlyBatchContext context)
+    {
+        using var missing = new MissingPagesVisitor(root, db.HistoryDepth);
+        root.Accept(missing, db);
+        missing.EnsureNoMissing(context);
+    }
+
+    private MissingPagesVisitor(RootPage page, int historyDepth)
     {
         _pages = new(page.Data.NextFreePage);
 

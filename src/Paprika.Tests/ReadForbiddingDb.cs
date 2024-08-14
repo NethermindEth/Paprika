@@ -33,6 +33,8 @@ public class ReadForbiddingDb(IDb db) : IDb
             return batch.TryGet(in key, out result);
         }
 
+        public void VerifyNoPagesMissing() => batch.VerifyNoPagesMissing();
+
         public void Dispose() => batch.Dispose();
     }
 
