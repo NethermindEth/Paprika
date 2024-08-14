@@ -465,7 +465,7 @@ public readonly ref struct NibblePath
         return source.Slice(GetSpanLength(odd, length));
     }
 
-    public static bool TryReadFrom(Span<byte> source, in NibblePath expected, out Span<byte> leftover)
+    public static bool TryReadFrom(scoped in Span<byte> source, in NibblePath expected, out Span<byte> leftover)
     {
         if (source[0] != expected.RawPreamble)
         {

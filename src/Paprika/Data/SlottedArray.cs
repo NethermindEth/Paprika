@@ -1,11 +1,9 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
-using Paprika.Store;
 using Paprika.Utils;
 
 namespace Paprika.Data;
@@ -142,7 +140,7 @@ public readonly ref struct SlottedArray /*: IClearable */
 
         if (HasKeyBytes(preamble))
         {
-            var dest2 = trimmed.WriteToWithLeftover(dest);
+            var dest2 = KeyEncoding.Write(trimmed, dest);
             data.CopyTo(dest2);
         }
         else
@@ -269,7 +267,9 @@ public readonly ref struct SlottedArray /*: IClearable */
             var slot = _map.GetSlotRef(index);
             var hash = _map.GetHashRef(index);
 
-            while (index < to && (slot.IsDeleted || slot.HasAtLeastOneNibble == false || slot.GetNibble0(hash) != _nibble)) // filter out deleted
+            while (index < to &&
+                   (slot.IsDeleted || slot.HasAtLeastOneNibble == false ||
+                    slot.GetNibble0(hash) != _nibble)) // filter out deleted
             {
                 // move by 1
                 index += 1;
@@ -338,7 +338,7 @@ public readonly ref struct SlottedArray /*: IClearable */
             NibblePath trimmed;
             if (slot.HasKeyBytes)
             {
-                data = NibblePath.ReadFrom(payload, out trimmed);
+                data = KeyEncoding.ReadFrom(payload, out trimmed);
             }
             else
             {
@@ -424,7 +424,80 @@ public readonly ref struct SlottedArray /*: IClearable */
 
     private static int GetTotalSpaceRequired(byte preamble, in NibblePath key, ReadOnlySpan<byte> data)
     {
-        return (HasKeyBytes(preamble) ? KeyLengthLength + key.RawSpanLength : 0) + data.Length;
+        return (HasKeyBytes(preamble) ? KeyEncoding.GetBytesCount(key) : 0) + data.Length;
+    }
+
+    private static class KeyEncoding
+    {
+        private const byte SingleNibbleCase = 0b1000_0000;
+        private const byte SingleNibbleOddity = 0b0100_0000;
+        private const byte SingleNibbleOddityShift = 6;
+        private const byte SingleNibbleMask = 0b0000_1111;
+        private const byte SingleNibbleLength = 1;
+        private const byte PathLengthOf1 = 1;
+
+        public static int GetBytesCount(in NibblePath key)
+        {
+            return key.Length == PathLengthOf1 ? SingleNibbleLength : key.RawSpanLength + KeyLengthLength;
+        }
+
+        public static bool TryReadFrom(scoped in Span<byte> actual, in NibblePath key, out Span<byte> leftover)
+        {
+            var first = actual[0];
+            if ((first & SingleNibbleCase) == SingleNibbleCase)
+            {
+                if (key.Length == PathLengthOf1 && key.FirstNibble == (first & SingleNibbleMask) &&
+                    key.Oddity == ((first & SingleNibbleOddity) >> SingleNibbleOddityShift))
+                {
+                    leftover = actual[SingleNibbleLength..];
+                    return true;
+                }
+
+                leftover = default;
+                return false;
+            }
+
+            return NibblePath.TryReadFrom(actual, key, out leftover);
+        }
+
+        public static ReadOnlySpan<byte> ReadFrom(scoped in ReadOnlySpan<byte> actual, out NibblePath key)
+        {
+            var first = actual[0];
+            if ((first & SingleNibbleCase) == SingleNibbleCase)
+            {
+                key = NibblePath.Single((byte)(first & SingleNibbleMask),
+                    (first & SingleNibbleOddity) >> SingleNibbleOddityShift);
+
+                return actual[SingleNibbleLength..];
+            }
+
+            return NibblePath.ReadFrom(actual, out key);
+        }
+
+        public static Span<byte> ReadFrom(scoped in Span<byte> actual, out NibblePath key)
+        {
+            var first = actual[0];
+            if ((first & SingleNibbleCase) == SingleNibbleCase)
+            {
+                key = NibblePath.Single((byte)(first & SingleNibbleMask),
+                    (first & SingleNibbleOddity) >> SingleNibbleOddityShift);
+
+                return actual[SingleNibbleLength..];
+            }
+
+            return NibblePath.ReadFrom(actual, out key);
+        }
+
+        public static Span<byte> Write(in NibblePath key, in Span<byte> destination)
+        {
+            if (key.Length == PathLengthOf1)
+            {
+                destination[0] = (byte)(SingleNibbleCase | key.FirstNibble | (key.Oddity << SingleNibbleOddityShift));
+                return destination[SingleNibbleLength..];
+            }
+
+            return key.WriteToWithLeftover(destination);
+        }
     }
 
     /// <summary>
@@ -702,7 +775,7 @@ public readonly ref struct SlottedArray /*: IClearable */
 
                 if (slot.HasKeyBytes)
                 {
-                    if (NibblePath.TryReadFrom(actual, key, out var leftover))
+                    if (KeyEncoding.TryReadFrom(actual, key, out var leftover))
                     {
                         data = leftover;
                         return i;
@@ -1031,7 +1104,7 @@ public readonly ref struct SlottedArray /*: IClearable */
                     Unsafe.Add(ref b, 2) = b;
                     return NibblePath.FromKey(workingSet, 1, 4);
                 default:
-                    data = NibblePath.ReadFrom(input, out var trimmed);
+                    data = KeyEncoding.ReadFrom(input, out var trimmed);
 
                     Debug.Assert(trimmed.IsEmpty == false, "Trimmed cannot empty");
 
