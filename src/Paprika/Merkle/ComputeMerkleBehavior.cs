@@ -99,7 +99,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         return value.Keccak;
     }
 
-    public Keccak GetHash(NibblePath path, IReadOnlyWorldState commit)
+    public Keccak GetHash(NibblePath path, IReadOnlyWorldState commit, bool ignoreCache = false)
     {
         const ComputeHint hint = ComputeHint.None;
         var wrapper = new CommitWrapper(commit, true);
@@ -119,10 +119,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 var leftover = Node.ReadFrom(out var parenType, out var leaf, out _, out var branch, merkleData.Span);
                 if (parenType == Node.Type.Branch)
                 {
-                    Span<byte> rlpMemoization = stackalloc byte[RlpMemo.Size];
-                    RlpMemo memo = RlpMemo.Decompress(leftover, branch.Children, rlpMemoization);
-                    if (memo.TryGetKeccak(path[NibblePath.KeccakNibbleCount - 1], out var keccakSpan))
-                        return new Keccak(keccakSpan);
+                    if (!ignoreCache)
+                    {
+                        Span<byte> rlpMemoization = stackalloc byte[RlpMemo.Size];
+                        RlpMemo memo = RlpMemo.Decompress(leftover, branch.Children, rlpMemoization);
+                        if (memo.TryGetKeccak(path[NibblePath.KeccakNibbleCount - 1], out var keccakSpan))
+                            return new Keccak(keccakSpan);
+                    }
                     EncodeLeaf(Key.Merkle(path), ctx, NibblePath.Empty, out var keccakOrRlp, out var memoizeHint);
                     return keccakOrRlp.Keccak;
                 }
@@ -161,8 +164,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             }
         }
 
-        const ComputeHint hint = ComputeHint.None;
-        var prefixed = new PrefixingCommit(new CommitWrapper(commit));
+        const ComputeHint hint = ComputeHint.DontUseParallel;
+        var prefixed = new PrefixingCommit(new CommitWrapper(commit, true));
         prefixed.SetPrefix(account);
 
         var root = Key.Merkle(storagePath);

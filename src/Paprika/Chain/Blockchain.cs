@@ -13,6 +13,7 @@ using Paprika.Merkle;
 using Paprika.RLP;
 using Paprika.Store;
 using Paprika.Utils;
+using static Paprika.Merkle.NibbleSet;
 using BitFilter = Paprika.Data.BitMapFilter<Paprika.Data.BitMapFilter.OfN>;
 
 namespace Paprika.Chain;
@@ -39,7 +40,7 @@ public class Blockchain : IAsyncDisposable
     private readonly Dictionary<Keccak, CommittedBlockState> _blocksByHash = new();
 
     private volatile ReadOnlyWorldStateAccessor? _accessor;
-    private volatile ReadOnlySyncWorldStateAccessor? _syncAccessor;
+    //private volatile ReadOnlySyncWorldStateAccessor? _syncAccessor;
 
     // finalization
     private readonly Channel<CommittedBlockState> _finalizedChannel;
@@ -1049,7 +1050,13 @@ public class Blockchain : IAsyncDisposable
 
         public void RemoveMerkle(in Key key)
         {
-            SetImpl(key, Span<byte>.Empty, EntryType.Persistent, _preCommit);
+            //Remove without marking hash dirty - dangerous!
+
+            var hash = GetHash(key);
+            _filter.Add(hash);
+
+            var k = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+            _preCommit.Set(k, hash, Span<byte>.Empty, (byte)EntryType.Persistent);
         }
 
         public void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value)
@@ -1916,7 +1923,7 @@ public class Blockchain : IAsyncDisposable
             _current.SetStorage(address, storage, value);
 
         public void DestroyAccount(in Keccak address) => _current.DestroyAccount(address);
-        public Keccak GetHash(in NibblePath path)
+        public Keccak GetHash(in NibblePath path, bool ignoreCache)
         {
             throw new NotImplementedException();
         }
@@ -1926,17 +1933,27 @@ public class Blockchain : IAsyncDisposable
             throw new NotImplementedException();
         }
 
-        public void CheckBoundaryProof(in Keccak account, in NibblePath storagePath)
+        public void RemoveBoundaryProof(in Keccak account, in NibblePath storagePath)
         {
             throw new NotImplementedException();
         }
 
-        public void CreateProofBranch(in Keccak account, in NibblePath storagePath, byte[] childNibbles, Keccak[] childHashes)
+        public void RemoveBoundaryProof(in NibblePath path)
         {
             throw new NotImplementedException();
         }
 
-        public void CreateProofExtension(in Keccak account, in NibblePath storagePath, in NibblePath extPath)
+        public void CreateProofBranch(in Keccak account, in NibblePath storagePath, byte[] childNibbles, Keccak[] childHashes, bool persist = true)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void CreateProofExtension(in Keccak account, in NibblePath storagePath, in NibblePath extPath, bool persist = true)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void CreateProofLeaf(in Keccak account, in NibblePath storagePath, in NibblePath leafPath)
         {
             throw new NotImplementedException();
         }
@@ -2089,7 +2106,7 @@ public class Blockchain : IAsyncDisposable
 #endif
         }
 
-        public void CreateProofBranch(in Keccak account, in NibblePath storagePath, byte[] childNibbles, Keccak[] childHashes)
+        public void CreateProofBranch(in Keccak account, in NibblePath storagePath, byte[] childNibbles, Keccak[] childHashes, bool persist = true)
         {
             Key key = account == Keccak.Zero ? Key.Merkle(storagePath) : Key.Raw(NibblePath.FromKey(account), DataType.Merkle, storagePath);
 
@@ -2103,20 +2120,31 @@ public class Blockchain : IAsyncDisposable
                 if (childHashes[i] != Keccak.Zero)
                     memo.Set(childHashes[i], childNibbles[i]);
             }
-            _current.SetBranch(key, set, memo.Raw);
+            _current.SetBranch(key, set, memo.Raw, persist ? EntryType.Persistent : EntryType.Proof);
         }
 
-        public void CreateProofExtension(in Keccak account, in NibblePath storagePath, in NibblePath extPath)
+        public void CreateProofExtension(in Keccak account, in NibblePath storagePath, in NibblePath extPath, bool persist = true)
         {
             Key key = account == Keccak.Zero ? Key.Merkle(storagePath) : Key.Raw(NibblePath.FromKey(account), DataType.Merkle, storagePath);
 
-            _current.SetExtension(key, extPath);
+            _current.SetExtension(key, extPath, persist ? EntryType.Persistent : EntryType.Proof);
         }
 
-        public void CheckBoundaryProof(in Keccak account, in NibblePath storagePath)
+        public void CreateProofLeaf(in Keccak account, in NibblePath storagePath, in NibblePath leafPath)
+        {
+            Key key = account == Keccak.Zero ? Key.Merkle(storagePath) : Key.Raw(NibblePath.FromKey(account), DataType.Merkle, storagePath);
+
+            _current.SetLeaf(key, leafPath);
+        }
+
+        public void RemoveBoundaryProof(in Keccak account, in NibblePath storagePath)
         {
             var path = NibblePath.FromKey(account);
             _current.RemoveMerkle(Key.Raw(path, DataType.Merkle, storagePath));
+        }
+        public void RemoveBoundaryProof(in NibblePath path)
+        {
+            _current.RemoveMerkle(Key.Merkle(path));
         }
 
         public void SetAccount(in Keccak address, in Account account) => _current.SetAccount(address, account);
@@ -2145,8 +2173,6 @@ public class Blockchain : IAsyncDisposable
 
             IReadOnlyBatch readOnly = _db.BeginReadOnlyBatch();
             _current = new BlockState(Keccak.Zero, readOnly, [], _blockchain);
-
-            _blockchain._syncAccessor?.OnRawStateCommit(readOnly);
         }
 
         public void Finalize(uint blockNumber)
@@ -2160,6 +2186,8 @@ public class Blockchain : IAsyncDisposable
             batch.SetMetadata(blockNumber, Hash);
             batch.Commit(CommitOptions.DangerNoWrite);
 
+            _blockchain._accessor?.OnRawStateFinalize(Hash);
+
             _finalized = true;
         }
 
@@ -2169,9 +2197,9 @@ public class Blockchain : IAsyncDisposable
             return Hash;
         }
 
-        public Keccak GetHash(in NibblePath path)
+        public Keccak GetHash(in NibblePath path, bool ignoreCache)
         {
-            return ((ComputeMerkleBehavior)_blockchain._preCommit).GetHash(path, this);
+            return ((ComputeMerkleBehavior)_blockchain._preCommit).GetHash(path, this, ignoreCache);
         }
 
         public Keccak GetStorageHash(in Keccak account, in NibblePath path)
@@ -2222,10 +2250,10 @@ public class Blockchain : IAsyncDisposable
         return _accessor = new ReadOnlyWorldStateAccessor(this);
     }
 
-    public IReadOnlyWorldStateAccessor BuildReadOnlyAccessorForSync()
-    {
-        return _syncAccessor = new ReadOnlySyncWorldStateAccessor(this);
-    }
+    //public IReadOnlyWorldStateAccessor BuildReadOnlyAccessorForSync()
+    //{
+    //    return _syncAccessor = new ReadOnlySyncWorldStateAccessor(this);
+    //}
 
     private class ReadOnlyWorldStateAccessor : IReadOnlyWorldStateAccessor
     {
@@ -2238,16 +2266,16 @@ public class Blockchain : IAsyncDisposable
         {
             _blockchain = blockchain;
 
-            var snapshot = _blockchain._db.SnapshotAll()
-                .Select(batch => new ReadOnlyState(new ReadOnlyBatchCountingRefs(batch)))
-                .ToArray();
+            //var snapshot = _blockchain._db.SnapshotAll()
+            //    .Select(batch => new ReadOnlyState(new ReadOnlyBatchCountingRefs(batch)))
+            //    .ToArray();
 
-            // enqueue all to make them properly disposable
-            foreach (ReadOnlyState state in snapshot)
-            {
-                _queue.Enqueue(state);
-                _readers.Add(state.Hash, state);
-            }
+            //// enqueue all to make them properly disposable
+            //foreach (ReadOnlyState state in snapshot)
+            //{
+            //    _queue.Enqueue(state);
+            //    _readers.Add(state.Hash, state);
+            //}
         }
 
         public void OnCommitToBlockchain(in Keccak stateHash)
@@ -2264,6 +2292,47 @@ public class Blockchain : IAsyncDisposable
             finally
             {
                 _lock.ExitWriteLock();
+            }
+        }
+
+        public void OnRawStateFinalize(in Keccak stateHash)
+        {
+            var state = _blockchain.StartReadOnly(stateHash);
+
+            _lock.EnterWriteLock();
+            try
+            {
+                _queue.Enqueue((ReadOnlyState)state);
+                _readers.Add(state.Hash, (ReadOnlyState)state);
+            }
+            finally
+            {
+                _lock.ExitWriteLock();
+            }
+        }
+
+        public void Reset()
+        {
+            var toDispose = new List<ReadOnlyState>();
+
+            _lock.EnterWriteLock();
+            try
+            {
+                foreach (var readOnlyState in _readers)
+                {
+                    toDispose.Add(readOnlyState.Value);
+                }
+                _readers.Clear();
+                _queue.Clear();
+            }
+            finally
+            {
+                _lock.ExitWriteLock();
+            }
+
+            foreach (ReadOnlyState state in toDispose)
+            {
+                state.Dispose();
             }
         }
 
@@ -2495,6 +2564,11 @@ public class Blockchain : IAsyncDisposable
                 // Release
                 state.Dispose();
             }
+        }
+
+        public void Reset()
+        {
+            throw new NotImplementedException();
         }
 
         /// <summary>
