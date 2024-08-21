@@ -17,14 +17,16 @@ public interface IRawState : IReadOnlyWorldState
 
     void DestroyAccount(in Keccak address);
 
-    Keccak GetHash(in NibblePath path);
+    Keccak GetHash(in NibblePath path, bool ignoreCache);
 
     Keccak GetStorageHash(in Keccak account, in NibblePath path);
 
-    void CheckBoundaryProof(in Keccak account, in NibblePath storagePath);
+    void RemoveBoundaryProof(in Keccak account, in NibblePath storagePath);
+    void RemoveBoundaryProof(in NibblePath path);
 
-    void CreateProofBranch(in Keccak account, in NibblePath storagePath, byte[] childNibbles, Keccak[] childHashes);
-    void CreateProofExtension(in Keccak account, in NibblePath storagePath, in NibblePath extPath);
+    void CreateProofBranch(in Keccak account, in NibblePath storagePath, byte[] childNibbles, Keccak[] childHashes, bool persist = true);
+    void CreateProofExtension(in Keccak account, in NibblePath storagePath, in NibblePath extPath, bool persist = true);
+    void CreateProofLeaf(in Keccak account, in NibblePath storagePath, in NibblePath leafPath);
 
     /// <summary>
     /// Commits the pending changes.
