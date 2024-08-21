@@ -347,5 +347,23 @@ public class NibblePathTests
         _hashes.Add(hash).Should().BeTrue();
     }
 
-    private HashSet<int> _hashes = new();
+    [Test]
+    public void Double()
+    {
+        for (byte nibble0 = 0; nibble0 < 15; nibble0++)
+        {
+            for (byte nibble1 = 0; nibble1 < 15; nibble1++)
+            {
+                var path = NibblePath.DoubleEven(nibble0, nibble1);
+
+                path.IsOdd.Should().BeFalse();
+                path.Length.Should().Be(2);
+                path.FirstNibble.Should().Be(nibble0);
+                path.GetAt(0).Should().Be(nibble0);
+                path.GetAt(1).Should().Be(nibble1);
+            }
+        }
+    }
+
+    private readonly HashSet<int> _hashes = new();
 }

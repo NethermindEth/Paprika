@@ -314,7 +314,49 @@ public class SlottedArrayTests
 
         var map = new SlottedArray(span);
 
-        map.SetAssert(key, ReadOnlySpan<byte>.Empty);
+        var value = ReadOnlySpan<byte>.Empty;
+        map.SetAssert(key, value);
+        map.GetAssert(key, value);
+    }
+
+    [Test]
+    public void Key_of_length_6_even()
+    {
+        const int length = 6;
+
+        // One should be enough as the leftover path of length 1 should be encoded as a single byte 
+        const int spaceForKey = 1;
+
+        Span<byte> span = stackalloc byte[SlottedArray.MinimalSizeWithNoData + spaceForKey];
+
+        // 0b10 is the prefix of the nibble that can be densely encoded on one byte.
+        var key = NibblePath.FromKey(stackalloc byte[] { 0x34, 0b1001_1101, 0x7A }, 0, length);
+
+        var map = new SlottedArray(span);
+
+        var value = ReadOnlySpan<byte>.Empty;
+        map.SetAssert(key, value);
+        map.GetAssert(key, value);
+    }
+
+    [Test]
+    public void Key_of_length_6_odd()
+    {
+        const int length = 6;
+
+        // One should be enough as the leftover path of length 1 should be encoded as a single byte 
+        const int spaceForKey = 1;
+
+        Span<byte> span = stackalloc byte[SlottedArray.MinimalSizeWithNoData + spaceForKey];
+
+        // 0b10 is the prefix of the nibble that can be densely encoded on one byte. For odd, first 3 are consumed to prepare.
+        var key = NibblePath.FromKey(stackalloc byte[] { 0x04, 0b1011_0010, 0xD9, 0x7A }, 0, length);
+
+        var map = new SlottedArray(span);
+
+        var value = ReadOnlySpan<byte>.Empty;
+        map.SetAssert(key, value);
+        map.GetAssert(key, value);
     }
 
     [Test(Description = "Make a lot of requests to make breach the vector count")]

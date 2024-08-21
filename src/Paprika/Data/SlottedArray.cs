@@ -435,10 +435,23 @@ public readonly ref struct SlottedArray /*: IClearable */
     /// </summary>
     private static class KeyEncoding
     {
-        private const byte SingleNibbleCase = 0b1000_0000;
+        private const byte SpecialCaseMask = 0b1000_0000;
+
+        // Special case, length 1
+        private const byte PathLengthOf1 = 1;
+        private const byte SingleNibbleCaseMask = 0b1111_0000;
         private const byte SingleNibbleMask = 0b0000_1111;
         private const byte SingleNibbleLength = 1;
-        private const byte PathLengthOf1 = 1;
+
+        // Special case, length 2 that starts with 0b10; This differentiates it from length 1.
+        // The rest of the path is not important.
+        // It should allow to encode 3/4 of paths of length 2 on a single byte.
+        private const byte DoubleEvenNibbleCaseByteMask = DoubleEvenNibbleCaseFirstNibbleMask << NibblePath.NibbleShift;
+        private const byte DoubleEvenNibbleCaseByteMaskValue = DoubleEvenNibbleCaseFirstNibbleMaskValue << NibblePath.NibbleShift;
+        private const byte DoubleEvenNibbleCaseFirstNibbleMask = 0b1100;
+        private const byte DoubleEvenNibbleCaseFirstNibbleMaskValue = 0b1000;
+        private const byte DoubleEvenNibbleCaseByteCount = 1;
+        private const byte PathLengthOf2 = 2;
 
         /// <summary>
         /// The oddity of all the paths encoded
@@ -447,7 +460,12 @@ public readonly ref struct SlottedArray /*: IClearable */
 
         public static int GetBytesCount(in NibblePath key)
         {
-            return key.Length == PathLengthOf1 ? SingleNibbleLength : key.RawSpanLength + KeyLengthLength;
+            return key.Length switch
+            {
+                PathLengthOf1 => SingleNibbleLength,
+                PathLengthOf2 => (key.FirstNibble & DoubleEvenNibbleCaseFirstNibbleMask) == DoubleEvenNibbleCaseFirstNibbleMaskValue ? DoubleEvenNibbleCaseByteCount : 2,
+                _ => key.RawSpanLength + KeyLengthLength
+            };
         }
 
         public static bool TryReadFrom(scoped in Span<byte> actual, in NibblePath key, out Span<byte> leftover)
@@ -455,11 +473,21 @@ public readonly ref struct SlottedArray /*: IClearable */
             AssertEven(key);
 
             var first = actual[0];
-            if ((first & SingleNibbleCase) == SingleNibbleCase)
+            if ((first & SpecialCaseMask) == SpecialCaseMask)
             {
-                if (key.Length == PathLengthOf1 && key.FirstNibble == (first & SingleNibbleMask))
+                // check lengths first, then construct a value that combines the prefix and the first nibble 
+                if (key.Length == PathLengthOf1 &&
+                    first == (SingleNibbleCaseMask | key.FirstNibble))
                 {
                     leftover = actual[SingleNibbleLength..];
+                    return true;
+                }
+
+                if (key.Length == PathLengthOf2 &&
+                    (first & DoubleEvenNibbleCaseByteMask) == DoubleEvenNibbleCaseByteMaskValue &&
+                    first == (key.FirstNibble << NibblePath.NibbleShift) + key.GetAt(1))
+                {
+                    leftover = actual[DoubleEvenNibbleCaseByteCount..];
                     return true;
                 }
 
@@ -474,10 +502,19 @@ public readonly ref struct SlottedArray /*: IClearable */
         {
             var first = actual[0];
 
-            if ((first & SingleNibbleCase) == SingleNibbleCase)
+            if ((first & SpecialCaseMask) == SpecialCaseMask)
             {
-                key = NibblePath.Single((byte)(first & SingleNibbleMask), EvenPath);
-                return actual[SingleNibbleLength..];
+                if ((first & SingleNibbleCaseMask) == SingleNibbleCaseMask)
+                {
+                    key = NibblePath.Single((byte)(first & SingleNibbleMask), EvenPath);
+                    return actual[SingleNibbleLength..];
+                }
+
+                if ((first & DoubleEvenNibbleCaseFirstNibbleMask) == DoubleEvenNibbleCaseFirstNibbleMaskValue)
+                {
+                    key = NibblePath.DoubleEven(first);
+                    return actual[DoubleEvenNibbleCaseByteCount..];
+                }
             }
 
             return NibblePath.ReadFrom(actual, out key);
@@ -486,10 +523,20 @@ public readonly ref struct SlottedArray /*: IClearable */
         public static Span<byte> ReadFrom(scoped in Span<byte> actual, out NibblePath key)
         {
             var first = actual[0];
-            if ((first & SingleNibbleCase) == SingleNibbleCase)
+
+            if ((first & SpecialCaseMask) == SpecialCaseMask)
             {
-                key = NibblePath.Single((byte)(first & SingleNibbleMask), EvenPath);
-                return actual[SingleNibbleLength..];
+                if ((first & SingleNibbleCaseMask) == SingleNibbleCaseMask)
+                {
+                    key = NibblePath.Single((byte)(first & SingleNibbleMask), EvenPath);
+                    return actual[SingleNibbleLength..];
+                }
+
+                if ((first & DoubleEvenNibbleCaseFirstNibbleMask) == DoubleEvenNibbleCaseFirstNibbleMaskValue)
+                {
+                    key = NibblePath.DoubleEven(first);
+                    return actual[DoubleEvenNibbleCaseByteCount..];
+                }
             }
 
             return NibblePath.ReadFrom(actual, out key);
@@ -501,8 +548,14 @@ public readonly ref struct SlottedArray /*: IClearable */
 
             if (key.Length == PathLengthOf1)
             {
-                destination[0] = (byte)(SingleNibbleCase | key.FirstNibble);
+                destination[0] = (byte)(SingleNibbleCaseMask | key.FirstNibble);
                 return destination[SingleNibbleLength..];
+            }
+
+            if (key.Length == PathLengthOf2 && (key.FirstNibble & DoubleEvenNibbleCaseFirstNibbleMask) == DoubleEvenNibbleCaseFirstNibbleMaskValue)
+            {
+                destination[0] = (byte)((key.FirstNibble << NibblePath.NibbleShift) + key.GetAt(1));
+                return destination[DoubleEvenNibbleCaseByteCount..];
             }
 
             return key.WriteToWithLeftover(destination);
