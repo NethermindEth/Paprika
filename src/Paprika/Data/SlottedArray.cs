@@ -38,7 +38,7 @@ public readonly ref struct SlottedArray /*: IClearable */
 
     public SlottedArray(Span<byte> buffer)
     {
-        Debug.Assert(buffer.Length > MinimalSizeWithNoData,
+        Debug.Assert(buffer.Length >= MinimalSizeWithNoData,
             $"The buffer should be reasonably big, more than {MinimalSizeWithNoData}");
 
         Debug.Assert(buffer.Length < Slot.MaximumAddressableSize,
@@ -427,14 +427,23 @@ public readonly ref struct SlottedArray /*: IClearable */
         return (HasKeyBytes(preamble) ? KeyEncoding.GetBytesCount(key) : 0) + data.Length;
     }
 
+    /// <summary>
+    /// Provides a custom encoding for the keys of type of <see cref="NibblePath"/>.
+    /// It uses a few assumptions about the paths encoded, such as:
+    ///
+    /// - encoded paths are always start at even nibble
+    /// </summary>
     private static class KeyEncoding
     {
         private const byte SingleNibbleCase = 0b1000_0000;
-        private const byte SingleNibbleOddity = 0b0100_0000;
-        private const byte SingleNibbleOddityShift = 6;
         private const byte SingleNibbleMask = 0b0000_1111;
         private const byte SingleNibbleLength = 1;
         private const byte PathLengthOf1 = 1;
+
+        /// <summary>
+        /// The oddity of all the paths encoded
+        /// </summary>
+        private const int EvenPath = 0;
 
         public static int GetBytesCount(in NibblePath key)
         {
@@ -443,11 +452,12 @@ public readonly ref struct SlottedArray /*: IClearable */
 
         public static bool TryReadFrom(scoped in Span<byte> actual, in NibblePath key, out Span<byte> leftover)
         {
+            AssertEven(key);
+
             var first = actual[0];
             if ((first & SingleNibbleCase) == SingleNibbleCase)
             {
-                if (key.Length == PathLengthOf1 && key.FirstNibble == (first & SingleNibbleMask) &&
-                    key.Oddity == ((first & SingleNibbleOddity) >> SingleNibbleOddityShift))
+                if (key.Length == PathLengthOf1 && key.FirstNibble == (first & SingleNibbleMask))
                 {
                     leftover = actual[SingleNibbleLength..];
                     return true;
@@ -463,11 +473,10 @@ public readonly ref struct SlottedArray /*: IClearable */
         public static ReadOnlySpan<byte> ReadFrom(scoped in ReadOnlySpan<byte> actual, out NibblePath key)
         {
             var first = actual[0];
+
             if ((first & SingleNibbleCase) == SingleNibbleCase)
             {
-                key = NibblePath.Single((byte)(first & SingleNibbleMask),
-                    (first & SingleNibbleOddity) >> SingleNibbleOddityShift);
-
+                key = NibblePath.Single((byte)(first & SingleNibbleMask), EvenPath);
                 return actual[SingleNibbleLength..];
             }
 
@@ -479,9 +488,7 @@ public readonly ref struct SlottedArray /*: IClearable */
             var first = actual[0];
             if ((first & SingleNibbleCase) == SingleNibbleCase)
             {
-                key = NibblePath.Single((byte)(first & SingleNibbleMask),
-                    (first & SingleNibbleOddity) >> SingleNibbleOddityShift);
-
+                key = NibblePath.Single((byte)(first & SingleNibbleMask), EvenPath);
                 return actual[SingleNibbleLength..];
             }
 
@@ -490,13 +497,22 @@ public readonly ref struct SlottedArray /*: IClearable */
 
         public static Span<byte> Write(in NibblePath key, in Span<byte> destination)
         {
+            AssertEven(key);
+
             if (key.Length == PathLengthOf1)
             {
-                destination[0] = (byte)(SingleNibbleCase | key.FirstNibble | (key.Oddity << SingleNibbleOddityShift));
+                destination[0] = (byte)(SingleNibbleCase | key.FirstNibble);
                 return destination[SingleNibbleLength..];
             }
 
             return key.WriteToWithLeftover(destination);
+        }
+
+        [Conditional("DEBUG")]
+        private static void AssertEven(in NibblePath key)
+        {
+            Debug.Assert(key.IsOdd == false,
+                $"Paths written in the {nameof(SlottedArray)} should start at even nibble to make them easy to concatenate");
         }
     }
 

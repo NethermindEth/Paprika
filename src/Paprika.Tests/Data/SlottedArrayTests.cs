@@ -299,6 +299,24 @@ public class SlottedArrayTests
         return Verify(span.ToArray());
     }
 
+    [TestCase(0)]
+    [TestCase(1)]
+    public void Key_of_length_5(int odd)
+    {
+        const int length = 5;
+
+        // One should be enough as the leftover path of length 1 should be encoded as a single byte 
+        const int spaceForKey = 1;
+
+        Span<byte> span = stackalloc byte[SlottedArray.MinimalSizeWithNoData + spaceForKey];
+
+        var key = NibblePath.FromKey(stackalloc byte[] { 0x34, 0x5, 0x7A }, odd, length);
+
+        var map = new SlottedArray(span);
+
+        map.SetAssert(key, ReadOnlySpan<byte>.Empty);
+    }
+
     [Test(Description = "Make a lot of requests to make breach the vector count")]
     public void Breach_VectorSize_with_key_count()
     {
