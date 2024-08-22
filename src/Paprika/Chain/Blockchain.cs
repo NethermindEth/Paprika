@@ -863,14 +863,6 @@ public class Blockchain : IAsyncDisposable
             ((ComputeMerkleBehavior)_blockchain._preCommit).RecalculateStorageTries(this, _cacheBudgetPreCommit);
         }
 
-        /// <summary>
-        /// Run merkle behaviour for storage tries only
-        /// </summary>
-        public void RecalculateStorageTries()
-        {
-            ((ComputeMerkleBehavior)_blockchain._preCommit).RecalculateStorageTries(this, _cacheBudgetPreCommit);
-        }
-
         private BufferPool Pool => _blockchain._pool;
 
         [SkipLocalsInit]
@@ -1169,7 +1161,8 @@ public class Blockchain : IAsyncDisposable
                 case Node.Type.Leaf:
                 {
                     var keccak = context.IsStorage
-                        ? ((ComputeMerkleBehavior)_blockchain._preCommit).GetStorageHash(this, context.AccountHash, path)
+                        ? ((ComputeMerkleBehavior)_blockchain._preCommit).GetStorageHash(this, context.AccountHash,
+                            path)
                         : ((ComputeMerkleBehavior)_blockchain._preCommit).GetHash(path, this);
 
                     visitor.VisitLeaf(path, keccak, leaf.Path, context, this);
@@ -1197,7 +1190,8 @@ public class Blockchain : IAsyncDisposable
                 case Node.Type.Extension:
                 {
                     var keccak = context.IsStorage
-                        ? ((ComputeMerkleBehavior)_blockchain._preCommit).GetStorageHash(this, context.AccountHash, path)
+                        ? ((ComputeMerkleBehavior)_blockchain._preCommit).GetStorageHash(this, context.AccountHash,
+                            path)
                         : ((ComputeMerkleBehavior)_blockchain._preCommit).GetHash(path, this);
 
                     visitor.VisitExtension(path, keccak, ext, context, this);
@@ -1212,82 +1206,11 @@ public class Blockchain : IAsyncDisposable
                 case Node.Type.Branch:
                 {
                     var keccak = context.IsStorage
-                        ? ((ComputeMerkleBehavior)_blockchain._preCommit).GetStorageHash(this, context.AccountHash, path)
+                        ? ((ComputeMerkleBehavior)_blockchain._preCommit).GetStorageHash(this, context.AccountHash,
+                            path)
                         : ((ComputeMerkleBehavior)_blockchain._preCommit).GetHash(path, this);
 
-                        visitor.VisitBranch(path, keccak, context, this);
-
-        /// <summary>
-        /// Just for tests - accept visitor method to traverse the merkle trie
-        /// </summary>
-        /// <param name="visitor"></param>
-        /// <param name="path"></param>
-        /// <param name="context"></param>
-        public void Accept(IBlockstateVisitor visitor, NibblePath path, BlockstateVisitorContext context)
-        {
-            var key = Key.Merkle(path);
-
-            // Query for the node
-            using var owner = context.Commit.Get(key);
-            if (owner.IsEmpty)
-            {
-                return;
-            }
-
-            // read the existing one
-            var leftover = Node.ReadFrom(out var type, out var leaf, out var ext, out var branch, owner.Span);
-            switch (type)
-            {
-                case Node.Type.Leaf:
-                {
-                    var keccak = context.IsStorage
-                        ? ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateStorageHash(this, context.AccountHash, path)
-                        : ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateHash(path, this);
-
-                    visitor.VisitLeaf(path, keccak, leaf, context, this);
-
-                    if (!context.IsStorage)
-                    {
-                        var full = path.Append(leaf.Path, stackalloc byte[NibblePath.MaxLengthValue * 2 + 1]);
-                        using var leadDataOwner = context.Commit.Get(Key.Account(full));
-                        Account.ReadFrom(leadDataOwner.Span, out Account account);
-
-                        if (account.StorageRootHash != Keccak.EmptyTreeHash)
-                        {
-                            var prefixed = new ComputeMerkleBehavior.PrefixingCommit(this);
-                            prefixed.SetPrefix(full);
-                            BlockstateVisitorContext storageContext = new BlockstateVisitorContext(prefixed);
-                            storageContext.Level = context.Level + 1;
-                            storageContext.IsStorage = true;
-                            storageContext.AccountHash = full.UnsafeAsKeccak;
-                            Accept(visitor, NibblePath.Empty, storageContext);
-                        }
-                    }
-
-                    return;
-                }
-                case Node.Type.Extension:
-                {
-                    var keccak = context.IsStorage
-                        ? ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateStorageHash(this, context.AccountHash, path)
-                        : ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateHash(path, this);
-
-                    visitor.VisitExtension(path, keccak, ext, context, this);
-
-                    context.Level++;
-                    context.BranchChildIndex = null;
-                    NibblePath childPath = path.Append(ext.Path, stackalloc byte[NibblePath.MaxLengthValue * 2 + 1]);
-                    Accept(visitor, childPath, context);
-                    context.Level--;
-                    return;
-                }
-                case Node.Type.Branch:
-                {
-                    var keccak = context.IsStorage
-                        ? ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateStorageHash(this, context.AccountHash, path)
-                        : ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateHash(path, this);
-
-                        visitor.VisitBranch(path, keccak, context, this);
+                    visitor.VisitBranch(path, keccak, context, this);
 
                     context.Level++;
                     Span<byte> workingSpan = stackalloc byte[NibblePath.MaxLengthValue * 2 + 1];
@@ -1307,9 +1230,11 @@ public class Blockchain : IAsyncDisposable
                                 visitor.VisitLeaf(childPath, new Keccak(keccakSpan), NibblePath.Empty, context, this);
                                 continue;
                             }
+
                             Accept(visitor, childPath, context);
                         }
                     }
+
                     context.Level--;
                     return;
                 }
@@ -2285,167 +2210,6 @@ public class Blockchain : IAsyncDisposable
         public Keccak GetStorageHash(in Keccak account, in NibblePath path)
         {
             return ((ComputeMerkleBehavior)_blockchain._preCommit).GetStorageHash(this, account, path);
-        }
-
-        public void Discard()
-        {
-            _current.Reset();
-        }
-
-        public string DumpTrie()
-        {
-            var td = new TrieDumper();
-            var context = new BlockstateVisitorContext(_current);
-            td.VisitTree(Hash, context);
-            _current.Accept(td, NibblePath.Empty, context);
-            return td.ToString();
-        }
-
-        public Keccak RecalculateStorageRoot(in Keccak accountAddress)
-        {
-            _current.RecalculateStorageTries();
-            return _current.GetAccount(accountAddress).StorageRootHash;
-        }
-
-        private void ThrowOnFinalized()
-        {
-            if (_finalized)
-            {
-                ThrowAlreadyFinalized();
-            }
-
-            [DoesNotReturn]
-            [StackTraceHidden]
-            static void ThrowAlreadyFinalized()
-            {
-                throw new Exception("This ras state has already been finalized!");
-            }
-        }
-
-        public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) => ((IReadOnlyWorldState)_current).Get(key);
-    }
-
-    /// <summary>
-    /// The raw state implementation - no ancestors
-    /// </summary>
-    private class RawStateMT : IRawState
-    {
-        private readonly Blockchain _blockchain;
-        private readonly IDb _db;
-        private BlockState _current;
-
-        private bool _finalized;
-
-        public RawStateMT(Blockchain blockchain, IDb db)
-        {
-            _blockchain = blockchain;
-            _db = db;
-            _current = new BlockState(Keccak.Zero, _db.BeginReadOnlyBatch(), [], _blockchain);
-        }
-
-        public RawStateMT(Blockchain blockchain, IDb db, Keccak rootHash)
-        {
-            _blockchain = blockchain;
-            _db = db;
-            _current = new BlockState(rootHash, _db.BeginReadOnlyBatch(), [], _blockchain);
-            Hash = rootHash;
-        }
-
-        public void Dispose()
-        {
-            _current.Dispose();
-        }
-
-        public Account GetAccount(in Keccak address) => _current.GetAccount(address);
-
-        public Span<byte> GetStorage(in Keccak address, in Keccak storage, Span<byte> destination) =>
-            _current.GetStorage(address, in storage, destination);
-
-        public Keccak Hash { get; private set; }
-
-        public void SetBoundary(in NibblePath account, in Keccak boundaryNodeKeccak)
-        {
-#if SNAP_SYNC_SUPPORT
-
-            if (_current.IsNonBoundaryHash(account, out Keccak existingHash) && existingHash == boundaryNodeKeccak)
-                return;
-                
-            var payload = SnapSync.WriteBoundaryValue(boundaryNodeKeccak, stackalloc byte[SnapSync.BoundaryValueSize]);
-
-            _current.RemoveMerkle(Key.Merkle(account));
-            _current.SetKeyForProof(Key.Account(account), payload);
-#endif
-        }
-
-        public void SetBoundary(in Keccak account, in NibblePath storage, in Keccak boundaryNodeKeccak)
-        {
-#if SNAP_SYNC_SUPPORT
-
-            var path = NibblePath.FromKey(account);
-            //if (_current.IsNonBoundaryHash(path, storage, out Keccak existingHash) && existingHash == boundaryNodeKeccak)
-            //    return;
-            if (_current.IsNonBoundaryHash(path, storage))
-                return;
-
-            var payload = SnapSync.WriteBoundaryValue(boundaryNodeKeccak, stackalloc byte[SnapSync.BoundaryValueSize]);
-
-            _current.SetKeyForProof(Key.StorageCell(path, storage), payload);
-#endif
-        }
-
-
-        public void SetAccount(in Keccak address, in Account account) => _current.SetAccount(address, account);
-
-        public void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value) =>
-            _current.SetStorage(address, storage, value);
-
-        public void DestroyAccount(in Keccak address) => _current.DestroyAccount(address);
-
-        public void Commit(bool ensureHash)
-        {
-            ThrowOnFinalized();
-
-            //commit without hash recalc - useful for storage ranges in snap sync
-            if (ensureHash)
-                Hash = _current.Hash;
-
-            using var batch = _db.BeginNextBatch();
-
-            var committed = _current.CommitRaw();
-            committed.Apply(batch);
-            _current.Dispose();
-
-            batch.Commit(CommitOptions.DangerNoWrite);
-
-            IReadOnlyBatch readOnly = _db.BeginReadOnlyBatch();
-            _current = new BlockState(Keccak.Zero, readOnly, [], _blockchain);
-
-            Console.WriteLine($"{Environment.CurrentManagedThreadId}: Committed {((BatchContextBase)batch).BatchId}!");
-        }
-
-        public void Finalize(uint blockNumber)
-        {
-            ThrowOnFinalized();
-
-            //enforce hash calculation
-            Hash = ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateHash(NibblePath.Empty, this);
-
-            using var batch = _db.BeginNextBatch();
-            batch.SetMetadata(blockNumber, Hash);
-            batch.Commit(CommitOptions.DangerNoWrite);
-
-            _finalized = true;
-        }
-
-        public Keccak RefreshRootHash()
-        {
-            Hash = _current.Hash;
-            return Hash;
-        }
-
-        public Keccak GetHash(in NibblePath path)
-        {
-            return ((ComputeMerkleBehavior)_blockchain._preCommit).CalculateHash(path, this);
         }
 
         public void Discard()
