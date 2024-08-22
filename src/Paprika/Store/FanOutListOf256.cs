@@ -54,6 +54,24 @@ public readonly ref struct FanOutListOf256<TPage, TPageType>(ref DbAddressList.O
         _addresses[index] = batch.GetAddress(updated);
     }
 
+    public void DeleteByPrefix(in NibblePath path, IBatchContext batch)
+    {
+        var index = GetIndex(path);
+        var sliced = path.SliceFrom(ConsumedNibbles);
+
+        var addr = _addresses[index];
+
+        if (addr.IsNull)
+        {
+            // There's nothing to delete here
+            return;
+        }
+
+        // The page exists, update
+        var updated = TPage.Wrap(batch.GetAt(addr)).DeleteByPrefix(sliced, batch);
+        _addresses[index] = batch.GetAddress(updated);
+    }
+
     public void Report(IReporter reporter, IPageResolver resolver, int level, int trimmedNibbles)
     {
         var consumedNibbles = trimmedNibbles + ConsumedNibbles;
