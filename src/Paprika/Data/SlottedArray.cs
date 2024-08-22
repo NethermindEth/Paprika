@@ -485,7 +485,7 @@ public readonly ref struct SlottedArray /*: IClearable */
 
                 if (key.Length == PathLengthOf2 &&
                     (first & DoubleEvenNibbleCaseByteMask) == DoubleEvenNibbleCaseByteMaskValue &&
-                    first == (key.FirstNibble << NibblePath.NibbleShift) + key.GetAt(1))
+                    first == key.UnsafeSpan)
                 {
                     leftover = actual[DoubleEvenNibbleCaseByteCount..];
                     return true;
@@ -552,9 +552,9 @@ public readonly ref struct SlottedArray /*: IClearable */
                 return destination[SingleNibbleLength..];
             }
 
-            if (key.Length == PathLengthOf2 && (key.FirstNibble & DoubleEvenNibbleCaseFirstNibbleMask) == DoubleEvenNibbleCaseFirstNibbleMaskValue)
+            if (key.Length == PathLengthOf2 && (key.UnsafeSpan & DoubleEvenNibbleCaseByteMask) == DoubleEvenNibbleCaseByteMaskValue)
             {
-                destination[0] = (byte)((key.FirstNibble << NibblePath.NibbleShift) + key.GetAt(1));
+                destination[0] = key.UnsafeSpan;
                 return destination[DoubleEvenNibbleCaseByteCount..];
             }
 
