@@ -1,9 +1,7 @@
 using System.Diagnostics;
-using System.IO.Hashing;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using Paprika.Crypto;
-using Paprika.Store;
 
 namespace Paprika.Data;
 
@@ -97,7 +95,6 @@ public readonly ref partial struct Key
 
     public bool IsState => Type == DataType.Account ||
                            (Type == DataType.Merkle && Path.Length < NibblePath.KeccakNibbleCount);
-
 
     [SkipLocalsInit]
     public override int GetHashCode()
