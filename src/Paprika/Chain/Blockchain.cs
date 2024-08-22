@@ -989,6 +989,8 @@ public class Blockchain : IAsyncDisposable
             return true;
         }
 
+
+
         /// <summary>
         /// Decides to whether put the value in a transient cache or in a persistent cache to speed
         /// up queries in next executions.
@@ -1963,6 +1965,7 @@ public class Blockchain : IAsyncDisposable
             throw new NotImplementedException();
         }
 
+
         public void Commit(bool ensureHash)
         {
             ThrowOnFinalized();
@@ -2044,6 +2047,7 @@ public class Blockchain : IAsyncDisposable
 
         public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) => ((IReadOnlyWorldState)_current).Get(key);
     }
+
 
     /// <summary>
     /// The raw state implementation - no ancestors
@@ -2340,6 +2344,8 @@ public class Blockchain : IAsyncDisposable
                 state.Dispose();
             }
         }
+
+
 
         public bool HasState(in Keccak keccak)
         {
