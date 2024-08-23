@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -29,13 +30,14 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         public const byte Fanout = 0;
 
         /// <summary>
-        /// <see cref="Payload.Buckets"/> are used to keep the structure of the Merkle using <see cref="UShortPage"/>.
-        /// Buckets[0] is used to store <see cref="NibblePath"/> of lengths of 0 and 1.
-        /// Buckets[1] is used to store <see cref="NibblePath"/> of lengths of 2.
-        /// Buckets[2] is used to store <see cref="NibblePath"/> of lengths of 3.
-        /// Up to <see cref="DataPage.MerkleModeLimitExclusive"/>.
+        /// This is a leaf page and it will use <see cref="Payload.Buckets"/> to keep additional overflow pages.
         /// </summary>
-        public const byte Merkle = 1;
+        public const byte Leaf = 1;
+    }
+
+    private static class LeafMode
+    {
+        public const int Bucket = 0;
     }
 
     public static DataPage Wrap(Page page) => Unsafe.As<Page, DataPage>(ref page);
@@ -85,7 +87,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                     if (k.IsEmpty || payload.Buckets[k.FirstNibble].IsNull)
                     {
                         // Empty key or a key with no children can be deleted only in-situ
-                        map.Delete(key);
+                        map.Delete(k);
                         break;
                     }
                 }
@@ -139,7 +141,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 child.Header.Level = (byte)(page.Header.Level + ConsumedNibbles);
 
                 // Set the mode for the new child to Merkle to make it spread content on the NibblePath length basis
-                child.Header.Metadata = Modes.Merkle;
+                child.Header.Metadata = Modes.Leaf;
                 payload.Buckets[nibble] = childAddr;
 
                 FlushDown(map, nibble, childAddr, batch);
@@ -147,146 +149,138 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
             }
             else
             {
-                Debug.Assert(page.Header.Metadata == Modes.Merkle);
+                Debug.Assert(page.Header.Metadata == Modes.Leaf);
 
-                if (k.Length < MerkleMode.MerkleModeLimitExclusive)
+                // If it's a delete and no child, just delete
+                if (data.IsEmpty && payload.Buckets[LeafMode.Bucket].IsNull)
                 {
-                    if (MerkleMode.TrySetInMerkle(k, data, ref payload, batch))
-                    {
-                        // Update happened, return
-                        break;
-                    }
-
-                    // Failed to set, transform and continue.
-                    MerkleMode.TransformMerkleToFanOut(current, ref page.Header, ref payload, batch);
-                    continue;
+                    map.Delete(k);
+                    break;
                 }
 
-                // The key is not qualified to be stored under Merkle, try set in map.
+                // Try set in the map
                 if (map.TrySet(k, data))
                 {
                     // Update happened, return
                     break;
                 }
 
-                // Failed to set, transform and continue.
-                MerkleMode.TransformMerkleToFanOut(current, ref page.Header, ref payload, batch);
-                continue;
+                // Failed to set, use overflow.
+                // 1. check if delete, then delete in both.
+                // 2. flush some down
+                // 3. retry set
+                var overflow = GetWritableOverflow(batch, ref payload);
+
+                Debug.Assert(payload.Buckets[LeafMode.Bucket].IsNull == false);
+
+                if (data.IsEmpty)
+                {
+                    map.Delete(k);
+                    overflow.Delete(k);
+                    break;
+                }
+
+                // Move down
+                map.MoveNonEmptyKeysTo(new MapSource(overflow), treatEmptyAsTombstone: true);
+
+                // Try set again
+                if (map.TrySet(k, data))
+                {
+                    // Update happened, return
+                    break;
+                }
+
+                // Failed to set, requires transforming the leaf to a full-blown fan-out data page.
+                TurnToFanOut(current, overflow, batch);
+
+                // Set the actual key
+                Set(current, k, data, batch);
+                break;
             }
         }
     }
 
-    [SkipLocalsInit]
-    private static class MerkleMode
+    private static void TurnToFanOut(DbAddress current, in SlottedArray overflow, IBatchContext batch)
     {
-        // For now, use only levels with length of 0 and 1
-        public const int MerkleModeLimitExclusive = 2;
+        // The plan:
+        // 1. Remove from overflow all the keys that exist in the current.
+        // 2. The overflow contains no keys from the current.
+        // 3. Change the mode
+        // 4. Find the biggest nibble from both, overflow and the current map
+        // 5. Create a child page for this nibble.
+        // 6. Set values from overflow to this page.
 
-        private const ushort OddMarker = 0x8000;
-        private const ushort OddMarkerShift = 15;
-        private const ushort Length1Marker = 0x4000;
-        private const ushort Length1NibbleMask = 0x00FF;
+        var page = batch.GetAt(current);
 
-        private static (ushort id, byte index) MapToId(in NibblePath key)
+        ref var payload = ref Unsafe.AsRef<Payload>(page.Payload);
+        var map = new SlottedArray(payload.DataSpan);
+
+        // Register for reuse and clear immediately. The overflow is kept as a map in memory
+        batch.RegisterForFutureReuse(batch.GetAt(payload.Buckets[LeafMode.Bucket]));
+        payload.Buckets[LeafMode.Bucket] = DbAddress.Null;
+
+        // 1. & 2.
+        overflow.RemoveKeysFrom(map);
+
+        // 3. 
+        page.Header.Metadata = Modes.Fanout;
+
+        // 4.
+        Span<ushort> stats = stackalloc ushort[BucketCount];
+        overflow.GatherCountStats1Nibble(stats);
+        map.GatherCountStats1Nibble(stats);
+
+        byte nibbleWithMostData = 0;
+        for (byte i = 1; i < BucketCount; i++)
         {
-            Debug.Assert(key.Length < MerkleModeLimitExclusive,
-                "The key length should have been checked before calling this");
-
-            var odd = (ushort)(key.Oddity * OddMarker);
-
-            return key.Length switch
+            if (stats[i] > stats[nibbleWithMostData])
             {
-                0 => (id: 0, index: 0),
-                1 => (id: (ushort)(Length1Marker + key.FirstNibble + odd), index: 0),
-                //2 => (id: (ushort)(key.FirstNibble * 16 + key.GetAt(1) + odd), index: 1),
-                _ => default((ushort id, byte index))
-            };
-        }
-
-        public static bool TrySetInMerkle(in NibblePath key, in ReadOnlySpan<byte> data, ref Payload payload,
-            IBatchContext batch)
-        {
-            var (id, index) = MapToId(key);
-
-            var addr = payload.Buckets[index];
-            UShortPage child;
-
-            if (addr.IsNull)
-            {
-                var page = batch.GetNewPage(out addr, false);
-                payload.Buckets[index] = addr;
-
-                page.Header.PageType = PageType.UShort;
-                child = new UShortPage(page);
-                child.Clear();
-            }
-            else
-            {
-                child = new UShortPage(batch.EnsureWritableCopy(ref addr));
-                payload.Buckets[index] = addr;
-            }
-
-            if (data.IsEmpty)
-            {
-                child.Map.Delete(id);
-                return true;
-            }
-
-            return child.Map.TrySet(id, data);
-        }
-
-        public static void TransformMerkleToFanOut(DbAddress at, ref PageHeader header, ref Payload payload,
-            IBatchContext batch)
-        {
-            Debug.Assert(header.Metadata == Modes.Merkle);
-
-            // The main thing is to notice that either fanout or merkle, they still set data in the slotted array.
-            // What we can do is to:
-            // 1. change the mode
-            // 2. iterate over Merkle parts and set them in the page as is
-            // The only thing to do is to copy them first and clean the buckets
-
-            header.Metadata = Modes.Fanout;
-
-            // Length 0 & 1
-            var addr = payload.Buckets[0];
-
-            if (addr.IsNull == false)
-            {
-                payload.Buckets[0] = DbAddress.Null;
-                var page0And1 = new UShortPage(batch.GetAt(addr));
-                batch.RegisterForFutureReuse(page0And1.AsPage());
-
-                foreach (var item in page0And1.Map.EnumerateAll())
-                {
-                    var key = NibblePath.Empty;
-
-                    if ((item.Key & Length1Marker) == Length1Marker)
-                    {
-                        var odd = (item.Key & OddMarker) >> OddMarkerShift;
-                        var nibble = (byte)(item.Key & Length1NibbleMask);
-
-                        key = NibblePath.Single(nibble, odd);
-                    }
-
-                    Set(at, key, item.RawData, batch);
-                }
+                nibbleWithMostData = i;
             }
         }
 
-        public static bool TryGetInMerkle(IReadOnlyBatchContext batch, scoped in NibblePath key, in Payload payload, out ReadOnlySpan<byte> result)
+        // 5
+        // Get new page without clearing. Clearing is done manually.
+        var child = batch.GetNewPage(out var childAddr, false);
+        new DataPage(child).Clear();
+
+        child.Header.PageType = PageType.Standard;
+        child.Header.Level = (byte)(page.Header.Level + ConsumedNibbles);
+
+        // Set the mode for the new child to Merkle to make it spread content on the NibblePath length basis
+        child.Header.Metadata = Modes.Leaf;
+        payload.Buckets[nibbleWithMostData] = childAddr;
+
+        // 6
+        foreach (var item in overflow.EnumerateAll())
         {
-            var (id, index) = MapToId(key);
-            var addr = payload.Buckets[index];
-
-            if (addr.IsNull)
-            {
-                result = default;
-                return false;
-            }
-
-            return new UShortPage(batch.GetAt(addr)).Map.TryGet(id, out result);
+            Set(current, item.Key, item.RawData, batch);
         }
+    }
+
+    private static SlottedArray GetWritableOverflow(IBatchContext batch, ref Payload payload)
+    {
+        var addr = payload.Buckets[LeafMode.Bucket];
+        LeafOverflowPage overflow;
+        Page overflowPage;
+        if (addr.IsNull)
+        {
+            // Manual clear below
+            overflowPage = batch.GetNewPage(out addr, clear: false);
+            payload.Buckets[LeafMode.Bucket] = addr;
+
+            overflowPage.Header.PageType = PageType.LeafOverflow;
+            overflow = new LeafOverflowPage(overflowPage);
+            overflow.Map.Clear();
+        }
+        else
+        {
+            overflowPage = batch.EnsureWritableCopy(ref addr);
+            overflow = new LeafOverflowPage(overflowPage);
+            payload.Buckets[LeafMode.Bucket] = addr;
+        }
+
+        return overflow.Map;
     }
 
     public void Clear()
@@ -415,14 +409,14 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         {
             batch.AssertRead(page.Header);
 
-            if (page.Header.Metadata == Modes.Merkle)
+            if (page.Header.Metadata == Modes.Leaf)
             {
-                if (sliced.Length < MerkleMode.MerkleModeLimitExclusive)
-                {
-                    return MerkleMode.TryGetInMerkle(batch, sliced, page.Data, out result);
-                }
+                if (page.Map.TryGet(sliced, out result))
+                    return true;
 
-                return page.Map.TryGet(sliced, out result);
+                var overflowAddr = page.Data.Buckets[LeafMode.Bucket];
+                return !overflowAddr.IsNull &&
+                       new LeafOverflowPage(batch.GetAt(overflowAddr)).Map.TryGet(sliced, out result);
             }
 
             DbAddress bucket = default;
@@ -478,14 +472,13 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
 
             var child = resolver.GetAt(bucket);
 
-
             if (IsFanOut)
             {
                 new DataPage(child).Report(reporter, resolver, pageLevel + 1, trimmedNibbles + 1);
             }
             else
             {
-                // TODO UshortPage
+                new LeafOverflowPage(child).Report(reporter, resolver, pageLevel + 1, trimmedNibbles + 1);
             }
         }
     }
@@ -509,7 +502,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 }
                 else
                 {
-                    new UShortPage(child).Accept(visitor, resolver, bucket);
+                    new LeafOverflowPage(child).Accept(visitor, resolver, bucket);
                 }
             }
         }
