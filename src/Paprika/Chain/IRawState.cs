@@ -18,6 +18,12 @@ public interface IRawState : IReadOnlyWorldState
     void DestroyAccount(in Keccak address);
 
     /// <summary>
+    /// Registers a deletion that will be applied when <see cref="Commit"/> is called.
+    /// </summary>
+    /// <param name="prefix"></param>
+    void RegisterDeleteByPrefix(in Key prefix);
+
+    /// <summary>
     /// Commits the pending changes.
     /// </summary>
     void Commit();

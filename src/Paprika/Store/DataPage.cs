@@ -3,7 +3,6 @@ using System.Reflection.PortableExecutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
-
 using static Paprika.Merkle.Node;
 
 namespace Paprika.Store;
@@ -31,13 +30,39 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
     public ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
 
-    public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
+    public Page DeleteByPrefix(in NibblePath prefix, IBatchContext batch)
     {
-        if (page.Header.Level > 10)
+        if (Header.BatchId != batch.BatchId)
         {
-            Debugger.Break();
+            // the page is from another batch, meaning, it's readonly. Copy
+            var writable = batch.GetWritableCopy(page);
+            return new DataPage(writable).DeleteByPrefix(prefix, batch);
         }
 
+        Map.DeleteByPrefix(prefix);
+
+        if (prefix.IsEmpty == false)
+        {
+            var childAddr = Data.Buckets[prefix.FirstNibble];
+
+            if (childAddr.IsNull == false)
+            {
+                var sliced = prefix.SliceFrom(ConsumedNibbles);
+                var child = batch.GetAt(childAddr);
+
+                child = child.Header.PageType == PageType.Leaf
+                    ? new LeafPage(child).DeleteByPrefix(sliced, batch)
+                    : new DataPage(child).DeleteByPrefix(sliced, batch);
+
+                Data.Buckets[prefix.FirstNibble] = batch.GetAddress(child);
+            }
+        }
+
+        return page;
+    }
+
+    public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
+    {
         if (Header.BatchId != batch.BatchId)
         {
             // the page is from another batch, meaning, it's readonly. Copy
@@ -227,8 +252,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
 
         private const int DataOffset = Size - DataSize;
 
-        [FieldOffset(0)]
-        public DbAddressList.Of16 Buckets;
+        [FieldOffset(0)] public DbAddressList.Of16 Buckets;
 
         /// <summary>
         /// The first item of map of frames to allow ref to it.
@@ -244,7 +268,8 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>
     public bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
         => TryGet(batch, key, out result, this);
 
-    private static bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result, DataPage page)
+    private static bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result,
+        DataPage page)
     {
         var returnValue = false;
         var sliced = key;

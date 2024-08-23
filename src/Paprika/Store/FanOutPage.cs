@@ -112,6 +112,36 @@ public readonly unsafe struct FanOutPage(Page page) : IPageWithData<FanOutPage>
         return page;
     }
 
+    public Page DeleteByPrefix(in NibblePath prefix, IBatchContext batch)
+    {
+        if (Header.BatchId != batch.BatchId)
+        {
+            // the page is from another batch, meaning, it's readonly. Copy
+            var writable = batch.GetWritableCopy(page);
+            return new FanOutPage(writable).DeleteByPrefix(prefix, batch);
+        }
+
+        if (IsKeyLocal(prefix))
+        {
+            new SlottedArray(Data.Data).DeleteByPrefix(prefix);
+            return page;
+        }
+
+        var index = GetIndex(prefix);
+        var sliced = prefix.SliceFrom(ConsumedNibbles);
+
+        ref var addr = ref Data.Addresses[index];
+
+        if (addr.IsNull)
+        {
+            return page;
+        }
+
+        // update after set
+        addr = batch.GetAddress(new DataPage(batch.GetAt(addr)).DeleteByPrefix(sliced, batch));
+        return page;
+    }
+
     private static bool IsKeyLocal(in NibblePath key) => key.Length < ConsumedNibbles;
 
     [DoesNotReturn]

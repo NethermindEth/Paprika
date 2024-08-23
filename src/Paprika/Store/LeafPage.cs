@@ -17,6 +17,32 @@ public readonly unsafe struct LeafPage(Page page) : IPageWithData<LeafPage>
 
     private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
 
+    public Page DeleteByPrefix(in NibblePath prefix, IBatchContext batch)
+    {
+        if (Header.BatchId != batch.BatchId)
+        {
+            // the page is from another batch, meaning, it's readonly. Copy
+            var writable = batch.GetWritableCopy(page);
+            return new LeafPage(writable).DeleteByPrefix(prefix, batch);
+        }
+
+        Map.DeleteByPrefix(prefix);
+
+        for (var i = 0; i < BucketCount; i++)
+        {
+            var childAddr = Data.Buckets[i];
+            if (childAddr.IsNull == false)
+            {
+                var child = batch.EnsureWritableCopy(ref childAddr);
+                var overflow = new LeafOverflowPage(child);
+                overflow.Map.DeleteByPrefix(prefix);
+                Data.Buckets[i] = childAddr;
+            }
+        }
+
+        return page;
+    }
+
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
         if (Header.BatchId != batch.BatchId)
