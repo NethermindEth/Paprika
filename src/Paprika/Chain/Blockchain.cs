@@ -1975,7 +1975,7 @@ public class Blockchain : IAsyncDisposable
             _prefixesToDelete.Advance(written.Length);
         }
 
-        public void Commit()
+        public void Commit(bool ensureHash)
         {
             ThrowOnFinalized();
 
@@ -2076,6 +2076,7 @@ public class Blockchain : IAsyncDisposable
     /// </summary>
     private class RawStateMT : IRawState
     {
+        private ArrayBufferWriter<byte> _prefixesToDelete = new();
         private readonly Blockchain _blockchain;
         private readonly IDb _db;
         private BlockState _current;
@@ -2166,6 +2167,13 @@ public class Blockchain : IAsyncDisposable
             Key key = account == Keccak.Zero ? Key.Merkle(storagePath) : Key.Raw(NibblePath.FromKey(account), DataType.Merkle, storagePath);
 
             _current.SetLeaf(key, leafPath);
+        }
+
+        public void RegisterDeleteByPrefix(in Key prefix)
+        {
+            var span = _prefixesToDelete.GetSpan(prefix.MaxByteLength);
+            var written = prefix.WriteTo(span);
+            _prefixesToDelete.Advance(written.Length);
         }
 
         public void RemoveBoundaryProof(in Keccak account, in NibblePath storagePath)
