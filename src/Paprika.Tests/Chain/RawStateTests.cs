@@ -9,7 +9,7 @@ using Paprika.Store;
 
 namespace Paprika.Tests.Chain;
 
-public class RawTests
+public class RawStateTests
 {
     [Test]
     public async Task Raw_access_spin()

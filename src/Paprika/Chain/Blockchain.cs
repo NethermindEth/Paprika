@@ -1703,8 +1703,8 @@ public class Blockchain : IAsyncDisposable
         public void RegisterDeleteByPrefix(in Key prefix)
         {
             var span = _prefixesToDelete.GetSpan(prefix.MaxByteLength);
-            var leftover = prefix.WriteTo(span);
-            _prefixesToDelete.Advance(span.Length - leftover.Length);
+            var written = prefix.WriteTo(span);
+            _prefixesToDelete.Advance(written.Length);
         }
 
         public void Commit()
