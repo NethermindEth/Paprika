@@ -372,6 +372,38 @@ public readonly ref struct SlottedArray /*: IClearable */
         }
     }
 
+    public void RemoveKeysFrom(in SlottedArray source)
+    {
+        var to = source.Count;
+
+        for (var i = 0; i < to; i++)
+        {
+            var removedSlot = source.GetSlotRef(i);
+            if (removedSlot.IsDeleted)
+                continue;
+
+            var removedHash = source.GetHashRef(i);
+            var removedPayload = source.GetSlotPayload(i);
+
+            NibblePath removedPath;
+            if (removedSlot.HasKeyBytes)
+            {
+                KeyEncoding.ReadFrom(removedPayload, out removedPath);
+            }
+            else
+            {
+                removedPath = default;
+            }
+
+            var toRemove = TryGetImpl(removedPath, removedHash, removedSlot.KeyPreamble, out _);
+
+            if (toRemove != NotFound)
+            {
+                DeleteImpl(toRemove);
+            }
+        }
+    }
+
     public const int BucketCount = 16;
 
     /// <summary>
@@ -395,27 +427,23 @@ public readonly ref struct SlottedArray /*: IClearable */
     }
 
     /// <summary>
-    /// Gets the aggregated count of entries for 2 nibble buckets.
-    /// The 0th nibble is shifted left <see cref="NibblePath.NibbleShift"/> then 1st is added.
+    /// Gets the aggregated size of entries per nibble.
     /// </summary>
-    public void GatherCountStats2Nibbles(Span<ushort> buckets)
+    public void GatherSizeStats1Nibble(Span<ushort> buckets)
     {
-        Debug.Assert(buckets.Length == BucketCount * BucketCount);
+        Debug.Assert(buckets.Length == BucketCount);
 
         var to = _header.Low / Slot.TotalSize;
-
         for (var i = 0; i < to; i++)
         {
             ref var slot = ref GetSlotRef(i);
 
             // extract only not deleted and these which have at least one nibble
-            if (slot.IsDeleted == false)
+            if (slot.IsDeleted == false && slot.HasAtLeastOneNibble)
             {
-                var hash = GetHashRef(i);
-                if (slot.HasAtLeastTwoNibbles(hash, slot.KeyPreamble))
-                {
-                    buckets[slot.GetNibble0And1(hash)] += 1;
-                }
+                const int hashSize = sizeof(ushort);
+                var size = (ushort)(GetSlotPayload(i, slot).Length + Slot.Size + hashSize);
+                buckets[slot.GetNibble0(GetHashRef(i))] += size;
             }
         }
     }
@@ -714,6 +742,12 @@ public readonly ref struct SlottedArray /*: IClearable */
 
         data = default;
         return false;
+    }
+
+    public bool Contains(scoped in NibblePath key)
+    {
+        var hash = Slot.PrepareKey(key, out byte preamble, out var trimmed);
+        return TryGetImpl(trimmed, hash, preamble, out _) != NotFound;
     }
 
     /// <summary>

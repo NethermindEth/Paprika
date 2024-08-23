@@ -417,6 +417,75 @@ public class SlottedArrayTests
 
     private static ReadOnlySpan<byte> Data(byte key) => new[] { key };
 
+    [TestCase(new[] { 1 })]
+    [TestCase(new[] { 2, 4 })]
+    [TestCase(new[] { 0, 1, 7 })]
+    public void Remove_keys_from(int[] indexes)
+    {
+        var toRemove = new SlottedArray(stackalloc byte[512]);
+        var map = new SlottedArray(stackalloc byte[512]);
+
+        var key1 = NibblePath.Parse("1");
+        var key2 = NibblePath.Parse("23");
+        var key3 = NibblePath.Parse("345");
+        var key4 = NibblePath.Parse("4567");
+        var key5 = NibblePath.Parse("56789");
+        var key6 = NibblePath.Parse("56899A");
+        var key7 = NibblePath.Parse("56899AB");
+        var key8 = NibblePath.Parse("56899AB1");
+
+        // Set receiver with all the keys
+        map.SetAssert(NibblePath.Empty, Data(0));
+        map.SetAssert(key1, Data(1));
+        map.SetAssert(key2, Data(2));
+        map.SetAssert(key3, Data(3));
+        map.SetAssert(key4, Data(4));
+        map.SetAssert(key5, Data(5));
+        map.SetAssert(key6, Data(6));
+        map.SetAssert(key7, Data(7));
+        map.SetAssert(key8, Data(8));
+
+        foreach (var index in indexes)
+        {
+            var removed = index switch
+            {
+                0 => NibblePath.Empty,
+                1 => key1,
+                2 => key2,
+                3 => key3,
+                4 => key4,
+                5 => key5,
+                6 => key6,
+                7 => key7,
+                8 => key8,
+                _ => default
+            };
+            toRemove.SetAssert(removed, ReadOnlySpan<byte>.Empty);
+            map.Contains(removed).Should().BeTrue();
+        }
+
+        map.RemoveKeysFrom(toRemove);
+
+        // Assert non existence
+        foreach (var index in indexes)
+        {
+            var removed = index switch
+            {
+                0 => NibblePath.Empty,
+                1 => key1,
+                2 => key2,
+                3 => key3,
+                4 => key4,
+                5 => key5,
+                6 => key6,
+                7 => key7,
+                8 => key8,
+                _ => default
+            };
+            map.Contains(removed).Should().BeFalse();
+        }
+    }
+
     [Test]
     public void Move_to_1()
     {
