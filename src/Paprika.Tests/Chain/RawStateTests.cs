@@ -126,4 +126,28 @@ public class RawStateTests
 
         raw.Hash.Should().Be(Keccak.EmptyTreeHash);
     }
+
+    [Test]
+    public async Task DeleteByPrefix()
+    {
+        var account = Values.Key1;
+
+        using var db = PagedDb.NativeMemoryDb(256 * 1024, 2);
+        var merkle = new ComputeMerkleBehavior();
+
+        await using var blockchain = new Blockchain(db, merkle);
+
+        using var raw = blockchain.StartRaw();
+
+        raw.SetAccount(account, new Account(1, 1));
+        raw.Commit();
+
+        raw.RegisterDeleteByPrefix(Key.Account(account));
+        raw.Commit();
+
+        raw.Finalize(1);
+
+        using var read = db.BeginReadOnlyBatch();
+        read.TryGet(Key.Account(account), out _).Should().BeFalse();
+    }
 }
