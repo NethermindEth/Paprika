@@ -594,6 +594,11 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             _root.Destroy(this, account);
         }
 
+        public void DeleteByPrefix(in Key prefix)
+        {
+            _root.DeleteByPrefix(in prefix, this);
+        }
+
         private void CheckDisposed()
         {
             if (_disposed)

@@ -21,6 +21,11 @@ public interface IBatch : IReadOnlyBatch
     void Destroy(in NibblePath account);
 
     /// <summary>
+    /// Deletes all the keys that share the given prefix.
+    /// </summary>
+    void DeleteByPrefix(in Key prefix);
+
+    /// <summary>
     /// Commits the block returning its root hash.
     /// </summary>
     /// <param name="options">How to commit.</param>
@@ -33,7 +38,7 @@ public interface IBatch : IReadOnlyBatch
     IBatchStats? Stats { get; }
 
     /// <summary>
-    /// Performs a time consuming verification when <see cref="Commit"/> is called that all the pages are reachable.
+    /// Performs a time-consuming verification when <see cref="Commit"/> is called that all the pages are reachable.
     /// </summary>
     void VerifyDbPagesOnCommit();
 }

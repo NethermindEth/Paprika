@@ -29,6 +29,12 @@ public interface IRawState : IReadOnlyWorldState
     void CreateProofLeaf(in Keccak account, in NibblePath storagePath, in NibblePath leafPath);
 
     /// <summary>
+    /// Registers a deletion that will be applied when <see cref="Commit"/> is called.
+    /// </summary>
+    /// <param name="prefix"></param>
+    void RegisterDeleteByPrefix(in Key prefix);
+
+    /// <summary>
     /// Commits the pending changes.
     /// </summary>
     void Commit(bool ensureHash = true);

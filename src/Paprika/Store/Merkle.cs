@@ -70,6 +70,35 @@ public static class Merkle
             return page;
         }
 
+        public Page DeleteByPrefix(in NibblePath prefix, IBatchContext batch)
+        {
+            if (Header.BatchId != batch.BatchId)
+            {
+                // the page is from another batch, meaning, it's readonly. Copy
+                var writable = batch.GetWritableCopy(page);
+                return new StateRootPage(writable).DeleteByPrefix(prefix, batch);
+            }
+
+            if (prefix.Length < ConsumedNibbles)
+            {
+                var map = new SlottedArray(Data.DataSpan);
+                map.DeleteByPrefix(prefix);
+                return page;
+            }
+
+            var index = GetIndex(prefix);
+            var sliced = prefix.SliceFrom(ConsumedNibbles);
+            ref var addr = ref Data.Buckets[index];
+
+            if (addr.IsNull)
+            {
+                return page;
+            }
+
+            addr = batch.GetAddress(new DataPage(batch.GetAt(addr)).DeleteByPrefix(sliced, batch));
+            return page;
+        }
+
         /// <summary>
         /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
         /// These buckets is used to store up to <see cref="DataSize"/> entries before flushing them down as other pages

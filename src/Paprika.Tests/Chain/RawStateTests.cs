@@ -9,7 +9,7 @@ using Paprika.Store;
 
 namespace Paprika.Tests.Chain;
 
-public class RawTests
+public class RawStateTests
 {
     [Test]
     public async Task Raw_access_spin()
@@ -125,5 +125,29 @@ public class RawTests
         raw.Finalize(1);
 
         raw.Hash.Should().Be(Keccak.EmptyTreeHash);
+    }
+
+    [Test]
+    public async Task DeleteByPrefix()
+    {
+        var account = Values.Key1;
+
+        using var db = PagedDb.NativeMemoryDb(256 * 1024, 2);
+        var merkle = new ComputeMerkleBehavior();
+
+        await using var blockchain = new Blockchain(db, merkle);
+
+        using var raw = blockchain.StartRaw();
+
+        raw.SetAccount(account, new Account(1, 1));
+        raw.Commit();
+
+        raw.RegisterDeleteByPrefix(Key.Account(account));
+        raw.Commit();
+
+        raw.Finalize(1);
+
+        using var read = db.BeginReadOnlyBatch();
+        read.TryGet(Key.Account(account), out _).Should().BeFalse();
     }
 }
