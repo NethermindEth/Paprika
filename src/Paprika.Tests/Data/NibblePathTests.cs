@@ -347,6 +347,8 @@ public class NibblePathTests
         _hashes.Add(hash).Should().BeTrue();
     }
 
+    private readonly HashSet<int> _hashes = new();
+
     [Test]
     public void Double()
     {
@@ -365,5 +367,24 @@ public class NibblePathTests
         }
     }
 
-    private readonly HashSet<int> _hashes = new();
+    [Test]
+    public void Builder()
+    {
+        const int count = 2;
+
+        var builder = new NibblePath.Builder(stackalloc byte[count]);
+
+        builder.Push(1);
+        builder.Current.Equals(NibblePath.Single(1, 0)).Should().BeTrue();
+        builder.Pop();
+
+        builder.Push(2);
+        builder.Current.Equals(NibblePath.Single(2, 0)).Should().BeTrue();
+        builder.Pop();
+
+        builder.Push(3, 4);
+        builder.Current.Equals(NibblePath.DoubleEven(3, 4)).Should().BeTrue();
+        builder.Pop();
+        builder.Pop();
+    }
 }

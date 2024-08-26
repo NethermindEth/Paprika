@@ -845,8 +845,32 @@ public readonly ref struct NibblePath
 
     [DoesNotReturn]
     [StackTraceHidden]
-    static void ThrowNotEnoughMemory()
+    private static void ThrowNotEnoughMemory() => throw new ArgumentException("Not enough memory to append");
+
+    public ref struct Builder(Span<byte> workingSet)
     {
-        throw new ArgumentException("Not enough memory to append");
+        private readonly NibblePath _path = new(workingSet, 0, workingSet.Length * NibblePerByte);
+        private int _length = 0;
+
+        public NibblePath Current => _path.SliceTo(_length);
+
+        public void Push(byte nibble)
+        {
+            _path.UnsafeSetAt(_length, nibble);
+            _length++;
+        }
+
+        public void Push(byte nibble0, byte nibble1)
+        {
+            _path.UnsafeSetAt(_length, nibble0);
+            _length++;
+            _path.UnsafeSetAt(_length, nibble1);
+            _length++;
+        }
+
+        public void Pop()
+        {
+            _length--;
+        }
     }
 }
