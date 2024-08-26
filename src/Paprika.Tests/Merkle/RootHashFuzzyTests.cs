@@ -7,6 +7,8 @@ using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Store;
+using Paprika.Tests.Store;
+using Spectre.Console;
 
 namespace Paprika.Tests.Merkle;
 
@@ -92,6 +94,10 @@ public class RootHashFuzzyTests
 
         rootHash.Should().Be(generator.RootHashAsKeccak);
         recalculated.Should().Be(rootHash);
+
+        var visitor = new ValueReportingVisitor(db);
+        db.VisitRoot(visitor);
+        AnsiConsole.Write(visitor.Tree);
     }
 
     [TestCase(nameof(Accounts_10_000), 64 * 1024 * 1024UL)]

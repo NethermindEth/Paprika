@@ -588,7 +588,6 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         public void SetRaw(in Key key, ReadOnlySpan<byte> rawData)
         {
             _metrics.Writes++;
-
             _root.SetRaw(key, this, rawData);
         }
 
