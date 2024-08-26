@@ -9,7 +9,7 @@ namespace Paprika.Store;
 /// The page used to store big chunks of data.
 /// </summary>
 [method: DebuggerStepThrough]
-public readonly unsafe struct LeafOverflowPage(Page page)
+public readonly unsafe struct LeafOverflowPage(Page page) : IPage
 {
     private ref PageHeader Header => ref page.Header;
 

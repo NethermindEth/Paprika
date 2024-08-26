@@ -263,11 +263,11 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         var addr = payload.Buckets[LeafMode.Bucket];
         LeafOverflowPage overflow;
         Page overflowPage;
+
         if (addr.IsNull)
         {
             // Manual clear below
             overflowPage = batch.GetNewPage(out addr, clear: false);
-            payload.Buckets[LeafMode.Bucket] = addr;
 
             overflowPage.Header.PageType = PageType.LeafOverflow;
             overflow = new LeafOverflowPage(overflowPage);
@@ -277,8 +277,13 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         {
             overflowPage = batch.EnsureWritableCopy(ref addr);
             overflow = new LeafOverflowPage(overflowPage);
-            payload.Buckets[LeafMode.Bucket] = addr;
+
+            Debug.Assert(overflowPage.Header.PageType == PageType.LeafOverflow);
         }
+
+        payload.Buckets[LeafMode.Bucket] = addr;
+
+        Debug.Assert(overflow.AsPage().Header.BatchId == batch.BatchId);
 
         return overflow.Map;
     }
@@ -454,7 +459,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         return returnValue;
     }
 
-    private SlottedArray Map => new(Data.DataSpan);
+    public SlottedArray Map => new(Data.DataSpan);
 
     public int CapacityLeft => Map.CapacityLeft;
 
