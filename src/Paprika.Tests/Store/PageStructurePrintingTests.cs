@@ -25,7 +25,7 @@ public class PageStructurePrintingTests
         using var db = PagedDb.NativeMemoryDb(size);
 
         const int batches = 5;
-        const int storageSlots = 280_000;
+        const int storageSlots = 350_000;
 
         var value = new byte[32];
 
