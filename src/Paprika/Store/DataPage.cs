@@ -230,8 +230,9 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
 
         // 4.
         Span<ushort> stats = stackalloc ushort[BucketCount];
-        overflow.GatherCountStats1Nibble(stats);
-        map.GatherCountStats1Nibble(stats);
+
+        GatherStats(overflow, stats);
+        GatherStats(map, stats);
 
         byte nibbleWithMostData = 0;
         for (byte i = 1; i < BucketCount; i++)
@@ -259,6 +260,17 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         {
             Set(current, item.Key, item.RawData, batch);
         }
+    }
+
+    /// <summary>
+    /// A single method for stats gathering to make it simple to change the implementation.
+    /// </summary>
+    private static void GatherStats(in SlottedArray map, Span<ushort> stats)
+    {
+        map.GatherCountStats1Nibble(stats);
+
+        // other proposal to be size based, not count based
+        //map.GatherSizeStats1Nibble(stats);
     }
 
     private static SlottedArray GetWritableOverflow(IBatchContext batch, ref Payload payload)
@@ -316,7 +328,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
 
         Span<ushort> stats = stackalloc ushort[count];
 
-        map.GatherCountStats1Nibble(stats);
+        GatherStats(map, stats);
 
         byte biggestIndex = 0;
         for (byte i = 1; i < count; i++)
@@ -334,7 +346,8 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         out byte nibble)
     {
         Span<ushort> stats = stackalloc ushort[BucketCount];
-        map.GatherCountStats1Nibble(stats);
+
+        GatherStats(map, stats);
 
         byte biggestIndex = 0;
         ushort biggestValue = 0;
