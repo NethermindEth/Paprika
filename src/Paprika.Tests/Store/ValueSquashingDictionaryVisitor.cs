@@ -1,6 +1,7 @@
 ﻿using System.Runtime.InteropServices;
 using Paprika.Data;
 using Paprika.Store;
+using Paprika.Utils;
 
 namespace Paprika.Tests.Store;
 
@@ -10,7 +11,7 @@ namespace Paprika.Tests.Store;
 /// <param name="resolver"></param>
 public class ValueSquashingDictionaryVisitor(IPageResolver resolver) : IPageVisitor
 {
-    public readonly Dictionary<byte[], byte[]> Dictionary = new();
+    public readonly Dictionary<byte[], byte[]> Dictionary = new(new BytesEqualityComparer());
 
     private void ReportMap(ref NibblePath.Builder prefix, in SlottedArray map)
     {

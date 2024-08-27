@@ -99,7 +99,9 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                     childAddr = payload.Buckets[k.FirstNibble];
                     if (childAddr.IsNull == false && batch.WasWritten(childAddr))
                     {
-                        // Child was written, advance k and update current
+                        // Delete the k in this page just to ensure that the write-through will write the last value.
+                        map.Delete(k);
+
                         k = k.SliceFrom(ConsumedNibbles);
                         current = childAddr;
                         continue;
@@ -172,6 +174,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 var overflow = GetWritableOverflow(batch, ref payload);
 
                 Debug.Assert(payload.Buckets[LeafMode.Bucket].IsNull == false);
+                Debug.Assert(batch.WasWritten(payload.Buckets[LeafMode.Bucket]));
 
                 if (data.IsEmpty)
                 {

@@ -93,11 +93,27 @@ public class RootHashFuzzyTests
         var recalculated = merkle.CalculateStateRootHash(state);
 
         rootHash.Should().Be(generator.RootHashAsKeccak);
-        //recalculated.Should().Be(rootHash);
+        recalculated.Should().Be(rootHash);
 
-        var visitor = new ValueReportingVisitor(db);
-        db.VisitRoot(visitor);
-        AnsiConsole.Write(visitor.Tree);
+        // var visitor = new ValueSquashingDictionaryVisitor(db);
+        // db.VisitRoot(visitor);
+        //
+        // var pairs = visitor.Dictionary
+        //     .Select(kvp =>
+        //     {
+        //         NibblePath.ReadFrom(kvp.Key, out var path);
+        //         return new ValueTuple<string, string>(path.ToString(), kvp.Value.AsSpan().ToHexString(true));
+        //     })
+        //     .ToArray();
+        //
+        // Array.Sort(pairs, (a, b) => a.Item1.CompareTo(b.Item1));
+        //
+        // foreach (var (key, value) in pairs)
+        // {
+        //     Console.WriteLine($"{key}: {value}");
+        // }
+
+        //AnsiConsole.Write(visitor.Tree);
     }
 
     [TestCase(nameof(Accounts_10_000), 64 * 1024 * 1024UL)]

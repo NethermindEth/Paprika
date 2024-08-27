@@ -33,8 +33,6 @@ public readonly unsafe struct LeafOverflowPage(Page page) : IPage
     }
 
     public SlottedArray Map => new(Data.DataSpan);
-    public Span<byte> MapSpan => Data.DataSpan;
-    public int CapacityLeft => Map.CapacityLeft;
 
     public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
