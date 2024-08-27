@@ -17,7 +17,7 @@ public class AdditionalTests
         const int seed = 17;
         const int storageCount = 32 * 1024;
 
-        using var db = PagedDb.NativeMemoryDb(256 * 1024 * 1024, 2);
+        using var db = PagedDb.NativeMemoryDb(32 * 1024 * 1024, 2);
         using var merkle = new ComputeMerkleBehavior();
 
         await using var blockchain = new Blockchain(db, merkle);

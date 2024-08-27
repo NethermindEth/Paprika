@@ -56,7 +56,7 @@ public class DataPageTests : BasePageTests
         }
 
         // batch.FindOlderThan(spins - 2).Should().BeEmpty("All pages should be properly reused");
-        batch.PageCount.Should().BeLessThan(100);
+        batch.PageCount.Should().BeLessThan(70);
     }
 
     // private static Keccak GetKey(int i)
