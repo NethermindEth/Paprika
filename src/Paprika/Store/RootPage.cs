@@ -85,7 +85,11 @@ public readonly unsafe struct RootPage(Page root) : IPage
         var stateRoot = Data.StateRoot;
         if (stateRoot.IsNull == false)
         {
-            new StateRootPage(resolver.GetAt(stateRoot)).Accept(visitor, resolver, stateRoot);
+            var builder = new NibblePath.Builder(stackalloc byte[NibblePath.Builder.DecentSize]);
+
+            new StateRootPage(resolver.GetAt(stateRoot)).Accept(ref builder, visitor, resolver, stateRoot);
+
+            builder.Dispose();
         }
 
         Data.Storage.Accept(visitor, resolver);
@@ -221,7 +225,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
     private static void SetAtRoot(IBatchContext batch, in NibblePath path, in ReadOnlySpan<byte> rawData,
         ref DbAddress root)
     {
-        var data = batch.TryGetPageAlloc(ref root, PageType.Standard);
+        var data = batch.TryGetPageAlloc(ref root, PageType.StateRoot);
         var updated = new StateRootPage(data).Set(path, rawData, batch);
         root = batch.GetAddress(updated);
     }

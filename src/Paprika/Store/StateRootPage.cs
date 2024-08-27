@@ -55,7 +55,7 @@ public readonly unsafe struct StateRootPage(Page page) : IPageWithData<StateRoot
         {
             var child = batch.GetNewPage(out addr, true);
             child.Header.Level = ConsumedNibbles;
-            child.Header.PageType = PageType.Standard;
+            child.Header.PageType = PageType.DataPage;
             new DataPage(child).Set(sliced, data, batch);
         }
         else
@@ -139,20 +139,31 @@ public readonly unsafe struct StateRootPage(Page page) : IPageWithData<StateRoot
         reporter.ReportDataUsage(Header.PageType, pageLevel, trimmedNibbles, slotted);
     }
 
-    public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
+    public void Accept(ref NibblePath.Builder prefix, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
-        using (visitor.On(this, addr))
+        using (visitor.On(ref prefix, this, addr))
         {
-            foreach (var bucket in Data.Buckets)
+            for (int i = 0; i < BucketCount; i++)
             {
+                var bucket = Data.Buckets[i];
                 if (bucket.IsNull)
                 {
                     continue;
                 }
 
                 var child = resolver.GetAt(bucket);
-                Debug.Assert(child.Header.PageType == PageType.Standard);
-                new DataPage(child).Accept(visitor, resolver, bucket);
+                Debug.Assert(child.Header.PageType == PageType.DataPage);
+
+                var nibble0 = (byte)(i >> NibblePath.NibbleShift);
+                var nibble1 = (byte)(i & NibblePath.NibbleMask);
+
+                prefix.Push(nibble0, nibble1);
+
+                {
+                    new DataPage(child).Accept(ref prefix, visitor, resolver, bucket);
+                }
+
+                prefix.Pop(2);
             }
         }
     }

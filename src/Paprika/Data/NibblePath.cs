@@ -1,5 +1,3 @@
-using System;
-using System.Buffers;
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -849,6 +847,9 @@ public readonly ref struct NibblePath
 
     public ref struct Builder(Span<byte> workingSet)
     {
+        private const int SizeOfId = 4;
+        public const int DecentSize = KeccakNibbleCount / NibblePerByte + SizeOfId;
+
         private readonly NibblePath _path = new(workingSet, 0, workingSet.Length * NibblePerByte);
         private int _length = 0;
 
@@ -856,21 +857,49 @@ public readonly ref struct NibblePath
 
         public void Push(byte nibble)
         {
+            Debug.Assert(nibble < 16);
+            Debug.Assert(_length < _path.Length);
+
             _path.UnsafeSetAt(_length, nibble);
             _length++;
         }
 
         public void Push(byte nibble0, byte nibble1)
         {
+            Debug.Assert(nibble0 < 16);
+            Debug.Assert(nibble1 < 16);
+            Debug.Assert(_length < _path.Length);
+
             _path.UnsafeSetAt(_length, nibble0);
             _length++;
             _path.UnsafeSetAt(_length, nibble1);
             _length++;
         }
 
-        public void Pop()
+        public void Pop(int count = 1)
         {
-            _length--;
+            _length -= count;
+            Debug.Assert(_length >= 0);
+        }
+
+        /// <summary>
+        /// Appends a given path to the accumulated one and returns it for an immediate use.
+        /// </summary>
+        /// <param name="path">The path to add to</param>
+        /// <returns>A concatenated path</returns>
+        public NibblePath Append(in NibblePath path)
+        {
+            for (var i = 0; i < path.Length; i++)
+            {
+                _path.UnsafeSetAt(_length + i, path.GetAt(i));
+            }
+
+            return new NibblePath(ref _path.UnsafeSpan, 0, (byte)(_length + path.Length));
+        }
+
+        public void Dispose()
+        {
+            Debug.Assert(_length == 0);
         }
     }
 }

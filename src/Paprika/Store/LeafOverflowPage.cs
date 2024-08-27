@@ -36,9 +36,9 @@ public readonly unsafe struct LeafOverflowPage(Page page) : IPage
     public Span<byte> MapSpan => Data.DataSpan;
     public int CapacityLeft => Map.CapacityLeft;
 
-    public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
+    public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
-        using var scope = visitor.On(this, addr);
+        using var scope = visitor.On(ref builder, this, addr);
     }
 
     public void Report(IReporter reporter, IPageResolver resolver, int level, int trimmedNibbles)

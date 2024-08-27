@@ -857,7 +857,18 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
         }
     }
 
-    public IDisposable On<TPage>(in TPage page, DbAddress addr)
+    public IDisposable On<TPage>(scoped ref NibblePath.Builder prefix, TPage page, DbAddress addr)
+        where TPage : unmanaged, IPage
+    {
+        if (typeof(TPage) == typeof(AbandonedPage))
+        {
+            return On(As<TPage, AbandonedPage>(page), addr);
+        }
+
+        return Mark(addr);
+    }
+
+    public IDisposable On<TPage>(TPage page, DbAddress addr) where TPage : unmanaged, IPage
     {
         if (typeof(TPage) == typeof(AbandonedPage))
         {

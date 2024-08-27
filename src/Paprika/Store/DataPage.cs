@@ -137,7 +137,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 var child = batch.GetNewPage(out childAddr, false);
                 new DataPage(child).Clear();
 
-                child.Header.PageType = PageType.Standard;
+                child.Header.PageType = PageType.DataPage;
                 child.Header.Level = (byte)(page.Header.Level + ConsumedNibbles);
 
                 // Set the mode for the new child to Merkle to make it spread content on the NibblePath length basis
@@ -244,7 +244,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         var child = batch.GetNewPage(out var childAddr, false);
         new DataPage(child).Clear();
 
-        child.Header.PageType = PageType.Standard;
+        child.Header.PageType = PageType.DataPage;
         child.Header.Level = (byte)(page.Header.Level + ConsumedNibbles);
 
         // Set the mode for the new child to Merkle to make it spread content on the NibblePath length basis
@@ -488,12 +488,13 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         }
     }
 
-    public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
+    public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
-        using (visitor.On(this, addr))
+        using (visitor.On(ref builder, this, addr))
         {
-            foreach (var bucket in Data.Buckets)
+            for (byte i = 0; i < DbAddressList.Of16.Count; i++)
             {
+                var bucket = Data.Buckets[i];
                 if (bucket.IsNull)
                 {
                     continue;
@@ -503,11 +504,15 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
 
                 if (IsFanOut)
                 {
-                    new DataPage(child).Accept(visitor, resolver, bucket);
+                    builder.Push(i);
+                    {
+                        new DataPage(child).Accept(ref builder, visitor, resolver, bucket);
+                    }
+                    builder.Pop();
                 }
                 else
                 {
-                    new LeafOverflowPage(child).Accept(visitor, resolver, bucket);
+                    new LeafOverflowPage(child).Accept(ref builder, visitor, resolver, bucket);
                 }
             }
         }

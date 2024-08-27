@@ -5,14 +5,14 @@ public enum PageType : byte
     None = 0,
 
     /// <summary>
-    /// A standard Paprika page with a fan-out of 16.
+    /// <see cref="Store.DataPage"/>.
     /// </summary>
-    Standard = 1,
+    DataPage = 1,
 
     /// <summary>
-    /// A page that is a Standard page but holds the account identity mappin.
+    /// <see cref="StateRootPage"/>
     /// </summary>
-    Identity = 2,
+    StateRoot = 2,
 
     /// <summary>
     /// Represents <see cref="AbandonedPage"/>
@@ -20,44 +20,12 @@ public enum PageType : byte
     Abandoned = 3,
 
     /// <summary>
-    /// The leaf page that represents a part of the page.
+    /// <see cref="LeafOverflowPage"/>
     /// </summary>
-    Leaf = 4,
+    LeafOverflow = 4,
 
     /// <summary>
-    /// The overflow of the leaf, storing all the data.
+    /// <see cref="StorageFanOut.Level1Page"/>
     /// </summary>
-    LeafOverflow = 5,
-
-    FanOutPage = 6,
-
-    /// <summary>
-    /// Merkle FanOut Page
-    /// </summary>
-    MerkleFanOut = 7,
-
-    /// <summary>
-    /// Merkle Leaf
-    /// </summary>
-    MerkleLeaf = 8,
-}
-
-public interface IPageTypeProvider
-{
-    public static abstract PageType Type { get; }
-}
-
-public readonly struct StandardType : IPageTypeProvider
-{
-    public static PageType Type => PageType.Standard;
-}
-
-public readonly struct MerkleFanOutType : IPageTypeProvider
-{
-    public static PageType Type => PageType.MerkleFanOut;
-}
-
-public readonly struct IdentityType : IPageTypeProvider
-{
-    public static PageType Type => PageType.Identity;
+    FanOutPage = 5,
 }

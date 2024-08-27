@@ -30,7 +30,7 @@ public interface IPageWithData<TPage> : IPage
 
     void Report(IReporter reporter, IPageResolver resolver, int pageLevel, int trimmedNibbles);
 
-    void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr);
+    void Accept(ref NibblePath.Builder prefix, IPageVisitor visitor, IPageResolver resolver, DbAddress addr);
 }
 
 /// <summary>

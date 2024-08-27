@@ -82,9 +82,7 @@ public class StatisticsReporter(TrieType trieType) : IReporter
         var capacityLeft = array.CapacityLeft + 1; // to ensure zeroes are handled well
         lvl.CapacityLeft.RecordValue(capacityLeft);
 
-        if (type == PageType.Leaf)
-            LeafCapacityLeft.RecordValue(capacityLeft);
-        else if (type == PageType.LeafOverflow)
+        if (type == PageType.LeafOverflow)
             LeafOverflowCapacityLeft.RecordValue(capacityLeft);
 
         // analyze data

@@ -108,18 +108,25 @@ public static class StorageFanOut
         {
             using var scope = visitor.Scope(nameof(StorageFanOut));
 
-            foreach (var bucket in _addresses)
+            for (var i = 0; i < DbAddressList.Of1024.Count; i++)
             {
-                if (!bucket.IsNull)
+                var addr = _addresses[i];
+                if (!addr.IsNull)
                 {
-                    Level1Page.Wrap(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
+                    Level1Page.Wrap(resolver.GetAt(addr)).Accept(i, visitor, resolver, addr);
                 }
             }
         }
     }
 
+    /// <summary>
+    /// Represents a fan out for:
+    /// - ids with <see cref="DbAddressList.Of4"/>
+    /// - storage with <see cref="DbAddressList.Of1024"/>
+    /// </summary>
+    /// <param name="page"></param>
     [method: DebuggerStepThrough]
-    private readonly unsafe struct Level1Page(Page page)
+    private readonly unsafe struct Level1Page(Page page) : IPage
     {
         public static Level1Page Wrap(Page page) => Unsafe.As<Page, Level1Page>(ref page);
 
@@ -182,7 +189,7 @@ public static class StorageFanOut
 
                 list[index] = addr;
 
-                newPage.Header.PageType = PageType.Standard;
+                newPage.Header.PageType = PageType.DataPage;
                 newPage.Header.Level = (byte)(Header.Level + consumedNibbles);
 
                 var dataPage = DataPage.Wrap(newPage);
@@ -249,31 +256,62 @@ public static class StorageFanOut
             }
         }
 
-        public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
+        public void Accept(int bucketOf1024, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
         {
-            using var scope = visitor.On(this, addr);
+            Debug.Assert(bucketOf1024 < DbAddressList.Of1024.Count,
+                $"The buckets should be within the range of level 0 which uses {nameof(DbAddressList.Of1024)}");
 
-            using (visitor.Scope(nameof(Data.Ids)))
+            var builder = new NibblePath.Builder(stackalloc byte[NibblePath.Builder.DecentSize]);
+
+            var nibble0 = (byte)((bucketOf1024 >> (NibblePath.NibbleShift + NibbleHalfShift)) & NibblePath.NibbleMask);
+            var nibble1 = (byte)((bucketOf1024 >> NibbleHalfShift) & NibblePath.NibbleMask);
+            var nibble2Low = (byte)(bucketOf1024 & NibbleHalfLower);
+
+            builder.Push(nibble0, nibble1);
             {
-                foreach (var bucket in Data.Ids)
+                using var scope = visitor.On(ref builder, this, addr);
+
+                using (visitor.Scope(nameof(Data.Ids)))
                 {
-                    if (!bucket.IsNull)
+                    for (var i = 0; i < DbAddressList.Of4.Count; i++)
                     {
-                        DataPage.Wrap(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
+                        var bucket = Data.Ids[i];
+
+                        if (!bucket.IsNull)
+                        {
+                            builder.Push((byte)((i << NibbleHalfShift) | nibble2Low));
+                            {
+                                DataPage.Wrap(resolver.GetAt(bucket)).Accept(ref builder, visitor, resolver, bucket);
+                            }
+                            builder.Pop();
+                        }
+                    }
+                }
+
+                using (visitor.Scope(nameof(Data.Storage)))
+                {
+                    for (var i = 0; i < DbAddressList.Of1024.Count; i++)
+                    {
+                        var bucket = Data.Storage[i];
+                        if (!bucket.IsNull)
+                        {
+                            var nibbleStart = i >> (NibblePath.NibbleShift + NibbleHalfShift);
+
+                            builder.Push((byte)((nibbleStart & NibbleHalfHigher) | nibble2Low));
+                            builder.Push((byte)((i >> NibblePath.NibbleShift) & NibblePath.NibbleMask));
+                            builder.Push((byte)((i >> NibbleHalfShift) & NibblePath.NibbleMask));
+
+                            DataPage.Wrap(resolver.GetAt(bucket)).Accept(ref builder, visitor, resolver, bucket);
+
+                            builder.Pop(3);
+                        }
                     }
                 }
             }
 
-            using (visitor.Scope(nameof(Data.Storage)))
-            {
-                foreach (var bucket in Data.Storage)
-                {
-                    if (!bucket.IsNull)
-                    {
-                        DataPage.Wrap(resolver.GetAt(bucket)).Accept(visitor, resolver, bucket);
-                    }
-                }
-            }
+            builder.Pop(2);
+
+            builder.Dispose();
         }
 
         [StructLayout(LayoutKind.Explicit, Size = Size)]

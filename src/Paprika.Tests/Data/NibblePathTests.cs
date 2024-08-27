@@ -386,5 +386,9 @@ public class NibblePathTests
         builder.Current.Equals(NibblePath.DoubleEven(3, 4)).Should().BeTrue();
         builder.Pop();
         builder.Pop();
+
+        builder.Push(5);
+        builder.Append(NibblePath.Single(6, 1)).Equals(NibblePath.DoubleEven(5, 6)).Should().BeTrue();
+        builder.Pop();
     }
 }

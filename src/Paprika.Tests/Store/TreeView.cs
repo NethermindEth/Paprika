@@ -1,4 +1,5 @@
-﻿using Paprika.Store;
+﻿using Paprika.Data;
+using Paprika.Store;
 using Spectre.Console;
 
 namespace Paprika.Tests.Store;
@@ -37,7 +38,12 @@ public class TreeView : IPageVisitor, IDisposable
         return this;
     }
 
-    public IDisposable On<TPage>(in TPage page, DbAddress addr) => Build(page.GetType().Name, addr);
+    public IDisposable On<TPage>(scoped ref NibblePath.Builder prefix, TPage page, DbAddress addr)
+        where TPage : unmanaged, IPage => Build(page.GetType().Name, addr);
+
+    public IDisposable On<TPage>(TPage page, DbAddress addr) where TPage : unmanaged, IPage =>
+        Build(page.GetType().Name, addr);
+
     public IDisposable Scope(string name) => Build(name, null);
 
     public void Dispose() => _nodes.TryPop(out _);

@@ -4,40 +4,20 @@ using Spectre.Console;
 
 namespace Paprika.Tests.Store;
 
+/// <summary>
+/// Reports the structure of the tree as a <see cref="Tree"/>.
+/// </summary>
+/// <param name="resolver"></param>
 public class ValueReportingVisitor(IPageResolver resolver) : IPageVisitor, IDisposable
 {
-    private readonly IPageResolver _resolver = resolver;
     public readonly Tree Tree = new("Db");
 
     private readonly Stack<TreeNode> _nodes = new();
 
-    private IDisposable Build(string name, DbAddress? addr, int? capacityLeft = null)
+    private (IDisposable scope, Paragraph text, TreeNode node) Build()
     {
-        TreeNode node;
-
-        if (addr.HasValue)
-        {
-            var capacity = capacityLeft.HasValue ? $", space_left: {capacityLeft.Value}" : "";
-            var dbAddr = addr.Value;
-
-            var text = $"{name.Replace("Page", "")}, @{dbAddr.Raw}{capacity}";
-            node = new TreeNode(new Text(text));
-
-            var page = _resolver.GetAt(dbAddr);
-            switch (page.Header.PageType)
-            {
-                case PageType.Standard:
-                    ReportMap(node, new DataPage(page).Map);
-                    break;
-                case PageType.LeafOverflow:
-                    ReportMap(node, new LeafOverflowPage(page).Map);
-                    break;
-            }
-        }
-        else
-        {
-            node = new TreeNode(new Text(name));
-        }
+        var text = new Paragraph();
+        var node = new TreeNode(text);
 
         if (_nodes.TryPeek(out var parent))
         {
@@ -49,7 +29,7 @@ public class ValueReportingVisitor(IPageResolver resolver) : IPageVisitor, IDisp
         }
 
         _nodes.Push(node);
-        return this;
+        return (this, text, node);
     }
 
     private static void ReportMap(TreeNode node, in SlottedArray map)
@@ -61,8 +41,47 @@ public class ValueReportingVisitor(IPageResolver resolver) : IPageVisitor, IDisp
         }
     }
 
-    public IDisposable On<TPage>(in TPage page, DbAddress addr) => Build(page.GetType().Name, addr);
-    public IDisposable Scope(string name) => Build(name, null);
+    public IDisposable On<TPage>(scoped ref NibblePath.Builder prefix, TPage page, DbAddress addr)
+        where TPage : unmanaged, IPage
+    {
+        var (scope, text, node) = Build();
+
+        text.Append(FormatNodeNameForPage(page, addr));
+
+        var p = page.AsPage();
+        switch (p.Header.PageType)
+        {
+            case PageType.DataPage:
+                ReportMap(node, new DataPage(p).Map);
+                break;
+            case PageType.LeafOverflow:
+                ReportMap(node, new LeafOverflowPage(p).Map);
+                break;
+        }
+
+        return scope;
+    }
+
+    public IDisposable On<TPage>(TPage page, DbAddress addr)
+        where TPage : unmanaged, IPage
+    {
+        var (scope, text, _) = Build();
+        text.Append(FormatNodeNameForPage(page, addr));
+        return scope;
+    }
+
+    public IDisposable Scope(string name)
+    {
+        var (scope, text, _) = Build();
+        text.Append(name);
+        return scope;
+    }
+
+    private static string FormatNodeNameForPage<TPage>(in TPage page, DbAddress addr)
+        where TPage : struct, IPage
+    {
+        return $"{page.GetType().Name.Replace("Page", "")}, @{addr.Raw}";
+    }
 
     public void Dispose() => _nodes.TryPop(out _);
 }
