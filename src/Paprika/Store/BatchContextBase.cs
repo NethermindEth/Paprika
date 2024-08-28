@@ -39,12 +39,7 @@ abstract class BatchContextBase(uint batchId) : IBatchContext
 
     public bool WasWritten(DbAddress addr) => GetAt(addr).Header.BatchId == BatchId;
 
-    /// <summary>
-    /// Registers the given page for future GC.
-    /// </summary>
-    /// <param name="page">The page to be analyzed and registered for future GC.</param>
-
-    public abstract void RegisterForFutureReuse(Page page);
+    public abstract void RegisterForFutureReuse(Page page, bool possibleImmediateReuse = false);
 
     public virtual void NoticeAbandonedPageReused(Page page) { }
 

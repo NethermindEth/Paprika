@@ -56,7 +56,9 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     private readonly Histogram<int> _commitPageCountReused;
     private readonly Histogram<int> _commitPageCountNewlyAllocated;
     private readonly Histogram<int> _commitPageAbandoned;
+    private readonly Histogram<int> _commitAbandonedSameBatch;
     private readonly MetricsExtensions.IAtomicIntGauge _dbSize;
+
 
     // pooled objects
     private Context? _ctx;
@@ -104,6 +106,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             "The number of pages newly allocated");
         _commitPageAbandoned = _meter.CreateHistogram<int>("Abandoned pages count", "pages",
             "The number of pages registered for future reuse (abandoned)");
+        _commitAbandonedSameBatch = _meter.CreateHistogram<int>("Written and abandoned in the same batch", "pages",
+            "The number of pages written and then registered for future reuse");
 
 #if TRACKING_REUSED_PAGES
         // Reuse tracking
@@ -136,12 +140,14 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
     private void ReportDbSize(int megabytes) => _dbSize.Set(megabytes);
 
-    private void ReportPageCountPerCommit(int totalPageCount, int reused, int newlyAllocated, int abandonedCount)
+    private void ReportPageStatsPerCommit(int totalPageCount, int reused, int newlyAllocated, int abandonedCount,
+        int registeredToReuseAfterWritingThisBatch)
     {
         _commitPageCountTotal.Record(totalPageCount);
         _commitPageCountReused.Record(reused);
         _commitPageCountNewlyAllocated.Record(newlyAllocated);
         _commitPageAbandoned.Record(abandonedCount);
+        _commitAbandonedSameBatch.Record(registeredToReuseAfterWritingThisBatch);
     }
 
     private void RootInit()
@@ -540,6 +546,11 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         /// </summary>
         private readonly HashSet<DbAddress> _written;
 
+        /// <summary>
+        /// Pages that can be reused immediately.
+        /// </summary>
+        private readonly Stack<DbAddress> _reusedImmediately;
+
         private readonly BatchMetrics _metrics;
 
         public Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx) : base(
@@ -551,6 +562,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             _ctx = ctx;
             _abandoned = ctx.Abandoned;
             _written = ctx.Written;
+            _reusedImmediately = ctx.ReusedImmediately;
 
             IdCache = ctx.IdCache;
 
@@ -632,8 +644,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             }
 
             // report metrics
-            _db.ReportPageCountPerCommit(_written.Count, _metrics.PagesReused, _metrics.PagesAllocated,
-                _abandoned.Count);
+            _db.ReportPageStatsPerCommit(_written.Count, _metrics.PagesReused, _metrics.PagesAllocated,
+                _abandoned.Count, _metrics.RegisteredToReuseAfterWritingThisBatch);
 
             _db.ReportReads(_metrics.Reads);
             _db.ReportWrites(_metrics.Writes);
@@ -685,15 +697,20 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         public override Page GetNewPage(out DbAddress addr, bool clear)
         {
             bool reused;
-            if (TryGetNoLongerUsedPage(out addr))
+            if (_reusedImmediately.TryPop(out addr))
             {
                 reused = true;
-                _metrics.ReportPageReused();
+                _metrics.PagesReused++;
+            }
+            else if (TryGetNoLongerUsedPage(out addr))
+            {
+                reused = true;
+                _metrics.PagesReused++;
             }
             else
             {
                 reused = false;
-                _metrics.ReportNewPageAllocation();
+                _metrics.PagesAllocated++;
 
                 // on failure to reuse a page, default to allocating a new one.
                 addr = _root.Data.GetNextFreePage();
@@ -721,6 +738,12 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
         private void MemoizeAbandoned()
         {
+            if (_reusedImmediately.Count > 0)
+            {
+                _abandoned.AddRange(_reusedImmediately);
+                _reusedImmediately.Clear();
+            }
+
             if (_abandoned.Count == 0)
             {
                 // nothing to memoize
@@ -748,7 +771,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             return claimed;
         }
 
-        public void RegisterForFutureReuse(DbAddress addr)
+        private void RegisterForFutureReuse(DbAddress addr)
         {
 #if TRACKING_REUSED_PAGES
             // register at this batch
@@ -762,10 +785,27 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
             batchId = BatchId;
 #endif
+
             _abandoned.Add(addr);
         }
 
-        public override void RegisterForFutureReuse(Page page) => RegisterForFutureReuse(_db.GetAddress(page));
+        public override void RegisterForFutureReuse(Page page, bool possibleImmediateReuse = false)
+        {
+            var addr = _db.GetAddress(page);
+
+            if (page.Header.BatchId == BatchId)
+            {
+                if (possibleImmediateReuse)
+                {
+                    _reusedImmediately.Push(addr);
+                    return;
+                }
+
+                _metrics.RegisteredToReuseAfterWritingThisBatch++;
+            }
+
+            RegisterForFutureReuse(addr);
+        }
 
         public override void NoticeAbandonedPageReused(Page page)
         {
@@ -809,6 +849,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             Abandoned = new List<DbAddress>();
             Written = new HashSet<DbAddress>();
             IdCache = new Dictionary<Keccak, uint>();
+            ReusedImmediately = new Stack<DbAddress>();
         }
 
         public Dictionary<Keccak, uint> IdCache { get; }
@@ -818,12 +859,15 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         public List<DbAddress> Abandoned { get; }
         public HashSet<DbAddress> Written { get; }
 
+        public Stack<DbAddress> ReusedImmediately { get; }
+
         public void Clear()
         {
             Abandoned.Clear();
             Written.Clear();
             IdCache.Clear();
             Abandoned.Clear();
+            ReusedImmediately.Clear();
 
             // no need to clear, it's always overwritten
             //Page.Clear();

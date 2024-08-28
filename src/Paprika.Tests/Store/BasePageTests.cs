@@ -56,22 +56,11 @@ public abstract class BasePageTests
             return page;
         }
 
-        public override void RegisterForFutureReuse(Page page)
+        public override void RegisterForFutureReuse(Page page, bool possibleImmediateReuse = false)
         {
             _toReuse.Add(GetAddress(page))
                 .Should()
                 .BeTrue("Page should not be registered as reusable before");
-        }
-
-        public Page[] FindOlderThan(uint batchId)
-        {
-            var older = _address2Page
-                .Where(kvp => kvp.Value.Header.BatchId < batchId)
-                .Select(kvp => kvp.Value)
-                .ToArray();
-
-            Array.Sort(older, (a, b) => a.Header.BatchId.CompareTo(b.Header.BatchId));
-            return older;
         }
 
         public override Dictionary<Keccak, uint> IdCache { get; } = new();

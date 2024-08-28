@@ -219,7 +219,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         var map = new SlottedArray(payload.DataSpan);
 
         // Register for reuse and clear immediately. The overflow is kept as a map in memory
-        batch.RegisterForFutureReuse(batch.GetAt(payload.Buckets[LeafMode.Bucket]));
+        var overflowAddress = payload.Buckets[LeafMode.Bucket];
         payload.Buckets[LeafMode.Bucket] = DbAddress.Null;
 
         // 1. & 2.
@@ -260,6 +260,9 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         {
             Set(current, item.Key, item.RawData, batch);
         }
+
+        // All values from overflow already written, can be reused immediately
+        batch.RegisterForFutureReuse(batch.GetAt(overflowAddress), possibleImmediateReuse: true);
     }
 
     /// <summary>

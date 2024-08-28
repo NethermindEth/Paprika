@@ -54,7 +54,9 @@ public interface IBatchContext : IReadOnlyBatchContext
     /// <summary>
     /// Abandon this page from this batch on.
     /// </summary>
-    void RegisterForFutureReuse(Page page);
+    /// <param name="page">The page to be reused.</param>
+    /// <param name="possibleImmediateReuse">If set to true, the page will be checked if it was written in this batch and if it was, will be reused immediately.</param>
+    void RegisterForFutureReuse(Page page, bool possibleImmediateReuse = false);
 
     /// <summary>
     /// Assigns the batch identifier to a given page, marking it writable by this batch.
