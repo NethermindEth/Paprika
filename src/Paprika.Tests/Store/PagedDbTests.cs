@@ -182,25 +182,8 @@ public class PagedDbTests
                 actual.SequenceEqual(expected).Should().BeTrue();
             }
 
-            var state = new StatisticsReporter(TrieType.State);
-            var storage = new StatisticsReporter(TrieType.Storage);
-
-            read.Report(state, storage, new JustLookingReporter(), out _);
-        }
-    }
-
-    private class JustLookingReporter : IReporter
-    {
-        public void ReportDataUsage(PageType type, int pageLevel, int trimmedNibbles, in SlottedArray array)
-        {
-        }
-
-        public void ReportPage(uint ageInBatches, PageType type)
-        {
-        }
-
-        public void ReportLeafOverflowCount(byte count)
-        {
+            var stats = new StatisticsVisitor();
+            read.Accept(stats);
         }
     }
 

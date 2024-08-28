@@ -16,6 +16,11 @@ public interface IPageVisitor
     IDisposable Scope(string name);
 }
 
+public interface IVisitable
+{
+    void Accept(IPageVisitor visitor);
+}
+
 public sealed class Disposable : IDisposable
 {
     private Disposable()

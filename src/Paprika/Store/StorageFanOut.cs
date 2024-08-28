@@ -10,6 +10,9 @@ namespace Paprika.Store;
 /// </summary>
 public static class StorageFanOut
 {
+    public const string ScopeIds = "Ids";
+    public const string ScopeStorage = "Storage";
+
     public enum Type
     {
         /// <summary>
@@ -89,20 +92,6 @@ public static class StorageFanOut
         }
 
         private const int ConsumedNibbles = 2;
-
-        public void Report(IReporter reporter, IPageResolver resolver, int level, int trimmedNibbles)
-        {
-            var consumedNibbles = trimmedNibbles + ConsumedNibbles;
-
-            foreach (var bucket in _addresses)
-            {
-                if (!bucket.IsNull)
-                {
-                    Level1Page.Wrap(resolver.GetAt(bucket))
-                        .Report(reporter, resolver, level + 1, consumedNibbles);
-                }
-            }
-        }
 
         public void Accept(IPageVisitor visitor, IPageResolver resolver)
         {
@@ -235,27 +224,6 @@ public static class StorageFanOut
         /// </summary>
         private const int Level1ConsumedNibblesForStorage = 3;
 
-        public void Report(IReporter reporter, IPageResolver resolver, int pageLevel, int trimmedNibbles)
-        {
-            foreach (var bucket in Data.Ids)
-            {
-                if (!bucket.IsNull)
-                {
-                    DataPage.Wrap(resolver.GetAt(bucket))
-                        .Report(reporter, resolver, pageLevel + 1, trimmedNibbles + Level1ConsumedNibblesForIds);
-                }
-            }
-
-            foreach (var bucket in Data.Storage)
-            {
-                if (!bucket.IsNull)
-                {
-                    DataPage.Wrap(resolver.GetAt(bucket))
-                        .Report(reporter, resolver, pageLevel + 1, trimmedNibbles + Level1ConsumedNibblesForStorage);
-                }
-            }
-        }
-
         public void Accept(int bucketOf1024, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
         {
             Debug.Assert(bucketOf1024 < DbAddressList.Of1024.Count,
@@ -271,7 +239,7 @@ public static class StorageFanOut
             {
                 using var scope = visitor.On(ref builder, this, addr);
 
-                using (visitor.Scope(nameof(Data.Ids)))
+                using (visitor.Scope(ScopeIds))
                 {
                     for (var i = 0; i < DbAddressList.Of4.Count; i++)
                     {
@@ -288,7 +256,7 @@ public static class StorageFanOut
                     }
                 }
 
-                using (visitor.Scope(nameof(Data.Storage)))
+                using (visitor.Scope(ScopeStorage))
                 {
                     for (var i = 0; i < DbAddressList.Of1024.Count; i++)
                     {

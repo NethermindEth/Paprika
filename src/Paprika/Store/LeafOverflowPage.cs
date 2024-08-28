@@ -38,9 +38,4 @@ public readonly unsafe struct LeafOverflowPage(Page page) : IPage
     {
         using var scope = visitor.On(ref builder, this, addr);
     }
-
-    public void Report(IReporter reporter, IPageResolver resolver, int level, int trimmedNibbles)
-    {
-        reporter.ReportDataUsage(Header.PageType, level, trimmedNibbles, Map);
-    }
 }

@@ -9,27 +9,24 @@ namespace Paprika.Runner;
 
 public static class StatisticsForPagedDb
 {
-    public static void Report(Layout reportTo, IReporting read)
+    public static void Report(Layout reportTo, IVisitable read)
     {
         reportTo.Update(new Panel("Gathering statistics...").Header("Paprika tree statistics").Expand());
 
         try
         {
-            var state = new StatisticsReporter(TrieType.State);
-            var storage = new StatisticsReporter(TrieType.Storage);
-            var ids = new PageCountingReporter();
-
-            read.Report(state, storage, ids, out var totalAbandoned);
+            var stats = new StatisticsVisitor();
+            read.Accept(stats);
 
             var report = new Layout()
                 .SplitRows(
                     new Layout("top")
                         .SplitColumns(
-                            BuildReport(state, "State"),
-                            BuildReport(storage, "Storage")),
+                            BuildReport(stats.State, "State"),
+                            BuildReport(stats.Storage, "Storage")),
                     new Layout("bottom")
                         .Update(new Panel(new Paragraph(
-                            $"- pages used for id mapping: {Page.FormatAsGb(ids.Count)}\n" +
+                            $"- pages used for id mapping: {Page.FormatAsGb(stats.Ids.PageCount)}\n" +
                                 $"- total pages abandoned: {Page.FormatAsGb(totalAbandoned)}\n" +
                             "")).Header("Other stats").Expand())
                 );
@@ -50,7 +47,7 @@ public static class StatisticsForPagedDb
 
     private static double ToGb(long value) => (double)value / 1024 / 1024 / 1024;
 
-    private static Layout BuildReport(StatisticsReporter reporter, string name)
+    private static Layout BuildReport(StatisticsVisitor.Stats stats, string name)
     {
         var up = new Layout("up");
         var sizes = new Layout("down");
@@ -58,18 +55,19 @@ public static class StatisticsForPagedDb
 
         var layout = new Layout().SplitRows(up, sizes, leafs);
 
-        var totalMerkle = reporter.MerkleBranchSize + reporter.MerkleExtensionSize + reporter.MerkleLeafSize;
+        var totalMerkle = stats.MerkleBranchSize + stats.MerkleExtensionSize + stats.MerkleLeafSize;
+
         var general =
-            $"Size total: {ToGb((long)reporter.PageCount * Page.PageSize):F2}GB:\n" +
+            $"Size total: {ToGb((long)stats.PageCount * Page.PageSize):F2}GB:\n" +
             $" Merkle:    {ToGb(totalMerkle):F2}GB:\n" +
-            $"  Branches: {ToGb(reporter.MerkleBranchSize):F2}GB\n" +
-            $"  Ext.:     {ToGb(reporter.MerkleExtensionSize):F2}GB\n" +
-            $"  Leaf:     {ToGb(reporter.MerkleLeafSize):F2}GB\n" +
-            $" Data:      {ToGb(reporter.DataSize):F2}GB\n" +
+            $"  Branches: {ToGb(stats.MerkleBranchSize):F2}GB\n" +
+            $"  Ext.:     {ToGb(stats.MerkleExtensionSize):F2}GB\n" +
+            $"  Leaf:     {ToGb(stats.MerkleLeafSize):F2}GB\n" +
+            $" Data:      {ToGb(stats.DataSize):F2}GB\n" +
             "---\n" +
-            $" Branches with small empty set: {reporter.MerkleBranchWithSmallEmpty}\n" +
-            $" Branches with 15 children: {reporter.MerkleBranchWithOneChildMissing}\n" +
-            $" Branches with 3 or less children: {reporter.MerkleBranchWithThreeChildrenOrLess}\n";
+            $" Branches with small empty set: {stats.MerkleBranchWithSmallEmpty}\n" +
+            $" Branches with 15 children: {stats.MerkleBranchWithOneChildMissing}\n" +
+            $" Branches with 3 or less children: {stats.MerkleBranchWithThreeChildrenOrLess}\n";
 
         up.Update(new Panel(general).Header($"General stats for {name}").Expand());
 
@@ -80,7 +78,7 @@ public static class StatisticsForPagedDb
         t.AddColumn(new TableColumn("Entries in page"));
         t.AddColumn(new TableColumn("Capacity left (bytes)"));
 
-        foreach (var (key, level) in reporter.Levels)
+        foreach (var (key, level) in stats.Levels)
         {
             var entries = level.Entries;
             var capacity = level.CapacityLeft;
@@ -100,9 +98,9 @@ public static class StatisticsForPagedDb
         leafsTable.AddColumn(new TableColumn("Leaf->Overflow count"));
 
         leafsTable.AddRow(
-            WriteHistogram(reporter.LeafCapacityLeft),
-            WriteHistogram(reporter.LeafOverflowCapacityLeft),
-            WriteHistogram(reporter.LeafOverflowCount));
+            WriteHistogram(stats.LeafCapacityLeft),
+            WriteHistogram(stats.LeafOverflowCapacityLeft),
+            WriteHistogram(stats.LeafOverflowCount));
 
         leafs.Update(leafsTable.Expand());
 

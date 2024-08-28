@@ -120,25 +120,6 @@ public readonly unsafe struct StateRootPage(Page page) : IPageWithData<StateRoot
         return new DataPage(batch.GetAt(addr)).TryGet(batch, key.SliceFrom(ConsumedNibbles), out result);
     }
 
-    public void Report(IReporter reporter, IPageResolver resolver, int pageLevel, int trimmedNibbles)
-    {
-        foreach (var bucket in Data.Buckets)
-        {
-            if (bucket.IsNull)
-                continue;
-
-            var consumedNibbles = trimmedNibbles + ConsumedNibbles;
-            var lvl = pageLevel + 1;
-
-            var child = resolver.GetAt(bucket);
-
-            new DataPage(child).Report(reporter, resolver, lvl, consumedNibbles);
-        }
-
-        var slotted = new SlottedArray(Data.DataSpan);
-        reporter.ReportDataUsage(Header.PageType, pageLevel, trimmedNibbles, slotted);
-    }
-
     public void Accept(ref NibblePath.Builder prefix, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
         using (visitor.On(ref prefix, this, addr))

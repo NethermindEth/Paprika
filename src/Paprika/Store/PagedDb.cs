@@ -205,7 +205,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
     IReadOnlyBatch IDb.BeginReadOnlyBatch(string name) => BeginReadOnlyBatch(name);
 
-    public IReportingReadOnlyBatch BeginReadOnlyBatch(string name = "")
+    public IVisitableReadOnlyBatch BeginReadOnlyBatch(string name = "")
     {
         lock (_batchLock)
         {
@@ -444,7 +444,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
 
     private sealed class ReadOnlyBatch(PagedDb db, RootPage root, string name)
-        : IReportingReadOnlyBatch, IReadOnlyBatchContext
+        : IVisitableReadOnlyBatch, IReadOnlyBatchContext
     {
         [ThreadStatic] private static ConcurrentDictionary<Keccak, uint>? s_cache;
 
@@ -493,20 +493,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
         public void VerifyNoPagesMissing() => MissingPagesVisitor.VerifyNoPagesMissing(Root, db, this);
 
-        public void Report(IReporter state, IReporter storage, IReporter ids, out long totalAbandoned)
-        {
-            ref readonly var data = ref root.Data;
-
-            totalAbandoned = 0;
-            totalAbandoned = data.AbandonedList.GatherTotalAbandoned(this);
-
-            if (data.StateRoot.IsNull == false)
-            {
-                new StateRootPage(GetAt(root.Data.StateRoot)).Report(state, this, 0, 0);
-            }
-
-            data.Storage.Report(storage, this, 0, 0);
-        }
+        public void Accept(IPageVisitor visitor) => Root.Accept(visitor, this);
 
         public uint BatchId => root.Header.BatchId;
 
@@ -624,10 +611,6 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             }
         }
 
-        public void Report(IReporter reporter)
-        {
-            throw new NotImplementedException();
-        }
 
         public async ValueTask Commit(CommitOptions options)
         {
@@ -961,6 +944,6 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
     }
 }
 
-public interface IReportingReadOnlyBatch : IReporting, IReadOnlyBatch
+public interface IVisitableReadOnlyBatch : IReadOnlyBatch, IVisitable
 {
 }

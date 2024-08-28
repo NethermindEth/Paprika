@@ -482,31 +482,6 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
 
     public int CapacityLeft => Map.CapacityLeft;
 
-    public void Report(IReporter reporter, IPageResolver resolver, int pageLevel, int trimmedNibbles)
-    {
-        resolver.Prefetch(Data.Buckets);
-
-        var slotted = new SlottedArray(Data.DataSpan);
-        reporter.ReportDataUsage(Header.PageType, pageLevel, trimmedNibbles, slotted);
-
-        foreach (var bucket in Data.Buckets)
-        {
-            if (bucket.IsNull)
-                continue;
-
-            var child = resolver.GetAt(bucket);
-
-            if (IsFanOut)
-            {
-                new DataPage(child).Report(reporter, resolver, pageLevel + 1, trimmedNibbles + 1);
-            }
-            else
-            {
-                new LeafOverflowPage(child).Report(reporter, resolver, pageLevel + 1, trimmedNibbles + 1);
-            }
-        }
-    }
-
     public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
         using (visitor.On(ref builder, this, addr))
