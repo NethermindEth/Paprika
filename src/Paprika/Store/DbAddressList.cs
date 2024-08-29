@@ -71,6 +71,8 @@ public static class DbAddressList
         public static abstract int Length { get; }
 
         public void Clear();
+
+        public DbAddress[] ToArray();
     }
 
     public ref struct Enumerator<TList>
@@ -112,6 +114,18 @@ public static class DbAddressList
     public static Enumerator<Of256> GetEnumerator(this in Of256 list) => new(list);
     public static Enumerator<Of1024> GetEnumerator(this in Of1024 list) => new(list);
 
+    private static DbAddress[] ToArrayImpl<TList>(in TList list)
+        where TList : struct, IDbAddressList
+    {
+        var array = new DbAddress[TList.Length];
+        for (var i = 0; i < TList.Length; i++)
+        {
+            array[i] = list[i];
+        }
+
+        return array;
+    }
+
     [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     public struct Of4 : IDbAddressList
     {
@@ -140,6 +154,8 @@ public static class DbAddressList
             MemoryMarshal.CreateReadOnlySpan(ref _b, Count).GetEnumerator();
 
         public void Clear() => MemoryMarshal.CreateSpan(ref _b, Count).Clear();
+
+        public DbAddress[] ToArray() => ToArrayImpl(this);
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
@@ -167,6 +183,8 @@ public static class DbAddressList
         public void Clear() => MemoryMarshal.CreateSpan(ref _b, Size).Clear();
 
         public static int Length => Count;
+
+        public DbAddress[] ToArray() => ToArrayImpl(this);
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
@@ -194,6 +212,8 @@ public static class DbAddressList
         public void Clear() => MemoryMarshal.CreateSpan(ref _b, Size).Clear();
 
         public static int Length => Count;
+
+        public DbAddress[] ToArray() => ToArrayImpl(this);
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
@@ -219,6 +239,8 @@ public static class DbAddressList
         }
 
         public void Clear() => MemoryMarshal.CreateSpan(ref _b, Size).Clear();
+
+        public DbAddress[] ToArray() => ToArrayImpl(this);
 
         public static int Length => Count;
     }

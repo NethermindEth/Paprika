@@ -183,11 +183,9 @@ public static class Program
 
             using var read = db.BeginReadOnlyBatch();
 
-            var state = new StatisticsReporter(TrieType.State);
-            var storage = new StatisticsReporter(TrieType.Storage);
-            var counting = new PageCountingReporter();
+            var visitor = new StatisticsVisitor(db);
 
-            read.Report(state, storage, counting, out _);
+            read.Accept(visitor);
 
             spectre.Cancel();
             await reportingTask;

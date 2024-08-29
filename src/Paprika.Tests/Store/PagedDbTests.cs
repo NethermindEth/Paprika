@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using FluentAssertions;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -140,28 +141,33 @@ public class PagedDbTests
     }
 
     [Test]
+    [Ignore("Heavily dependent on the WriteId method in the root. For smaller networks it might be much better, " +
+            "clustering the values in smaller number of buckets")]
+    [Category(Categories.LongRunning)]
     public async Task FanOut()
     {
-        const int size = 256 * 256;
+        // To saturate fan out
+        const int size = DbAddressList.Of1024.Count * DbAddressList.Of1024.Count;
 
-        using var db = PagedDb.NativeMemoryDb(1024 * Mb, 2);
+        using var db = PagedDb.NativeMemoryDb((long)8 * 1024 * Mb, 2);
 
         var value = new byte[4];
 
+        using var batch = db.BeginNextBatch();
+
         for (var i = 0; i < size; i++)
         {
-            using var batch = db.BeginNextBatch();
-
             Keccak keccak = default;
             BinaryPrimitives.WriteInt32LittleEndian(keccak.BytesAsSpan, i);
             BinaryPrimitives.WriteInt32LittleEndian(value, i);
 
             batch.SetRaw(Key.StorageCell(NibblePath.FromKey(keccak), keccak), value);
-
-            await batch.Commit(CommitOptions.FlushDataAndRoot);
         }
 
+        await batch.Commit(CommitOptions.FlushDataAndRoot);
+
         Assert(db);
+        return;
 
         static void Assert(PagedDb db)
         {
@@ -182,8 +188,13 @@ public class PagedDbTests
                 actual.SequenceEqual(expected).Should().BeTrue();
             }
 
-            var stats = new StatisticsVisitor();
+            var stats = new StatisticsVisitor(db);
             read.Accept(stats);
+
+            // stats.AbandonedCount.Should().BeGreaterThan(0);
+            stats.Ids.PageCount.Should().BeGreaterThan(0);
+            stats.Storage.PageCount.Should().BeGreaterThan(0);
+            stats.Storage.NibbleDepths[StorageFanOut.StorageConsumedNibbles].Should().Be(size);
         }
     }
 

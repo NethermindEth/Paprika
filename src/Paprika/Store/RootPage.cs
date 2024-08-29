@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
@@ -156,9 +157,18 @@ public readonly unsafe struct RootPage(Page root) : IPage
 
     private static uint ReadId(ReadOnlySpan<byte> id) => BinaryPrimitives.ReadUInt32LittleEndian(id);
 
-    private static void WriteId(Span<byte> idSpan, uint cachedId) =>
-        BinaryPrimitives.WriteUInt32LittleEndian(idSpan, cachedId);
+    private static void WriteId(Span<byte> idSpan, uint id)
+    {
+        // Rotation of nibbles could help with an even spread but would make it worse for smaller networks.
+        // If a chain has 16 million contracts or more, this does not matter anyway.
 
+        // // Rotate nibbles so that small value goes first as the NibblePath reads them
+        // // This will distribute buckets more properly for smaller networks as StorageFanOut consumes 5 nibbles.
+        // var rotatedNibbles = ((id & 0x0F0F0F0F) << 4) | ((id & 0xF0F0F0F0) >> 4);
+        // BinaryPrimitives.WriteUInt32LittleEndian(idSpan, rotatedNibbles);
+
+        BinaryPrimitives.WriteUInt32LittleEndian(idSpan, id);
+    }
 
     public void SetRaw(in Key key, IBatchContext batch, ReadOnlySpan<byte> rawData)
     {

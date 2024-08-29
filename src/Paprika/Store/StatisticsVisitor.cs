@@ -8,14 +8,20 @@ namespace Paprika.Store;
 
 public class StatisticsVisitor : IPageVisitor
 {
+    private readonly IPageResolver _resolver;
+
     public readonly Stats State;
     public readonly Stats Ids;
     public readonly Stats Storage;
 
+    public int AbandonedCount;
+    public int TotalVisited;
+
     private Stats _current;
 
-    public StatisticsVisitor()
+    public StatisticsVisitor(IPageResolver resolver)
     {
+        _resolver = resolver;
         State = new Stats();
         Ids = new Stats();
         Storage = new Stats();
@@ -23,9 +29,8 @@ public class StatisticsVisitor : IPageVisitor
         _current = State;
     }
 
-    public class Stats
+    public class Stats()
     {
-        public readonly IntHistogram NibbleDepth = new(100, 5);
         public readonly Dictionary<int, int> NibbleDepths = new();
 
         public void ReportMap(scoped ref NibblePath.Builder prefix, in SlottedArray map)
@@ -37,10 +42,11 @@ public class StatisticsVisitor : IPageVisitor
 
     public IDisposable On<TPage>(scoped ref NibblePath.Builder prefix, TPage page, DbAddress addr) where TPage : unmanaged, IPage
     {
+        TotalVisited++;
         _current.PageCount++;
 
         var length = prefix.Current.Length;
-        _current.NibbleDepth.RecordValue(length);
+
         ref var count = ref CollectionsMarshal.GetValueRefOrAddDefault(_current.NibbleDepths, length, out _);
         count += 1;
 
@@ -60,6 +66,12 @@ public class StatisticsVisitor : IPageVisitor
 
     public IDisposable On<TPage>(TPage page, DbAddress addr) where TPage : unmanaged, IPage
     {
+        TotalVisited++;
+        if (typeof(TPage) == typeof(AbandonedPage))
+        {
+            AbandonedCount += new AbandonedPage(page.AsPage()).CountPages();
+        }
+
         return Disposable.Instance;
     }
 
@@ -88,24 +100,6 @@ public class StatisticsVisitor : IPageVisitor
     }
 }
 
-public class PageCountingReporter : IPageVisitor
-{
-    public long Count { get; private set; }
-
-    public IDisposable On<TPage>(scoped ref NibblePath.Builder prefix, TPage page, DbAddress addr) where TPage : unmanaged, IPage
-    {
-        Count++;
-        return Disposable.Instance;
-    }
-
-    public IDisposable On<TPage>(TPage page, DbAddress addr) where TPage : unmanaged, IPage
-    {
-        Count++;
-        return Disposable.Instance;
-    }
-
-    public IDisposable Scope(string name) => Disposable.Instance;
-}
 //
 // public class StatisticsReporter(TrieType trieType) : IReporter
 // {

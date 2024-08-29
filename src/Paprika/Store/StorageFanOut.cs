@@ -10,6 +10,7 @@ namespace Paprika.Store;
 /// </summary>
 public static class StorageFanOut
 {
+    public const int StorageConsumedNibbles = Level0.ConsumedNibbles + Level1Page.Level1ConsumedNibblesForStorage;
     public const string ScopeIds = "Ids";
     public const string ScopeStorage = "Storage";
 
@@ -91,7 +92,7 @@ public static class StorageFanOut
             return at;
         }
 
-        private const int ConsumedNibbles = 2;
+        public const int ConsumedNibbles = 2;
 
         public void Accept(IPageVisitor visitor, IPageResolver resolver)
         {
@@ -197,7 +198,7 @@ public static class StorageFanOut
             // Represents high part of the first nibble but lowered
             var hi = (key.FirstNibble & NibbleHalfHigher) >> NibbleHalfShift;
 
-            Debug.Assert(0 <= hi && hi < 15);
+            Debug.Assert(0 <= hi && hi < 4);
 
             if (type == Type.Id)
             {
@@ -222,7 +223,7 @@ public static class StorageFanOut
         /// <summary>
         /// This is effectively 1.5 of the nibble as the 1.5 is consumed on the higher level.
         /// </summary>
-        private const int Level1ConsumedNibblesForStorage = 3;
+        public const int Level1ConsumedNibblesForStorage = 3;
 
         public void Accept(int bucketOf1024, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
         {
