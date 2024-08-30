@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Text;
 using HdrHistogram;
 using Paprika.Merkle;
@@ -27,8 +28,8 @@ public static class StatisticsForPagedDb
                     new Layout("bottom")
                         .Update(new Panel(new Paragraph(
                             $"- pages used for id mapping: {Page.FormatAsGb(stats.Ids.PageCount)}\n" +
-                                $"- total pages abandoned:     {Page.FormatAsGb(stats.AbandonedCount)}\n" +
-                                $"- total pages visited:       {Page.FormatAsGb(stats.TotalVisited)}\n" +
+                            $"- total pages abandoned:     {Page.FormatAsGb(stats.AbandonedCount)}\n" +
+                            $"- total pages visited:       {Page.FormatAsGb(stats.TotalVisited)}\n" +
                             "")).Header("Other stats").Expand())
                 );
 
@@ -52,7 +53,7 @@ public static class StatisticsForPagedDb
         var sizes = new Layout("down");
         //var leafs = new Layout("leafs");
 
-        var layout = new Layout().SplitRows(up, sizes/*, leafs*/);
+        var layout = new Layout().SplitRows(up, sizes /*, leafs*/);
 
         // var totalMerkle = stats.MerkleBranchSize + stats.MerkleExtensionSize + stats.MerkleLeafSize;
 
@@ -73,19 +74,29 @@ public static class StatisticsForPagedDb
 
         var t = new Table();
         t.AddColumn(new TableColumn("Depth"));
-        t.AddColumn(new TableColumn("Count"));
+        t.AddColumn(new TableColumn("Page count"));
+        t.AddColumn(new TableColumn("Leaf page count"));
+        t.AddColumn(new TableColumn("Overflow page count"));
 
         // t.AddColumn(new TableColumn("Child page count"));
         //
         // t.AddColumn(new TableColumn("Entries in page"));
         // t.AddColumn(new TableColumn("Capacity left (bytes)"));
 
-        KeyValuePair<int, int>[] kvps = stats.NibbleDepths.ToArray();
-        Array.Sort(kvps, (a, b) => a.Key.CompareTo(b.Key));
+        var countByLevel = stats.PageCountPerNibblePathDepth.ToArray();
+        Array.Sort(countByLevel, (a, b) => a.Key.CompareTo(b.Key));
 
-        foreach (var (depth, count) in kvps)
+        foreach (var (depth, count) in countByLevel)
         {
-            t.AddRow(new Text(depth.ToString()), new Text(count.ToString()));
+            var leafPageCount = stats.LeafPageCountPerNibblePathDepth.GetValueOrDefault(depth, 0);
+            var overflowCount = stats.OverflowPageCountPerNibblePathDepth.GetValueOrDefault(depth, 0);
+
+            t.AddRow(
+                new Text(depth.ToString()),
+                new Text(count.ToString()),
+                new Text(leafPageCount.ToString()),
+                new Text(overflowCount.ToString())
+            );
 
             // var entries = level.Entries;
             // var capacity = level.CapacityLeft;

@@ -42,6 +42,8 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
 
     public static DataPage Wrap(Page page) => Unsafe.As<Page, DataPage>(ref page);
 
+    public bool IsLeaf => Header.Metadata == Modes.Leaf;
+
     private ref PageHeader Header => ref page.Header;
 
     private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);

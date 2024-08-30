@@ -31,7 +31,9 @@ public class StatisticsVisitor : IPageVisitor
 
     public class Stats()
     {
-        public readonly Dictionary<int, int> NibbleDepths = new();
+        public readonly Dictionary<int, int> PageCountPerNibblePathDepth = new();
+        public readonly Dictionary<int, int> LeafPageCountPerNibblePathDepth = new();
+        public readonly Dictionary<int, int> OverflowPageCountPerNibblePathDepth = new();
 
         public void ReportMap(scoped ref NibblePath.Builder prefix, in SlottedArray map)
         {
@@ -47,16 +49,29 @@ public class StatisticsVisitor : IPageVisitor
 
         var length = prefix.Current.Length;
 
-        ref var count = ref CollectionsMarshal.GetValueRefOrAddDefault(_current.NibbleDepths, length, out _);
+        ref var count = ref CollectionsMarshal.GetValueRefOrAddDefault(_current.PageCountPerNibblePathDepth, length, out _);
         count += 1;
 
         var p = page.AsPage();
         switch (p.Header.PageType)
         {
             case PageType.DataPage:
-                _current.ReportMap(ref prefix, new DataPage(p).Map);
+                var dataPage = new DataPage(p);
+                if (dataPage.IsLeaf)
+                {
+                    ref var leafCount =
+                        ref CollectionsMarshal.GetValueRefOrAddDefault(_current.LeafPageCountPerNibblePathDepth, length,
+                            out _);
+                    leafCount += 1;
+                }
+                _current.ReportMap(ref prefix, dataPage.Map);
                 break;
             case PageType.LeafOverflow:
+                ref var overflowCount =
+                    ref CollectionsMarshal.GetValueRefOrAddDefault(_current.OverflowPageCountPerNibblePathDepth, length,
+                        out _);
+                overflowCount += 1;
+
                 _current.ReportMap(ref prefix, new LeafOverflowPage(p).Map);
                 break;
         }
