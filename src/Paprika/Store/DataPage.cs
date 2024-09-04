@@ -76,14 +76,14 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         {
             Debug.Assert(page.Header.Metadata == Modes.Leaf);
             var childAddr = Data.Buckets[LeafMode.Bucket];
-            
+
             if (childAddr.IsNull == false)
             {
                 var child = new LeafOverflowPage(batch.GetAt(childAddr)).DeleteByPrefix(prefix, batch);
                 Data.Buckets[prefix.FirstNibble] = batch.GetAddress(child);
             }
         }
-        
+
         return page;
     }
 

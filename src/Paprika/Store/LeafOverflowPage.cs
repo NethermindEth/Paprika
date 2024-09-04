@@ -49,7 +49,7 @@ public readonly unsafe struct LeafOverflowPage(Page page) : IPage
         }
 
         Map.DeleteByPrefix(prefix);
-        
+
         return page;
     }
 }

@@ -188,9 +188,9 @@ public static class StorageFanOut
                 var writable = batch.GetWritableCopy(page);
                 return new Level1Page(writable).DeleteByPrefix(prefix, batch);
             }
-            
+
             var index = GetIndex(prefix, Type.Storage, out var sliced);
-            
+
             var addr = Data.Storage[index];
 
             if (addr.IsNull)
