@@ -87,6 +87,34 @@ public readonly ref struct SlottedArray /*: IClearable */
         return TrySetImpl(hash, preamble, trimmed, data);
     }
 
+    public void DeleteByPrefix(in NibblePath prefix)
+    {
+        if (prefix.Length == 0)
+        {
+            Delete(prefix);
+        }
+        else if (prefix.Length == 1)
+        {
+            // TODO: optimize by filtering by hash. The key is at least 2 nibbles long so can be easily filtered with a bitwise mask over the hash.
+            // Don't materialize data! 
+            foreach (var item in EnumerateNibble(prefix.FirstNibble))
+            {
+                Delete(item);
+            }
+        }
+        else
+        {
+            // TODO: optimize by filtering by hash. The key is at least 2 nibbles long so can be easily filtered with a bitwise mask over the hash.
+            foreach (var item in EnumerateAll())
+            {
+                if (item.Key.StartsWith(prefix))
+                {
+                    Delete(item);
+                }
+            }
+        }
+    }
+
     private bool TrySetImpl(ushort hash, byte preamble, in NibblePath trimmed, ReadOnlySpan<byte> data)
     {
         var index = TryGetImpl(trimmed, hash, preamble, out var existingData);
@@ -1184,7 +1212,6 @@ public readonly ref struct SlottedArray /*: IClearable */
             }
 
             data = input;
-
 
             switch (lengthBits)
             {

@@ -26,6 +26,11 @@ public interface IPageWithData<TPage> : IPage
 
     bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result);
 
+    /// <summary>
+    /// Delete all the values by the given prefix in the page and below.
+    /// </summary>
+    Page DeleteByPrefix(in NibblePath prefix, IBatchContext batch);
+
     Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch);
 
     void Accept(ref NibblePath.Builder prefix, IPageVisitor visitor, IPageResolver resolver, DbAddress addr);

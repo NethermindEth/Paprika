@@ -79,6 +79,21 @@ public static class StorageFanOut
             _addresses[index] = batch.GetAddress(updated);
         }
 
+        public void DeleteByPrefix(in NibblePath path, IBatchContext batch)
+        {
+            var index = GetIndex(path, out var sliced);
+            var addr = _addresses[index];
+
+            if (addr.IsNull)
+            {
+                return;
+            }
+
+            // The page exists, update
+            var updated = Level1Page.Wrap(batch.GetAt(addr)).DeleteByPrefix(sliced, batch);
+            _addresses[index] = batch.GetAddress(updated);
+        }
+
         private static int GetIndex(scoped in NibblePath key, out NibblePath sliced)
         {
             Debug.Assert(key.IsOdd == false);
@@ -161,6 +176,31 @@ public static class StorageFanOut
             {
                 Set(ref Data.Storage, index, sliced, data, batch, Level1ConsumedNibblesForStorage);
             }
+
+            return page;
+        }
+
+        public Page DeleteByPrefix(in NibblePath prefix, IBatchContext batch)
+        {
+            if (Header.BatchId != batch.BatchId)
+            {
+                // the page is from another batch, meaning, it's readonly.
+                var writable = batch.GetWritableCopy(page);
+                return new Level1Page(writable).DeleteByPrefix(prefix, batch);
+            }
+            
+            var index = GetIndex(prefix, Type.Storage, out var sliced);
+            
+            var addr = Data.Storage[index];
+
+            if (addr.IsNull)
+            {
+                return page;
+            }
+
+            // update after set
+            addr = batch.GetAddress(DataPage.Wrap(batch.GetAt(addr)).DeleteByPrefix(sliced, batch));
+            Data.Storage[index] = addr;
 
             return page;
         }

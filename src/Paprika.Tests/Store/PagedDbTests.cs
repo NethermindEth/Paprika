@@ -91,6 +91,91 @@ public class PagedDbTests
     }
 
     [Test]
+    public async Task DeleteByPrefix_Accounts()
+    {
+        using var db = PagedDb.NativeMemoryDb(16 * Mb, 2);
+
+        var keccak0 = Values.Key0;
+        var keccak1 = Values.Key0;
+        var keccak2 = Values.Key0;
+        var keccak3 = Values.Key0;
+        var prefix = Values.Key0;
+
+        keccak0.BytesAsSpan[^1] = 0x01;
+        keccak1.BytesAsSpan[^1] = 0x02;
+        keccak2.BytesAsSpan[^1] = 0x03;
+        keccak3.BytesAsSpan[^1] = 0x04;
+        prefix.BytesAsSpan[^1] = 0x00;
+
+        // Set data
+        using var batch = db.BeginNextBatch();
+
+        var v = new byte[] { 1 };
+        batch.SetRaw(Key.Account(keccak0), v);
+        batch.SetRaw(Key.Account(keccak1), v);
+        batch.SetRaw(Key.Account(keccak2), v);
+        batch.SetRaw(Key.Account(keccak3), v);
+
+        await batch.Commit(CommitOptions.FlushDataAndRoot);
+
+        // Delete by prefix
+        using var batch2 = db.BeginNextBatch();
+        batch.DeleteByPrefix(Key.Merkle(NibblePath.FromKey(prefix).SliceTo(NibblePath.KeccakNibbleCount - 1)));
+        await batch2.Commit(CommitOptions.FlushDataAndRoot);
+
+        using var read = db.BeginReadOnlyBatch();
+
+        read.TryGet(Key.Account(keccak0), out _).Should().BeFalse();
+        read.TryGet(Key.Account(keccak1), out _).Should().BeFalse();
+        read.TryGet(Key.Account(keccak2), out _).Should().BeFalse();
+        read.TryGet(Key.Account(keccak3), out _).Should().BeFalse();
+    }
+
+    [Test]
+    public async Task DeleteByPrefix_Storage()
+    {
+        using var db = PagedDb.NativeMemoryDb(16 * Mb, 2);
+
+        var account = Values.Key2;
+
+        var keccak0 = Values.Key0;
+        var keccak1 = Values.Key0;
+        var keccak2 = Values.Key0;
+        var keccak3 = Values.Key0;
+        var prefix = Values.Key0;
+
+        keccak0.BytesAsSpan[^1] = 0x01;
+        keccak1.BytesAsSpan[^1] = 0x02;
+        keccak2.BytesAsSpan[^1] = 0x03;
+        keccak3.BytesAsSpan[^1] = 0x04;
+        prefix.BytesAsSpan[^1] = 0x00;
+
+        // Set data
+        using var batch = db.BeginNextBatch();
+
+        var v = new byte[] { 1 };
+        batch.SetRaw(Key.StorageCell(NibblePath.FromKey(account), keccak0), v);
+        batch.SetRaw(Key.StorageCell(NibblePath.FromKey(account), keccak1), v);
+        batch.SetRaw(Key.StorageCell(NibblePath.FromKey(account), keccak2), v);
+        batch.SetRaw(Key.StorageCell(NibblePath.FromKey(account), keccak3), v);
+
+        await batch.Commit(CommitOptions.FlushDataAndRoot);
+
+        // Delete by prefix
+        using var batch2 = db.BeginNextBatch();
+        batch.DeleteByPrefix(Key.Raw(NibblePath.FromKey(account), DataType.Merkle,
+            NibblePath.FromKey(prefix).SliceTo(NibblePath.KeccakNibbleCount - 1)));
+        await batch2.Commit(CommitOptions.FlushDataAndRoot);
+
+        using var read = db.BeginReadOnlyBatch();
+
+        read.TryGet(Key.StorageCell(NibblePath.FromKey(account), keccak0), out _).Should().BeFalse();
+        read.TryGet(Key.StorageCell(NibblePath.FromKey(account), keccak1), out _).Should().BeFalse();
+        read.TryGet(Key.StorageCell(NibblePath.FromKey(account), keccak2), out _).Should().BeFalse();
+        read.TryGet(Key.StorageCell(NibblePath.FromKey(account), keccak3), out _).Should().BeFalse();
+    }
+
+    [Test]
     public async Task Multiple_storages_per_commit()
     {
         var account = Values.Key0;

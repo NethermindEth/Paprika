@@ -219,6 +219,9 @@ public readonly unsafe struct RootPage(Page root) : IPage
 
     public void Destroy(IBatchContext batch, in NibblePath account)
     {
+        // GC for storage
+        DeleteByPrefix(Key.Merkle(account), batch);
+
         // Destroy the Id entry about it
         Data.Storage.Set(account, StorageFanOut.Type.Id, ReadOnlySpan<byte>.Empty, batch);
 
@@ -227,9 +230,45 @@ public readonly unsafe struct RootPage(Page root) : IPage
 
         // Remove the cached
         batch.IdCache.Remove(account.UnsafeAsKeccak);
+    }
 
-        // TODO: there' no garbage collection for storage
-        // It should not be hard. Walk down by the mapped path, then remove all the pages underneath.
+    public void DeleteByPrefix(in Key prefix, IBatchContext batch)
+    {
+        if (prefix.IsState)
+        {
+            var data = batch.TryGetPageAlloc(ref Data.StateRoot, PageType.StateRoot);
+            var updated = new StateRootPage(data).DeleteByPrefix(prefix.Path, batch);
+            Data.StateRoot = batch.GetAddress(updated);
+        }
+        else
+        {
+            scoped NibblePath id;
+            Span<byte> idSpan = stackalloc byte[sizeof(uint)];
+
+            var keccak = prefix.Path.UnsafeAsKeccak;
+
+            if (batch.IdCache.TryGetValue(keccak, out var cachedId))
+            {
+                WriteId(idSpan, cachedId);
+                id = NibblePath.FromKey(idSpan);
+            }
+            else
+            {
+                // Not in cache, try fetch from db
+                if (Data.Storage.TryGet(batch, prefix.Path, StorageFanOut.Type.Id, out var existingId) != false)
+                {
+                    id = NibblePath.FromKey(existingId);
+                }
+                else
+                {
+                    // Has never been mapped, return.
+                    return;
+                }
+            }
+
+            var path = id.Append(prefix.StoragePath, stackalloc byte[StorageKeySize]);
+            Data.Storage.DeleteByPrefix(path, batch);
+        }
     }
 
     private static void SetAtRoot(IBatchContext batch, in NibblePath path, in ReadOnlySpan<byte> rawData,

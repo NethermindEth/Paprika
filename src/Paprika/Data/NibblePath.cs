@@ -687,6 +687,15 @@ public readonly ref struct NibblePath
 
     private static readonly char[] Hex = "0123456789ABCDEF".ToArray();
 
+    // TODO: optimize
+    public bool StartsWith(in NibblePath prefix)
+    {
+        if (prefix.Length > Length)
+            return false;
+
+        return SliceTo(prefix.Length).Equals(prefix);
+    }
+
     public bool Equals(in NibblePath other)
     {
         if (((other.Length ^ Length) | (other._odd ^ _odd)) > 0)

@@ -38,4 +38,18 @@ public readonly unsafe struct LeafOverflowPage(Page page) : IPage
     {
         using var scope = visitor.On(ref builder, this, addr);
     }
+
+    public Page DeleteByPrefix(in NibblePath prefix, IBatchContext batch)
+    {
+        if (Header.BatchId != batch.BatchId)
+        {
+            // the page is from another batch, meaning, it's readonly. Copy
+            var writable = batch.GetWritableCopy(page);
+            return new LeafOverflowPage(writable).DeleteByPrefix(prefix, batch);
+        }
+
+        Map.DeleteByPrefix(prefix);
+        
+        return page;
+    }
 }

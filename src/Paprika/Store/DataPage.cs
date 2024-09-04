@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -47,6 +46,46 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
     private ref PageHeader Header => ref page.Header;
 
     private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
+
+    public Page DeleteByPrefix(in NibblePath prefix, IBatchContext batch)
+    {
+        if (Header.BatchId != batch.BatchId)
+        {
+            // the page is from another batch, meaning, it's readonly. Copy
+            var writable = batch.GetWritableCopy(page);
+            return new DataPage(writable).DeleteByPrefix(prefix, batch);
+        }
+
+        Map.DeleteByPrefix(prefix);
+
+        if (page.Header.Metadata == Modes.Fanout)
+        {
+            if (prefix.IsEmpty == false)
+            {
+                var childAddr = Data.Buckets[prefix.FirstNibble];
+
+                if (childAddr.IsNull == false)
+                {
+                    var sliced = prefix.SliceFrom(ConsumedNibbles);
+                    var child = new DataPage(batch.GetAt(childAddr)).DeleteByPrefix(sliced, batch);
+                    Data.Buckets[prefix.FirstNibble] = batch.GetAddress(child);
+                }
+            }
+        }
+        else
+        {
+            Debug.Assert(page.Header.Metadata == Modes.Leaf);
+            var childAddr = Data.Buckets[LeafMode.Bucket];
+            
+            if (childAddr.IsNull == false)
+            {
+                var child = new LeafOverflowPage(batch.GetAt(childAddr)).DeleteByPrefix(prefix, batch);
+                Data.Buckets[prefix.FirstNibble] = batch.GetAddress(child);
+            }
+        }
+        
+        return page;
+    }
 
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
