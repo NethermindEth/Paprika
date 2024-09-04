@@ -36,7 +36,8 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
 
     private static class LeafMode
     {
-        public const int Bucket = 0;
+        public const int Bucket0 = 0;
+        public const int Bucket1 = 1;
     }
 
     public static DataPage Wrap(Page page) => Unsafe.As<Page, DataPage>(ref page);
@@ -58,33 +59,43 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
 
         Map.DeleteByPrefix(prefix);
 
+        ref var buckets = ref Data.Buckets;
+
         if (page.Header.Metadata == Modes.Fanout)
         {
             if (prefix.IsEmpty == false)
             {
-                var childAddr = Data.Buckets[prefix.FirstNibble];
+                var childAddr = buckets[prefix.FirstNibble];
 
                 if (childAddr.IsNull == false)
                 {
                     var sliced = prefix.SliceFrom(ConsumedNibbles);
                     var child = new DataPage(batch.GetAt(childAddr)).DeleteByPrefix(sliced, batch);
-                    Data.Buckets[prefix.FirstNibble] = batch.GetAddress(child);
+                    buckets[prefix.FirstNibble] = batch.GetAddress(child);
                 }
             }
         }
         else
         {
             Debug.Assert(page.Header.Metadata == Modes.Leaf);
-            var childAddr = Data.Buckets[LeafMode.Bucket];
 
-            if (childAddr.IsNull == false)
-            {
-                var child = new LeafOverflowPage(batch.GetAt(childAddr)).DeleteByPrefix(prefix, batch);
-                Data.Buckets[prefix.FirstNibble] = batch.GetAddress(child);
-            }
+            DeleteByPrefixInOverflowBucket(prefix, ref buckets, batch, LeafMode.Bucket0);
+            DeleteByPrefixInOverflowBucket(prefix, ref buckets, batch, LeafMode.Bucket1);
         }
 
         return page;
+
+        static void DeleteByPrefixInOverflowBucket(in NibblePath prefix, ref DbAddressList.Of16 buckets,
+            IBatchContext batch, int bucket)
+        {
+            var addr = buckets[bucket];
+
+            if (addr.IsNull == false)
+            {
+                var child = new LeafOverflowPage(batch.GetAt(addr)).DeleteByPrefix(prefix, batch);
+                buckets[bucket] = batch.GetAddress(child);
+            }
+        }
     }
 
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
@@ -195,7 +206,9 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 Debug.Assert(page.Header.Metadata == Modes.Leaf);
 
                 // If it's a delete and no child, just delete
-                if (data.IsEmpty && payload.Buckets[LeafMode.Bucket].IsNull)
+                if (data.IsEmpty &&
+                    payload.Buckets[LeafMode.Bucket0].IsNull &&
+                    payload.Buckets[LeafMode.Bucket1].IsNull)
                 {
                     map.Delete(k);
                     break;
@@ -214,8 +227,13 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 // 3. retry set
                 var overflow = GetWritableOverflow(batch, ref payload);
 
-                Debug.Assert(payload.Buckets[LeafMode.Bucket].IsNull == false);
-                Debug.Assert(batch.WasWritten(payload.Buckets[LeafMode.Bucket]));
+                // Assert existence
+                Debug.Assert(payload.Buckets[LeafMode.Bucket0].IsNull == false);
+                Debug.Assert(payload.Buckets[LeafMode.Bucket1].IsNull == false);
+
+                // Asserting written status
+                Debug.Assert(batch.WasWritten(payload.Buckets[LeafMode.Bucket0]));
+                Debug.Assert(batch.WasWritten(payload.Buckets[LeafMode.Bucket1]));
 
                 if (data.IsEmpty)
                 {
@@ -225,7 +243,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 }
 
                 // Move down
-                map.MoveNonEmptyKeysTo(new MapSource(overflow), treatEmptyAsTombstone: true);
+                map.MoveNonEmptyKeysTo(overflow.AsSource(), treatEmptyAsTombstone: true);
 
                 // Try set again
                 if (map.TrySet(k, data))
@@ -244,7 +262,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         }
     }
 
-    private static void TurnToFanOut(DbAddress current, in SlottedArray overflow, IBatchContext batch)
+    private static void TurnToFanOut(DbAddress current, in MapSource.Of2 overflow, IBatchContext batch)
     {
         // The plan:
         // 1. Remove from overflow all the keys that exist in the current.
@@ -260,8 +278,10 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         var map = new SlottedArray(payload.DataSpan);
 
         // Register for reuse and clear immediately. The overflow is kept as a map in memory
-        var overflowAddress = payload.Buckets[LeafMode.Bucket];
-        payload.Buckets[LeafMode.Bucket] = DbAddress.Null;
+        var overflowAddress0 = payload.Buckets[LeafMode.Bucket0];
+        payload.Buckets[LeafMode.Bucket0] = DbAddress.Null;
+        var overflowAddress1 = payload.Buckets[LeafMode.Bucket1];
+        payload.Buckets[LeafMode.Bucket1] = DbAddress.Null;
 
         // 1. & 2.
         overflow.RemoveKeysFrom(map);
@@ -272,7 +292,8 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         // 4.
         Span<ushort> stats = stackalloc ushort[BucketCount];
 
-        GatherStats(overflow, stats);
+        GatherStats(overflow.Map0, stats);
+        GatherStats(overflow.Map1, stats);
         GatherStats(map, stats);
 
         byte nibbleWithMostData = 0;
@@ -297,13 +318,19 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         payload.Buckets[nibbleWithMostData] = childAddr;
 
         // 6
-        foreach (var item in overflow.EnumerateAll())
+        foreach (var item in overflow.Map0.EnumerateAll())
+        {
+            Set(current, item.Key, item.RawData, batch);
+        }
+
+        foreach (var item in overflow.Map1.EnumerateAll())
         {
             Set(current, item.Key, item.RawData, batch);
         }
 
         // All values from overflow already written, can be reused immediately
-        batch.RegisterForFutureReuse(batch.GetAt(overflowAddress), possibleImmediateReuse: true);
+        batch.RegisterForFutureReuse(batch.GetAt(overflowAddress0), possibleImmediateReuse: true);
+        batch.RegisterForFutureReuse(batch.GetAt(overflowAddress1), possibleImmediateReuse: true);
     }
 
     /// <summary>
@@ -317,34 +344,42 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         //map.GatherSizeStats1Nibble(stats);
     }
 
-    private static SlottedArray GetWritableOverflow(IBatchContext batch, ref Payload payload)
+    private static MapSource.Of2 GetWritableOverflow(IBatchContext batch, ref Payload payload)
     {
-        var addr = payload.Buckets[LeafMode.Bucket];
-        LeafOverflowPage overflow;
-        Page overflowPage;
+        var overflow0 = EnsureOverflow(batch, ref payload, LeafMode.Bucket0);
+        var overflow1 = EnsureOverflow(batch, ref payload, LeafMode.Bucket1);
 
-        if (addr.IsNull)
+        return new MapSource.Of2(overflow0, overflow1);
+
+        static SlottedArray EnsureOverflow(IBatchContext batch, ref Payload payload, int bucket)
         {
-            // Manual clear below
-            overflowPage = batch.GetNewPage(out addr, clear: false);
+            var addr = payload.Buckets[bucket];
 
-            overflowPage.Header.PageType = PageType.LeafOverflow;
-            overflow = new LeafOverflowPage(overflowPage);
-            overflow.Map.Clear();
+            LeafOverflowPage leafOverflowPage;
+            Page overflowPage;
+
+            if (addr.IsNull)
+            {
+                // Manual clear below
+                overflowPage = batch.GetNewPage(out addr, clear: false);
+
+                overflowPage.Header.PageType = PageType.LeafOverflow;
+                leafOverflowPage = new LeafOverflowPage(overflowPage);
+                leafOverflowPage.Map.Clear();
+            }
+            else
+            {
+                overflowPage = batch.EnsureWritableCopy(ref addr);
+                leafOverflowPage = new LeafOverflowPage(overflowPage);
+
+                Debug.Assert(overflowPage.Header.PageType == PageType.LeafOverflow);
+            }
+
+            payload.Buckets[bucket] = addr;
+
+            Debug.Assert(leafOverflowPage.AsPage().Header.BatchId == batch.BatchId);
+            return leafOverflowPage.Map;
         }
-        else
-        {
-            overflowPage = batch.EnsureWritableCopy(ref addr);
-            overflow = new LeafOverflowPage(overflowPage);
-
-            Debug.Assert(overflowPage.Header.PageType == PageType.LeafOverflow);
-        }
-
-        payload.Buckets[LeafMode.Bucket] = addr;
-
-        Debug.Assert(overflow.AsPage().Header.BatchId == batch.BatchId);
-
-        return overflow.Map;
     }
 
     public void Clear()
@@ -477,11 +512,21 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
             if (page.Header.Metadata == Modes.Leaf)
             {
                 if (page.Map.TryGet(sliced, out result))
+                {
                     return true;
+                }
 
-                var overflowAddr = page.Data.Buckets[LeafMode.Bucket];
-                return !overflowAddr.IsNull &&
-                       new LeafOverflowPage(batch.GetAt(overflowAddr)).Map.TryGet(sliced, out result);
+                Span<int> buckets = [LeafMode.Bucket0, LeafMode.Bucket1];
+                foreach (var i in buckets)
+                {
+                    var addr = page.Data.Buckets[i];
+                    if (addr.IsNull == false && new LeafOverflowPage(batch.GetAt(addr)).Map.TryGet(sliced, out result))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
             }
 
             DbAddress bucket = default;
@@ -517,6 +562,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         } while (true);
 
         return returnValue;
+
     }
 
     public SlottedArray Map => new(Data.DataSpan);

@@ -1302,6 +1302,29 @@ public readonly ref struct SlottedArray /*: IClearable */
 
 public readonly ref struct MapSource
 {
+    /// <summary>
+    /// A simple map source of two.
+    /// </summary>
+    public readonly ref struct Of2(SlottedArray map0, SlottedArray map1)
+    {
+        public readonly SlottedArray Map0 = map0;
+        public readonly SlottedArray Map1 = map1;
+
+        public MapSource AsSource() => new(Map0, Map1);
+
+        public void Delete(in NibblePath key)
+        {
+            Map0.Delete(key);
+            Map1.Delete(key);
+        }
+
+        public void RemoveKeysFrom(in SlottedArray map)
+        {
+            Map0.RemoveKeysFrom(map);
+            Map1.RemoveKeysFrom(map);
+        }
+    }
+
     private readonly SlottedArray _map0;
     private readonly SlottedArray _map1;
     private readonly SlottedArray _map2;
