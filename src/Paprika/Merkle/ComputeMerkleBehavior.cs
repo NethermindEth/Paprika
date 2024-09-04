@@ -1184,7 +1184,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                             var keyType = trieType == TrieType.State ? DataType.Account : DataType.StorageCell;
                             var valueKey = Key.Raw(slice, keyType, NibblePath.Empty);
 
-                                // delete memoized keccak
+                            // delete memoized keccak
                             //commit.Set(valueKey, ReadOnlySpan<byte>.Empty);
 
                             var newDataKey = Key.Raw(path, keyType, NibblePath.Empty);
