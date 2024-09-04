@@ -36,32 +36,6 @@ public class RawStateTests
         raw.Hash.Should().Be(Keccak.EmptyTreeHash);
     }
 
-    [Test]
-    public async Task Snap_boundary()
-    {
-        var account = Values.Key1;
-        var keccak = Values.Key2;
-
-        using var db = PagedDb.NativeMemoryDb(256 * 1024, 2);
-        var merkle = new ComputeMerkleBehavior();
-
-        await using var blockchain = new Blockchain(db, merkle);
-        using var raw = blockchain.StartRaw();
-
-        raw.SetBoundary(NibblePath.FromKey(account).SliceTo(1), keccak);
-        raw.Commit();
-
-        var root1 = raw.Hash;
-
-        raw.SetAccount(account, new Account(1, 1));
-        raw.Commit();
-
-        raw.Finalize(1);
-
-        var root2 = raw.Hash;
-
-        root1.Should().NotBe(root2);
-    }
 
     [Test]
     public async Task Metadata_are_preserved()
@@ -149,5 +123,64 @@ public class RawStateTests
 
         using var read = db.BeginReadOnlyBatch();
         read.TryGet(Key.Account(account), out _).Should().BeFalse();
+    }
+
+    [Test]
+    [Ignore("Deletion by prefixes of length <= 2 is not supported")]
+    public async Task DeleteByShortPrefix()
+    {
+        var account1 = new Keccak(new byte[]
+            { 1, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
+        
+        var account2 = new Keccak(new byte[]
+            { 18, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
+
+        using var db = PagedDb.NativeMemoryDb(256 * 1024, 2);
+        var merkle = new ComputeMerkleBehavior();
+
+        await using var blockchain = new Blockchain(db, merkle);
+
+        using var raw = blockchain.StartRaw();
+
+        raw.SetAccount(account1, new Account(1, 1));
+        raw.SetAccount(account2, new Account(2, 2));
+        raw.Commit();
+
+        raw.RegisterDeleteByPrefix(Key.Account(NibblePath.FromKey(account2).SliceTo(2)));
+        raw.Commit();
+
+        raw.Finalize(1);
+
+        using var read = db.BeginReadOnlyBatch();
+        read.TryGet(Key.Account(account1), out _).Should().BeTrue();
+        read.TryGet(Key.Account(account2), out _).Should().BeFalse();
+    }
+
+    [Test]
+    public void DeleteByPrefixStorage()
+    {
+        var account = Values.Key1;
+
+        using var db = PagedDb.NativeMemoryDb(256 * 1024, 2);
+        var merkle = new ComputeMerkleBehavior();
+
+        var blockchain = new Blockchain(db, merkle);
+
+        using var raw = blockchain.StartRaw();
+
+        raw.SetAccount(account, new Account(1, 1));
+        raw.SetStorage(account, Values.Key2, new byte[] { 1, 2, 3, 4, 5 });
+        raw.Commit();
+
+        using var read = db.BeginReadOnlyBatch();
+        read.TryGet(Key.StorageCell(NibblePath.FromKey(account), Values.Key2), out _).Should().BeTrue();
+
+        raw.RegisterDeleteByPrefix(Key.StorageCell(NibblePath.FromKey(account), NibblePath.Empty));
+        raw.Commit();
+
+        raw.Finalize(1);
+
+        using var read2 = db.BeginReadOnlyBatch();
+        read2.TryGet(Key.StorageCell(NibblePath.FromKey(account), Values.Key2), out _).Should().BeFalse();
     }
 }

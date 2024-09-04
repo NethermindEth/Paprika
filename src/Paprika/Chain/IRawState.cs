@@ -8,9 +8,6 @@ namespace Paprika.Chain;
 /// </summary>
 public interface IRawState : IReadOnlyWorldState
 {
-    void SetBoundary(in NibblePath account, in Keccak boundaryNodeKeccak);
-    void SetBoundary(in Keccak account, in NibblePath storage, in Keccak boundaryNodeKeccak);
-
     void SetAccount(in Keccak address, in Account account);
 
     void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value);
@@ -21,12 +18,9 @@ public interface IRawState : IReadOnlyWorldState
 
     Keccak GetStorageHash(in Keccak account, in NibblePath path);
 
-    void RemoveBoundaryProof(in Keccak account, in NibblePath storagePath);
-    void RemoveBoundaryProof(in NibblePath path);
-
-    void CreateProofBranch(in Keccak account, in NibblePath storagePath, byte[] childNibbles, Keccak[] childHashes, bool persist = true);
-    void CreateProofExtension(in Keccak account, in NibblePath storagePath, in NibblePath extPath, bool persist = true);
-    void CreateProofLeaf(in Keccak account, in NibblePath storagePath, in NibblePath leafPath);
+    void CreateMerkleBranch(in Keccak account, in NibblePath storagePath, byte[] childNibbles, Keccak[] childHashes, bool persist = true);
+    void CreateMerkleExtension(in Keccak account, in NibblePath storagePath, in NibblePath extPath, bool persist = true);
+    void CreateMerkleLeaf(in Keccak account, in NibblePath storagePath, in NibblePath leafPath);
 
     /// <summary>
     /// Registers a deletion that will be applied when <see cref="Commit"/> is called.
