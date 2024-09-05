@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using FluentAssertions;
-using Nethermind.Int256;
 using Paprika.Crypto;
+using Paprika.Data;
 using Paprika.Store;
 using static Paprika.Tests.Values;
 
@@ -19,11 +19,11 @@ public class DbTests
     [Test]
     public async Task Simple()
     {
-        const int max = 2;
+        const int max = 1024;
 
-        using var db = PagedDb.NativeMemoryDb(MB);
+        using var db = PagedDb.NativeMemoryDb(MB256);
 
-        for (byte i = 0; i < max; i++)
+        for (int i = 0; i < max; i++)
         {
             var key = GetKey(i);
 
@@ -33,6 +33,7 @@ public class DbTests
 
             batch.SetAccount(key, value);
             batch.SetStorage(key, key, value);
+            batch.SetRaw(Key.Merkle(NibblePath.FromKey(key)), value);
 
             await batch.Commit(CommitOptions.FlushDataAndRoot);
         }
@@ -40,18 +41,23 @@ public class DbTests
         using var read = db.BeginNextBatch();
 
         Assert(read);
-
-        Console.WriteLine($"Used memory {db.Megabytes:P}");
+        return;
 
         static void Assert(IReadOnlyBatch read)
         {
-            for (byte i = 0; i < max; i++)
+            for (int i = 0; i < max; i++)
             {
                 var key = GetKey(i);
                 var expected = GetValue(i);
 
                 read.ShouldHaveAccount(key, expected);
                 read.AssertStorageValue(key, key, expected);
+                read.TryGet(Key.Merkle(NibblePath.FromKey(key)), out var value).Should().BeTrue();
+                if (value.SequenceEqual(expected) == false)
+                {
+                    NUnit.Framework.Assert.Fail(
+                        $"Failed at {i} where {ParseValue(value)} should have been equal to {ParseValue(expected)}");
+                }
             }
         }
     }
@@ -60,7 +66,7 @@ public class DbTests
     [TestCase(500, 2_000, TestName = "Short history, many accounts")]
     public async Task Page_reuse(int blockCount, int accountsCount)
     {
-        const int size = MB64;
+        const int size = MB256;
 
         using var db = PagedDb.NativeMemoryDb(size);
 
@@ -254,7 +260,9 @@ public class DbTests
             var header = page.Header;
 
             header.BatchId.Should().BeGreaterThan(0);
-            header.PageType.Should().BeOneOf(PageType.Abandoned, PageType.Standard, PageType.Identity, PageType.Leaf, PageType.LeafOverflow);
+            var types = Enum.GetValues<PageType>().ToList();
+            types.Remove(PageType.None);
+            header.PageType.Should().BeOneOf(types);
             header.PaprikaVersion.Should().Be(1);
         }
     }
@@ -266,5 +274,6 @@ public class DbTests
         return keccak;
     }
 
-    static byte[] GetValue(int i) => new UInt256((uint)i).ToBigEndian();
+    static byte[] GetValue(int i) => BitConverter.GetBytes(i);
+    static int ParseValue(ReadOnlySpan<byte> b) => BitConverter.ToInt32(b);
 }

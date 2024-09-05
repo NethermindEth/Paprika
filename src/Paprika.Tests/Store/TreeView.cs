@@ -1,4 +1,5 @@
-﻿using Paprika.Store;
+﻿using Paprika.Data;
+using Paprika.Store;
 using Spectre.Console;
 
 namespace Paprika.Tests.Store;
@@ -9,11 +10,18 @@ public class TreeView : IPageVisitor, IDisposable
 
     private readonly Stack<TreeNode> _nodes = new();
 
-    private IDisposable Build(string name, DbAddress addr, int? capacityLeft = null)
+    private IDisposable Build(string name, DbAddress? addr, int? capacityLeft = null)
     {
-        var count = _nodes.Count;
-        var capacity = capacityLeft.HasValue ? $", space_left: {capacityLeft.Value}" : "";
-        var text = $"{count}: {name.Replace("Page", "")}, @{addr.Raw}{capacity}";
+        string text;
+        if (addr.HasValue)
+        {
+            var capacity = capacityLeft.HasValue ? $", space_left: {capacityLeft.Value}" : "";
+            text = $"{name.Replace("Page", "")}, @{addr.Value.Raw}{capacity}";
+        }
+        else
+        {
+            text = name;
+        }
 
         var node = new TreeNode(new Text(text));
 
@@ -30,23 +38,13 @@ public class TreeView : IPageVisitor, IDisposable
         return this;
     }
 
-    public IDisposable On(RootPage page, DbAddress addr) => Build(nameof(RootPage), addr);
+    public IDisposable On<TPage>(scoped ref NibblePath.Builder prefix, TPage page, DbAddress addr)
+        where TPage : unmanaged, IPage => Build(page.GetType().Name, addr);
 
-    public IDisposable On(AbandonedPage page, DbAddress addr) => Build(nameof(AbandonedPage), addr);
+    public IDisposable On<TPage>(TPage page, DbAddress addr) where TPage : unmanaged, IPage =>
+        Build(page.GetType().Name, addr);
 
-
-    public IDisposable On(DataPage page, DbAddress addr) => Build(nameof(DataPage), addr, page.CapacityLeft);
-
-    public IDisposable On(FanOutPage page, DbAddress addr) => Build(nameof(FanOutPage), addr);
-
-    public IDisposable On(LeafPage page, DbAddress addr) => Build(nameof(LeafPage), addr, page.CapacityLeft);
-
-    public IDisposable On<TNext>(StorageFanOutPage<TNext> page, DbAddress addr)
-        where TNext : struct, IPageWithData<TNext> =>
-        Build(nameof(StorageFanOutPage), addr);
-
-    public IDisposable On(LeafOverflowPage page, DbAddress addr) => Build(nameof(LeafOverflowPage), addr, page.CapacityLeft);
-    public IDisposable On(Paprika.Store.Merkle.StateRootPage data, DbAddress addr) => Build(nameof(LeafOverflowPage), addr);
+    public IDisposable Scope(string name) => Build(name, null);
 
     public void Dispose() => _nodes.TryPop(out _);
 }

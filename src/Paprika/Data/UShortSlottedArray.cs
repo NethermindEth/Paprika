@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Store;
@@ -22,15 +23,17 @@ public readonly ref struct UShortSlottedArray
 {
     private readonly ref Header _header;
     private readonly Span<byte> _data;
-    private readonly Span<Slot> _slots;
-    private readonly Span<byte> _raw;
 
     public UShortSlottedArray(Span<byte> buffer)
     {
-        _raw = buffer;
-        _header = ref Unsafe.As<byte, Header>(ref _raw[0]);
+        _header = ref Unsafe.As<byte, Header>(ref buffer[0]);
         _data = buffer.Slice(Header.Size);
-        _slots = MemoryMarshal.Cast<byte, Slot>(_data);
+    }
+
+    public void Set(ushort key, ReadOnlySpan<byte> data)
+    {
+        var succeeded = TrySet(key, data);
+        Debug.Assert(succeeded);
     }
 
     public bool TrySet(ushort key, ReadOnlySpan<byte> data)
@@ -60,7 +63,7 @@ public readonly ref struct UShortSlottedArray
             }
 
             // there are some deleted entries, run defragmentation of the buffer and try again
-            Deframent();
+            Defragment();
 
             // re-evaluate again
             if (_header.Taken + total + Slot.Size > _data.Length)
@@ -71,7 +74,7 @@ public readonly ref struct UShortSlottedArray
         }
 
         var at = _header.Low;
-        ref var slot = ref _slots[at / Slot.Size];
+        ref var slot = ref this[at / Slot.Size];
 
         // write slot
         slot.Key = key;
@@ -91,6 +94,97 @@ public readonly ref struct UShortSlottedArray
     }
 
     /// <summary>
+    /// Clears the map.
+    /// </summary>
+    public void Clear()
+    {
+        _header = default;
+    }
+
+    public Enumerator EnumerateAll() =>
+        new(this);
+
+    public ref struct Enumerator
+    {
+        /// <summary>The map being enumerated.</summary>
+        private readonly UShortSlottedArray _map;
+
+        /// <summary>The next index to yield.</summary>
+        private int _index;
+
+        private Item _current;
+
+        internal Enumerator(UShortSlottedArray map)
+        {
+            _map = map;
+            _index = -1;
+        }
+
+        /// <summary>Advances the enumerator to the next element of the span.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool MoveNext()
+        {
+            var index = _index + 1;
+            var to = _map.Count;
+
+            ref var slot = ref _map[index];
+
+            while (index < to && slot.IsDeleted) // filter out deleted
+            {
+                // move by 1
+                index += 1;
+                slot = ref _map[index];
+            }
+
+            if (index < to)
+            {
+                _index = index;
+                _current = new Item(slot.Key, _map.GetSlotPayload(ref slot), _index);
+                return true;
+            }
+
+            return false;
+        }
+
+        public readonly Item Current => _current;
+
+        public readonly void Dispose()
+        {
+        }
+
+        public readonly ref struct Item(ushort key, ReadOnlySpan<byte> rawData, int index)
+        {
+            public int Index { get; } = index;
+            public ushort Key { get; } = key;
+            public ReadOnlySpan<byte> RawData { get; } = rawData;
+        }
+
+        // a shortcut to not allocate, just copy the enumerator
+        public readonly Enumerator GetEnumerator() => this;
+    }
+
+    private readonly ref Slot this[int index]
+    {
+        get
+        {
+            var offset = index * Slot.Size;
+            if (offset >= _data.Length - Slot.Size)
+            {
+                ThrowIndexOutOfRangeException();
+            }
+
+            return ref Unsafe.As<byte, Slot>(ref Unsafe.Add(ref MemoryMarshal.GetReference(_data), offset));
+
+            [DoesNotReturn]
+            [StackTraceHidden]
+            static void ThrowIndexOutOfRangeException()
+            {
+                throw new IndexOutOfRangeException();
+            }
+        }
+    }
+
+    /// <summary>
     /// Gets how many slots are used in the map.
     /// </summary>
     public int Count => _header.Low / Slot.Size;
@@ -100,8 +194,6 @@ public readonly ref struct UShortSlottedArray
     /// It includes slots that were deleted and that can be reclaimed when a defragmentation happens.
     /// </summary>
     public int CapacityLeft => _data.Length - _header.Taken + _header.Deleted;
-
-    public bool CanAdd(in ReadOnlySpan<byte> data) => CapacityLeft >= Slot.Size + data.Length;
 
     private static int GetTotalSpaceRequired(ReadOnlySpan<byte> data) => data.Length;
 
@@ -123,12 +215,16 @@ public readonly ref struct UShortSlottedArray
     private void DeleteImpl(int index)
     {
         // mark as deleted first
-        ref var slot = ref _slots[index];
+        ref var slot = ref this[index];
+
+        Debug.Assert(slot.IsDeleted == false);
+
         slot.IsDeleted = true;
 
         var size = (ushort)(GetSlotLength(ref slot) + Slot.Size);
 
-        Debug.Assert(_header.Deleted + size <= _data.Length, "Deleted marker breached size");
+        var deleted = _header.Deleted;
+        Debug.Assert(deleted + size <= _data.Length, "Deleted marker breached size");
 
         _header.Deleted += size;
 
@@ -136,43 +232,58 @@ public readonly ref struct UShortSlottedArray
         CollectTombstones();
     }
 
-    private void Deframent()
+    private void Defragment()
     {
         // As data were fitting before, the will fit after so all the checks can be skipped
-        var size = _raw.Length;
-        var array = ArrayPool<byte>.Shared.Rent(size);
-        var span = array.AsSpan(0, size);
-
-        span.Clear();
-        var copy = new UShortSlottedArray(span);
         var count = _header.Low / Slot.Size;
 
-        for (var i = 0; i < count; i++)
+        // The pointer where the writing in the array ended, move it up when written.
+        var writeAt = 0;
+        var writtenTo = (ushort)_data.Length;
+        var readTo = writtenTo;
+        var newCount = (ushort)0;
+
+        for (int i = 0; i < count; i++)
         {
-            var copyFrom = _slots[i];
-            if (copyFrom.IsDeleted == false)
+            var slot = this[i];
+            var addr = slot.ItemAddress;
+
+            if (!slot.IsDeleted)
             {
-                var fromSpan = GetSlotPayload(ref _slots[i]);
+                newCount++;
 
-                ref var copyTo = ref copy._slots[copy._header.Low / Slot.Size];
+                if (writtenTo == readTo)
+                {
+                    // This is a case where nothing required copying so far, just move on by advancing it all.
+                    writeAt++;
+                    writtenTo = addr;
+                }
+                else
+                {
+                    // Something has been previously deleted, needs to be copied carefully
+                    var source = _data.Slice(addr, readTo - addr);
+                    writtenTo = (ushort)(writtenTo - source.Length);
+                    var destination = _data.Slice(writtenTo, source.Length);
+                    source.CopyTo(destination);
+                    ref var destinationSlot = ref this[writeAt];
 
-                // copy raw, no decoding
-                var high = (ushort)(copy._data.Length - copy._header.High - fromSpan.Length);
-                fromSpan.CopyTo(copy._data.Slice(high));
+                    // Copy everything, just overwrite the address
+                    destinationSlot.Key = slot.Key;
+                    destinationSlot.ItemAddress = writtenTo;
+                    destinationSlot.IsDeleted = false;
 
-                copyTo.Key = copyFrom.Key;
-                copyTo.ItemAddress = high;
-
-                copy._header.Low += Slot.Size;
-                copy._header.High = (ushort)(copy._header.High + fromSpan.Length);
+                    writeAt++;
+                }
             }
+
+            // Memoize to what is read to
+            readTo = addr;
         }
 
-        // finalize by coping over to this
-        span.CopyTo(_raw);
-
-        ArrayPool<byte>.Shared.Return(array);
-        Debug.Assert(copy._header.Deleted == 0, "All deleted should be gone");
+        // Finalize by setting the header
+        _header.Low = (ushort)(newCount * Slot.Size);
+        _header.High = (ushort)(_data.Length - writtenTo);
+        _header.Deleted = 0;
     }
 
     /// <summary>
@@ -183,12 +294,12 @@ public readonly ref struct UShortSlottedArray
         // start with the last written and perform checks and cleanup till all the deleted are gone
         var index = Count - 1;
 
-        while (index >= 0 && _slots[index].IsDeleted)
+        while (index >= 0 && this[index].IsDeleted)
         {
             // undo writing low
             _header.Low -= Slot.Size;
 
-            ref var slot = ref _slots[index];
+            ref var slot = ref this[index];
 
             // undo writing high
             var slice = GetSlotPayload(ref slot);
@@ -223,15 +334,12 @@ public readonly ref struct UShortSlottedArray
         "key encoding is delayed but it might be called twice, here + TrySet")]
     private bool TryGetImpl(ushort key, out Span<byte> data, out int slotIndex)
     {
-        var to = _header.Low / Slot.Size;
+        var to = _header.Low;
 
         // uses vectorized search, treating slots as a Span<ushort>
         // if the found index is odd -> found a slot to be queried
-
-        Debug.Assert(0 <= to && to < _slots.Length);
-
         const int notFound = -1;
-        var span = MemoryMarshal.Cast<Slot, ushort>(_slots.Slice(0, to));
+        var span = MemoryMarshal.Cast<byte, ushort>(_data.Slice(0, to));
 
         var offset = 0;
         int index = span.IndexOf(key);
@@ -252,7 +360,7 @@ public readonly ref struct UShortSlottedArray
             {
                 var i = offset / 2;
 
-                ref var slot = ref _slots[i];
+                ref var slot = ref this[i];
                 if (slot.IsDeleted == false)
                 {
                     data = GetSlotPayload(ref slot);
@@ -290,7 +398,7 @@ public readonly ref struct UShortSlottedArray
     private ushort GetSlotLength(ref Slot slot)
     {
         // assert whether the slot has a previous, if not use data.length
-        var previousSlotAddress = Unsafe.IsAddressLessThan(ref _slots[0], ref slot)
+        var previousSlotAddress = Unsafe.IsAddressLessThan(ref this[0], ref slot)
             ? Unsafe.Add(ref slot, -1).ItemAddress
             : _data.Length;
 

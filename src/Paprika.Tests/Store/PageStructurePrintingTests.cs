@@ -47,6 +47,7 @@ public class PageStructurePrintingTests
         var view = new TreeView();
         db.VisitRoot(view);
 
+        AnsiConsole.WriteLine($"DB size: {db.Megabytes:N0}MB");
         AnsiConsole.Write(view.Tree);
 
         return;

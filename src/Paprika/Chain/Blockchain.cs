@@ -61,6 +61,7 @@ public class Blockchain : IAsyncDisposable
     private readonly CacheBudget.Options _cacheBudgetStateAndStorage;
     private readonly CacheBudget.Options _cacheBudgetPreCommit;
     private readonly Action? _beforeMetricsDisposed;
+    private bool _verify;
 
     public Blockchain(IDb db, IPreCommitBehavior preCommit, TimeSpan? minFlushDelay = null,
         CacheBudget.Options cacheBudgetStateAndStorage = default,
@@ -102,6 +103,11 @@ public class Blockchain : IAsyncDisposable
 
         using var batch = _db.BeginReadOnlyBatch();
         _lastFinalized = batch.Metadata.BlockNumber;
+    }
+
+    public void VerifyDbIntegrityOnCommit()
+    {
+        _verify = true;
     }
 
     private static Channel<CommittedBlockState> CreateChannel(int? finalizationQueueLimit)
@@ -148,6 +154,11 @@ public class Blockchain : IAsyncDisposable
                     last = (block.BlockNumber, block.Hash);
 
                     using var batch = _db.BeginNextBatch();
+
+                    if (_verify)
+                    {
+                        batch.VerifyDbPagesOnCommit();
+                    }
 
                     // apply
                     var application = Stopwatch.StartNew();

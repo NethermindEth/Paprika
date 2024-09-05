@@ -41,28 +41,6 @@ public interface IBatchContext : IReadOnlyBatchContext
     }
 
     /// <summary>
-    /// Ensures that the given slot exists and is writable. If it didn't exist before, create the slot.
-    /// </summary>
-    Page EnsureWritableExists(ref DbAddress addr)
-    {
-        if (addr.IsNull)
-        {
-            return GetNewPage(out addr, true);
-        }
-
-        var page = GetAt(addr);
-
-        if (page.Header.BatchId == BatchId)
-        {
-            return page;
-        }
-
-        var cow = GetWritableCopy(page);
-        addr = GetAddress(cow);
-        return cow;
-    }
-
-    /// <summary>
     /// Informs the batch, that the given page was abandoned before and is manually reused.
     /// </summary>
     /// <param name="page">The page that will be reused.</param>
@@ -76,7 +54,9 @@ public interface IBatchContext : IReadOnlyBatchContext
     /// <summary>
     /// Abandon this page from this batch on.
     /// </summary>
-    void RegisterForFutureReuse(Page page);
+    /// <param name="page">The page to be reused.</param>
+    /// <param name="possibleImmediateReuse">If set to true, the page will be checked if it was written in this batch and if it was, will be reused immediately.</param>
+    void RegisterForFutureReuse(Page page, bool possibleImmediateReuse = false);
 
     /// <summary>
     /// Assigns the batch identifier to a given page, marking it writable by this batch.
