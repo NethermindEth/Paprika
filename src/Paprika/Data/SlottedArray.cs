@@ -101,18 +101,10 @@ public readonly ref struct SlottedArray /*: IClearable */
                 Delete(item);
             }
         }
-        else if (prefix.Length == 2)
-        {
-            foreach (var item in Enumerate2Nibbles(prefix.FirstNibble, prefix.GetAt(1)))
-            {
-                if (item.Key.StartsWith(prefix))
-                {
-                    Delete(item);
-                }
-            }
-        }
         else
         {
+            Debug.Assert(prefix.Length >= 2);
+            
             // Filtering by 2 first nibbles should be sufficient to filter out a lot
             foreach (var item in Enumerate2Nibbles(prefix.FirstNibble, prefix.GetAt(1)))
             {
