@@ -95,8 +95,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         }
         else if (prefix.Length == 1)
         {
-            // TODO: optimize by filtering by hash. The key is at least 2 nibbles long so can be easily filtered with a bitwise mask over the hash.
-            // Don't materialize data! 
+            // The prefix is single nibble. All keys within this nibble will match.
             foreach (var item in EnumerateNibble(prefix.FirstNibble))
             {
                 Delete(item);
@@ -104,8 +103,8 @@ public readonly ref struct SlottedArray /*: IClearable */
         }
         else
         {
-            // TODO: optimize by filtering by hash. The key is at least 2 nibbles long so can be easily filtered with a bitwise mask over the hash.
-            foreach (var item in EnumerateAll())
+            // TODO: Try to optimize by filtering by hash better. Right now, the filter is only by the first nibble.
+            foreach (var item in EnumerateNibble(prefix.FirstNibble))
             {
                 if (item.Key.StartsWith(prefix))
                 {
