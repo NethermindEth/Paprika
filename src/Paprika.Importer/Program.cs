@@ -72,7 +72,7 @@ do
     {
         throw new Exception($"Searched for {back} block back since {blockNumber} and failed to load the root");
     }
-    
+
     emptyPath = TreePath.Empty;
 } while (trie.RootRef.TryResolveNode(store, ref emptyPath) == false);
 
@@ -178,7 +178,7 @@ if (dbExists == false)
 else
 {
     using var read = db.BeginReadOnlyBatch();
-    StatisticsForPagedDb.Report(layout[stats], read);
+    StatisticsForPagedDb.Report(layout[stats], read, db);
     // await using (var blockchain =
     //              new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), CacheBudget.Options.None, 100, () => reporter.Observe()))
     // {
