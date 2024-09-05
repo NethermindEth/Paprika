@@ -95,8 +95,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         }
         else if (prefix.Length == 1)
         {
-            // TODO: optimize by filtering by hash. The key is at least 2 nibbles long so can be easily filtered with a bitwise mask over the hash.
-            // Don't materialize data! 
+            // The prefix is single nibble. All keys within this nibble will match.
             foreach (var item in EnumerateNibble(prefix.FirstNibble))
             {
                 Delete(item);
@@ -104,8 +103,10 @@ public readonly ref struct SlottedArray /*: IClearable */
         }
         else
         {
-            // TODO: optimize by filtering by hash. The key is at least 2 nibbles long so can be easily filtered with a bitwise mask over the hash.
-            foreach (var item in EnumerateAll())
+            Debug.Assert(prefix.Length >= 2);
+
+            // Filtering by 2 first nibbles should be sufficient to filter out a lot
+            foreach (var item in Enumerate2Nibbles(prefix.FirstNibble, prefix.GetAt(1)))
             {
                 if (item.Key.StartsWith(prefix))
                 {
@@ -192,6 +193,7 @@ public readonly ref struct SlottedArray /*: IClearable */
 
     public Enumerator EnumerateAll() => new(this);
     public NibbleEnumerator EnumerateNibble(byte nibble) => new(this, nibble);
+    public Nibble2Enumerator Enumerate2Nibbles(byte nibble0, byte nibble1) => new(this, nibble0, nibble1);
 
     [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     private ref struct Chunk
@@ -257,12 +259,10 @@ public readonly ref struct SlottedArray /*: IClearable */
             value = new Item(key, data, _index);
         }
 
-        public readonly void Dispose()
-        {
-        }
-
         // a shortcut to not allocate, just copy the enumerator
         public readonly Enumerator GetEnumerator() => this;
+
+        public void Dispose() { }
     }
 
     public ref struct NibbleEnumerator
@@ -321,16 +321,78 @@ public readonly ref struct SlottedArray /*: IClearable */
         {
             var span = _map.GetSlotPayload(_index, slot);
             var key = Slot.UnPrepareKey(hash, slot.KeyPreamble, span, _bytes.Span, out var data);
-
             value = new Item(key, data, _index);
-        }
-
-        public readonly void Dispose()
-        {
         }
 
         // a shortcut to not allocate, just copy the enumerator
         public readonly NibbleEnumerator GetEnumerator() => this;
+
+        public void Dispose() { }
+    }
+
+    public ref struct Nibble2Enumerator
+    {
+        /// <summary>The map being enumerated.</summary>
+        private readonly SlottedArray _map;
+
+        private readonly byte _searched;
+
+        /// <summary>The next index to yield.</summary>
+        private int _index;
+
+        private Chunk _bytes;
+        private Item _current;
+
+        internal Nibble2Enumerator(SlottedArray map, byte nibble0, byte nibble1)
+        {
+            _map = map;
+            _searched = Slot.CombineNibbles(nibble0, nibble1);
+            _index = -1;
+        }
+
+        /// <summary>Advances the enumerator to the next element of the span.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool MoveNext()
+        {
+            var index = _index + 1;
+            var to = _map.Count;
+
+            var slot = _map.GetSlotRef(index);
+            var hash = _map.GetHashRef(index);
+
+            while (index < to &&
+                   (slot.IsDeleted || slot.HasAtLeastTwoNibbles(hash, slot.KeyPreamble) == false ||
+                    slot.GetNibble0And1(hash) != _searched)) // filter out deleted
+            {
+                // move by 1
+                index += 1;
+                slot = _map.GetSlotRef(index);
+                hash = _map.GetHashRef(index);
+            }
+
+            if (index < to)
+            {
+                _index = index;
+                Build(slot, hash, out _current);
+                return true;
+            }
+
+            return false;
+        }
+
+        public readonly Item Current => _current;
+
+        private void Build(Slot slot, ushort hash, out Item value)
+        {
+            var span = _map.GetSlotPayload(_index, slot);
+            var key = Slot.UnPrepareKey(hash, slot.KeyPreamble, span, _bytes.Span, out var data);
+            value = new Item(key, data, _index);
+        }
+
+        // a shortcut to not allocate, just copy the enumerator
+        public readonly Nibble2Enumerator GetEnumerator() => this;
+
+        public void Dispose() { }
     }
 
     /// <summary>
@@ -1067,7 +1129,12 @@ public readonly ref struct SlottedArray /*: IClearable */
             var nibble0 = (byte)(0x0F & (hash >> (3 * shift - odd * shift)));
             var nibble1 = (byte)(0x0F & (hash >> (2 * shift - odd * shift)));
 
-            return (byte)((nibble0 << shift) + nibble1);
+            return CombineNibbles(nibble0, nibble1);
+        }
+
+        public static byte CombineNibbles(byte nibble0, byte nibble1)
+        {
+            return (byte)((nibble0 << NibblePath.NibbleShift) + nibble1);
         }
 
         public byte KeyPreamble

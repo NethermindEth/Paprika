@@ -46,10 +46,10 @@ public class SlottedArrayTests
         var map = new SlottedArray(span);
 
         var key0 = NibblePath.Empty;
-        var key1 = NibblePath.FromKey(stackalloc byte[1] { 7 }).SliceFrom(odd);
-        var key2 = NibblePath.FromKey(stackalloc byte[2] { 7, 13 }).SliceFrom(odd);
-        var key3 = NibblePath.FromKey(stackalloc byte[3] { 7, 13, 31 }).SliceFrom(odd);
-        var key4 = NibblePath.FromKey(stackalloc byte[4] { 7, 13, 31, 41 }).SliceFrom(odd);
+        var key1 = NibblePath.FromKey([7]).SliceFrom(odd);
+        var key2 = NibblePath.FromKey([7, 13]).SliceFrom(odd);
+        var key3 = NibblePath.FromKey([7, 13, 31]).SliceFrom(odd);
+        var key4 = NibblePath.FromKey([7, 13, 31, 41]).SliceFrom(odd);
 
         map.SetAssert(key0, Data0);
         map.SetAssert(key1, Data1);
@@ -98,10 +98,10 @@ public class SlottedArrayTests
         var map = new SlottedArray(span);
 
         var key0 = NibblePath.Empty;
-        var key1 = NibblePath.FromKey(stackalloc byte[1] { 0x1A });
-        var key2 = NibblePath.FromKey(stackalloc byte[2] { 0x2A, 13 });
-        var key3 = NibblePath.FromKey(stackalloc byte[3] { 0x3A, 13, 31 });
-        var key4 = NibblePath.FromKey(stackalloc byte[4] { 0x4A, 13, 31, 41 });
+        var key1 = NibblePath.FromKey([0x1A]);
+        var key2 = NibblePath.FromKey([0x2A, 13]);
+        var key3 = NibblePath.FromKey([0x3A, 13, 31]);
+        var key4 = NibblePath.FromKey([0x4A, 13, 31, 41]);
 
         map.SetAssert(key0, Data0);
         map.SetAssert(key1, Data1);
@@ -144,6 +144,60 @@ public class SlottedArrayTests
 
         // verify
         return Verify(span.ToArray());
+    }
+
+    [Test]
+    public void Enumerate_2_nibbles([Values(1, 2, 3, 4)] int nibble0)
+    {
+        const byte nibble1 = 0xA;
+
+        Span<byte> span = stackalloc byte[256];
+        var map = new SlottedArray(span);
+
+        var key0 = NibblePath.Empty;
+        var key1 = NibblePath.FromKey([0x10 | nibble1]);
+        var key2 = NibblePath.FromKey([0x20 | nibble1, 13]);
+        var key3 = NibblePath.FromKey([0x30 | nibble1, 13, 31]);
+        var key4 = NibblePath.FromKey([0x40 | nibble1, 13, 31, 41]);
+
+        map.SetAssert(key0, Data0);
+        map.SetAssert(key1, Data1);
+        map.SetAssert(key2, Data2);
+        map.SetAssert(key3, Data3);
+        map.SetAssert(key4, Data4);
+
+        map.GetAssert(key0, Data0);
+        map.GetAssert(key1, Data1);
+        map.GetAssert(key2, Data2);
+        map.GetAssert(key3, Data3);
+        map.GetAssert(key4, Data4);
+
+        var expected = nibble0 switch
+        {
+            1 => key1,
+            2 => key2,
+            3 => key3,
+            4 => key4,
+            _ => throw new Exception()
+        };
+
+        var data = nibble0 switch
+        {
+            1 => Data1,
+            2 => Data2,
+            3 => Data3,
+            4 => Data4,
+            _ => throw new Exception()
+        };
+
+        using var e = map.Enumerate2Nibbles((byte)nibble0, nibble1);
+
+        e.MoveNext().Should().BeTrue();
+
+        e.Current.Key.Equals(expected).Should().BeTrue();
+        e.Current.RawData.SequenceEqual(data).Should().BeTrue();
+
+        e.MoveNext().Should().BeFalse();
     }
 
     [Test]
