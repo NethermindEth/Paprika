@@ -63,6 +63,28 @@ public readonly struct AbandonedPage(Page page) : IPage
         }
     }
 
+    public int CountPages()
+    {
+        var count = 0;
+
+        for (var i = 0; i < Data.Count; i++)
+        {
+            var top = Data.Abandoned[i];
+            if ((top & PackedFlag) == PackedFlag)
+            {
+                // is packed, count this and next
+                count += 2;
+            }
+            else
+            {
+                // not packed, just return
+                count += 1;
+            }
+        }
+
+        return count;
+    }
+
     public IEnumerable<DbAddress> Enumerate()
     {
         for (var i = 0; i < Data.Count; i++)

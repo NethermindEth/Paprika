@@ -33,6 +33,9 @@ public abstract class DbAddressListTests<TList> where TList : struct, DbAddressL
 }
 
 [TestFixture]
+public class DbAddressListTestsOf4 : DbAddressListTests<DbAddressList.Of4>;
+
+[TestFixture]
 public class DbAddressListTestsOf16 : DbAddressListTests<DbAddressList.Of16>;
 
 [TestFixture]

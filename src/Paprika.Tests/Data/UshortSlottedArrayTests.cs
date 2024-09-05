@@ -1,6 +1,4 @@
 ﻿using FluentAssertions;
-using NUnit.Framework;
-using Paprika.Crypto;
 using Paprika.Data;
 
 namespace Paprika.Tests.Data;
@@ -79,6 +77,55 @@ public class UshortSlottedArrayTests
         map.SetAssert(Key0, Data2);
 
         map.GetAssert(Key0, Data2);
+    }
+
+    [Test]
+    public void Rotating_updates()
+    {
+        Span<byte> span = stackalloc byte[128];
+        var map = new UShortSlottedArray(span);
+
+        var keys = new Queue<ushort>();
+        ushort key = 0;
+
+        while (map.TrySet(key, Data0))
+        {
+            keys.Enqueue(key);
+            key++;
+        }
+
+        const int count = 1000;
+
+        for (int i = 0; i < count; i++)
+        {
+            map.Delete(keys.Dequeue()).Should().BeTrue();
+            map.Set(key, Data0);
+            keys.Enqueue(key);
+            key++;
+        }
+    }
+
+    [Test]
+    public void EnumerateAll()
+    {
+        // by trial and error, found the smallest value that will allow to put these two
+        Span<byte> span = stackalloc byte[24];
+        var map = new UShortSlottedArray(span);
+
+        map.SetAssert(Key0, Data0);
+        map.SetAssert(Key1, Data1);
+
+        var e = map.EnumerateAll().GetEnumerator();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Should().Be(Key0);
+        e.Current.RawData.SequenceEqual(Data0).Should().BeTrue();
+
+        e.MoveNext().Should().BeTrue();
+        e.Current.Key.Should().Be(Key1);
+        e.Current.RawData.SequenceEqual(Data1).Should().BeTrue();
+
+        e.MoveNext().Should().BeFalse();
     }
 }
 

@@ -9,7 +9,7 @@ namespace Paprika.Store;
 /// The page used to store big chunks of data.
 /// </summary>
 [method: DebuggerStepThrough]
-public readonly unsafe struct LeafOverflowPage(Page page)
+public readonly unsafe struct LeafOverflowPage(Page page) : IPage
 {
     private ref PageHeader Header => ref page.Header;
 
@@ -33,17 +33,23 @@ public readonly unsafe struct LeafOverflowPage(Page page)
     }
 
     public SlottedArray Map => new(Data.DataSpan);
-    public Span<byte> MapSpan => Data.DataSpan;
 
-    public int CapacityLeft => Map.CapacityLeft;
-
-    public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
+    public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
-        using var scope = visitor.On(this, addr);
+        using var scope = visitor.On(ref builder, this, addr);
     }
 
-    public void Report(IReporter reporter, IPageResolver resolver, int level, int trimmedNibbles)
+    public Page DeleteByPrefix(in NibblePath prefix, IBatchContext batch)
     {
-        reporter.ReportDataUsage(Header.PageType, level, trimmedNibbles, Map);
+        if (Header.BatchId != batch.BatchId)
+        {
+            // the page is from another batch, meaning, it's readonly. Copy
+            var writable = batch.GetWritableCopy(page);
+            return new LeafOverflowPage(writable).DeleteByPrefix(prefix, batch);
+        }
+
+        Map.DeleteByPrefix(prefix);
+
+        return page;
     }
 }

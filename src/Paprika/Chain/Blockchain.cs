@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.CodeDom.Compiler;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -60,6 +61,7 @@ public class Blockchain : IAsyncDisposable
     private readonly CacheBudget.Options _cacheBudgetStateAndStorage;
     private readonly CacheBudget.Options _cacheBudgetPreCommit;
     private readonly Action? _beforeMetricsDisposed;
+    private bool _verify;
 
     public Blockchain(IDb db, IPreCommitBehavior preCommit, TimeSpan? minFlushDelay = null,
         CacheBudget.Options cacheBudgetStateAndStorage = default,
@@ -101,6 +103,11 @@ public class Blockchain : IAsyncDisposable
 
         using var batch = _db.BeginReadOnlyBatch();
         _lastFinalized = batch.Metadata.BlockNumber;
+    }
+
+    public void VerifyDbIntegrityOnCommit()
+    {
+        _verify = true;
     }
 
     private static Channel<CommittedBlockState> CreateChannel(int? finalizationQueueLimit)
@@ -147,6 +154,11 @@ public class Blockchain : IAsyncDisposable
                     last = (block.BlockNumber, block.Hash);
 
                     using var batch = _db.BeginNextBatch();
+
+                    if (_verify)
+                    {
+                        batch.VerifyDbPagesOnCommit();
+                    }
 
                     // apply
                     var application = Stopwatch.StartNew();
@@ -1632,6 +1644,7 @@ public class Blockchain : IAsyncDisposable
     /// </summary>
     private class RawState : IRawState
     {
+        private ArrayBufferWriter<byte> _prefixesToDelete = new();
         private readonly Blockchain _blockchain;
         private readonly IDb _db;
         private BlockState _current;
@@ -1698,6 +1711,13 @@ public class Blockchain : IAsyncDisposable
 
         public void DestroyAccount(in Keccak address) => _current.DestroyAccount(address);
 
+        public void RegisterDeleteByPrefix(in Key prefix)
+        {
+            var span = _prefixesToDelete.GetSpan(prefix.MaxByteLength);
+            var written = prefix.WriteTo(span);
+            _prefixesToDelete.Advance(written.Length);
+        }
+
         public void Commit()
         {
             ThrowOnFinalized();
@@ -1714,6 +1734,8 @@ public class Blockchain : IAsyncDisposable
 
             using var batch = _db.BeginNextBatch();
 
+            DeleteByPrefixes(batch);
+
             var committed = _current.CommitRaw();
             committed.Apply(batch);
             _current.Dispose();
@@ -1725,6 +1747,17 @@ public class Blockchain : IAsyncDisposable
             var ancestors = new[] { committed };
 
             _current = new BlockState(Keccak.Zero, read, ancestors, _blockchain);
+        }
+
+        private void DeleteByPrefixes(IBatch batch)
+        {
+            var prefixes = _prefixesToDelete.WrittenSpan;
+            while (prefixes.IsEmpty == false)
+            {
+                prefixes = Key.ReadFrom(prefixes, out var prefixToDelete);
+                batch.DeleteByPrefix(prefixToDelete);
+            }
+            _prefixesToDelete.ResetWrittenCount();
         }
 
         public void Finalize(uint blockNumber)

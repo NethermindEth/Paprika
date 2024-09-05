@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Diagnostics.Contracts;
 using System.Runtime.InteropServices;
 
 namespace Paprika.Store;
@@ -217,27 +216,6 @@ public struct AbandonedList
         var abandoned = new AbandonedPage(resolver.GetAt(addr));
         visitor.On(abandoned, addr);
         abandoned.Accept(visitor, resolver);
-    }
-
-    [Pure]
-    public long GatherTotalAbandoned(IPageResolver resolver)
-    {
-        resolver.Prefetch(Addresses);
-
-        long count = 0;
-
-        foreach (var addr in Addresses[..(int)EntriesCount])
-        {
-            var current = addr;
-            while (current.IsNull == false)
-            {
-                var abandoned = new AbandonedPage(resolver.GetAt(current));
-                count += abandoned.Count;
-                current = abandoned.Next;
-            }
-        }
-
-        return count;
     }
 
     public bool IsFullyEmpty

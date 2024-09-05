@@ -41,7 +41,7 @@ public class GatherStatistics : Command<StatisticsSettings>
 
         AnsiConsole.WriteLine("Gathering stats...");
 
-        StatisticsForPagedDb.Report(stats, read);
+        StatisticsForPagedDb.Report(stats, read, db);
 
         AnsiConsole.Write(stats);
 

@@ -1,40 +1,26 @@
 namespace Paprika.Store;
 
-class BatchMetrics : IBatchMetrics
-{
-    public int PagesReused { get; private set; }
-
-    public int PagesAllocated { get; private set; }
-
-    public void ReportPageReused() => PagesReused++;
-
-    public void ReportNewPageAllocation() => PagesAllocated++;
-
-    /// <summary>
-    /// The batch is accessed from a single thread, no need to use atomic.
-    /// </summary>
-    public int Writes { get; set; }
-
-    /// <summary>
-    /// The batch is accessed from a single thread, no need to use atomic.
-    /// </summary>
-    public int Reads { get; set; }
-}
-
-public interface IBatchMetrics
+/// <summary>
+/// The batch is accessed from a single thread, no need to use atomic.
+/// </summary>
+class BatchMetrics
 {
     /// <summary>
     /// The number of pages reused from previously existing in the database.
     /// </summary>
-    int PagesReused { get; }
+    public int PagesReused { get; set; }
 
     /// <summary>
     /// The number of newly allocated pages.
     /// </summary>
-    int PagesAllocated { get; }
+    public int PagesAllocated { get; set; }
+
+    public int Writes { get; set; }
+
+    public int Reads { get; set; }
 
     /// <summary>
-    /// Total pages written during this batch.
+    /// The page was written this batch and is <see cref="IBatchContext.RegisterForFutureReuse"/>
     /// </summary>
-    int TotalPagesWritten => PagesAllocated + PagesReused;
+    public int RegisteredToReuseAfterWritingThisBatch { get; set; }
 }

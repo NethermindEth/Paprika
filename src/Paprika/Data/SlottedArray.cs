@@ -1,11 +1,9 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
-using Paprika.Store;
 using Paprika.Utils;
 
 namespace Paprika.Data;
@@ -21,7 +19,7 @@ namespace Paprika.Data;
 /// It keeps an internal map, that is aligned with the local hardware vector size, so that even vectors (0th, 2nd, 4th...)
 /// are used for hashes, while odd (1st, 3rd, 5th...) are used to store slots.
 /// </remarks>
-public readonly ref struct SlottedArray
+public readonly ref struct SlottedArray /*: IClearable */
 {
     public const int Alignment = 8;
     public const int HeaderSize = Header.Size;
@@ -40,7 +38,7 @@ public readonly ref struct SlottedArray
 
     public SlottedArray(Span<byte> buffer)
     {
-        Debug.Assert(buffer.Length > MinimalSizeWithNoData,
+        Debug.Assert(buffer.Length >= MinimalSizeWithNoData,
             $"The buffer should be reasonably big, more than {MinimalSizeWithNoData}");
 
         Debug.Assert(buffer.Length < Slot.MaximumAddressableSize,
@@ -77,10 +75,44 @@ public readonly ref struct SlottedArray
         return ref Unsafe.Add(ref Unsafe.As<byte, Slot>(ref MemoryMarshal.GetReference(_data)), offset);
     }
 
+    public void Set(in NibblePath key, ReadOnlySpan<byte> data)
+    {
+        var succeeded = TrySet(key, data);
+        Debug.Assert(succeeded);
+    }
+
     public bool TrySet(in NibblePath key, ReadOnlySpan<byte> data)
     {
         var hash = Slot.PrepareKey(key, out var preamble, out var trimmed);
         return TrySetImpl(hash, preamble, trimmed, data);
+    }
+
+    public void DeleteByPrefix(in NibblePath prefix)
+    {
+        if (prefix.Length == 0)
+        {
+            Delete(prefix);
+        }
+        else if (prefix.Length == 1)
+        {
+            // TODO: optimize by filtering by hash. The key is at least 2 nibbles long so can be easily filtered with a bitwise mask over the hash.
+            // Don't materialize data! 
+            foreach (var item in EnumerateNibble(prefix.FirstNibble))
+            {
+                Delete(item);
+            }
+        }
+        else
+        {
+            // TODO: optimize by filtering by hash. The key is at least 2 nibbles long so can be easily filtered with a bitwise mask over the hash.
+            foreach (var item in EnumerateAll())
+            {
+                if (item.Key.StartsWith(prefix))
+                {
+                    Delete(item);
+                }
+            }
+        }
     }
 
     private bool TrySetImpl(ushort hash, byte preamble, in NibblePath trimmed, ReadOnlySpan<byte> data)
@@ -136,7 +168,7 @@ public readonly ref struct SlottedArray
 
         if (HasKeyBytes(preamble))
         {
-            var dest2 = trimmed.WriteToWithLeftover(dest);
+            var dest2 = KeyEncoding.Write(trimmed, dest);
             data.CopyTo(dest2);
         }
         else
@@ -158,21 +190,21 @@ public readonly ref struct SlottedArray
 
     public int CapacityLeft => _data.Length - _header.Taken;
 
-    public Enumerator EnumerateAll() =>
-        new(this);
+    public Enumerator EnumerateAll() => new(this);
+    public NibbleEnumerator EnumerateNibble(byte nibble) => new(this, nibble);
+
+    [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
+    private ref struct Chunk
+    {
+        private const int Size = 64;
+
+        private byte _start;
+
+        public Span<byte> Span => MemoryMarshal.CreateSpan(ref _start, Size);
+    }
 
     public ref struct Enumerator
     {
-        [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
-        private ref struct Chunk
-        {
-            public const int Size = 64;
-
-            private byte _start;
-
-            public Span<byte> Span => MemoryMarshal.CreateSpan(ref _start, Size);
-        }
-
         /// <summary>The map being enumerated.</summary>
         private readonly SlottedArray _map;
 
@@ -192,7 +224,7 @@ public readonly ref struct SlottedArray
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool MoveNext()
         {
-            int index = _index + 1;
+            var index = _index + 1;
             var to = _map.Count;
 
             ref var slot = ref _map.GetSlotRef(index);
@@ -207,7 +239,7 @@ public readonly ref struct SlottedArray
             if (index < to)
             {
                 _index = index;
-                Build(out _current);
+                Build(slot, out _current);
                 return true;
             }
 
@@ -216,12 +248,10 @@ public readonly ref struct SlottedArray
 
         public readonly Item Current => _current;
 
-        private void Build(out Item value)
+        private void Build(Slot slot, out Item value)
         {
-            ref var slot = ref _map.GetSlotRef(_index);
             var hash = _map.GetHashRef(_index);
-
-            var span = _map.GetSlotPayload(_index);
+            var span = _map.GetSlotPayload(_index, slot);
             var key = Slot.UnPrepareKey(hash, slot.KeyPreamble, span, _bytes.Span, out var data);
 
             value = new Item(key, data, _index);
@@ -231,15 +261,86 @@ public readonly ref struct SlottedArray
         {
         }
 
-        public readonly ref struct Item(NibblePath key, ReadOnlySpan<byte> rawData, int index)
+        // a shortcut to not allocate, just copy the enumerator
+        public readonly Enumerator GetEnumerator() => this;
+    }
+
+    public ref struct NibbleEnumerator
+    {
+        /// <summary>The map being enumerated.</summary>
+        private readonly SlottedArray _map;
+
+        private readonly byte _nibble;
+
+        /// <summary>The next index to yield.</summary>
+        private int _index;
+
+        private Chunk _bytes;
+        private Item _current;
+
+        internal NibbleEnumerator(SlottedArray map, byte nibble)
         {
-            public int Index { get; } = index;
-            public NibblePath Key { get; } = key;
-            public ReadOnlySpan<byte> RawData { get; } = rawData;
+            _map = map;
+            _nibble = nibble;
+            _index = -1;
+        }
+
+        /// <summary>Advances the enumerator to the next element of the span.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool MoveNext()
+        {
+            var index = _index + 1;
+            var to = _map.Count;
+
+            var slot = _map.GetSlotRef(index);
+            var hash = _map.GetHashRef(index);
+
+            while (index < to &&
+                   (slot.IsDeleted || slot.HasAtLeastOneNibble == false ||
+                    slot.GetNibble0(hash) != _nibble)) // filter out deleted
+            {
+                // move by 1
+                index += 1;
+                slot = _map.GetSlotRef(index);
+                hash = _map.GetHashRef(index);
+            }
+
+            if (index < to)
+            {
+                _index = index;
+                Build(slot, hash, out _current);
+                return true;
+            }
+
+            return false;
+        }
+
+        public readonly Item Current => _current;
+
+        private void Build(Slot slot, ushort hash, out Item value)
+        {
+            var span = _map.GetSlotPayload(_index, slot);
+            var key = Slot.UnPrepareKey(hash, slot.KeyPreamble, span, _bytes.Span, out var data);
+
+            value = new Item(key, data, _index);
+        }
+
+        public readonly void Dispose()
+        {
         }
 
         // a shortcut to not allocate, just copy the enumerator
-        public readonly Enumerator GetEnumerator() => this;
+        public readonly NibbleEnumerator GetEnumerator() => this;
+    }
+
+    /// <summary>
+    /// An enumerator item.
+    /// </summary>
+    public readonly ref struct Item(NibblePath key, ReadOnlySpan<byte> rawData, int index)
+    {
+        public int Index { get; } = index;
+        public NibblePath Key { get; } = key;
+        public ReadOnlySpan<byte> RawData { get; } = rawData;
     }
 
     public void MoveNonEmptyKeysTo(in MapSource destination, bool treatEmptyAsTombstone = false)
@@ -265,7 +366,7 @@ public readonly ref struct SlottedArray
             NibblePath trimmed;
             if (slot.HasKeyBytes)
             {
-                data = NibblePath.ReadFrom(payload, out trimmed);
+                data = KeyEncoding.ReadFrom(payload, out trimmed);
             }
             else
             {
@@ -299,12 +400,44 @@ public readonly ref struct SlottedArray
         }
     }
 
+    public void RemoveKeysFrom(in SlottedArray source)
+    {
+        var to = source.Count;
+
+        for (var i = 0; i < to; i++)
+        {
+            var removedSlot = source.GetSlotRef(i);
+            if (removedSlot.IsDeleted)
+                continue;
+
+            var removedHash = source.GetHashRef(i);
+            var removedPayload = source.GetSlotPayload(i);
+
+            NibblePath removedPath;
+            if (removedSlot.HasKeyBytes)
+            {
+                KeyEncoding.ReadFrom(removedPayload, out removedPath);
+            }
+            else
+            {
+                removedPath = default;
+            }
+
+            var toRemove = TryGetImpl(removedPath, removedHash, removedSlot.KeyPreamble, out _);
+
+            if (toRemove != NotFound)
+            {
+                DeleteImpl(toRemove);
+            }
+        }
+    }
+
     public const int BucketCount = 16;
 
     /// <summary>
     /// Gets the aggregated count of entries per nibble.
     /// </summary>
-    public void GatherCountStatistics(Span<ushort> buckets)
+    public void GatherCountStats1Nibble(Span<ushort> buckets)
     {
         Debug.Assert(buckets.Length == BucketCount);
 
@@ -321,11 +454,175 @@ public readonly ref struct SlottedArray
         }
     }
 
+    /// <summary>
+    /// Gets the aggregated size of entries per nibble.
+    /// </summary>
+    public void GatherSizeStats1Nibble(Span<ushort> buckets)
+    {
+        Debug.Assert(buckets.Length == BucketCount);
+
+        var to = _header.Low / Slot.TotalSize;
+        for (var i = 0; i < to; i++)
+        {
+            ref var slot = ref GetSlotRef(i);
+
+            // extract only not deleted and these which have at least one nibble
+            if (slot.IsDeleted == false && slot.HasAtLeastOneNibble)
+            {
+                const int hashSize = sizeof(ushort);
+                var size = (ushort)(GetSlotPayload(i, slot).Length + Slot.Size + hashSize);
+                buckets[slot.GetNibble0(GetHashRef(i))] += size;
+            }
+        }
+    }
+
     private const int KeyLengthLength = 1;
 
     private static int GetTotalSpaceRequired(byte preamble, in NibblePath key, ReadOnlySpan<byte> data)
     {
-        return (HasKeyBytes(preamble) ? KeyLengthLength + key.RawSpanLength : 0) + data.Length;
+        return (HasKeyBytes(preamble) ? KeyEncoding.GetBytesCount(key) : 0) + data.Length;
+    }
+
+    /// <summary>
+    /// Provides a custom encoding for the keys of type of <see cref="NibblePath"/>.
+    /// It uses a few assumptions about the paths encoded, such as:
+    ///
+    /// - encoded paths are always start at even nibble
+    /// </summary>
+    private static class KeyEncoding
+    {
+        private const byte SpecialCaseMask = 0b1000_0000;
+
+        // Special case, length 1
+        private const byte PathLengthOf1 = 1;
+        private const byte SingleNibbleCaseMask = 0b1111_0000;
+        private const byte SingleNibbleMask = 0b0000_1111;
+        private const byte SingleNibbleLength = 1;
+
+        // Special case, length 2 that starts with 0b10; This differentiates it from length 1.
+        // The rest of the path is not important.
+        // It should allow to encode 3/4 of paths of length 2 on a single byte.
+        private const byte DoubleEvenNibbleCaseByteMask = DoubleEvenNibbleCaseFirstNibbleMask << NibblePath.NibbleShift;
+        private const byte DoubleEvenNibbleCaseByteMaskValue = DoubleEvenNibbleCaseFirstNibbleMaskValue << NibblePath.NibbleShift;
+        private const byte DoubleEvenNibbleCaseFirstNibbleMask = 0b1100;
+        private const byte DoubleEvenNibbleCaseFirstNibbleMaskValue = 0b1000;
+        private const byte DoubleEvenNibbleCaseByteCount = 1;
+        private const byte PathLengthOf2 = 2;
+
+        /// <summary>
+        /// The oddity of all the paths encoded
+        /// </summary>
+        private const int EvenPath = 0;
+
+        public static int GetBytesCount(in NibblePath key)
+        {
+            return key.Length switch
+            {
+                PathLengthOf1 => SingleNibbleLength,
+                PathLengthOf2 => (key.FirstNibble & DoubleEvenNibbleCaseFirstNibbleMask) == DoubleEvenNibbleCaseFirstNibbleMaskValue ? DoubleEvenNibbleCaseByteCount : 2,
+                _ => key.RawSpanLength + KeyLengthLength
+            };
+        }
+
+        public static bool TryReadFrom(scoped in Span<byte> actual, in NibblePath key, out Span<byte> leftover)
+        {
+            AssertEven(key);
+
+            var first = actual[0];
+            if ((first & SpecialCaseMask) == SpecialCaseMask)
+            {
+                // check lengths first, then construct a value that combines the prefix and the first nibble 
+                if (key.Length == PathLengthOf1 &&
+                    first == (SingleNibbleCaseMask | key.FirstNibble))
+                {
+                    leftover = actual[SingleNibbleLength..];
+                    return true;
+                }
+
+                if (key.Length == PathLengthOf2 &&
+                    (first & DoubleEvenNibbleCaseByteMask) == DoubleEvenNibbleCaseByteMaskValue &&
+                    first == key.UnsafeSpan)
+                {
+                    leftover = actual[DoubleEvenNibbleCaseByteCount..];
+                    return true;
+                }
+
+                leftover = default;
+                return false;
+            }
+
+            return NibblePath.TryReadFrom(actual, key, out leftover);
+        }
+
+        public static ReadOnlySpan<byte> ReadFrom(scoped in ReadOnlySpan<byte> actual, out NibblePath key)
+        {
+            var first = actual[0];
+
+            if ((first & SpecialCaseMask) == SpecialCaseMask)
+            {
+                if ((first & SingleNibbleCaseMask) == SingleNibbleCaseMask)
+                {
+                    key = NibblePath.Single((byte)(first & SingleNibbleMask), EvenPath);
+                    return actual[SingleNibbleLength..];
+                }
+
+                if ((first & DoubleEvenNibbleCaseByteMask) == DoubleEvenNibbleCaseByteMaskValue)
+                {
+                    key = NibblePath.DoubleEven(first);
+                    return actual[DoubleEvenNibbleCaseByteCount..];
+                }
+            }
+
+            return NibblePath.ReadFrom(actual, out key);
+        }
+
+        public static Span<byte> ReadFrom(scoped in Span<byte> actual, out NibblePath key)
+        {
+            var first = actual[0];
+
+            if ((first & SpecialCaseMask) == SpecialCaseMask)
+            {
+                if ((first & SingleNibbleCaseMask) == SingleNibbleCaseMask)
+                {
+                    key = NibblePath.Single((byte)(first & SingleNibbleMask), EvenPath);
+                    return actual[SingleNibbleLength..];
+                }
+
+                if ((first & DoubleEvenNibbleCaseByteMask) == DoubleEvenNibbleCaseByteMaskValue)
+                {
+                    key = NibblePath.DoubleEven(first);
+                    return actual[DoubleEvenNibbleCaseByteCount..];
+                }
+            }
+
+            return NibblePath.ReadFrom(actual, out key);
+        }
+
+        public static Span<byte> Write(in NibblePath key, in Span<byte> destination)
+        {
+            AssertEven(key);
+
+            if (key.Length == PathLengthOf1)
+            {
+                destination[0] = (byte)(SingleNibbleCaseMask | key.FirstNibble);
+                return destination[SingleNibbleLength..];
+            }
+
+            if (key.Length == PathLengthOf2 && (key.UnsafeSpan & DoubleEvenNibbleCaseByteMask) == DoubleEvenNibbleCaseByteMaskValue)
+            {
+                destination[0] = key.UnsafeSpan;
+                return destination[DoubleEvenNibbleCaseByteCount..];
+            }
+
+            return key.WriteToWithLeftover(destination);
+        }
+
+        [Conditional("DEBUG")]
+        private static void AssertEven(in NibblePath key)
+        {
+            Debug.Assert(key.IsOdd == false,
+                $"Paths written in the {nameof(SlottedArray)} should start at even nibble to make them easy to concatenate");
+        }
     }
 
     /// <summary>
@@ -350,7 +647,7 @@ public readonly ref struct SlottedArray
         return false;
     }
 
-    public void Delete(in Enumerator.Item item) => DeleteImpl(item.Index);
+    public void Delete(in Item item) => DeleteImpl(item.Index);
 
     private void DeleteImpl(int index, bool collectTombstones = true)
     {
@@ -473,6 +770,12 @@ public readonly ref struct SlottedArray
 
         data = default;
         return false;
+    }
+
+    public bool Contains(scoped in NibblePath key)
+    {
+        var hash = Slot.PrepareKey(key, out byte preamble, out var trimmed);
+        return TryGetImpl(trimmed, hash, preamble, out _) != NotFound;
     }
 
     /// <summary>
@@ -603,7 +906,7 @@ public readonly ref struct SlottedArray
 
                 if (slot.HasKeyBytes)
                 {
-                    if (NibblePath.TryReadFrom(actual, key, out var leftover))
+                    if (KeyEncoding.TryReadFrom(actual, key, out var leftover))
                     {
                         data = leftover;
                         return i;
@@ -626,9 +929,12 @@ public readonly ref struct SlottedArray
     /// Gets the payload pointed to by the given slot without the length prefix.
     /// </summary>
     [SkipLocalsInit]
-    private Span<byte> GetSlotPayload(int index)
+    private Span<byte> GetSlotPayload(int index) => GetSlotPayload(index, GetSlotRef(index));
+
+    [SkipLocalsInit]
+    private Span<byte> GetSlotPayload(int index, Slot slot)
     {
-        var addr = GetSlotRef(index).ItemAddress;
+        var addr = slot.ItemAddress;
 
         // If this is the first, just slice of data
         if (index == 0)
@@ -734,12 +1040,34 @@ public readonly ref struct SlottedArray
 
         public bool HasAtLeastOneNibble => (KeyPreamble >> KeyPreambleLengthShift) > KeyPreambleLength0;
 
+        public bool HasAtLeastTwoNibbles(ushort hash, byte preamble)
+        {
+            return (KeyPreamble >> KeyPreambleLengthShift) switch
+            {
+                KeyPreambleLength0 => false,
+                KeyPreambleLength3OrLess => GetLengthOf123(hash, preamble & KeyPreambleOddBit) >= 2,
+                _ => true
+            };
+        }
+
         public byte GetNibble0(ushort hash)
         {
             // Bitwise. Shift by 12, unless it's odd. If odd, shift by 8.
             return (byte)(0x0F & (hash >> (3 * NibblePath.NibbleShift -
                                            ((Raw >> KeyPreambleShift) & KeyPreambleOddBit) *
                                            NibblePath.NibbleShift)));
+        }
+
+        public byte GetNibble0And1(ushort hash)
+        {
+            var odd = (Raw >> KeyPreambleShift) & KeyPreambleOddBit;
+
+            const int shift = NibblePath.NibbleShift;
+
+            var nibble0 = (byte)(0x0F & (hash >> (3 * shift - odd * shift)));
+            var nibble1 = (byte)(0x0F & (hash >> (2 * shift - odd * shift)));
+
+            return (byte)((nibble0 << shift) + nibble1);
         }
 
         public byte KeyPreamble
@@ -885,7 +1213,6 @@ public readonly ref struct SlottedArray
 
             data = input;
 
-
             switch (lengthBits)
             {
                 case KeyPreambleLength0:
@@ -907,7 +1234,7 @@ public readonly ref struct SlottedArray
                     Unsafe.Add(ref b, 2) = b;
                     return NibblePath.FromKey(workingSet, 1, 4);
                 default:
-                    data = NibblePath.ReadFrom(input, out var trimmed);
+                    data = KeyEncoding.ReadFrom(input, out var trimmed);
 
                     Debug.Assert(trimmed.IsEmpty == false, "Trimmed cannot empty");
 
@@ -975,6 +1302,29 @@ public readonly ref struct SlottedArray
 
 public readonly ref struct MapSource
 {
+    /// <summary>
+    /// A simple map source of two.
+    /// </summary>
+    public readonly ref struct Of2(SlottedArray map0, SlottedArray map1)
+    {
+        public readonly SlottedArray Map0 = map0;
+        public readonly SlottedArray Map1 = map1;
+
+        public MapSource AsSource() => new(Map0, Map1);
+
+        public void Delete(in NibblePath key)
+        {
+            Map0.Delete(key);
+            Map1.Delete(key);
+        }
+
+        public void RemoveKeysFrom(in SlottedArray map)
+        {
+            Map0.RemoveKeysFrom(map);
+            Map1.RemoveKeysFrom(map);
+        }
+    }
+
     private readonly SlottedArray _map0;
     private readonly SlottedArray _map1;
     private readonly SlottedArray _map2;
