@@ -236,7 +236,7 @@ public static class StorageFanOut
         private static int GetIndex(scoped in NibblePath key, Type type, out NibblePath sliced)
         {
             // Represents high part of the first nibble but lowered
-            var hi = (key.FirstNibble & NibbleHalfHigher) >> NibbleHalfShift;
+            var hi = (key.Nibble0 & NibbleHalfHigher) >> NibbleHalfShift;
 
             Debug.Assert(0 <= hi && hi < 4);
 

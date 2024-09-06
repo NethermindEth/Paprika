@@ -208,7 +208,7 @@ public static partial class Node
             Assert((path.Oddity + path.Length) % 2 == 0,
                 "If path is odd, length should be odd as well. If even, even");
 
-            var metadata = path.IsOdd ? (byte)(OddPathMetadata | path.FirstNibble) : 0;
+            var metadata = path.IsOdd ? (byte)(OddPathMetadata | path.Nibble0) : 0;
             Header = new Header(Type.Leaf, (byte)metadata);
 
             Path = path;

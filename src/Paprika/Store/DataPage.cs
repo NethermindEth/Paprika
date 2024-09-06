@@ -65,13 +65,13 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         {
             if (prefix.IsEmpty == false)
             {
-                var childAddr = buckets[prefix.FirstNibble];
+                var childAddr = buckets[prefix.Nibble0];
 
                 if (childAddr.IsNull == false)
                 {
                     var sliced = prefix.SliceFrom(ConsumedNibbles);
                     var child = new DataPage(batch.GetAt(childAddr)).DeleteByPrefix(sliced, batch);
-                    buckets[prefix.FirstNibble] = batch.GetAddress(child);
+                    buckets[prefix.Nibble0] = batch.GetAddress(child);
                 }
             }
         }
@@ -136,7 +136,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 {
                     // Empty data means deletion.
                     // If it's a deletion and a key is empty or there's no child page, delete in page
-                    if (k.IsEmpty || payload.Buckets[k.FirstNibble].IsNull)
+                    if (k.Length < ConsumedNibbles || payload.Buckets[k.Nibble0].IsNull)
                     {
                         // Empty key or a key with no children can be deleted only in-situ
                         map.Delete(k);
@@ -144,11 +144,11 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                     }
                 }
 
-                // Try to write through, if key is not empty and there's a child that was written in this batch
+                // Try to write through, if key may reside on the next level and there's a child that was written in this batch
                 DbAddress childAddr;
-                if (k.IsEmpty == false)
+                if (k.Length >= ConsumedNibbles)
                 {
-                    childAddr = payload.Buckets[k.FirstNibble];
+                    childAddr = payload.Buckets[k.Nibble0];
                     if (childAddr.IsNull == false && batch.WasWritten(childAddr))
                     {
                         // Delete the k in this page just to ensure that the write-through will write the last value.
@@ -534,7 +534,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
             {
                 // As the CPU does not auto-prefetch across page boundaries
                 // Prefetch child page in case we go there next to reduce CPU stalls
-                bucket = page.Data.Buckets[sliced.FirstNibble];
+                bucket = page.Data.Buckets[sliced.Nibble0];
                 batch.Prefetch(bucket);
             }
 

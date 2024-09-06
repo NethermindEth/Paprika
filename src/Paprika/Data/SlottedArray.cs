@@ -96,7 +96,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         else if (prefix.Length == 1)
         {
             // The prefix is single nibble. All keys within this nibble will match.
-            foreach (var item in EnumerateNibble(prefix.FirstNibble))
+            foreach (var item in EnumerateNibble(prefix.Nibble0))
             {
                 Delete(item);
             }
@@ -106,7 +106,7 @@ public readonly ref struct SlottedArray /*: IClearable */
             Debug.Assert(prefix.Length >= 2);
 
             // Filtering by 2 first nibbles should be sufficient to filter out a lot
-            foreach (var item in Enumerate2Nibbles(prefix.FirstNibble, prefix.GetAt(1)))
+            foreach (var item in Enumerate2Nibbles(prefix.Nibble0, prefix.GetAt(1)))
             {
                 if (item.Key.StartsWith(prefix))
                 {
@@ -581,7 +581,7 @@ public readonly ref struct SlottedArray /*: IClearable */
             return key.Length switch
             {
                 PathLengthOf1 => SingleNibbleLength,
-                PathLengthOf2 => (key.FirstNibble & DoubleEvenNibbleCaseFirstNibbleMask) == DoubleEvenNibbleCaseFirstNibbleMaskValue ? DoubleEvenNibbleCaseByteCount : 2,
+                PathLengthOf2 => (key.Nibble0 & DoubleEvenNibbleCaseFirstNibbleMask) == DoubleEvenNibbleCaseFirstNibbleMaskValue ? DoubleEvenNibbleCaseByteCount : 2,
                 _ => key.RawSpanLength + KeyLengthLength
             };
         }
@@ -595,7 +595,7 @@ public readonly ref struct SlottedArray /*: IClearable */
             {
                 // check lengths first, then construct a value that combines the prefix and the first nibble 
                 if (key.Length == PathLengthOf1 &&
-                    first == (SingleNibbleCaseMask | key.FirstNibble))
+                    first == (SingleNibbleCaseMask | key.Nibble0))
                 {
                     leftover = actual[SingleNibbleLength..];
                     return true;
@@ -666,7 +666,7 @@ public readonly ref struct SlottedArray /*: IClearable */
 
             if (key.Length == PathLengthOf1)
             {
-                destination[0] = (byte)(SingleNibbleCaseMask | key.FirstNibble);
+                destination[0] = (byte)(SingleNibbleCaseMask | key.Nibble0);
                 return destination[SingleNibbleLength..];
             }
 
