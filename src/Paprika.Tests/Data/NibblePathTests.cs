@@ -360,7 +360,7 @@ public class NibblePathTests
 
                 path.IsOdd.Should().BeFalse();
                 path.Length.Should().Be(2);
-                path.FirstNibble.Should().Be(nibble0);
+                path.Nibble0.Should().Be(nibble0);
                 path.GetAt(0).Should().Be(nibble0);
                 path.GetAt(1).Should().Be(nibble1);
             }
