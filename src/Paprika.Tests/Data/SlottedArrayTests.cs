@@ -559,7 +559,7 @@ public class SlottedArrayTests
         original.SetAssert(key4, Data(4));
         original.SetAssert(key5, Data(5));
 
-        original.MoveNonEmptyKeysTo(new(copy0));
+        original.MoveNonEmptyKeysTo(new MapSource(copy0));
 
         // original should have only empty
         original.Count.Should().Be(1);
@@ -602,7 +602,7 @@ public class SlottedArrayTests
         original.SetAssert(key4, tombstone);
         original.SetAssert(key5, Data(5));
 
-        original.MoveNonEmptyKeysTo(new(copy0), true);
+        original.MoveNonEmptyKeysTo(new MapSource(copy0), true);
 
         // original should have only empty
         original.Count.Should().Be(0);
@@ -643,7 +643,7 @@ public class SlottedArrayTests
         original.SetAssert(key4, Data(4));
         original.SetAssert(key5, Data(5));
 
-        original.MoveNonEmptyKeysTo(new(copy0, copy1));
+        original.MoveNonEmptyKeysTo(new MapSource(copy0, copy1));
 
         // original should have only empty
         original.Count.Should().Be(1);
@@ -696,7 +696,7 @@ public class SlottedArrayTests
         original.SetAssert(key4, Data(4));
         original.SetAssert(key5, Data(5));
 
-        original.MoveNonEmptyKeysTo(new(copy0, copy1, copy2, copy3));
+        original.MoveNonEmptyKeysTo(new MapSource(copy0, copy1, copy2, copy3));
 
         // original should have only empty
         original.Count.Should().Be(1);
@@ -777,7 +777,7 @@ public class SlottedArrayTests
         original.SetAssert(key7, Data(7));
         original.SetAssert(key8, Data(8));
 
-        original.MoveNonEmptyKeysTo(new(copy0, copy1, copy2, copy3, copy4, copy5, copy6, copy7));
+        original.MoveNonEmptyKeysTo(new MapSource(copy0, copy1, copy2, copy3, copy4, copy5, copy6, copy7));
 
         // original should have only empty
         HasOnly(original, 0);

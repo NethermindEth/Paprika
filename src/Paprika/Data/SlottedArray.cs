@@ -462,6 +462,61 @@ public readonly ref struct SlottedArray /*: IClearable */
         }
     }
 
+    public void MoveNonEmptyKeysTo(in SlottedArray destination, bool treatEmptyAsTombstone = false)
+    {
+        var to = Count;
+        var moved = 0;
+
+        for (int i = 0; i < to; i++)
+        {
+            ref var slot = ref GetSlotRef(i);
+            if (slot.IsDeleted)
+                continue;
+
+            if (slot.HasAtLeastOneNibble == false)
+                continue;
+
+            var payload = GetSlotPayload(i);
+
+            Span<byte> data;
+
+            NibblePath trimmed;
+            if (slot.HasKeyBytes)
+            {
+                data = KeyEncoding.ReadFrom(payload, out trimmed);
+            }
+            else
+            {
+                trimmed = default;
+                data = payload;
+            }
+
+            var hash = GetHashRef(i);
+            if (data.IsEmpty && treatEmptyAsTombstone)
+            {
+                // special case for tombstones in overflows
+                var index = destination.TryGetImpl(trimmed, hash, slot.KeyPreamble, out _);
+                if (index != NotFound)
+                {
+                    destination.DeleteImpl(index);
+                }
+
+                slot.MarkAsDeleted();
+            }
+            else if (destination.TrySetImpl(hash, slot.KeyPreamble, trimmed, data))
+            {
+                slot.MarkAsDeleted();
+                moved++;
+            }
+        }
+
+        if (moved > 0)
+        {
+            CollectTombstones();
+            Defragment();
+        }
+    }
+
     public void RemoveKeysFrom(in SlottedArray source)
     {
         var to = source.Count;

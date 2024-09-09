@@ -230,13 +230,9 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                     break;
                 }
 
-                // Move down
-                overflow.StealFrom(map);
-
-                // Try set again
-                if (map.TrySet(k, data))
+                // Move down and try set
+                if (overflow.MoveFromThenTrySet(map, k, data, batch))
                 {
-                    // Update happened, return
                     break;
                 }
 
@@ -252,6 +248,8 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
 
     private static void TurnToFanOut(DbAddress current, in LeafOverflowPage overflow, IBatchContext batch)
     {
+        Debug.Assert(overflow.AsPage().Header.BatchId == batch.BatchId);
+
         // The plan:
         // 1. Remove from overflow all the keys that exist in the current.
         // 2. The overflow contains no keys from the current.
@@ -269,7 +267,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         payload.Buckets[LeafModeBucket] = DbAddress.Null;
 
         // 1. & 2.
-        overflow.RemoveKeysFrom(map);
+        overflow.RemoveKeysFrom(map, batch);
 
         // 3. 
         page.Header.Metadata = Modes.Fanout;
@@ -277,7 +275,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         // 4.
         Span<ushort> stats = stackalloc ushort[BucketCount];
 
-        overflow.GatherStats(stats);
+        overflow.GatherStats(stats, batch);
         GatherStats(map, stats);
 
         byte nibbleWithMostData = 0;
@@ -302,10 +300,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         payload.Buckets[nibbleWithMostData] = childAddr;
 
         // 6
-        overflow.CopyTo(new DataPage(batch.GetAt(current)), batch);
-
-        // All values from overflow already written, can be reused immediately
-        batch.RegisterForFutureReuse(overflow.AsPage(), possibleImmediateReuse: true);
+        overflow.CopyToThenReuse(new DataPage(batch.GetAt(current)), batch);
     }
 
     /// <summary>
@@ -484,7 +479,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 }
 
                 var addr = page.Data.Buckets[LeafModeBucket];
-                return addr.IsNull == false && new LeafOverflowPage(batch.GetAt(addr)).TryGet(sliced, out result);
+                return addr.IsNull == false && new LeafOverflowPage(batch.GetAt(addr)).TryGet(sliced, batch, out result);
             }
 
             DbAddress bucket = default;

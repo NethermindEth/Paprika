@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Xml.Serialization;
 using Paprika.Data;
 
 namespace Paprika.Store;
@@ -21,14 +22,12 @@ public readonly unsafe struct LeafOverflowPage(Page page) : IPage
         private const int Size = Page.PageSize - PageHeader.Size;
         private const int DataSize = Size - DbAddress.Size;
 
-        [FieldOffset(0)]
-        public DbAddress Next;
+        [FieldOffset(0)] public DbAddress Next;
 
         /// <summary>
         /// The first item of map of frames to allow ref to it.
         /// </summary>
-        [FieldOffset(DbAddress.Size)]
-        private byte DataStart;
+        [FieldOffset(DbAddress.Size)] private byte DataStart;
 
         /// <summary>
         /// Writable area.
@@ -47,9 +46,27 @@ public readonly unsafe struct LeafOverflowPage(Page page) : IPage
     public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
         using var scope = visitor.On(ref builder, this, addr);
+
+        if (Data.Next.IsNull == false)
+        {
+            new LeafOverflowPage(resolver.GetAt(Data.Next)).Accept(ref builder, visitor, resolver, addr);
+        }
     }
 
-    public bool TryGet(in NibblePath key, out ReadOnlySpan<byte> result) => Map.TryGet(key, out result);
+    public bool TryGet(scoped in NibblePath key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
+    {
+        if (Map.TryGet(key, out result))
+        {
+            return true;
+        }
+
+        if (Data.Next.IsNull == false)
+        {
+            return new LeafOverflowPage(batch.GetAt(Data.Next)).TryGet(key, batch, out result);
+        }
+
+        return false;
+    }
 
     public Page DeleteByPrefix(in NibblePath prefix, IBatchContext batch)
     {
@@ -62,37 +79,109 @@ public readonly unsafe struct LeafOverflowPage(Page page) : IPage
 
         Map.DeleteByPrefix(prefix);
 
+        if (Data.Next.IsNull == false)
+        {
+            Data.Next = batch.GetAddress(new LeafOverflowPage(batch.GetAt(Data.Next)).DeleteByPrefix(prefix, batch));
+        }
+
         return page;
     }
 
-    public void Delete(in NibblePath key, IBatchContext batch)
+    public Page Delete(in NibblePath key, IBatchContext batch)
     {
         Debug.Assert(batch.BatchId == Header.BatchId, "Should have been COWed before");
         Map.Delete(key);
+
+        if (Data.Next.IsNull == false)
+        {
+            Data.Next = batch.GetAddress(new LeafOverflowPage(batch.GetAt(Data.Next)).Delete(key, batch));
+        }
+
+        return page;
     }
 
-    public void StealFrom(in SlottedArray map)
+    public bool MoveFromThenTrySet(in SlottedArray parent, in NibblePath key, ReadOnlySpan<byte> data,
+        IBatchContext batch)
     {
-        map.MoveNonEmptyKeysTo(new MapSource(Map), treatEmptyAsTombstone: true);
+        parent.MoveNonEmptyKeysTo(Map);
+
+        // After moving, try set in the original map
+        if (parent.TrySet(key, data))
+            return true;
+
+        // Failed to set in parent, try set in Map,  first ensure that no stale version is above
+        parent.Delete(key);
+        if (Map.TrySet(key, data))
+            return true;
+
+        Debug.Assert(parent.Contains(key) == false, "Parent should contain the key");
+
+        // No space in the map of the page above, no space in the map of this page. Ensure one more level
+        LeafOverflowPage child;
+
+        if (Data.Next.IsNull)
+        {
+            // No level below, create one
+            child = new LeafOverflowPage(batch.GetNewPage(out Data.Next, false));
+            child.Clear();
+        }
+        else
+        {
+            child = new LeafOverflowPage(batch.EnsureWritableCopy(ref Data.Next));
+        }
+
+        // Move from this to the child, so that some space is left
+        Map.MoveNonEmptyKeysTo(child.Map);
+
+        if (Map.TrySet(key, data))
+            return true;
+
+        // Failed to set in Map, try set in child, first ensure that no stale version in Map
+        Map.Delete(key);
+        if (child.Map.TrySet(key, data))
+            return true;
+
+        // No overflowing or moving helped
+        return false;
     }
 
-    public void RemoveKeysFrom(in SlottedArray map)
+    public Page RemoveKeysFrom(in SlottedArray map, IBatchContext batch)
     {
         Map.RemoveKeysFrom(map);
+
+        if (Data.Next.IsNull == false)
+        {
+            Data.Next = batch.GetAddress(new LeafOverflowPage(batch.GetAt(Data.Next)).RemoveKeysFrom(map, batch));
+        }
+
+        return page;
     }
 
-    public void GatherStats(Span<ushort> stats)
+    public void GatherStats(Span<ushort> stats, IBatchContext batch)
     {
         Map.GatherCountStats1Nibble(stats);
+
+        if (Data.Next.IsNull == false)
+        {
+            new LeafOverflowPage(batch.GetAt(Data.Next)).GatherStats(stats, batch);
+        }
     }
 
-    public void CopyTo(DataPage data, IBatchContext batch)
+    public void CopyToThenReuse(DataPage data, IBatchContext batch)
     {
+        // First, copy the next as it can have stale data
+        if (Data.Next.IsNull == false)
+        {
+            new LeafOverflowPage(batch.GetAt(Data.Next)).CopyToThenReuse(data, batch);
+        }
+
+        // Then copy from this page
         foreach (var item in Map.EnumerateAll())
         {
             var result = data.Set(item.Key, item.RawData, batch);
-
             Debug.Assert(result.Raw == data.AsPage().Raw, "Set should not change the data page");
         }
+
+        batch.RegisterForFutureReuse(page, possibleImmediateReuse: true);
     }
 }
