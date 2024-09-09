@@ -14,6 +14,8 @@ public interface IReadOnlyBatch : IDisposable
     /// <param name="result"></param>
     /// <returns></returns>
     bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result);
+
+    public void VerifyNoPagesMissing();
 }
 
 public class EmptyReadOnlyBatch : IReadOnlyBatch
@@ -33,6 +35,8 @@ public class EmptyReadOnlyBatch : IReadOnlyBatch
         result = default;
         return false;
     }
+
+    public void VerifyNoPagesMissing() { }
 
     public void Dispose() { }
 }

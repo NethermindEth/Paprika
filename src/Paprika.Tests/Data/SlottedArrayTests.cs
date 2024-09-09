@@ -46,10 +46,10 @@ public class SlottedArrayTests
         var map = new SlottedArray(span);
 
         var key0 = NibblePath.Empty;
-        var key1 = NibblePath.FromKey(stackalloc byte[1] { 7 }).SliceFrom(odd);
-        var key2 = NibblePath.FromKey(stackalloc byte[2] { 7, 13 }).SliceFrom(odd);
-        var key3 = NibblePath.FromKey(stackalloc byte[3] { 7, 13, 31 }).SliceFrom(odd);
-        var key4 = NibblePath.FromKey(stackalloc byte[4] { 7, 13, 31, 41 }).SliceFrom(odd);
+        var key1 = NibblePath.FromKey([7]).SliceFrom(odd);
+        var key2 = NibblePath.FromKey([7, 13]).SliceFrom(odd);
+        var key3 = NibblePath.FromKey([7, 13, 31]).SliceFrom(odd);
+        var key4 = NibblePath.FromKey([7, 13, 31, 41]).SliceFrom(odd);
 
         map.SetAssert(key0, Data0);
         map.SetAssert(key1, Data1);
@@ -98,10 +98,10 @@ public class SlottedArrayTests
         var map = new SlottedArray(span);
 
         var key0 = NibblePath.Empty;
-        var key1 = NibblePath.FromKey(stackalloc byte[1] { 0x1A });
-        var key2 = NibblePath.FromKey(stackalloc byte[2] { 0x2A, 13 });
-        var key3 = NibblePath.FromKey(stackalloc byte[3] { 0x3A, 13, 31 });
-        var key4 = NibblePath.FromKey(stackalloc byte[4] { 0x4A, 13, 31, 41 });
+        var key1 = NibblePath.FromKey([0x1A]);
+        var key2 = NibblePath.FromKey([0x2A, 13]);
+        var key3 = NibblePath.FromKey([0x3A, 13, 31]);
+        var key4 = NibblePath.FromKey([0x4A, 13, 31, 41]);
 
         map.SetAssert(key0, Data0);
         map.SetAssert(key1, Data1);
@@ -144,6 +144,60 @@ public class SlottedArrayTests
 
         // verify
         return Verify(span.ToArray());
+    }
+
+    [Test]
+    public void Enumerate_2_nibbles([Values(1, 2, 3, 4)] int nibble0)
+    {
+        const byte nibble1 = 0xA;
+
+        Span<byte> span = stackalloc byte[256];
+        var map = new SlottedArray(span);
+
+        var key0 = NibblePath.Empty;
+        var key1 = NibblePath.FromKey([0x10 | nibble1]);
+        var key2 = NibblePath.FromKey([0x20 | nibble1, 13]);
+        var key3 = NibblePath.FromKey([0x30 | nibble1, 13, 31]);
+        var key4 = NibblePath.FromKey([0x40 | nibble1, 13, 31, 41]);
+
+        map.SetAssert(key0, Data0);
+        map.SetAssert(key1, Data1);
+        map.SetAssert(key2, Data2);
+        map.SetAssert(key3, Data3);
+        map.SetAssert(key4, Data4);
+
+        map.GetAssert(key0, Data0);
+        map.GetAssert(key1, Data1);
+        map.GetAssert(key2, Data2);
+        map.GetAssert(key3, Data3);
+        map.GetAssert(key4, Data4);
+
+        var expected = nibble0 switch
+        {
+            1 => key1,
+            2 => key2,
+            3 => key3,
+            4 => key4,
+            _ => throw new Exception()
+        };
+
+        var data = nibble0 switch
+        {
+            1 => Data1,
+            2 => Data2,
+            3 => Data3,
+            4 => Data4,
+            _ => throw new Exception()
+        };
+
+        using var e = map.Enumerate2Nibbles((byte)nibble0, nibble1);
+
+        e.MoveNext().Should().BeTrue();
+
+        e.Current.Key.Equals(expected).Should().BeTrue();
+        e.Current.RawData.SequenceEqual(data).Should().BeTrue();
+
+        e.MoveNext().Should().BeFalse();
     }
 
     [Test]
@@ -299,6 +353,66 @@ public class SlottedArrayTests
         return Verify(span.ToArray());
     }
 
+    [TestCase(0)]
+    [TestCase(1)]
+    public void Key_of_length_5(int odd)
+    {
+        const int length = 5;
+
+        // One should be enough as the leftover path of length 1 should be encoded as a single byte 
+        const int spaceForKey = 1;
+
+        Span<byte> span = stackalloc byte[SlottedArray.MinimalSizeWithNoData + spaceForKey];
+
+        var key = NibblePath.FromKey(stackalloc byte[] { 0x34, 0x5, 0x7A }, odd, length);
+
+        var map = new SlottedArray(span);
+
+        var value = ReadOnlySpan<byte>.Empty;
+        map.SetAssert(key, value);
+        map.GetAssert(key, value);
+    }
+
+    [Test]
+    public void Key_of_length_6_even()
+    {
+        const int length = 6;
+
+        // One should be enough as the leftover path of length 1 should be encoded as a single byte 
+        const int spaceForKey = 1;
+
+        Span<byte> span = stackalloc byte[SlottedArray.MinimalSizeWithNoData + spaceForKey];
+
+        // 0b10 is the prefix of the nibble that can be densely encoded on one byte.
+        var key = NibblePath.FromKey(stackalloc byte[] { 0x34, 0b1001_1101, 0x7A }, 0, length);
+
+        var map = new SlottedArray(span);
+
+        var value = ReadOnlySpan<byte>.Empty;
+        map.SetAssert(key, value);
+        map.GetAssert(key, value);
+    }
+
+    [Test]
+    public void Key_of_length_6_odd()
+    {
+        const int length = 6;
+
+        // One should be enough as the leftover path of length 1 should be encoded as a single byte 
+        const int spaceForKey = 1;
+
+        Span<byte> span = stackalloc byte[SlottedArray.MinimalSizeWithNoData + spaceForKey];
+
+        // 0b10 is the prefix of the nibble that can be densely encoded on one byte. For odd, first 3 are consumed to prepare.
+        var key = NibblePath.FromKey(stackalloc byte[] { 0x04, 0b1011_0010, 0xD9, 0x7A }, 0, length);
+
+        var map = new SlottedArray(span);
+
+        var value = ReadOnlySpan<byte>.Empty;
+        map.SetAssert(key, value);
+        map.GetAssert(key, value);
+    }
+
     [Test(Description = "Make a lot of requests to make breach the vector count")]
     public void Breach_VectorSize_with_key_count()
     {
@@ -356,6 +470,75 @@ public class SlottedArrayTests
     }
 
     private static ReadOnlySpan<byte> Data(byte key) => new[] { key };
+
+    [TestCase(new[] { 1 })]
+    [TestCase(new[] { 2, 4 })]
+    [TestCase(new[] { 0, 1, 7 })]
+    public void Remove_keys_from(int[] indexes)
+    {
+        var toRemove = new SlottedArray(stackalloc byte[512]);
+        var map = new SlottedArray(stackalloc byte[512]);
+
+        var key1 = NibblePath.Parse("1");
+        var key2 = NibblePath.Parse("23");
+        var key3 = NibblePath.Parse("345");
+        var key4 = NibblePath.Parse("4567");
+        var key5 = NibblePath.Parse("56789");
+        var key6 = NibblePath.Parse("56899A");
+        var key7 = NibblePath.Parse("56899AB");
+        var key8 = NibblePath.Parse("56899AB1");
+
+        // Set receiver with all the keys
+        map.SetAssert(NibblePath.Empty, Data(0));
+        map.SetAssert(key1, Data(1));
+        map.SetAssert(key2, Data(2));
+        map.SetAssert(key3, Data(3));
+        map.SetAssert(key4, Data(4));
+        map.SetAssert(key5, Data(5));
+        map.SetAssert(key6, Data(6));
+        map.SetAssert(key7, Data(7));
+        map.SetAssert(key8, Data(8));
+
+        foreach (var index in indexes)
+        {
+            var removed = index switch
+            {
+                0 => NibblePath.Empty,
+                1 => key1,
+                2 => key2,
+                3 => key3,
+                4 => key4,
+                5 => key5,
+                6 => key6,
+                7 => key7,
+                8 => key8,
+                _ => default
+            };
+            toRemove.SetAssert(removed, ReadOnlySpan<byte>.Empty);
+            map.Contains(removed).Should().BeTrue();
+        }
+
+        map.RemoveKeysFrom(toRemove);
+
+        // Assert non existence
+        foreach (var index in indexes)
+        {
+            var removed = index switch
+            {
+                0 => NibblePath.Empty,
+                1 => key1,
+                2 => key2,
+                3 => key3,
+                4 => key4,
+                5 => key5,
+                6 => key6,
+                7 => key7,
+                8 => key8,
+                _ => default
+            };
+            map.Contains(removed).Should().BeFalse();
+        }
+    }
 
     [Test]
     public void Move_to_1()

@@ -39,7 +39,7 @@ public static class Program
         new(100, 1000, 1 * Gb, false, TimeSpan.FromSeconds(5), false, true);
 
     private static readonly Case InMemorySmall =
-        new(10_000, 1000, 10 * Gb, false, TimeSpan.FromSeconds(5), false, true);
+        new(2_000, 1000, 10 * Gb, false, TimeSpan.FromSeconds(5), false, true);
 
     private static readonly Case InMemoryMedium =
         new(50_000, 1000, 32 * Gb, false, TimeSpan.FromSeconds(5), false, false);
@@ -53,8 +53,8 @@ public static class Program
     private static readonly Case DiskSmallFlushFile =
         new(50_000, 1000, 32 * Gb, true, TimeSpan.FromSeconds(60), true, false);
 
-    private const int MaxReorgDepth = 64;
-    private const int FinalizeEvery = 64;
+    private const int MaxReorgDepth = 32;
+    private const int FinalizeEvery = 32;
 
     private const int RandomSeed = 17;
     private const long Gb = 1024 * 1024 * 1024L;
@@ -233,7 +233,9 @@ public static class Program
             ReportReading(counter);
 
             // statistics
-            StatisticsForPagedDb.Report(layout[info], read);
+            StatisticsForPagedDb.Report(layout[info], read, db);
+
+            read.VerifyNoPagesMissing();
 
             spectre.Cancel();
             await reportingTask;

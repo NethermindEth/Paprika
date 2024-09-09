@@ -7,6 +7,8 @@ using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Store;
+using Paprika.Tests.Store;
+using Spectre.Console;
 
 namespace Paprika.Tests.Merkle;
 
@@ -63,7 +65,10 @@ public class RootHashFuzzyTests
 
     [Test]
     public async Task CalculateStateRootHash(
-        [Values(nameof(Accounts_1_Storage_100), nameof(Accounts_100_Storage_1), nameof(Accounts_1000_Storage_1))] string test,
+        [Values(
+            nameof(Accounts_1_Storage_100), nameof(Accounts_100_Storage_1),
+            nameof(Accounts_1000_Storage_1))]
+        string test,
         [Values(int.MaxValue, 23)] int commitEvery,
         [Values(true, false)] bool parallel)
     {
@@ -81,11 +86,34 @@ public class RootHashFuzzyTests
         blockchain.Finalize(rootHash);
         await flush;
 
+        using var read = db.BeginReadOnlyBatch();
+        read.VerifyNoPagesMissing();
+
         using var state = blockchain.StartReadOnly(rootHash);
         var recalculated = merkle.CalculateStateRootHash(state);
 
         rootHash.Should().Be(generator.RootHashAsKeccak);
         recalculated.Should().Be(rootHash);
+
+        // var visitor = new ValueSquashingDictionaryVisitor(db);
+        // db.VisitRoot(visitor);
+        //
+        // var pairs = visitor.Dictionary
+        //     .Select(kvp =>
+        //     {
+        //         NibblePath.ReadFrom(kvp.Key, out var path);
+        //         return new ValueTuple<string, string>(path.ToString(), kvp.Value.AsSpan().ToHexString(true));
+        //     })
+        //     .ToArray();
+        //
+        // Array.Sort(pairs, (a, b) => a.Item1.CompareTo(b.Item1));
+        //
+        // foreach (var (key, value) in pairs)
+        // {
+        //     Console.WriteLine($"{key}: {value}");
+        // }
+
+        //AnsiConsole.Write(visitor.Tree);
     }
 
     [TestCase(nameof(Accounts_10_000), 64 * 1024 * 1024UL)]
@@ -96,7 +124,10 @@ public class RootHashFuzzyTests
 
         using var db = PagedDb.NativeMemoryDb(1024 * 1024 * 1024, 2);
         using var merkle = new ComputeMerkleBehavior(ComputeMerkleBehavior.ParallelismNone);
-        await using var blockchain = new Blockchain(db, merkle, null, new CacheBudget.Options(2000, 4), new CacheBudget.Options(2000, 4));
+        await using var blockchain = new Blockchain(db, merkle, null, new CacheBudget.Options(2000, 4),
+            new CacheBudget.Options(2000, 4));
+
+        // blockchain.VerifyDbIntegrityOnCommit();
 
         // set
         generator.Run(blockchain, 513, false, true);
@@ -243,7 +274,8 @@ public class RootHashFuzzyTests
             return rootHash;
         }
 
-        private void Next(ref int counter, int newBlockEvery, ref IWorldState block, Blockchain blockchain, bool autoFinalize)
+        private void Next(ref int counter, int newBlockEvery, ref IWorldState block, Blockchain blockchain,
+            bool autoFinalize)
         {
             counter++;
 

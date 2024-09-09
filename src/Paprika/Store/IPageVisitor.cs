@@ -1,21 +1,24 @@
+using Paprika.Data;
+
 namespace Paprika.Store;
 
 public interface IPageVisitor
 {
-    IDisposable On(RootPage page, DbAddress addr);
+    IDisposable On<TPage>(scoped ref NibblePath.Builder prefix, TPage page, DbAddress addr)
+        where TPage : unmanaged, IPage;
 
-    IDisposable On(AbandonedPage page, DbAddress addr);
+    IDisposable On<TPage>(TPage page, DbAddress addr)
+        where TPage : unmanaged, IPage;
 
-    IDisposable On(DataPage page, DbAddress addr);
+    /// <summary>
+    /// Just a named scope, to group pages.
+    /// </summary>
+    IDisposable Scope(string name);
+}
 
-    IDisposable On(FanOutPage page, DbAddress addr);
-    IDisposable On(LeafPage page, DbAddress addr);
-    IDisposable On<TNext>(StorageFanOutPage<TNext> page, DbAddress addr)
-        where TNext : struct, IPageWithData<TNext>;
-
-    IDisposable On(LeafOverflowPage page, DbAddress addr);
-
-    IDisposable On(Merkle.StateRootPage data, DbAddress addr);
+public interface IVisitable
+{
+    void Accept(IPageVisitor visitor);
 }
 
 public sealed class Disposable : IDisposable

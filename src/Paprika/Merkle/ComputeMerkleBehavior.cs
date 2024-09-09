@@ -577,7 +577,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         if (ctx.TrieType == TrieType.State)
         {
             Account.ReadFrom(leafData.Span, out var account);
-
             if (ctx.Hint.HasFlag(ComputeHint.ForceStorageRootHashRecalculation))
             {
                 var prefixed = new PrefixingCommit(ctx.Commit);
@@ -589,6 +588,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             }
 
             Node.Leaf.KeccakOrRlp(leafPath, account, out keccakOrRlp);
+
             return;
         }
 

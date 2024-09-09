@@ -10,6 +10,7 @@ using Paprika.Data;
 using Paprika.Store.PageManagers;
 using Paprika.Utils;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 
 namespace Paprika.Store;
 
@@ -55,7 +56,9 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     private readonly Histogram<int> _commitPageCountReused;
     private readonly Histogram<int> _commitPageCountNewlyAllocated;
     private readonly Histogram<int> _commitPageAbandoned;
+    private readonly Histogram<int> _commitAbandonedSameBatch;
     private readonly MetricsExtensions.IAtomicIntGauge _dbSize;
+
 
     // pooled objects
     private Context? _ctx;
@@ -103,6 +106,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             "The number of pages newly allocated");
         _commitPageAbandoned = _meter.CreateHistogram<int>("Abandoned pages count", "pages",
             "The number of pages registered for future reuse (abandoned)");
+        _commitAbandonedSameBatch = _meter.CreateHistogram<int>("Written and abandoned in the same batch", "pages",
+            "The number of pages written and then registered for future reuse");
 
 #if TRACKING_REUSED_PAGES
         // Reuse tracking
@@ -135,12 +140,14 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
     private void ReportDbSize(int megabytes) => _dbSize.Set(megabytes);
 
-    private void ReportPageCountPerCommit(int totalPageCount, int reused, int newlyAllocated, int abandonedCount)
+    private void ReportPageStatsPerCommit(int totalPageCount, int reused, int newlyAllocated, int abandonedCount,
+        int registeredToReuseAfterWritingThisBatch)
     {
         _commitPageCountTotal.Record(totalPageCount);
         _commitPageCountReused.Record(reused);
         _commitPageCountNewlyAllocated.Record(newlyAllocated);
         _commitPageAbandoned.Record(abandonedCount);
+        _commitAbandonedSameBatch.Record(registeredToReuseAfterWritingThisBatch);
     }
 
     private void RootInit()
@@ -198,7 +205,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
     IReadOnlyBatch IDb.BeginReadOnlyBatch(string name) => BeginReadOnlyBatch(name);
 
-    public IReportingReadOnlyBatch BeginReadOnlyBatch(string name = "")
+    public IVisitableReadOnlyBatch BeginReadOnlyBatch(string name = "")
     {
         lock (_batchLock)
         {
@@ -437,7 +444,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
 
     private sealed class ReadOnlyBatch(PagedDb db, RootPage root, string name)
-        : IReportingReadOnlyBatch, IReadOnlyBatchContext
+        : IVisitableReadOnlyBatch, IReadOnlyBatchContext
     {
         [ThreadStatic] private static ConcurrentDictionary<Keccak, uint>? s_cache;
 
@@ -484,21 +491,9 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             return root.TryGet(key, this, out result);
         }
 
-        public void Report(IReporter state, IReporter storage, IReporter ids, out long totalAbandoned)
-        {
-            ref readonly var data = ref root.Data;
+        public void VerifyNoPagesMissing() => MissingPagesVisitor.VerifyNoPagesMissing(Root, db, this);
 
-            totalAbandoned = 0;
-            totalAbandoned = data.AbandonedList.GatherTotalAbandoned(this);
-
-            if (data.StateRoot.IsNull == false)
-            {
-                new Merkle.StateRootPage(GetAt(root.Data.StateRoot)).Report(state, this, 0, 0);
-            }
-
-            data.Storage.Report(storage, this, 0, 0);
-            data.Ids.Report(ids, this, 0, 0);
-        }
+        public void Accept(IPageVisitor visitor) => Root.Accept(visitor, this);
 
         public uint BatchId => root.Header.BatchId;
 
@@ -538,6 +533,11 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         /// </summary>
         private readonly HashSet<DbAddress> _written;
 
+        /// <summary>
+        /// Pages that can be reused immediately.
+        /// </summary>
+        private readonly Stack<DbAddress> _reusedImmediately;
+
         private readonly BatchMetrics _metrics;
 
         public Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx) : base(
@@ -549,6 +549,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             _ctx = ctx;
             _abandoned = ctx.Abandoned;
             _written = ctx.Written;
+            _reusedImmediately = ctx.ReusedImmediately;
 
             IdCache = ctx.IdCache;
 
@@ -576,6 +577,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             }
         }
 
+        public void VerifyNoPagesMissing() => MissingPagesVisitor.VerifyNoPagesMissing(_root, _db, this);
+
         public void SetMetadata(uint blockNumber, in Keccak blockHash)
         {
             _root.Data.Metadata = new Metadata(blockNumber, blockHash);
@@ -584,7 +587,6 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         public void SetRaw(in Key key, ReadOnlySpan<byte> rawData)
         {
             _metrics.Writes++;
-
             _root.SetRaw(key, this, rawData);
         }
 
@@ -614,10 +616,6 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             }
         }
 
-        public void Report(IReporter reporter)
-        {
-            throw new NotImplementedException();
-        }
 
         public async ValueTask Commit(CommitOptions options)
         {
@@ -630,14 +628,12 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
             if (_verify)
             {
-                using var missing = new MissingPagesVisitor(_root, _db._historyDepth);
-                _root.Accept(missing, this);
-                missing.EnsureNoMissing(this);
+                VerifyNoPagesMissing();
             }
 
             // report metrics
-            _db.ReportPageCountPerCommit(_written.Count, _metrics.PagesReused, _metrics.PagesAllocated,
-                _abandoned.Count);
+            _db.ReportPageStatsPerCommit(_written.Count, _metrics.PagesReused, _metrics.PagesAllocated,
+                _abandoned.Count, _metrics.RegisteredToReuseAfterWritingThisBatch);
 
             _db.ReportReads(_metrics.Reads);
             _db.ReportWrites(_metrics.Writes);
@@ -689,15 +685,20 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         public override Page GetNewPage(out DbAddress addr, bool clear)
         {
             bool reused;
-            if (TryGetNoLongerUsedPage(out addr))
+            if (_reusedImmediately.TryPop(out addr))
             {
                 reused = true;
-                _metrics.ReportPageReused();
+                _metrics.PagesReused++;
+            }
+            else if (TryGetNoLongerUsedPage(out addr))
+            {
+                reused = true;
+                _metrics.PagesReused++;
             }
             else
             {
                 reused = false;
-                _metrics.ReportNewPageAllocation();
+                _metrics.PagesAllocated++;
 
                 // on failure to reuse a page, default to allocating a new one.
                 addr = _root.Data.GetNextFreePage();
@@ -725,6 +726,12 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
         private void MemoizeAbandoned()
         {
+            if (_reusedImmediately.Count > 0)
+            {
+                _abandoned.AddRange(_reusedImmediately);
+                _reusedImmediately.Clear();
+            }
+
             if (_abandoned.Count == 0)
             {
                 // nothing to memoize
@@ -752,12 +759,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             return claimed;
         }
 
-        public override bool WasWritten(DbAddress addr) => _written.Contains(addr);
-
-        public override void RegisterForFutureReuse(Page page)
+        private void RegisterForFutureReuse(DbAddress addr)
         {
-            var addr = _db.GetAddress(page);
-
 #if TRACKING_REUSED_PAGES
             // register at this batch
             ref var batchId =
@@ -770,7 +773,26 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
             batchId = BatchId;
 #endif
+
             _abandoned.Add(addr);
+        }
+
+        public override void RegisterForFutureReuse(Page page, bool possibleImmediateReuse = false)
+        {
+            var addr = _db.GetAddress(page);
+
+            if (page.Header.BatchId == BatchId)
+            {
+                if (possibleImmediateReuse)
+                {
+                    _reusedImmediately.Push(addr);
+                    return;
+                }
+
+                _metrics.RegisteredToReuseAfterWritingThisBatch++;
+            }
+
+            RegisterForFutureReuse(addr);
         }
 
         public override void NoticeAbandonedPageReused(Page page)
@@ -815,6 +837,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             Abandoned = new List<DbAddress>();
             Written = new HashSet<DbAddress>();
             IdCache = new Dictionary<Keccak, uint>();
+            ReusedImmediately = new Stack<DbAddress>();
         }
 
         public Dictionary<Keccak, uint> IdCache { get; }
@@ -824,12 +847,15 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         public List<DbAddress> Abandoned { get; }
         public HashSet<DbAddress> Written { get; }
 
+        public Stack<DbAddress> ReusedImmediately { get; }
+
         public void Clear()
         {
             Abandoned.Clear();
             Written.Clear();
             IdCache.Clear();
             Abandoned.Clear();
+            ReusedImmediately.Clear();
 
             // no need to clear, it's always overwritten
             //Page.Clear();
@@ -845,7 +871,14 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
 {
     private readonly DbAddressSet _pages;
 
-    public MissingPagesVisitor(RootPage page, byte historyDepth)
+    public static void VerifyNoPagesMissing(RootPage root, PagedDb db, IReadOnlyBatchContext context)
+    {
+        using var missing = new MissingPagesVisitor(root, db.HistoryDepth);
+        root.Accept(missing, db);
+        missing.EnsureNoMissing(context);
+    }
+
+    private MissingPagesVisitor(RootPage page, int historyDepth)
     {
         _pages = new(page.Data.NextFreePage);
 
@@ -856,7 +889,34 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
         }
     }
 
-    public IDisposable On(RootPage page, DbAddress addr) => Mark(addr);
+    public IDisposable On<TPage>(scoped ref NibblePath.Builder prefix, TPage page, DbAddress addr)
+        where TPage : unmanaged, IPage
+    {
+        if (typeof(TPage) == typeof(AbandonedPage))
+        {
+            return On(As<TPage, AbandonedPage>(page), addr);
+        }
+
+        return Mark(addr);
+    }
+
+    public IDisposable On<TPage>(TPage page, DbAddress addr) where TPage : unmanaged, IPage
+    {
+        if (typeof(TPage) == typeof(AbandonedPage))
+        {
+            return On(As<TPage, AbandonedPage>(page), addr);
+        }
+
+        return Mark(addr);
+    }
+
+    public IDisposable Scope(string name) => Disposable.Instance;
+
+    private static TDestinationPage As<TPage, TDestinationPage>(in TPage page)
+        where TDestinationPage : IPage
+    {
+        return Unsafe.As<TPage, TDestinationPage>(ref Unsafe.AsRef(in page));
+    }
 
     public IDisposable On(AbandonedPage page, DbAddress addr)
     {
@@ -867,20 +927,6 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
 
         return Mark(addr);
     }
-
-    public IDisposable On(DataPage page, DbAddress addr) => Mark(addr);
-
-    public IDisposable On(FanOutPage page, DbAddress addr) => Mark(addr);
-
-    public IDisposable On(LeafPage page, DbAddress addr) => Mark(addr);
-
-    public IDisposable On<TNext>(StorageFanOutPage<TNext> page, DbAddress addr)
-        where TNext : struct, IPageWithData<TNext>
-        => Mark(addr);
-
-    public IDisposable On(LeafOverflowPage page, DbAddress addr) => Mark(addr);
-
-    public IDisposable On(Merkle.StateRootPage data, DbAddress addr) => Mark(addr);
 
     private IDisposable Mark(DbAddress addr)
     {
@@ -903,6 +949,6 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
     }
 }
 
-public interface IReportingReadOnlyBatch : IReporting, IReadOnlyBatch
+public interface IVisitableReadOnlyBatch : IReadOnlyBatch, IVisitable
 {
 }

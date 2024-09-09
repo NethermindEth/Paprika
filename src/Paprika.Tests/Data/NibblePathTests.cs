@@ -347,5 +347,48 @@ public class NibblePathTests
         _hashes.Add(hash).Should().BeTrue();
     }
 
-    private HashSet<int> _hashes = new();
+    private readonly HashSet<int> _hashes = new();
+
+    [Test]
+    public void Double()
+    {
+        for (byte nibble0 = 0; nibble0 < 15; nibble0++)
+        {
+            for (byte nibble1 = 0; nibble1 < 15; nibble1++)
+            {
+                var path = NibblePath.DoubleEven(nibble0, nibble1);
+
+                path.IsOdd.Should().BeFalse();
+                path.Length.Should().Be(2);
+                path.Nibble0.Should().Be(nibble0);
+                path.GetAt(0).Should().Be(nibble0);
+                path.GetAt(1).Should().Be(nibble1);
+            }
+        }
+    }
+
+    [Test]
+    public void Builder()
+    {
+        const int count = 2;
+
+        var builder = new NibblePath.Builder(stackalloc byte[count]);
+
+        builder.Push(1);
+        builder.Current.Equals(NibblePath.Single(1, 0)).Should().BeTrue();
+        builder.Pop();
+
+        builder.Push(2);
+        builder.Current.Equals(NibblePath.Single(2, 0)).Should().BeTrue();
+        builder.Pop();
+
+        builder.Push(3, 4);
+        builder.Current.Equals(NibblePath.DoubleEven(3, 4)).Should().BeTrue();
+        builder.Pop();
+        builder.Pop();
+
+        builder.Push(5);
+        builder.Append(NibblePath.Single(6, 1)).Equals(NibblePath.DoubleEven(5, 6)).Should().BeTrue();
+        builder.Pop();
+    }
 }
