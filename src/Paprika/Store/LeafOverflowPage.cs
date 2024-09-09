@@ -123,6 +123,11 @@ public readonly unsafe struct LeafOverflowPage(Page page) : IPage
         {
             // No level below, create one
             child = new LeafOverflowPage(batch.GetNewPage(out Data.Next, false));
+            ref var header = ref child.AsPage().Header;
+
+            header.PageType = PageType.LeafOverflow;
+            header.Level = Header.Level; // same level
+
             child.Clear();
         }
         else
