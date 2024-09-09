@@ -47,9 +47,10 @@ public readonly unsafe struct LeafOverflowPage(Page page) : IPage
     {
         using var scope = visitor.On(ref builder, this, addr);
 
-        if (Data.Next.IsNull == false)
+        var next = Data.Next;
+        if (next.IsNull == false)
         {
-            new LeafOverflowPage(resolver.GetAt(Data.Next)).Accept(ref builder, visitor, resolver, addr);
+            new LeafOverflowPage(resolver.GetAt(next)).Accept(ref builder, visitor, resolver, next);
         }
     }
 
