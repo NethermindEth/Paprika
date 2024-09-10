@@ -61,11 +61,9 @@ public sealed class MemoryMappedPageManager : PointerPageManager
             _file = new FileStream(Path, FileMode.Open, FileAccess.ReadWrite, FileShare.None, 4096,
                 PaprikaFileOptions);
         }
+        _mapped = MemoryMappedFile.CreateFromFile(_file, null, 0, MemoryMappedFileAccess.ReadWrite, HandleInheritability.None, true);
 
-        _mapped = MemoryMappedFile.CreateFromFile(_file, null, (long)size, MemoryMappedFileAccess.ReadWrite,
-            HandleInheritability.None, true);
-
-        _whole = _mapped.CreateViewAccessor();
+        _whole = _mapped.CreateViewAccessor(0, historyDepth * Page.PageSize);
         _whole.SafeMemoryMappedViewHandle.AcquirePointer(ref _ptr);
         _options = options;
 
