@@ -79,15 +79,21 @@ public readonly ref struct SlottedArray /*: IClearable */
 
     public bool TrySet(in NibblePath key, ReadOnlySpan<byte> data)
     {
-        Debug.Assert(key.Oddity == _oddity);
+        AssertKey(key);
 
         var hash = Slot.PrepareKey(key, out var preamble, out var trimmed);
         return TrySetImpl(hash, preamble, trimmed, data);
     }
 
+    [Conditional("DEBUG")]
+    private void AssertKey(in NibblePath key)
+    {
+        Debug.Assert(key.IsEmpty || key.Oddity == _oddity);
+    }
+
     public void DeleteByPrefix(in NibblePath prefix)
     {
-        Debug.Assert(prefix.Oddity == _oddity);
+        AssertKey(prefix);
 
         if (prefix.Length == 0)
         {
@@ -736,7 +742,7 @@ public readonly ref struct SlottedArray /*: IClearable */
     /// </summary>
     public bool Delete(in NibblePath key)
     {
-        Debug.Assert(key.Oddity == _oddity);
+        AssertKey(key);
 
         var hash = Slot.PrepareKey(key, out var preamble, out var trimmed);
         var index = TryGetImpl(trimmed, hash, preamble, out _);
@@ -863,7 +869,7 @@ public readonly ref struct SlottedArray /*: IClearable */
 
     public bool TryGet(scoped in NibblePath key, out ReadOnlySpan<byte> data)
     {
-        Debug.Assert(key.Oddity == _oddity);
+        AssertKey(key);
 
         var hash = Slot.PrepareKey(key, out byte preamble, out var trimmed);
         if (TryGetImpl(trimmed, hash, preamble, out var span) != NotFound)

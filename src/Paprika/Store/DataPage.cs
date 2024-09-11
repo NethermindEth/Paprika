@@ -225,7 +225,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 // 1. check if delete, then delete in both.
                 // 2. flush some down
                 // 3. retry set
-                var overflow = GetWritableOverflow(batch, ref payload);
+                var overflow = GetWritableOverflow(batch, ref payload, page.Header.Level);
 
                 // Assert existence
                 Debug.Assert(payload.Buckets[LeafMode.Bucket0].IsNull == false);
@@ -344,14 +344,14 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         //map.GatherSizeStats1Nibble(stats);
     }
 
-    private static MapSource.Of2 GetWritableOverflow(IBatchContext batch, ref Payload payload)
+    private static MapSource.Of2 GetWritableOverflow(IBatchContext batch, ref Payload payload, byte level)
     {
-        var overflow0 = EnsureOverflow(batch, ref payload, LeafMode.Bucket0);
-        var overflow1 = EnsureOverflow(batch, ref payload, LeafMode.Bucket1);
+        var overflow0 = EnsureOverflow(batch, ref payload, LeafMode.Bucket0, level);
+        var overflow1 = EnsureOverflow(batch, ref payload, LeafMode.Bucket1, level);
 
         return new MapSource.Of2(overflow0, overflow1);
 
-        static SlottedArray EnsureOverflow(IBatchContext batch, ref Payload payload, int bucket)
+        static SlottedArray EnsureOverflow(IBatchContext batch, ref Payload payload, int bucket, byte level)
         {
             var addr = payload.Buckets[bucket];
 
@@ -364,6 +364,8 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 overflowPage = batch.GetNewPage(out addr, clear: false);
 
                 overflowPage.Header.PageType = PageType.LeafOverflow;
+                overflowPage.Header.Level = level; // same level to align maps
+
                 leafOverflowPage = new LeafOverflowPage(overflowPage);
                 leafOverflowPage.Map.Clear();
             }
