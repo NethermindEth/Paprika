@@ -128,7 +128,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
             Debug.Assert(batch.WasWritten(current));
 
             ref var payload = ref Unsafe.AsRef<Payload>(page.Payload);
-            var map = new SlottedArray(payload.DataSpan);
+            var map = new SlottedArray(payload.DataSpan, page.Header.LevelOddity);
 
             if (page.Header.Metadata == Modes.Fanout)
             {
@@ -275,7 +275,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         var page = batch.GetAt(current);
 
         ref var payload = ref Unsafe.AsRef<Payload>(page.Payload);
-        var map = new SlottedArray(payload.DataSpan);
+        var map = new SlottedArray(payload.DataSpan, page.Header.LevelOddity);
 
         // Register for reuse and clear immediately. The overflow is kept as a map in memory
         var overflowAddress0 = payload.Buckets[LeafMode.Bucket0];
@@ -384,7 +384,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
 
     public void Clear()
     {
-        new SlottedArray(Data.DataSpan).Clear();
+        new SlottedArray(Data.DataSpan, page.Header.LevelOddity).Clear();
         Data.Buckets.Clear();
     }
 
@@ -565,7 +565,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
 
     }
 
-    public SlottedArray Map => new(Data.DataSpan);
+    public SlottedArray Map => new(Data.DataSpan, page.Header.LevelOddity);
 
     public int CapacityLeft => Map.CapacityLeft;
 

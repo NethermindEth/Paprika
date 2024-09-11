@@ -84,6 +84,8 @@ public struct PageHeader
     /// </summary>
     public byte Level;
 
+    public byte LevelOddity => (byte)(Level & 1);
+
     public byte Metadata;
 }
 

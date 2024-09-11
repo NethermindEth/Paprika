@@ -32,7 +32,7 @@ public readonly unsafe struct StateRootPage(Page page) : IPageWithData<StateRoot
 
         if (key.Length < ConsumedNibbles)
         {
-            var map = new SlottedArray(Data.DataSpan);
+            var map = new SlottedArray(Data.DataSpan, page.Header.LevelOddity);
             var isDelete = data.IsEmpty;
             if (isDelete)
             {
@@ -129,7 +129,7 @@ public readonly unsafe struct StateRootPage(Page page) : IPageWithData<StateRoot
     {
         if (key.Length < ConsumedNibbles)
         {
-            return new SlottedArray(Data.DataSpan).TryGet(key, out result);
+            return new SlottedArray(Data.DataSpan, page.Header.LevelOddity).TryGet(key, out result);
         }
 
         var index = GetIndex(key);

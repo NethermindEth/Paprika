@@ -32,7 +32,7 @@ public readonly unsafe struct LeafOverflowPage(Page page) : IPage
         public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, Size);
     }
 
-    public SlottedArray Map => new(Data.DataSpan);
+    public SlottedArray Map => new(Data.DataSpan, page.Header.LevelOddity);
 
     public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
