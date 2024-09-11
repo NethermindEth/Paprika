@@ -7,14 +7,16 @@ namespace Paprika.Tests.Data;
 
 public class SlottedArrayTests
 {
-    private static ReadOnlySpan<byte> Data0 => new byte[] { 23 };
-    private static ReadOnlySpan<byte> Data1 => new byte[] { 29, 31 };
+    private static ReadOnlySpan<byte> Data0 => [23];
+    private static ReadOnlySpan<byte> Data1 => [29, 31];
 
-    private static ReadOnlySpan<byte> Data2 => new byte[] { 37, 39 };
+    private static ReadOnlySpan<byte> Data2 => [37, 39];
 
-    private static ReadOnlySpan<byte> Data3 => new byte[] { 31, 41 };
-    private static ReadOnlySpan<byte> Data4 => new byte[] { 23, 24, 25 };
-    private static ReadOnlySpan<byte> Data5 => new byte[] { 23, 24, 64 };
+    private static ReadOnlySpan<byte> Data3 => [31, 41];
+    private static ReadOnlySpan<byte> Data4 => [23, 24, 25];
+    private static ReadOnlySpan<byte> Data5 => [23, 24, 64];
+
+    private const byte Even = 0;
 
     [Test]
     public Task Set_Get_Delete_Get_AnotherSet()
@@ -22,7 +24,7 @@ public class SlottedArrayTests
         var key0 = Values.Key0.Span;
 
         Span<byte> span = stackalloc byte[SlottedArray.MinimalSizeWithNoData + key0.Length + Data0.Length];
-        var map = new SlottedArray(span);
+        var map = new SlottedArray(span, Even);
 
         map.SetAssert(key0, Data0);
 
@@ -40,10 +42,12 @@ public class SlottedArrayTests
     }
 
     [Test]
-    public Task Enumerate_all([Values(0, 1)] int odd)
+    public Task Enumerate_all([Values((byte)0, (byte)1)] byte odd)
     {
+        var isEven = odd == 0;
+
         Span<byte> span = stackalloc byte[256];
-        var map = new SlottedArray(span);
+        var map = new SlottedArray(span, odd);
 
         var key0 = NibblePath.Empty;
         var key1 = NibblePath.FromKey([7]).SliceFrom(odd);
@@ -51,13 +55,21 @@ public class SlottedArrayTests
         var key3 = NibblePath.FromKey([7, 13, 31]).SliceFrom(odd);
         var key4 = NibblePath.FromKey([7, 13, 31, 41]).SliceFrom(odd);
 
-        map.SetAssert(key0, Data0);
+        if (isEven)
+        {
+            map.SetAssert(key0, Data0);
+        }
+
         map.SetAssert(key1, Data1);
         map.SetAssert(key2, Data2);
         map.SetAssert(key3, Data3);
         map.SetAssert(key4, Data4);
 
-        map.GetAssert(key0, Data0);
+        if (isEven)
+        {
+            map.GetAssert(key0, Data0);
+        }
+
         map.GetAssert(key1, Data1);
         map.GetAssert(key2, Data2);
         map.GetAssert(key3, Data3);
@@ -65,9 +77,12 @@ public class SlottedArrayTests
 
         using var e = map.EnumerateAll();
 
-        e.MoveNext().Should().BeTrue();
-        e.Current.Key.Equals(key0).Should().BeTrue();
-        e.Current.RawData.SequenceEqual(Data0).Should().BeTrue();
+        if (isEven)
+        {
+            e.MoveNext().Should().BeTrue();
+            e.Current.Key.Equals(key0).Should().BeTrue();
+            e.Current.RawData.SequenceEqual(Data0).Should().BeTrue();
+        }
 
         e.MoveNext().Should().BeTrue();
         e.Current.Key.Equals(key1).Should().BeTrue();
@@ -95,7 +110,7 @@ public class SlottedArrayTests
     public Task Enumerate_nibble([Values(1, 2, 3, 4)] int nibble)
     {
         Span<byte> span = stackalloc byte[256];
-        var map = new SlottedArray(span);
+        var map = new SlottedArray(span, Even);
 
         var key0 = NibblePath.Empty;
         var key1 = NibblePath.FromKey([0x1A]);
@@ -152,7 +167,7 @@ public class SlottedArrayTests
         const byte nibble1 = 0xA;
 
         Span<byte> span = stackalloc byte[256];
-        var map = new SlottedArray(span);
+        var map = new SlottedArray(span, Even);
 
         var key0 = NibblePath.Empty;
         var key1 = NibblePath.FromKey([0x10 | nibble1]);
@@ -201,10 +216,10 @@ public class SlottedArrayTests
     }
 
     [Test]
-    public Task Enumerate_long_key([Values(0, 1)] int oddStart, [Values(0, 1)] int lengthCutOff)
+    public Task Enumerate_long_key([Values((byte)0, (byte)1)] byte oddStart, [Values(0, 1)] int lengthCutOff)
     {
         Span<byte> span = stackalloc byte[128];
-        var map = new SlottedArray(span);
+        var map = new SlottedArray(span, oddStart);
 
         var key = NibblePath.FromKey(Keccak.EmptyTreeHash).SliceFrom(oddStart)
             .SliceTo(NibblePath.KeccakNibbleCount - oddStart - lengthCutOff);
@@ -230,7 +245,7 @@ public class SlottedArrayTests
         var key0 = Values.Key0.Span;
 
         Span<byte> span = stackalloc byte[128];
-        var map = new SlottedArray(span);
+        var map = new SlottedArray(span, Even);
 
         var data = ReadOnlySpan<byte>.Empty;
 
@@ -261,7 +276,7 @@ public class SlottedArrayTests
     {
         // by trial and error, found the smallest value that will allow to put these two
         Span<byte> span = stackalloc byte[SlottedArray.MinimalSizeWithNoData + 88];
-        var map = new SlottedArray(span);
+        var map = new SlottedArray(span, Even);
 
         var key0 = Values.Key0.Span;
         var key1 = Values.Key1.Span;
@@ -289,7 +304,7 @@ public class SlottedArrayTests
     {
         // by trial and error, found the smallest value that will allow to put these two
         Span<byte> span = stackalloc byte[128];
-        var map = new SlottedArray(span);
+        var map = new SlottedArray(span, Even);
 
         var key1 = Values.Key1.Span;
 
@@ -309,7 +324,7 @@ public class SlottedArrayTests
 
         // Update the value, with the next one being bigger.
         Span<byte> span = stackalloc byte[SlottedArray.MinimalSizeWithNoData + key0.Length + Data0.Length];
-        var map = new SlottedArray(span);
+        var map = new SlottedArray(span, Even);
 
         map.SetAssert(key0, Data0);
         map.SetAssert(key0, Data2);
@@ -324,7 +339,7 @@ public class SlottedArrayTests
     public Task Small_keys_compression()
     {
         Span<byte> span = stackalloc byte[512];
-        var map = new SlottedArray(span);
+        var map = new SlottedArray(span, Even);
 
         Span<byte> key = stackalloc byte[1];
         Span<byte> value = stackalloc byte[2];
@@ -353,9 +368,8 @@ public class SlottedArrayTests
         return Verify(span.ToArray());
     }
 
-    [TestCase(0)]
-    [TestCase(1)]
-    public void Key_of_length_5(int odd)
+    [Test]
+    public void Key_of_length_5([Values((byte)0, (byte)1)] byte odd)
     {
         const int length = 5;
 
@@ -364,9 +378,9 @@ public class SlottedArrayTests
 
         Span<byte> span = stackalloc byte[SlottedArray.MinimalSizeWithNoData + spaceForKey];
 
-        var key = NibblePath.FromKey(stackalloc byte[] { 0x34, 0x5, 0x7A }, odd, length);
+        var key = NibblePath.FromKey([0x34, 0x5, 0x7A], odd, length);
 
-        var map = new SlottedArray(span);
+        var map = new SlottedArray(span, odd);
 
         var value = ReadOnlySpan<byte>.Empty;
         map.SetAssert(key, value);
@@ -384,9 +398,9 @@ public class SlottedArrayTests
         Span<byte> span = stackalloc byte[SlottedArray.MinimalSizeWithNoData + spaceForKey];
 
         // 0b10 is the prefix of the nibble that can be densely encoded on one byte.
-        var key = NibblePath.FromKey(stackalloc byte[] { 0x34, 0b1001_1101, 0x7A }, 0, length);
+        var key = NibblePath.FromKey([0x34, 0b1001_1101, 0x7A], 0, length);
 
-        var map = new SlottedArray(span);
+        var map = new SlottedArray(span, Even);
 
         var value = ReadOnlySpan<byte>.Empty;
         map.SetAssert(key, value);
@@ -404,9 +418,9 @@ public class SlottedArrayTests
         Span<byte> span = stackalloc byte[SlottedArray.MinimalSizeWithNoData + spaceForKey];
 
         // 0b10 is the prefix of the nibble that can be densely encoded on one byte. For odd, first 3 are consumed to prepare.
-        var key = NibblePath.FromKey(stackalloc byte[] { 0x04, 0b1011_0010, 0xD9, 0x7A }, 0, length);
+        var key = NibblePath.FromKey([0x04, 0b1011_0010, 0xD9, 0x7A], 0, length);
 
-        var map = new SlottedArray(span);
+        var map = new SlottedArray(span, Even);
 
         var value = ReadOnlySpan<byte>.Empty;
         map.SetAssert(key, value);
@@ -420,7 +434,7 @@ public class SlottedArrayTests
         var random = new Random(seed);
         Span<byte> key = stackalloc byte[4];
 
-        var map = new SlottedArray(new byte[3 * 1024]);
+        var map = new SlottedArray(new byte[3 * 1024], Even);
 
         const int count = 257;
 
@@ -451,7 +465,7 @@ public class SlottedArrayTests
             keys[i * keyLength + 1] = i;
         }
 
-        var map = new SlottedArray(new byte[3 * 1024]);
+        var map = new SlottedArray(new byte[3 * 1024], Even);
 
         for (var i = 0; i < count; i++)
         {
@@ -476,8 +490,8 @@ public class SlottedArrayTests
     [TestCase(new[] { 0, 1, 7 })]
     public void Remove_keys_from(int[] indexes)
     {
-        var toRemove = new SlottedArray(stackalloc byte[512]);
-        var map = new SlottedArray(stackalloc byte[512]);
+        var toRemove = new SlottedArray(stackalloc byte[512], Even);
+        var map = new SlottedArray(stackalloc byte[512], Even);
 
         var key1 = NibblePath.Parse("1");
         var key2 = NibblePath.Parse("23");
@@ -543,8 +557,8 @@ public class SlottedArrayTests
     [Test]
     public void Move_to_1()
     {
-        var original = new SlottedArray(stackalloc byte[256]);
-        var copy0 = new SlottedArray(stackalloc byte[256]);
+        var original = new SlottedArray(stackalloc byte[256], Even);
+        var copy0 = new SlottedArray(stackalloc byte[256], Even);
 
         var key1 = NibblePath.Parse("1");
         var key2 = NibblePath.Parse("23");
@@ -585,8 +599,8 @@ public class SlottedArrayTests
     {
         const int size = 256;
 
-        var original = new SlottedArray(stackalloc byte[size]);
-        var copy0 = new SlottedArray(stackalloc byte[size]);
+        var original = new SlottedArray(stackalloc byte[size], Even);
+        var copy0 = new SlottedArray(stackalloc byte[size], Even);
 
         var key1 = NibblePath.Parse("1");
         var key2 = NibblePath.Parse("23");
@@ -625,9 +639,9 @@ public class SlottedArrayTests
     [Test]
     public void Move_to_2()
     {
-        var original = new SlottedArray(stackalloc byte[256]);
-        var copy0 = new SlottedArray(stackalloc byte[256]);
-        var copy1 = new SlottedArray(stackalloc byte[256]);
+        var original = new SlottedArray(stackalloc byte[256], Even);
+        var copy0 = new SlottedArray(stackalloc byte[256], Even);
+        var copy1 = new SlottedArray(stackalloc byte[256], Even);
 
         var key0 = NibblePath.Empty;
         var key1 = NibblePath.Parse("1");
@@ -676,11 +690,11 @@ public class SlottedArrayTests
     [Test]
     public void Move_to_4()
     {
-        var original = new SlottedArray(stackalloc byte[256]);
-        var copy0 = new SlottedArray(stackalloc byte[256]);
-        var copy1 = new SlottedArray(stackalloc byte[256]);
-        var copy2 = new SlottedArray(stackalloc byte[256]);
-        var copy3 = new SlottedArray(stackalloc byte[256]);
+        var original = new SlottedArray(stackalloc byte[256], Even);
+        var copy0 = new SlottedArray(stackalloc byte[256], Even);
+        var copy1 = new SlottedArray(stackalloc byte[256], Even);
+        var copy2 = new SlottedArray(stackalloc byte[256], Even);
+        var copy3 = new SlottedArray(stackalloc byte[256], Even);
 
         var key0 = NibblePath.Empty;
         var key1 = NibblePath.Parse("1");
@@ -747,15 +761,15 @@ public class SlottedArrayTests
     [Test]
     public void Move_to_8()
     {
-        var original = new SlottedArray(stackalloc byte[512]);
-        var copy0 = new SlottedArray(stackalloc byte[128]);
-        var copy1 = new SlottedArray(stackalloc byte[128]);
-        var copy2 = new SlottedArray(stackalloc byte[128]);
-        var copy3 = new SlottedArray(stackalloc byte[128]);
-        var copy4 = new SlottedArray(stackalloc byte[128]);
-        var copy5 = new SlottedArray(stackalloc byte[128]);
-        var copy6 = new SlottedArray(stackalloc byte[128]);
-        var copy7 = new SlottedArray(stackalloc byte[128]);
+        var original = new SlottedArray(stackalloc byte[512], Even);
+        var copy0 = new SlottedArray(stackalloc byte[128], Even);
+        var copy1 = new SlottedArray(stackalloc byte[128], Even);
+        var copy2 = new SlottedArray(stackalloc byte[128], Even);
+        var copy3 = new SlottedArray(stackalloc byte[128], Even);
+        var copy4 = new SlottedArray(stackalloc byte[128], Even);
+        var copy5 = new SlottedArray(stackalloc byte[128], Even);
+        var copy6 = new SlottedArray(stackalloc byte[128], Even);
+        var copy7 = new SlottedArray(stackalloc byte[128], Even);
 
         var key0 = NibblePath.Empty;
         var key1 = NibblePath.Parse("1");
@@ -895,16 +909,7 @@ public class SlottedArrayTests
     {
         var key = NibblePath.FromKey(Keccak.EmptyTreeHash).Slice(sliceFrom, length);
 
-        // prepare
-        var hash = SlottedArray.PrepareKeyForTests(key, out var preamble, out var trimmed);
-        var written = trimmed.IsEmpty ? ReadOnlySpan<byte>.Empty : trimmed.WriteTo(stackalloc byte[33]);
-
-        Span<byte> working = stackalloc byte[32];
-
-        var unprepared = SlottedArray.UnPrepareKeyForTests(hash, preamble, written, working, out var data);
-
-        data.IsEmpty.Should().BeTrue();
-        key.Equals(unprepared).Should().BeTrue();
+        SlottedArray.PrepareUnPrepareForTests(key);
     }
 }
 

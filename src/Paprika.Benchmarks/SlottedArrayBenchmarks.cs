@@ -11,6 +11,8 @@ public unsafe class SlottedArrayBenchmarks
 {
     private const int KeyCount = 97;
 
+    private const int Even = 0;
+
     private const int
         BytesPerKey =
             3; // 3 repeated bytes allow to cut off the first nibble and still have a unique key. Also, allow storing some key leftover
@@ -44,7 +46,7 @@ public unsafe class SlottedArrayBenchmarks
         _map = AllocAlignedPage();
         Span<byte> value = stackalloc byte[1];
 
-        var map = new SlottedArray(new Span<byte>(_map, Page.PageSize));
+        var map = new SlottedArray(new Span<byte>(_map, Page.PageSize), Even);
         for (byte i = 0; i < KeyCount; i++)
         {
             value[0] = i;
@@ -74,7 +76,7 @@ public unsafe class SlottedArrayBenchmarks
 
         _hashCollidingMap = AllocAlignedPage();
 
-        var hashColliding = new SlottedArray(new Span<byte>(_hashCollidingMap, Page.PageSize));
+        var hashColliding = new SlottedArray(new Span<byte>(_hashCollidingMap, Page.PageSize), Even);
         for (byte i = 0; i < HashCollidingKeyCount; i++)
         {
             value[0] = i;
@@ -109,7 +111,7 @@ public unsafe class SlottedArrayBenchmarks
     [Arguments((byte)KeyCount - 1, false)]
     public int TryGet(byte index, bool odd)
     {
-        var map = new SlottedArray(new Span<byte>(_map, Page.PageSize));
+        var map = new SlottedArray(new Span<byte>(_map, Page.PageSize), Even);
         var key = GetKey(index, odd);
 
         var count = 0;
@@ -129,7 +131,7 @@ public unsafe class SlottedArrayBenchmarks
     [Arguments((byte)31)]
     public int TryGet_With_Hash_Collisions(byte index)
     {
-        var map = new SlottedArray(new Span<byte>(_hashCollidingMap, Page.PageSize));
+        var map = new SlottedArray(new Span<byte>(_hashCollidingMap, Page.PageSize), Even);
         var key = GetHashCollidingKey(index);
 
         var count = 0;
@@ -173,7 +175,7 @@ public unsafe class SlottedArrayBenchmarks
     [Benchmark]
     public int EnumerateAll()
     {
-        var map = new SlottedArray(new Span<byte>(_map, Page.PageSize));
+        var map = new SlottedArray(new Span<byte>(_map, Page.PageSize), Even);
 
         var length = 0;
         foreach (var item in map.EnumerateAll())
@@ -190,7 +192,7 @@ public unsafe class SlottedArrayBenchmarks
     [Arguments((byte)1)]
     public int EnumerateNibble(byte nibble)
     {
-        var map = new SlottedArray(new Span<byte>(_map, Page.PageSize));
+        var map = new SlottedArray(new Span<byte>(_map, Page.PageSize), Even);
 
         var length = 0;
         foreach (var item in map.EnumerateNibble(nibble))

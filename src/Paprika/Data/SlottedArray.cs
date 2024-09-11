@@ -77,20 +77,18 @@ public readonly ref struct SlottedArray /*: IClearable */
         return ref Unsafe.Add(ref Unsafe.As<byte, Slot>(ref MemoryMarshal.GetReference(_data)), offset);
     }
 
-    public void Set(in NibblePath key, ReadOnlySpan<byte> data)
-    {
-        var succeeded = TrySet(key, data);
-        Debug.Assert(succeeded);
-    }
-
     public bool TrySet(in NibblePath key, ReadOnlySpan<byte> data)
     {
+        Debug.Assert(key.Oddity == _oddity);
+
         var hash = Slot.PrepareKey(key, out var preamble, out var trimmed);
         return TrySetImpl(hash, preamble, trimmed, data);
     }
 
     public void DeleteByPrefix(in NibblePath prefix)
     {
+        Debug.Assert(prefix.Oddity == _oddity);
+
         if (prefix.Length == 0)
         {
             Delete(prefix);
@@ -596,6 +594,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         {
             return key.Length switch
             {
+                PathLengthOf0 => ZeroNibbleLength,
                 PathLengthOf1 => SingleNibbleLength,
                 PathLengthOf2 => (key.Nibble0 & DoubleEvenNibbleCaseFirstNibbleMask) ==
                                  DoubleEvenNibbleCaseFirstNibbleMaskValue
@@ -737,6 +736,8 @@ public readonly ref struct SlottedArray /*: IClearable */
     /// </summary>
     public bool Delete(in NibblePath key)
     {
+        Debug.Assert(key.Oddity == _oddity);
+
         var hash = Slot.PrepareKey(key, out var preamble, out var trimmed);
         var index = TryGetImpl(trimmed, hash, preamble, out _);
         if (index != NotFound)
@@ -862,6 +863,8 @@ public readonly ref struct SlottedArray /*: IClearable */
 
     public bool TryGet(scoped in NibblePath key, out ReadOnlySpan<byte> data)
     {
+        Debug.Assert(key.Oddity == _oddity);
+
         var hash = Slot.PrepareKey(key, out byte preamble, out var trimmed);
         if (TryGetImpl(trimmed, hash, preamble, out var span) != NotFound)
         {
@@ -1052,6 +1055,26 @@ public readonly ref struct SlottedArray /*: IClearable */
     /// </summary>
     public static ushort HashForTests(in NibblePath key) => Slot.PrepareKey(key, out _, out _);
 
+    public static void PrepareUnPrepareForTests(in NibblePath key)
+    {
+        var hash = Slot.PrepareKey(key, out var preamble, out var trimmed);
+
+        Span<byte> span = default;
+
+        if (HasKeyBytes(preamble))
+        {
+            span = new byte[KeyEncoding.GetBytesCount(trimmed)];
+            var leftover = KeyEncoding.Write(trimmed, span);
+            Debug.Assert(leftover.Length == 0, "Should have nothing left");
+        }
+
+        var oddity = (byte)key.Oddity;
+        var unprepared = Slot.UnPrepareKey(hash, preamble, oddity, span, new byte[32], out var data);
+
+        Debug.Assert(data.Length == 0, "Data should be empty");
+        Debug.Assert(unprepared.Equals(key), "Keys are different");
+    }
+
     public static NibblePath UnPrepareKeyForTests(ushort hash, byte preamble, byte oddity, ReadOnlySpan<byte> input,
         Span<byte> workingSet, out ReadOnlySpan<byte> data) =>
         Slot.UnPrepareKey(hash, preamble, oddity, input, workingSet, out data);
@@ -1107,7 +1130,7 @@ public readonly ref struct SlottedArray /*: IClearable */
 
         // Preamble uses all bits that AddressMask does not
         private const ushort KeyPreambleMask = unchecked((ushort)~AddressMask);
-        private const ushort KeyPreambleShift = 13;
+        private const ushort KeyPreambleShift = 14;
 
         // There are 3 bits left, where 0th bit is used to mark the oddity.
         // There are two more bits that allow encoding 4 values:
@@ -1322,8 +1345,6 @@ public readonly ref struct SlottedArray /*: IClearable */
 
                 default:
                     data = KeyEncoding.ReadFrom(input, out var trimmed);
-
-                    Debug.Assert(trimmed.IsEmpty == false, "Trimmed cannot empty");
 
                     var result = NibblePath.FromKey(workingSet, oddity, trimmed.Length + 4);
 
