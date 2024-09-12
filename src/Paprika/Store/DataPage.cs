@@ -63,15 +63,16 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
 
         if (page.Header.Metadata == Modes.Fanout)
         {
-            if (prefix.IsEmpty == false)
+            if (prefix.Length >= ConsumedNibbles)
             {
-                var childAddr = buckets[prefix.Nibble0];
+                var index = GetIndex(prefix);
+                var childAddr = buckets[index];
 
                 if (childAddr.IsNull == false)
                 {
                     var sliced = prefix.SliceFrom(ConsumedNibbles);
                     var child = new DataPage(batch.GetAt(childAddr)).DeleteByPrefix(sliced, batch);
-                    buckets[prefix.Nibble0] = batch.GetAddress(child);
+                    buckets[index] = batch.GetAddress(child);
                 }
             }
         }
@@ -136,7 +137,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 {
                     // Empty data means deletion.
                     // If it's a deletion and a key is empty or there's no child page, delete in page
-                    if (k.Length < ConsumedNibbles || payload.Buckets[k.Nibble0].IsNull)
+                    if (k.Length < ConsumedNibbles || payload.Buckets[GetIndex(k)].IsNull)
                     {
                         // Empty key or a key with no children can be deleted only in-situ
                         map.Delete(k);
@@ -148,7 +149,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 DbAddress childAddr;
                 if (k.Length >= ConsumedNibbles)
                 {
-                    childAddr = payload.Buckets[k.Nibble0];
+                    childAddr = payload.Buckets[GetIndex(k)];
                     if (childAddr.IsNull == false && batch.WasWritten(childAddr))
                     {
                         // Delete the k in this page just to ensure that the write-through will write the last value.
@@ -261,6 +262,9 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
             }
         }
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static byte GetIndex(in NibblePath k) => k.Nibble0;
 
     private static void TurnToFanOut(DbAddress current, in MapSource.Of2 overflow, IBatchContext batch)
     {
@@ -534,8 +538,9 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
             {
                 // As the CPU does not auto-prefetch across page boundaries
                 // Prefetch child page in case we go there next to reduce CPU stalls
-                bucket = page.Data.Buckets[sliced.Nibble0];
-                batch.Prefetch(bucket);
+                bucket = page.Data.Buckets[GetIndex(sliced)];
+                if (bucket.IsNull == false)
+                    batch.Prefetch(bucket);
             }
 
             // try regular map
