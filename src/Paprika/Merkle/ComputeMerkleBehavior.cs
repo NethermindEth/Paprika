@@ -717,10 +717,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 else
 #endif
                 {
-                UIntPtr stack = default;
-                using var ctx = new ComputeContext(child, trieType, hint, budget, _pool, ref stack);
-                Compute(Key.Merkle(childPath), ctx, out KeccakOrRlp keccakRlp, out memoizeHint[nibble]);
-                results[nibble] = keccakRlp.Span.ToArray();
+                    UIntPtr stack = default;
+                    using var ctx = new ComputeContext(child, trieType, hint, budget, _pool, ref stack);
+                    Compute(Key.Merkle(childPath), ctx, out KeccakOrRlp keccakRlp, out memoizeHint[nibble]);
+                    results[nibble] = keccakRlp.Span.ToArray();
                 }
             });
 
