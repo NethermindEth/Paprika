@@ -135,6 +135,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     return keccakOrRlp.Keccak;
                 }
             }
+            else
+            {
+                EncodeLeaf(Key.Merkle(path), ctx, NibblePath.Empty, out var keccakOrRlp, out _);
+                return keccakOrRlp.Keccak;
+            }
         }
 
         var root = Key.Merkle(path);
@@ -545,25 +550,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     {
         memoizeHint = true;
         keccakOrRlp = Keccak.EmptyTreeHash;
-#if SNAP_SYNC_SUPPORT
-        NibblePath pathEncodedKeccak = leafKey.Path;
-        if (leafData.IsEmpty && leafKey.Path.Length == NibblePath.KeccakNibbleCount)
-        {
-            using var merkleData = ctx.Commit.Get(Key.Merkle(leafKey.Path));
-            if (!merkleData.IsEmpty)
-            {
-                var leftover = Node.ReadFrom(out var type, out var leaf, out var ext, out var branch, merkleData.Span);
-                if (type == Node.Type.Leaf)
-                    pathEncodedKeccak = leaf.Path;
-            }
-        }
-        if (SnapSync.TryGetKeccakFromBoundaryPath(pathEncodedKeccak, out var keccak))
-        {
-            memoizeHint = false;
-            keccakOrRlp = keccak;
-            return;
-        }
-#endif
 
         if (leafData.IsEmpty)
             return;
@@ -656,23 +642,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     bool memoizeHint = true;
                     if (childPath.Length == NibblePath.KeccakNibbleCount)
                     {
-                        NibblePath leafKeyPath = NibblePath.Empty;
-#if SNAP_SYNC_SUPPORT
-                        using var owner = ctx.Commit.Get(leafKey);
-                        if (!owner.IsEmpty)
-                        {
-                            Node.ReadFrom(out var type, out var leaf, out var ext, out var br, owner.Span);
-                            switch (type)
-                            {
-                                case Node.Type.Leaf:
-                                    leafKeyPath = leaf.Path;
-                                    break;
-                                default:
-                                    throw new InvalidOperationException("Unexpected node type when encoding leaf");
-                            }
-                        }
-#endif
-                        EncodeLeaf(leafKey, ctx, leafKeyPath, out keccakOrRlp, out memoizeHint);
+                        EncodeLeaf(leafKey, ctx, NibblePath.Empty, out keccakOrRlp, out memoizeHint);
                     }
                     else
                     {
@@ -720,15 +690,38 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
             // parallel calculation
             bool[] memoizeHint = new bool[NibbleSet.NibbleCount];
+
+#if SNAP_SYNC_SUPPORT
+            //Unpack RlpMemo to be used in parallel calculations
+            //used for node proofs in snap sync
+            Keccak[] memoKeccaks = new Keccak[NibbleSet.NibbleCount];
+            if (memoize)
+            {
+                for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+                {
+                    if (memo.TryGetKeccak(i, out var keccakBytes))
+                        memoKeccaks[i] = new Keccak(keccakBytes);
+                }
+            }
+#endif
+
             Parallel.For((long)0, NibbleSet.NibbleCount, s_parallelOptions, nibble =>
             {
                 var childPath = NibblePath.Single((byte)nibble, 0);
-
                 var child = commits[nibble] = commit.GetChild();
+#if SNAP_SYNC_SUPPORT
+                if (memoKeccaks[nibble] != Keccak.Zero)
+                {
+                    results[nibble] = memoKeccaks[nibble].Span.ToArray();
+                }
+                else
+#endif
+                {
                 UIntPtr stack = default;
                 using var ctx = new ComputeContext(child, trieType, hint, budget, _pool, ref stack);
                 Compute(Key.Merkle(childPath), ctx, out KeccakOrRlp keccakRlp, out memoizeHint[nibble]);
                 results[nibble] = keccakRlp.Span.ToArray();
+                }
             });
 
             foreach (var childCommit in commits)
