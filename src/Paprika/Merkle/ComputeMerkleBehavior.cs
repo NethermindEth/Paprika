@@ -636,7 +636,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     var childPath = key.Path.AppendNibble(i, childSpan);
                     var leafKey = Key.Merkle(childPath);
 
-                    bool memoizeHint = true;
                     if (childPath.Length == NibblePath.KeccakNibbleCount)
                     {
                         EncodeLeaf(leafKey, ctx, NibblePath.Empty, out keccakOrRlp);
@@ -656,7 +655,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         stream.Write(keccakOrRlp.Span);
                     }
 
-                    if (memoize && memoizeHint)
+                    if (memoize)
                     {
                         memoizedUpdated = true;
                         memo.Set(keccakOrRlp, i);

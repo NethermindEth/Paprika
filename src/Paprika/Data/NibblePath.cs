@@ -732,35 +732,6 @@ public readonly ref struct NibblePath
         }
     }
 
-    //TODO - unnecessary allocation !!!
-    public NibblePath GetAligned()
-    {
-        if ((_odd + Length) % 2 == 0)
-            return this;
-        if (_odd == 1 && Length % 2 == 0)
-        {
-            var span = new byte[(Length + 1) / 2];
-            var copy = new NibblePath(span, 0, Length);
-
-            for (int i = 0; i < Length; i++)
-            {
-                copy.UnsafeSetAt(i, GetAt(i));
-            }
-            return copy;
-        }
-
-        if (_odd == 0 && Length % 2 == 1)
-        {
-            var span = new byte[(Length + 1) / 2];
-            RawSpan.CopyTo(span);
-            var copy = new NibblePath(span, 0, Length);
-            copy.UnsafeMakeOdd();
-            return copy;
-        }
-
-        return this;
-    }
-
     private static readonly char[] Hex = "0123456789ABCDEF".ToArray();
 
     // TODO: optimize
