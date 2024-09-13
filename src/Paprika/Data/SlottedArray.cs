@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Drawing;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -188,6 +189,26 @@ public readonly ref struct SlottedArray /*: IClearable */
     /// Gets how many slots are used in the map.
     /// </summary>
     public int Count => _header.Low / Slot.TotalSize;
+
+    /// <summary>
+    /// Performs a walk through the map calculating the actual size of data stored in it.
+    /// </summary>
+    public double CalculateActualSpaceUsed()
+    {
+        var occupied = 0;
+
+        foreach (var item in EnumerateAll())
+        {
+            occupied += Slot.TotalSize;
+            occupied += item.RawData.Length;
+            if (item.Key.Length > Slot.KeyPreambleMaxEncodedLength)
+            {
+                occupied += KeyEncoding.GetBytesCount(item.Key.SliceFrom(Slot.KeyPreambleMaxEncodedLength));
+            }
+        }
+
+        return (double)occupied / _data.Length;
+    }
 
     public int CapacityLeft => _data.Length - _header.Taken;
 
@@ -1095,7 +1116,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         public const byte KeyPreambleWithBytes = KeyPreambleLength5OrMore << KeyPreambleLengthShift;
 
         private const byte KeyPreambleLengthShift = 1;
-        private const byte KeyPreambleMaxEncodedLength = 4;
+        public const byte KeyPreambleMaxEncodedLength = 4;
         private const byte KeySlice = 2;
 
         private const int HashByteShift = 8;

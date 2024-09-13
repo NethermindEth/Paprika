@@ -1,6 +1,8 @@
 ﻿using System.Buffers.Binary;
 using NUnit.Framework;
+using Paprika.Chain;
 using Paprika.Crypto;
+using Paprika.Merkle;
 using Paprika.Store;
 using Spectre.Console;
 
@@ -44,7 +46,52 @@ public class PageStructurePrintingTests
             await batch.Commit(CommitOptions.FlushDataAndRoot);
         }
 
-        var view = new TreeView();
+        var view = new TreeView(db);
+        db.VisitRoot(view);
+
+        AnsiConsole.WriteLine($"DB size: {db.Megabytes:N0}MB");
+        AnsiConsole.Write(view.Tree);
+
+        return;
+
+        Keccak GetStorageAddress(int i)
+        {
+            Keccak result = default;
+            BinaryPrimitives.WriteInt32LittleEndian(result.BytesAsSpan, i);
+            return result;
+        }
+    }
+
+    [Test]
+    public async Task Merkle_storage_account()
+    {
+        var account = Keccak.EmptyTreeHash;
+
+        using var db = PagedDb.NativeMemoryDb(MB256);
+
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
+
+        const int storageSlots = 400_000;
+
+        var value = new byte[32];
+
+        var random = new Random(13);
+        random.NextBytes(value);
+
+        using var block = blockchain.StartNew(Keccak.EmptyTreeHash);
+
+        block.SetAccount(account, new Account(1_000, 1_000, Keccak.OfAnEmptyString, Keccak.OfAnEmptySequenceRlp));
+
+        for (var slot = 0; slot < storageSlots; slot++)
+        {
+            block.SetStorage(account, GetStorageAddress(slot), value);
+        }
+
+        var commit = block.Commit(1);
+        blockchain.Finalize(commit);
+        await blockchain.WaitTillFlush(1);
+
+        var view = new TreeView(db);
         db.VisitRoot(view);
 
         AnsiConsole.WriteLine($"DB size: {db.Megabytes:N0}MB");
