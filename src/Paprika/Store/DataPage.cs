@@ -272,9 +272,8 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         // 1. Remove from overflow all the keys that exist in the current.
         // 2. The overflow contains no keys from the current.
         // 3. Change the mode
-        // 4. Find the biggest nibble from both, overflow and the current map
-        // 5. Create a child page for this nibble.
-        // 6. Set values from overflow to this page.
+        // 4. Iterate by nibble, to collocate as much as possible
+        // 5. Enumerate overflows by nibble and set in the parent.
 
         var page = batch.GetAt(current);
 
@@ -293,43 +292,18 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         // 3. 
         page.Header.Metadata = Modes.Fanout;
 
-        // 4.
-        Span<ushort> stats = stackalloc ushort[BucketCount];
-
-        GatherStats(overflow.Map0, stats);
-        GatherStats(overflow.Map1, stats);
-        GatherStats(map, stats);
-
-        byte nibbleWithMostData = 0;
-        for (byte i = 1; i < BucketCount; i++)
+        // 4 & 5
+        for (byte nibble = 0; nibble < BucketCount; nibble++)
         {
-            if (stats[i] > stats[nibbleWithMostData])
+            foreach (var item in overflow.Map0.EnumerateNibble(nibble))
             {
-                nibbleWithMostData = i;
+                Set(current, item.Key, item.RawData, batch);
             }
-        }
 
-        // 5
-        // Get new page without clearing. Clearing is done manually.
-        var child = batch.GetNewPage(out var childAddr, false);
-        new DataPage(child).Clear();
-
-        child.Header.PageType = PageType.DataPage;
-        child.Header.Level = (byte)(page.Header.Level + ConsumedNibbles);
-
-        // Set the mode for the new child to Merkle to make it spread content on the NibblePath length basis
-        child.Header.Metadata = Modes.Leaf;
-        payload.Buckets[nibbleWithMostData] = childAddr;
-
-        // 6
-        foreach (var item in overflow.Map0.EnumerateAll())
-        {
-            Set(current, item.Key, item.RawData, batch);
-        }
-
-        foreach (var item in overflow.Map1.EnumerateAll())
-        {
-            Set(current, item.Key, item.RawData, batch);
+            foreach (var item in overflow.Map1.EnumerateNibble(nibble))
+            {
+                Set(current, item.Key, item.RawData, batch);
+            }
         }
 
         // All values from overflow already written, can be reused immediately
