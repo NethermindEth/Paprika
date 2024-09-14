@@ -147,7 +147,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
 
                 // Try to write through, if key may reside on the next level and there's a child that was written in this batch
                 DbAddress childAddr;
-                if (k.Length >= ConsumedNibbles)
+                if (k.Length >= ConsumedNibbles && ShouldKeepShortKeyLocal(k) == false)
                 {
                     childAddr = payload.Buckets[GetIndex(k)];
                     if (childAddr.IsNull == false && batch.WasWritten(childAddr))
@@ -344,6 +344,15 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
     {
         map.GatherCountStats1Nibble(stats);
 
+        // Provide a minor discount for nibbles that should be kept local
+        for (byte nibble = 0; nibble < BucketCount; nibble++)
+        {
+            ref var s = ref stats[nibble];
+            if (s > 0 && ShouldKeepShortKeyLocal(nibble))
+            {
+                s -= 1;
+            }
+        }
         // other proposal to be size based, not count based
         //map.GatherSizeStats1Nibble(stats);
     }
@@ -458,16 +467,36 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
     {
         Debug.Assert(batch.WasWritten(child));
 
+        var keepShortKeyLocal = ShouldKeepShortKeyLocal(nibble);
+
         foreach (var item in map.EnumerateNibble(nibble))
         {
             var sliced = item.Key.SliceFrom(ConsumedNibbles);
 
-            Set(child, sliced, item.RawData, batch);
+            if (keepShortKeyLocal && item.Key.Length == 1)
+            {
+                Debug.Assert(sliced.IsEmpty, "The local caching is only 1 lvl deep");
 
-            // Use the special delete for the item that is much faster than map.Delete(item.Key);
-            map.Delete(item);
+                // The key is meant to be kept local, set a deletion underneath and leave it as is.
+                Set(child, sliced, ReadOnlySpan<byte>.Empty, batch);
+            }
+            else
+            {
+                // Key is not kept local, propagate it down
+                Set(child, sliced, item.RawData, batch);
+
+                // Use the fast delete by item.
+                map.Delete(item);
+            }
         }
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool ShouldKeepShortKeyLocal(in NibblePath path) =>
+        path.Length == 1 && ShouldKeepShortKeyLocal(path.Nibble0);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool ShouldKeepShortKeyLocal(byte nibble) => nibble % 4 == 0;
 
     /// <summary>
     /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
