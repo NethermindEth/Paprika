@@ -169,7 +169,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 }
 
                 // First, try to flush the existing
-                if (TryFindMostFrequentExistingNibble(map, payload.Buckets, out var nibble))
+                if (TryFindMostFrequentExistingNibble(k.Oddity, map, payload.Buckets, out var nibble))
                 {
                     childAddr = EnsureExistingChildWritable(batch, ref payload, nibble);
                     FlushDown(map, nibble, childAddr, batch);
@@ -179,7 +179,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 }
 
                 // None of the existing was flushable, find the most frequent one
-                nibble = FindMostFrequentNibble(map);
+                nibble = FindMostFrequentNibble(k.Oddity, map);
 
                 // Ensure that the child page exists
                 childAddr = payload.Buckets[nibble];
@@ -314,7 +314,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
     /// <summary>
     /// A single method for stats gathering to make it simple to change the implementation.
     /// </summary>
-    private static void GatherStats(in SlottedArray map, Span<ushort> stats)
+    private static void GatherStats(int oddity, in SlottedArray map, Span<ushort> stats)
     {
         map.GatherCountStats1Nibble(stats);
 
@@ -322,11 +322,16 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         for (byte nibble = 0; nibble < BucketCount; nibble++)
         {
             ref var s = ref stats[nibble];
-            if (s > 0 && ShouldKeepShortKeyLocal(nibble))
+
+            if (s > 0 &&
+                ShouldKeepShortKeyLocal(nibble) &&
+                map.Contains(NibblePath.Single(nibble, oddity)))
             {
+                // The count is bigger than 0 and the nibble should be kept local so test for the key. Only then subtract.
                 s -= 1;
             }
         }
+
         // other proposal to be size based, not count based
         //map.GatherSizeStats1Nibble(stats);
     }
@@ -388,13 +393,13 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         return childAddr;
     }
 
-    private static byte FindMostFrequentNibble(in SlottedArray map)
+    private static byte FindMostFrequentNibble(int oddity, in SlottedArray map)
     {
         const int count = SlottedArray.BucketCount;
 
         Span<ushort> stats = stackalloc ushort[count];
 
-        GatherStats(map, stats);
+        GatherStats(oddity, map, stats);
 
         byte biggestIndex = 0;
         for (byte i = 1; i < count; i++)
@@ -408,12 +413,12 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         return biggestIndex;
     }
 
-    private static bool TryFindMostFrequentExistingNibble(in SlottedArray map, in DbAddressList.Of16 children,
+    private static bool TryFindMostFrequentExistingNibble(int oddity, in SlottedArray map, in DbAddressList.Of16 children,
         out byte nibble)
     {
         Span<ushort> stats = stackalloc ushort[BucketCount];
 
-        GatherStats(map, stats);
+        GatherStats(oddity, map, stats);
 
         byte biggestIndex = 0;
         ushort biggestValue = 0;
@@ -470,7 +475,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         path.Length == 1 && ShouldKeepShortKeyLocal(path.Nibble0);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool ShouldKeepShortKeyLocal(byte nibble) => nibble % 4 == 0;
+    private static bool ShouldKeepShortKeyLocal(byte nibble) => nibble % 2 == 0;
 
     /// <summary>
     /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
