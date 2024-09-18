@@ -39,7 +39,7 @@ abstract class BatchContextBase(uint batchId) : IBatchContext
 
     public bool WasWritten(DbAddress addr) => GetAt(addr).Header.BatchId == BatchId;
 
-    public abstract void RegisterForFutureReuse(Page page, bool possibleImmediateReuse = false);
+    public abstract void RegisterForFutureReuse(Page page,  bool possibleImmediateReuse = false);
 
     public virtual void NoticeAbandonedPageReused(Page page) { }
 
@@ -71,4 +71,7 @@ abstract class BatchContextBase(uint batchId) : IBatchContext
     }
 
     public BatchStats? Stats { get; } = new();
+
+    public unsafe Page NullPage => new Page((byte*)0);
+
 }

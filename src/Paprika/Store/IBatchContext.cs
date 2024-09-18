@@ -72,6 +72,8 @@ public interface IBatchContext : IReadOnlyBatchContext
     Page TryGetPageAlloc(ref DbAddress addr, PageType pageType);
 
     BatchStats? Stats { get; }
+
+    public unsafe Page NullPage => new Page((byte*)0);
 }
 
 public class BatchStats : IBatchStats

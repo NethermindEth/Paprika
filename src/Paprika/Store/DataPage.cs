@@ -74,6 +74,11 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                     buckets[prefix.Nibble0] = batch.GetAddress(child);
                 }
             }
+            else
+            {
+                batch.RegisterForFutureReuse(page);
+                return batch.NullPage;
+            }
         }
         else
         {
