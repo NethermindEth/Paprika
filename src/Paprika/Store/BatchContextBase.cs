@@ -71,7 +71,4 @@ abstract class BatchContextBase(uint batchId) : IBatchContext
     }
 
     public BatchStats? Stats { get; } = new();
-
-    public unsafe Page NullPage => new Page((byte*)0);
-
 }
