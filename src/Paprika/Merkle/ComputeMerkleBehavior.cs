@@ -650,7 +650,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         var end = stream.Position;
         var actualLength = end - initialShift;
         var lengthOfLength = Rlp.LengthOfLength(actualLength);
-        if (actualLength >= 56) //to match StartSequence
+        if (actualLength >= Rlp.SmallPrefixBarrier) //to match StartSequence
             lengthOfLength++;
         var from = initialShift - lengthOfLength;
         stream.Position = from;
