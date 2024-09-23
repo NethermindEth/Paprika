@@ -4,26 +4,15 @@ using Spectre.Console;
 
 namespace Paprika.Tests.Store;
 
-public class TreeView : IPageVisitor, IDisposable
+public class TreeView(IPageResolver resolver) : IPageVisitor, IDisposable
 {
     public readonly Tree Tree = new("Db");
 
     private readonly Stack<TreeNode> _nodes = new();
 
-    private IDisposable Build(string name, DbAddress? addr, int? capacityLeft = null)
+    private IDisposable BuildNode(string name)
     {
-        string text;
-        if (addr.HasValue)
-        {
-            var capacity = capacityLeft.HasValue ? $", space_left: {capacityLeft.Value}" : "";
-            text = $"{name.Replace("Page", "")}, @{addr.Value.Raw}{capacity}";
-        }
-        else
-        {
-            text = name;
-        }
-
-        var node = new TreeNode(new Text(text));
+        var node = new TreeNode(new Text(name));
 
         if (_nodes.TryPeek(out var parent))
         {
@@ -39,12 +28,36 @@ public class TreeView : IPageVisitor, IDisposable
     }
 
     public IDisposable On<TPage>(scoped ref NibblePath.Builder prefix, TPage page, DbAddress addr)
-        where TPage : unmanaged, IPage => Build(page.GetType().Name, addr);
+        where TPage : unmanaged, IPage =>
+        On(page, addr);
 
-    public IDisposable On<TPage>(TPage page, DbAddress addr) where TPage : unmanaged, IPage =>
-        Build(page.GetType().Name, addr);
+    public IDisposable On<TPage>(TPage page, DbAddress addr) where TPage : unmanaged, IPage
+    {
+        var name = page.GetType().Name;
+        var text = $"{name.Replace("Page", "")}, @{addr.Raw}, lvl: {page.AsPage().Header.Level}";
 
-    public IDisposable Scope(string name) => Build(name, null);
+        var p = page.AsPage();
+
+        if (typeof(TPage) == typeof(DataPage))
+        {
+            text += ReportUsage(p.Cast<DataPage>().Map);
+        }
+        else if (typeof(TPage) == typeof(LeafOverflowPage))
+        {
+            text += ReportUsage(p.Cast<LeafOverflowPage>().Map);
+        }
+
+        return BuildNode(text);
+
+        string ReportUsage(SlottedArray map)
+        {
+            var usage = map.CalculateActualSpaceUsed();
+            var report = $", Usage: {usage:P}";
+            return report;
+        }
+    }
+
+    public IDisposable Scope(string name) => BuildNode(name);
 
     public void Dispose() => _nodes.TryPop(out _);
 }

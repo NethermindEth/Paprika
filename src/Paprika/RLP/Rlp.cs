@@ -11,6 +11,7 @@ public static class Rlp
 {
     public const int LengthOfKeccakRlp = 33;
     public const int MaxLengthOfLength = 4;
+    public const int SmallPrefixBarrier = 56;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int LengthOf(in UInt256 item)
@@ -47,7 +48,7 @@ public static class Rlp
             return 1;
         }
 
-        if (span.Length < 56)
+        if (span.Length < SmallPrefixBarrier)
         {
             return span.Length + 1;
         }
@@ -57,7 +58,7 @@ public static class Rlp
 
     public static int LengthOfSequence(int contentLength)
     {
-        if (contentLength < 56)
+        if (contentLength < SmallPrefixBarrier)
         {
             return 1 + contentLength;
         }

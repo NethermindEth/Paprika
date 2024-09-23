@@ -470,7 +470,7 @@ public readonly ref struct NibblePath
         return appended;
     }
 
-    public byte FirstNibble => (byte)((_span >> ((1 - _odd) * NibbleShift)) & NibbleMask);
+    public byte Nibble0 => (byte)((_span >> ((1 - _odd) * NibbleShift)) & NibbleMask);
 
     private static int GetSpanLength(int odd, int length) => (length + 1 + odd) / 2;
 
