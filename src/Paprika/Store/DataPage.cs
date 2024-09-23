@@ -130,6 +130,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
 
             ref var payload = ref Unsafe.AsRef<Payload>(page.Payload);
             var map = new SlottedArray(payload.DataSpan);
+            var oddity = page.Header.Level % 2;
 
             if (page.Header.Metadata == Modes.Fanout)
             {
@@ -169,7 +170,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 }
 
                 // First, try to flush the existing
-                if (TryFindMostFrequentExistingNibble(k.Oddity, map, payload.Buckets, out var nibble))
+                if (TryFindMostFrequentExistingNibble(oddity, map, payload.Buckets, out var nibble))
                 {
                     childAddr = EnsureExistingChildWritable(batch, ref payload, nibble);
                     FlushDown(map, nibble, childAddr, batch);
@@ -179,7 +180,7 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 }
 
                 // None of the existing was flushable, find the most frequent one
-                nibble = FindMostFrequentNibble(k.Oddity, map);
+                nibble = FindMostFrequentNibble(oddity, map);
 
                 // Ensure that the child page exists
                 childAddr = payload.Buckets[nibble];
