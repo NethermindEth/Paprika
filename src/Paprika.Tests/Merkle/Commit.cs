@@ -28,6 +28,9 @@ public class Commit(bool skipMemoizedRlpCheck = false) : ICommit
     public void Set(in Key key, ReadOnlySpan<byte> value)
     {
         _before[GetKey(key)] = value.ToArray();
+        //to enable storage root calculation for tests
+        if (!key.IsState)
+            _stats.RegisterSetStorageAccount(key.Path.UnsafeAsKeccak);
     }
 
     public void DeleteKey(in Key key) => Set(key, ReadOnlySpan<byte>.Empty);

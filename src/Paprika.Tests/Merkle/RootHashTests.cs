@@ -88,6 +88,28 @@ public class RootHashTests(bool parallel)
         AssertRoot("a624947d9693a5cba0701897b3a48cb9954c2f4fd54de36151800eb2c7f6bf50", commit);
     }
 
+    [Test]
+    public void Extension_branch_two_short_leaves()
+    {
+        var commit = new Commit();
+
+        //create E->B->L
+        //           ->L
+        //leaves without any key and very small value cause to be inlined in branch
+        //encoded branch rlp is also < 32 bytes which causes it to be encoded as RLP in extension node
+        Keccak storageKey1 =
+            new Keccak(Convert.FromHexString("ccccccccccccccccccccddddddddddddddddeeeeeeeeeeeeeeeeeeeeeeeeeeb1"));
+        Keccak storageKey2 =
+            new Keccak(Convert.FromHexString("ccccccccccccccccccccddddddddddddddddeeeeeeeeeeeeeeeeeeeeeeeeeeb2"));
+
+        commit.Set(Key.Account(Values.Key0),
+            new Account(0, 1).WriteTo(stackalloc byte[Paprika.Account.MaxByteCount]));
+        commit.Set(Key.StorageCell(NibblePath.FromKey(Values.Key0), storageKey1), new byte[] { 1, 2, 3 });
+        commit.Set(Key.StorageCell(NibblePath.FromKey(Values.Key0), storageKey2), new byte[] { 10, 20, 30 });
+
+        AssertRoot("c8f9c9c3a0e95e13d6f6b7e0df65052a0cc484ab0db3e57c287df74f2714d5b3", commit);
+    }
+
     [TestCase(0, "7f7fd47a28dc4dbfd1b1b33d254da8be74deab55bef81a02c232ca9957e05689", TestName = "From the Root")]
     [TestCase(Keccak.Size - 2, "d8fc42b5f9491f526d0935445e9b83d8ddde46978cc450a6d1f83351da1bfae2",
         TestName = "At the bottom")]
