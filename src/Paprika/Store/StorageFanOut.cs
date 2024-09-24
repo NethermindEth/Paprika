@@ -205,7 +205,7 @@ public static class StorageFanOut
             }
 
             // update after set
-            addr = batch.GetAddress(WrapStoragePage(batch.GetAt(addr)).DeleteByPrefix(sliced, batch)));
+            addr = batch.GetAddress(WrapStoragePage(batch.GetAt(addr)).DeleteByPrefix(sliced, batch));
             Data.Storage[index] = addr;
 
             return page;
