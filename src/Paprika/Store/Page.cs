@@ -24,6 +24,8 @@ public interface IPageWithData<TPage> : IPage
     /// </summary>
     static abstract TPage Wrap(Page page);
 
+    void Clear();
+
     bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result);
 
     /// <summary>
@@ -95,7 +97,7 @@ public struct PageHeader
 /// </summary>
 public readonly unsafe struct Page : IPage, IEquatable<Page>
 {
-    public const int PageSize = 8 * 1024;
+    public const int PageSize = 4 * 1024;
 
     private readonly byte* _ptr;
 
