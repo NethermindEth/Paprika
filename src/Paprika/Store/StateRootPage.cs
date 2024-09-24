@@ -7,7 +7,7 @@ using Paprika.Merkle;
 namespace Paprika.Store;
 
 [method: DebuggerStepThrough]
-public readonly unsafe struct StateRootPage(Page page) : IPageWithData<StateRootPage>
+public readonly unsafe struct StateRootPage(Page page) : IPage
 {
     public static StateRootPage Wrap(Page page) => Unsafe.As<Page, StateRootPage>(ref page);
 

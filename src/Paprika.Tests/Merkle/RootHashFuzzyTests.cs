@@ -74,7 +74,7 @@ public class RootHashFuzzyTests
     {
         var generator = Build(test);
 
-        using var db = PagedDb.NativeMemoryDb(16 * 1024 * 1024, 2);
+        using var db = PagedDb.NativeMemoryDb(32 * 1024 * 1024, 2);
         var parallelism = parallel ? ComputeMerkleBehavior.ParallelismUnlimited : ComputeMerkleBehavior.ParallelismNone;
         var merkle = new ComputeMerkleBehavior(parallelism);
 
@@ -116,13 +116,13 @@ public class RootHashFuzzyTests
         //AnsiConsole.Write(visitor.Tree);
     }
 
-    [TestCase(nameof(Accounts_10_000), 64 * 1024 * 1024UL)]
-    [TestCase(nameof(Accounts_1_000_000), 1024 * 1024 * 1024UL, Category = Categories.LongRunning)]
-    public async Task CalculateThenDelete(string test, ulong size)
+    [TestCase(nameof(Accounts_10_000), 256 * 1024 * 1024L)]
+    [TestCase(nameof(Accounts_1_000_000), 2 * 1024 * 1024 * 1024L, Category = Categories.LongRunning)]
+    public async Task CalculateThenDelete(string test, long size)
     {
         var generator = Build(test);
 
-        using var db = PagedDb.NativeMemoryDb(1024 * 1024 * 1024, 2);
+        using var db = PagedDb.NativeMemoryDb(size, 2);
         using var merkle = new ComputeMerkleBehavior(ComputeMerkleBehavior.ParallelismNone);
         await using var blockchain = new Blockchain(db, merkle, null, new CacheBudget.Options(2000, 4),
             new CacheBudget.Options(2000, 4));
