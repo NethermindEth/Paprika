@@ -3,6 +3,14 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
 
+// The definition what kind of page is used on Level2
+#if !USE_BIG_FANOUT
+using Level2 = Paprika.Store.DataPage;
+#else
+using Level2 = Paprika.Store.StorageFanOut.Level2Page;
+#endif
+
+
 namespace Paprika.Store;
 
 /// <summary>
@@ -158,10 +166,8 @@ public static class StorageFanOut
 
             return type == Type.Id
                 ? DataPage.Wrap(p).TryGet(batch, sliced, out result)
-                : WrapStoragePage(p).TryGet(batch, sliced, out result);
+                : Level2.Wrap(p).TryGet(batch, sliced, out result);
         }
-
-        private static Level2Page WrapStoragePage(Page p) => Level2Page.Wrap(p);
 
         public Page Set(in NibblePath key, Type type, in ReadOnlySpan<byte> data, IBatchContext batch)
         {
@@ -180,7 +186,7 @@ public static class StorageFanOut
             }
             else
             {
-                Set<DbAddressList.Of1024, Level2Page>(ref Data.Storage, index, sliced, data, batch, Level1ConsumedNibblesForStorage);
+                Set<DbAddressList.Of1024, Level2>(ref Data.Storage, index, sliced, data, batch, Level1ConsumedNibblesForStorage);
             }
 
             return page;
@@ -205,7 +211,7 @@ public static class StorageFanOut
             }
 
             // update after set
-            addr = batch.GetAddress(WrapStoragePage(batch.GetAt(addr)).DeleteByPrefix(sliced, batch));
+            addr = batch.GetAddress(Level2.Wrap(batch.GetAt(addr)).DeleteByPrefix(sliced, batch));
             Data.Storage[index] = addr;
 
             return page;
@@ -317,7 +323,7 @@ public static class StorageFanOut
                             builder.Push((byte)((i >> NibblePath.NibbleShift) & NibblePath.NibbleMask));
                             builder.Push((byte)((i >> NibbleHalfShift) & NibblePath.NibbleMask));
 
-                            WrapStoragePage(resolver.GetAt(bucket)).Accept(ref builder, visitor, resolver, bucket);
+                            Level2.Wrap(resolver.GetAt(bucket)).Accept(ref builder, visitor, resolver, bucket);
 
                             builder.Pop(3);
                         }
@@ -352,7 +358,7 @@ public static class StorageFanOut
     /// </summary>
     /// <param name="page"></param>
     [method: DebuggerStepThrough]
-    private readonly unsafe struct Level2Page(Page page) : IPageWithData<Level2Page>
+    public readonly unsafe struct Level2Page(Page page) : IPageWithData<Level2Page>
     {
         public static Level2Page Wrap(Page page) => Unsafe.As<Page, Level2Page>(ref page);
 
