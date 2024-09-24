@@ -73,7 +73,7 @@ public interface IBatchContext : IReadOnlyBatchContext
 
     BatchStats? Stats { get; }
 
-    public unsafe Page NullPage => new Page((byte*)0);
+    public unsafe Page NullPage => new Page(GetAt(DbAddress.Null));
 }
 
 public class BatchStats : IBatchStats
