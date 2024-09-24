@@ -62,8 +62,10 @@ public class PageStructurePrintingTests
         }
     }
 
-    [Test]
-    public async Task Merkle_storage_account()
+    [TestCase(400_000)]
+    [TestCase(300_000)]
+    [TestCase(200_000)]
+    public async Task Merkle_one_big_storage_account(int storageSlots)
     {
         var account = Keccak.EmptyTreeHash;
 
@@ -71,11 +73,11 @@ public class PageStructurePrintingTests
 
         await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
 
-        const int storageSlots = 400_000;
-
         var value = new byte[32];
 
-        var random = new Random(13);
+        const int seed = 13;
+
+        var random = new Random(seed);
         random.NextBytes(value);
 
         using var block = blockchain.StartNew(Keccak.EmptyTreeHash);
@@ -90,6 +92,13 @@ public class PageStructurePrintingTests
         var commit = block.Commit(1);
         blockchain.Finalize(commit);
         await blockchain.WaitTillFlush(1);
+
+        // Assert
+        using var read = db.BeginReadOnlyBatch();
+        for (var slot = 0; slot < storageSlots; slot++)
+        {
+            read.AssertStorageValue(account, GetStorageAddress(slot), value);
+        }
 
         var view = new TreeView(db);
         db.VisitRoot(view);

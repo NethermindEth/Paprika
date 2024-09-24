@@ -174,6 +174,8 @@ public static class TestExtensions
         return keccak;
     }
 
+    public static byte NextByte(this Random random) => (byte)random.Next(0, byte.MaxValue);
+
     public static Task WaitTillFlush(this Blockchain chain, uint blockNumber)
     {
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
