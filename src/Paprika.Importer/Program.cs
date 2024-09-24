@@ -81,7 +81,7 @@ var dataPath = Path.Combine(dir, "db");
 var dbExists = Directory.Exists(dataPath);
 
 const long GB = 1024 * 1024 * 1024;
-var size = (path.Contains("mainnet") ? 256L : 64L) * GB;
+var size = (path.Contains("mainnet") ? 512L : 64L) * GB;
 
 if (dbExists)
 {
@@ -125,7 +125,7 @@ var reportingTask = Task.Run(() => AnsiConsole.Live(dbExists ? layout.GetLayout(
 var sw = Stopwatch.StartNew();
 
 //using var db = new Db(dataPath, 64, size, sync: false);
-using var db = PagedDb.MemoryMappedDb(size, 64, dataPath, false);
+using var db = PagedDb.MemoryMappedDb(size, 32, dataPath, false);
 
 const bool skipStorage = false;
 
