@@ -476,7 +476,18 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         path.Length == 1 && ShouldKeepShortKeyLocal(path.Nibble0);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static bool ShouldKeepShortKeyLocal(byte nibble) => nibble % 2 == 0;
+    private static bool ShouldKeepShortKeyLocal(byte nibble)
+    {
+        // The criterion whether the given nibble should be kept local or not.
+
+        // How much of the page should be occupied by branches inlined from below, in percents.
+        const int maxOccupationPercentage = 50;
+        const int fullMerkleBranchEstimation = 512;
+        const int inlinedBranchesPerPage = Page.PageSize / fullMerkleBranchEstimation * maxOccupationPercentage / 100;
+        const int saveEveryNthBranch = BucketCount / inlinedBranchesPerPage;
+
+        return nibble % saveEveryNthBranch == 0;
+    }
 
     /// <summary>
     /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
