@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.InteropServices;
 using Paprika.Crypto;
 
 namespace Paprika.Store;
@@ -126,29 +127,21 @@ public interface IPageResolver
     /// </summary>
     Page GetAt(DbAddress address);
 
-    void Prefetch(DbAddress address);
+    void Prefetch(DbAddress address) => Prefetch(MemoryMarshal.CreateReadOnlySpan(ref address, 1));
 
-    void Prefetch(ReadOnlySpan<DbAddress> addresses)
-    {
-        foreach (var bucket in addresses)
-        {
-            if (!bucket.IsNull)
-            {
-                Prefetch(bucket);
-            }
-        }
-    }
+    void Prefetch(ReadOnlySpan<DbAddress> addresses);
 
     void Prefetch<TAddressList>(in TAddressList addresses)
         where TAddressList : struct, DbAddressList.IDbAddressList
     {
+        Span<DbAddress> span = stackalloc DbAddress[TAddressList.Length];
+
+        // Copy all
         for (var i = 0; i < TAddressList.Length; i++)
         {
-            var addr = addresses[i];
-            if (!addr.IsNull)
-            {
-                Prefetch(addr);
-            }
+            span[i] = addresses[i];
         }
+
+        Prefetch(span);
     }
 }

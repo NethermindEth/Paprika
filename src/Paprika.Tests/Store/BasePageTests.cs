@@ -27,8 +27,9 @@ public abstract class BasePageTests
 
         public override Page GetAt(DbAddress address) => _address2Page[address];
 
-        public override void Prefetch(DbAddress address)
-        { }
+        public override void Prefetch(ReadOnlySpan<DbAddress> addresses)
+        {
+        }
 
         public override DbAddress GetAddress(Page page) => _page2Address[page.Raw];
 
