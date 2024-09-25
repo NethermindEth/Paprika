@@ -606,6 +606,13 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                     continue;
                 }
 
+                // prefetch
+                var next = i + 1;
+                if (next < DbAddressList.Of16.Count)
+                {
+                    resolver.Prefetch(Data.Buckets[next]);
+                }
+
                 var child = resolver.GetAt(bucket);
 
                 if (IsFanOut)

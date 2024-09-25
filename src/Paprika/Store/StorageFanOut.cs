@@ -479,13 +479,19 @@ public static class StorageFanOut
 
         public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
         {
-            resolver.Prefetch(Data.Addresses);
-
             using var scope = visitor.On(this, addr);
 
             for (var i = 0; i < DbAddressList.Of256.Length; i++)
             {
                 var bucket = Data.Addresses[i];
+
+                // prefetch next
+                var next = i + 1;
+                if (next < DbAddressList.Of256.Count)
+                {
+                    resolver.Prefetch(Data.Addresses[next]);
+                }
+
                 if (!bucket.IsNull)
                 {
                     builder.Push((byte)(i >> NibblePath.NibbleShift), (byte)(i & NibblePath.NibbleMask));
