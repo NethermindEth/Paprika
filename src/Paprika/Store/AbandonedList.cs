@@ -139,6 +139,13 @@ public struct AbandonedList
 
         if (current.TryPop(out reused))
         {
+            // Schedule prefetching next if possible
+            if (current.TryPeek(out var next, out _))
+            {
+                Debug.Assert(next.IsNull == false, "Next should not be NULL here");
+                batch.Prefetch(next);
+            }
+
             return true;
         }
 
