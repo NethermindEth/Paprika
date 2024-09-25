@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
 
@@ -131,6 +132,7 @@ public interface IPageResolver
 
     void Prefetch(ReadOnlySpan<DbAddress> addresses);
 
+    [SkipLocalsInit]
     void Prefetch<TAddressList>(in TAddressList addresses)
         where TAddressList : struct, DbAddressList.IDbAddressList
     {
