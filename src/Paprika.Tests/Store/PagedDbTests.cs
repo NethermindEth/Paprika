@@ -279,7 +279,7 @@ public class PagedDbTests
             // stats.AbandonedCount.Should().BeGreaterThan(0);
             stats.Ids.PageCount.Should().BeGreaterThan(0);
             stats.Storage.PageCount.Should().BeGreaterThan(0);
-            stats.Storage.PageCountPerNibblePathDepth[StorageFanOut.StorageConsumedNibbles].Should().Be(size);
+            stats.Storage.PageCountPerNibblePathDepth[0].Should().Be(size);
         }
     }
 

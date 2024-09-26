@@ -12,7 +12,6 @@ namespace Paprika.Store;
 /// </summary>
 public static class StorageFanOut
 {
-    public const int StorageConsumedNibbles = Level0.ConsumedNibbles + Level1Page.Level1ConsumedNibblesForStorage;
     public const string ScopeIds = "Ids";
     public const string ScopeStorage = "Storage";
 
@@ -65,7 +64,7 @@ public static class StorageFanOut
                 _addresses[index] = addr;
 
                 newPage.Header.PageType = PageType.FanOutPage;
-                newPage.Header.Level = ConsumedNibbles;
+                newPage.Header.Level = 0;
 
                 Level1Page.Wrap(newPage).Set(next, key, type, data, batch);
                 return;
@@ -78,8 +77,6 @@ public static class StorageFanOut
 
         private static (uint next, int index) GetIndex(uint at) =>
             ((uint next, int index))Math.DivRem(at, DbAddressList.Of1024.Length);
-
-        public const int ConsumedNibbles = 2;
 
         public void Accept(IPageVisitor visitor, IPageResolver resolver)
         {
@@ -281,16 +278,6 @@ public static class StorageFanOut
             return page;
         }
 
-        /// <summary>
-        /// This is effectively 0.5 of the nibble as the 1.5 is consumed on the higher level.
-        /// </summary>
-        private const int Level1ConsumedNibblesForIds = 1;
-
-        /// <summary>
-        /// This is effectively 1.5 of the nibble as the 1.5 is consumed on the higher level.
-        /// </summary>
-        public const int Level1ConsumedNibblesForStorage = 3;
-
         public void Accept(IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
         {
             var builder = new NibblePath.Builder(stackalloc byte[NibblePath.Builder.DecentSize]);
@@ -370,9 +357,6 @@ public static class StorageFanOut
 
             return Level3Page.Wrap(batch.GetAt(addr)).TryGet(batch, next, key, out result);
         }
-
-        private static int GetIndex(scoped in NibblePath key) =>
-            (key.Nibble0 << NibblePath.NibbleShift) + key.GetAt(1);
 
         public Page Set(uint at, in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
         {
