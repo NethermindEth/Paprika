@@ -486,6 +486,7 @@ public static class StorageFanOut
             for (var i = 0; i < DbAddressList.Of256.Length; i++)
             {
                 var bucket = Data.Addresses[i];
+
                 if (!bucket.IsNull)
                 {
                     builder.Push((byte)(i >> NibblePath.NibbleShift), (byte)(i & NibblePath.NibbleMask));
