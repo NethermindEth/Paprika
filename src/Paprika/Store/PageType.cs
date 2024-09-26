@@ -25,7 +25,7 @@ public enum PageType : byte
     LeafOverflow = 4,
 
     /// <summary>
-    /// <see cref="StorageFanOut.Level1Page"/>
+    /// <see cref="StorageFanOut"/>
     /// </summary>
     FanOutPage = 5,
 }

@@ -115,30 +115,24 @@ public readonly unsafe struct RootPage(Page root) : IPage
             return new StateRootPage(batch.GetAt(Data.StateRoot)).TryGet(batch, key.Path, out result);
         }
 
-        Span<byte> idSpan = stackalloc byte[sizeof(uint)];
-
-        ReadOnlySpan<byte> id;
         var cache = batch.IdCache;
         var keccak = key.Path.UnsafeAsKeccak;
 
-        if (cache.TryGetValue(keccak, out var cachedId))
+        if (cache.TryGetValue(keccak, out var id))
         {
-            if (cachedId == 0)
+            if (id == 0)
             {
                 result = default;
                 return false;
             }
-
-            WriteId(idSpan, cachedId);
-            id = idSpan;
         }
         else
         {
-            if (Data.Storage.TryGet(batch, key.Path, StorageFanOut.Type.Id, out id))
+            if (Data.Storage.TryGetId(keccak, out id, batch))
             {
                 if (cache.Count < IdCacheLimit)
                 {
-                    cache[keccak] = ReadId(id);
+                    cache[keccak] = id;
                 }
             }
             else
@@ -150,12 +144,8 @@ public readonly unsafe struct RootPage(Page root) : IPage
             }
         }
 
-        var path = NibblePath.FromKey(id).Append(key.StoragePath, stackalloc byte[StorageKeySize]);
-
-        return Data.Storage.TryGet(batch, path, StorageFanOut.Type.Storage, out result);
+        return Data.Storage.TryGetStorage(id, key.StoragePath, out result, batch);
     }
-
-    private static uint ReadId(ReadOnlySpan<byte> id) => BinaryPrimitives.ReadUInt32LittleEndian(id);
 
     private static void WriteId(Span<byte> idSpan, uint id)
     {
@@ -178,42 +168,29 @@ public readonly unsafe struct RootPage(Page root) : IPage
         }
         else
         {
-            scoped NibblePath id;
-            Span<byte> idSpan = stackalloc byte[sizeof(uint)];
-
             var keccak = key.Path.UnsafeAsKeccak;
 
-            if (batch.IdCache.TryGetValue(keccak, out var cachedId))
-            {
-                WriteId(idSpan, cachedId);
-                id = NibblePath.FromKey(idSpan);
-            }
-            else
+            if (batch.IdCache.TryGetValue(keccak, out var id) == false)
             {
                 // try fetch existing first
-                if (Data.Storage.TryGet(batch, key.Path, StorageFanOut.Type.Id, out var existingId) == false)
+                if (Data.Storage.TryGetId(keccak, out id, batch) == false)
                 {
                     Data.AccountCounter++;
-                    WriteId(idSpan, Data.AccountCounter);
 
                     // memoize in cache
-                    batch.IdCache[keccak] = Data.AccountCounter;
+                    batch.IdCache[keccak] = id = Data.AccountCounter;
 
                     // update root
-                    Data.Storage.Set(key.Path, StorageFanOut.Type.Id, idSpan, batch);
-
-                    id = NibblePath.FromKey(idSpan);
+                    Data.Storage.SetId(keccak, id, batch);
                 }
                 else
                 {
                     // memoize in cache
-                    batch.IdCache[keccak] = ReadId(existingId);
-                    id = NibblePath.FromKey(existingId);
+                    batch.IdCache[keccak] = id;
                 }
             }
 
-            var path = id.Append(key.StoragePath, stackalloc byte[StorageKeySize]);
-            Data.Storage.Set(path, StorageFanOut.Type.Storage, rawData, batch);
+            Data.Storage.SetStorage(id, key.StoragePath, rawData, batch);
         }
     }
 
@@ -222,14 +199,16 @@ public readonly unsafe struct RootPage(Page root) : IPage
         // GC for storage
         DeleteByPrefix(Key.Merkle(account), batch);
 
+        var keccak = account.UnsafeAsKeccak;
+
         // Destroy the Id entry about it
-        Data.Storage.Set(account, StorageFanOut.Type.Id, ReadOnlySpan<byte>.Empty, batch);
+        Data.Storage.SetId(keccak, 0, batch);
 
         // Destroy the account entry
         SetAtRoot(batch, account, ReadOnlySpan<byte>.Empty, ref Data.StateRoot);
 
         // Remove the cached
-        batch.IdCache.Remove(account.UnsafeAsKeccak);
+        batch.IdCache.Remove(keccak);
     }
 
     public void DeleteByPrefix(in Key prefix, IBatchContext batch)
@@ -242,32 +221,19 @@ public readonly unsafe struct RootPage(Page root) : IPage
         }
         else
         {
-            scoped NibblePath id;
-            Span<byte> idSpan = stackalloc byte[sizeof(uint)];
-
             var keccak = prefix.Path.UnsafeAsKeccak;
 
-            if (batch.IdCache.TryGetValue(keccak, out var cachedId))
-            {
-                WriteId(idSpan, cachedId);
-                id = NibblePath.FromKey(idSpan);
-            }
-            else
+            if (batch.IdCache.TryGetValue(keccak, out var id) == false)
             {
                 // Not in cache, try fetch from db
-                if (Data.Storage.TryGet(batch, prefix.Path, StorageFanOut.Type.Id, out var existingId) != false)
-                {
-                    id = NibblePath.FromKey(existingId);
-                }
-                else
+                if (Data.Storage.TryGetId(keccak, out id, batch) == false)
                 {
                     // Has never been mapped, return.
                     return;
                 }
             }
 
-            var path = id.Append(prefix.StoragePath, stackalloc byte[StorageKeySize]);
-            Data.Storage.DeleteByPrefix(path, batch);
+            Data.Storage.DeleteStorageByPrefix(id, prefix.StoragePath, batch);
         }
     }
 
