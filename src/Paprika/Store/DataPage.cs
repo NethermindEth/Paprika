@@ -16,7 +16,7 @@ namespace Paprika.Store;
 /// in the parent page, or they are flushed underneath.
 /// </remarks>
 [method: DebuggerStepThrough]
-public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, IClearable
+public readonly unsafe struct DataPage(Page page) : IPage, IClearable
 {
     private const int ConsumedNibbles = 1;
     private const int BucketCount = DbAddressList.Of16.Count;
