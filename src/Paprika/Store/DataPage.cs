@@ -520,10 +520,10 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
         public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
     }
 
-    public bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
+    public bool TryGet(IPageResolver batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
         => TryGet(batch, key, out result, this);
 
-    private static bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result,
+    private static bool TryGet(IPageResolver batch, scoped in NibblePath key, out ReadOnlySpan<byte> result,
         DataPage page)
     {
         var returnValue = false;
@@ -531,8 +531,6 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
 
         do
         {
-            batch.AssertRead(page.Header);
-
             if (page.Header.Metadata == Modes.Leaf)
             {
                 if (page.Map.TryGet(sliced, out result))

@@ -70,7 +70,7 @@ public static class StorageFanOut
         private const int Level = 0;
         private readonly ref DbAddressList.Of1024 _addresses = ref addresses;
 
-        private bool TryGet(IReadOnlyBatchContext batch, uint at, scoped in NibblePath key, Type type,
+        private bool TryGet(IPageResolver batch, uint at, scoped in NibblePath key, Type type,
             out ReadOnlySpan<byte> result)
         {
             var (next, index) = GetIndex(at, Level);
@@ -122,7 +122,7 @@ public static class StorageFanOut
             }
         }
 
-        public bool TryGetId(in Keccak keccak, out uint id, IReadOnlyBatchContext batch)
+        public bool TryGetId(in Keccak keccak, out uint id, IPageResolver batch)
         {
             var at = BuildIdIndex(NibblePath.FromKey(keccak), out var sliced);
 
@@ -214,11 +214,9 @@ public static class StorageFanOut
 
         private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
 
-        public bool TryGet(IReadOnlyBatchContext batch, uint at, scoped in NibblePath key, Type type,
+        public bool TryGet(IPageResolver batch, uint at, scoped in NibblePath key, Type type,
             out ReadOnlySpan<byte> result)
         {
-            batch.AssertRead(Header);
-
             DbAddress addr;
 
             if (type == Type.Id)
@@ -383,7 +381,7 @@ public static class StorageFanOut
         private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
 
 
-        public bool TryGet(IReadOnlyBatchContext batch, uint at, scoped in NibblePath key,
+        public bool TryGet(IPageResolver batch, uint at, scoped in NibblePath key,
             out ReadOnlySpan<byte> result)
         {
             var (next, index) = GetIndex(at, Level);
@@ -490,7 +488,7 @@ public static class StorageFanOut
             }
         }
 
-        public bool TryGet(IReadOnlyBatchContext batch, uint at, in NibblePath key, out ReadOnlySpan<byte> result)
+        public bool TryGet(IPageResolver batch, uint at, in NibblePath key, out ReadOnlySpan<byte> result)
         {
             return Data.Buckets[(int)at].TryGet(batch, key, out result);
         }
@@ -551,7 +549,7 @@ public static class StorageFanOut
                 Map.Clear();
             }
 
-            public bool TryGet(IReadOnlyBatchContext batch, in NibblePath key, out ReadOnlySpan<byte> result)
+            public bool TryGet(IPageResolver batch, in NibblePath key, out ReadOnlySpan<byte> result)
             {
                 if (Map.TryGet(key, out result))
                 {
@@ -622,11 +620,24 @@ public static class StorageFanOut
 
                 new DataPage(resolver.GetAt(Root)).Accept(ref builder, visitor, resolver, Root);
             }
+
+            public void Prefetch(IPageResolver resolver)
+            {
+                if (Root.IsNull)
+                    return;
+
+                resolver.Prefetch(Root);
+            }
         }
 
         public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
         {
             using var scope = visitor.On(ref builder, this, addr);
+
+            foreach (ref var bucket in Data.Buckets)
+            {
+                bucket.Prefetch(resolver);
+            }
 
             foreach (ref var bucket in Data.Buckets)
             {
