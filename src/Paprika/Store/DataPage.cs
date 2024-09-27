@@ -596,6 +596,8 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
 
     public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
+        resolver.Prefetch(Data.Buckets);
+
         using (visitor.On(ref builder, this, addr))
         {
             for (byte i = 0; i < DbAddressList.Of16.Count; i++)
@@ -604,13 +606,6 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
                 if (bucket.IsNull)
                 {
                     continue;
-                }
-
-                // prefetch
-                var next = i + 1;
-                if (next < DbAddressList.Of16.Count)
-                {
-                    resolver.Prefetch(Data.Buckets[next]);
                 }
 
                 var child = resolver.GetAt(bucket);

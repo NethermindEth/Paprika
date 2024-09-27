@@ -12,11 +12,26 @@ public static class StatisticsForPagedDb
 {
     public static void Report(Layout reportTo, IVisitable read, IPageResolver resolver)
     {
-        reportTo.Update(new Panel("Gathering statistics...").Header("Paprika tree statistics").Expand());
+        const string txt = "Gathering statistics...";
+        const string header = "Paprika tree statistics";
+        reportTo.Update(new Panel(txt).Header(header).Expand());
 
         try
         {
             var stats = new StatisticsVisitor(resolver);
+
+            stats.TotalVisitedChanged += (_, __) =>
+            {
+                var total = stats.TotalVisited;
+                const long pagePer128MB = 128 * 1024 * 1024 / Page.PageSize;
+
+                if (total % pagePer128MB == 0)
+                {
+                    var size = Page.FormatAsGb(total);
+                    reportTo.Update(new Panel($"{txt} Analyzed so far: {size}").Header(header).Expand());
+                }
+            };
+
             read.Accept(stats);
 
             var report = new Layout()
@@ -33,7 +48,7 @@ public static class StatisticsForPagedDb
                             "")).Header("Other stats").Expand())
                 );
 
-            reportTo.Update(new Panel(report).Header("Paprika tree statistics").Expand());
+            reportTo.Update(new Panel(report).Header(header).Expand());
         }
         catch (Exception e)
         {
@@ -43,7 +58,7 @@ public static class StatisticsForPagedDb
             paragraph.Append(e.Message, style);
             paragraph.Append(e.StackTrace!, style);
 
-            reportTo.Update(new Panel(paragraph).Header("Paprika tree statistics").Expand());
+            reportTo.Update(new Panel(paragraph).Header(header).Expand());
         }
     }
 
