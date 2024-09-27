@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
@@ -8,7 +9,17 @@ using Paprika.Data;
 namespace Paprika.Store;
 
 /// <summary>
-/// Components responsible for fanning out storage heavily. This means both, id mapping as well as the actual storage.
+/// This class is responsible for proving a good fan out for both:
+/// 1. <see cref="Keccak"/> -> <see cref="uint"/> mapping needed to map contracts to their identifiers
+/// 2. <see cref="uint"/> identifiers to <see cref="Level3Page"/> that provide the top of the tree for a given contract
+///
+/// This is done in two different ways. For identifiers, the biggest possible fan out is used
+/// consuming <see cref="Level0.IdConsumedNibbles"/> from the keccak and moving it to the upper bits of the <see cref="uint"/>.
+/// This distributes hashes of addresses to 64k buckets.
+///
+/// For storage, the identifier is kept as low as possible (counting from 0), meaning,
+/// that the highest bits will be used only for large networks. This makes it small on upper levels but ensures
+/// that on lower levels will distribute nicely. It still ensures a good fan out that does not blow up with the number of pages occupied.
 /// </summary>
 public static class StorageFanOut
 {
@@ -28,6 +39,27 @@ public static class StorageFanOut
         Storage
     }
 
+    private static (uint next, int index) GetIndex(uint at, int level)
+    {
+        const int length = DbAddressList.Of1024.Count;
+        const int lengthMask = length - 1;
+        var lengthBits = BitOperations.Log2(length);
+
+        // Always extract from top bits to low, so for level 0 it will be (21, 31] etc
+
+        const int bitsInUint = sizeof(uint) * 8;
+        var shift = bitsInUint - (level + 1) * lengthBits;
+
+        var index = (int)((at >> shift) & lengthMask);
+
+        Debug.Assert(0 <= index && index < length);
+
+        var nextMask = (1U << shift) - 1;
+        var next = nextMask & at;
+
+        return (next, index);
+    }
+
     /// <summary>
     /// Provides a convenient data structure for <see cref="RootPage"/>,
     /// to hold a list of child addresses of <see cref="DbAddressList.IDbAddressList"/> but with addition of
@@ -35,12 +67,13 @@ public static class StorageFanOut
     /// </summary>
     public readonly ref struct Level0(ref DbAddressList.Of1024 addresses)
     {
+        private const int Level = 0;
         private readonly ref DbAddressList.Of1024 _addresses = ref addresses;
 
         private bool TryGet(IReadOnlyBatchContext batch, uint at, scoped in NibblePath key, Type type,
             out ReadOnlySpan<byte> result)
         {
-            var (next, index) = GetIndex(at);
+            var (next, index) = GetIndex(at, Level);
 
             var addr = _addresses[index];
             if (addr.IsNull)
@@ -55,7 +88,7 @@ public static class StorageFanOut
 
         private void Set(IBatchContext batch, uint at, in NibblePath key, Type type, in ReadOnlySpan<byte> data)
         {
-            var (next, index) = GetIndex(at);
+            var (next, index) = GetIndex(at, Level);
             var addr = _addresses[index];
 
             if (addr.IsNull)
@@ -74,9 +107,6 @@ public static class StorageFanOut
             var updated = Level1Page.Wrap(batch.GetAt(addr)).Set(next, key, type, data, batch);
             _addresses[index] = batch.GetAddress(updated);
         }
-
-        private static (uint next, int index) GetIndex(uint at) =>
-            ((uint next, int index))Math.DivRem(at, DbAddressList.Of1024.Length);
 
         public void Accept(IPageVisitor visitor, IPageResolver resolver)
         {
@@ -116,20 +146,31 @@ public static class StorageFanOut
             Set(batch, at, sliced, Type.Id, span);
         }
 
+        // Id encoding
+        private const int IdConsumedNibbles = 4;
+        private const int IdNibblesToShiftUp = NibblePath.NibblePerByte * sizeof(uint) - IdConsumedNibbles;
+        private const int IdShift = IdNibblesToShiftUp * NibblePath.NibbleShift;
+
         private static uint BuildIdIndex(in NibblePath path, out NibblePath sliced)
         {
             // Combined 1024 at level0 + 64 at level 1 for 
             Debug.Assert(DbAddressList.Of1024.Length * DbAddressList.Of64.Length == 16 * 16 * 16 * 16,
                 "Should combine properly");
 
-            sliced = path.SliceFrom(4);
+            sliced = path.SliceFrom(IdConsumedNibbles);
 
-            return (uint)
-                ((path.Nibble0 << (NibblePath.NibbleShift * 3)) +
-                 (path.GetAt(1) << (NibblePath.NibbleShift * 2)) +
-                 (path.GetAt(2) << (NibblePath.NibbleShift * 1)) +
-                 path.GetAt(3));
+            var combined = (path.Nibble0 << (NibblePath.NibbleShift * 3)) +
+                     (path.GetAt(1) << (NibblePath.NibbleShift * 2)) +
+                     (path.GetAt(2) << (NibblePath.NibbleShift * 1)) +
+                     path.GetAt(IdConsumedNibbles - 1);
+
+            return (uint)combined << IdShift;
         }
+
+        /// <summary>
+        /// A counterpart to <see cref="BuildIdIndex"/>.
+        /// </summary>
+        public static int NormalizeAtForId(uint at) => (int)(at >> IdShift);
 
         public bool TryGetStorage(uint id, scoped in NibblePath path, out ReadOnlySpan<byte> result,
             IReadOnlyBatchContext batch) =>
@@ -142,7 +183,7 @@ public static class StorageFanOut
 
         public void DeleteStorageByPrefix(uint id, scoped in NibblePath prefix, IBatchContext batch)
         {
-            var (next, index) = GetIndex(id);
+            var (next, index) = GetIndex(id, Level);
             var addr = _addresses[index];
 
             if (addr.IsNull)
@@ -165,6 +206,8 @@ public static class StorageFanOut
     [method: DebuggerStepThrough]
     private readonly unsafe struct Level1Page(Page page) : IPage
     {
+        private const int Level = 1;
+
         public static Level1Page Wrap(Page page) => Unsafe.As<Page, Level1Page>(ref page);
 
         private ref PageHeader Header => ref page.Header;
@@ -180,7 +223,7 @@ public static class StorageFanOut
 
             if (type == Type.Id)
             {
-                addr = Data.Ids[(int)at];
+                addr = Data.Ids[Level0.NormalizeAtForId(at)];
                 if (addr.IsNull)
                 {
                     result = default;
@@ -192,7 +235,7 @@ public static class StorageFanOut
 
             Debug.Assert(type == Type.Storage);
 
-            var (next, index) = GetStorageIndex(at);
+            var (next, index) = GetIndex(at, Level);
             addr = Data.Storage[index];
 
             if (addr.IsNull)
@@ -204,8 +247,6 @@ public static class StorageFanOut
             return Level2Page.Wrap(batch.GetAt(addr)).TryGet(batch, next, key, out result);
         }
 
-        private static (uint next, int index) GetStorageIndex(uint at) =>
-            ((uint next, int index))Math.DivRem(at, DbAddressList.Of1024.Length);
 
         public Page Set(uint at, in NibblePath key, Type type, in ReadOnlySpan<byte> data, IBatchContext batch)
         {
@@ -220,7 +261,7 @@ public static class StorageFanOut
 
             if (type == Type.Id)
             {
-                addr = Data.Ids[(int)at];
+                addr = Data.Ids[Level0.NormalizeAtForId(at)];
                 if (addr.IsNull)
                 {
                     var p = batch.GetNewPage(out addr, false);
@@ -230,13 +271,13 @@ public static class StorageFanOut
                     new DataPage(p).Clear();
                 }
 
-                Data.Ids[(int)at] = batch.GetAddress(DataPage.Wrap(batch.GetAt(addr)).Set(key, data, batch));
+                Data.Ids[Level0.NormalizeAtForId(at)] = batch.GetAddress(DataPage.Wrap(batch.GetAt(addr)).Set(key, data, batch));
                 return page;
             }
 
             Debug.Assert(type == Type.Storage);
 
-            var (next, index) = GetStorageIndex(at);
+            var (next, index) = GetIndex(at, Level);
             addr = Data.Storage[index];
 
             if (addr.IsNull)
@@ -248,7 +289,7 @@ public static class StorageFanOut
                 ids.Clear();
             }
 
-            Data.Storage[(int)at] = batch.GetAddress(Level2Page.Wrap(batch.GetAt(addr)).Set(next, key, data, batch));
+            Data.Storage[index] = batch.GetAddress(Level2Page.Wrap(batch.GetAt(addr)).Set(next, key, data, batch));
 
             return page;
         }
@@ -262,7 +303,7 @@ public static class StorageFanOut
                 return new Level1Page(writable).DeleteByPrefix(at, prefix, batch);
             }
 
-            var (next, index) = GetStorageIndex(at);
+            var (next, index) = GetIndex(at, Level);
 
             var addr = Data.Storage[index];
 
@@ -332,6 +373,7 @@ public static class StorageFanOut
     [method: DebuggerStepThrough]
     public readonly unsafe struct Level2Page(Page page) : IPage
     {
+        private const int Level = 2;
         public static Level2Page Wrap(Page page) => Unsafe.As<Page, Level2Page>(ref page);
 
         public void Clear() => Data.Addresses.Clear();
@@ -340,13 +382,11 @@ public static class StorageFanOut
 
         private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
 
-        private static (uint next, int index) GetStorageIndex(uint at) =>
-            ((uint next, int index))Math.DivRem(at, DbAddressList.Of1024.Length);
 
         public bool TryGet(IReadOnlyBatchContext batch, uint at, scoped in NibblePath key,
             out ReadOnlySpan<byte> result)
         {
-            var (next, index) = GetStorageIndex(at);
+            var (next, index) = GetIndex(at, Level);
 
             var addr = Data.Addresses[index];
             if (addr.IsNull)
@@ -367,7 +407,7 @@ public static class StorageFanOut
                 return new Level2Page(writable).Set(at, key, data, batch);
             }
 
-            var (next, index) = GetStorageIndex(at);
+            var (next, index) = GetIndex(at, Level);
             var addr = Data.Addresses[index];
 
             if (addr.IsNull)
@@ -378,7 +418,7 @@ public static class StorageFanOut
                 new Level3Page(p).Clear();
             }
 
-            Data.Addresses[(int)at] = batch.GetAddress(Level3Page.Wrap(batch.GetAt(addr)).Set(next, key, data, batch));
+            Data.Addresses[index] = batch.GetAddress(Level3Page.Wrap(batch.GetAt(addr)).Set(next, key, data, batch));
 
             return page;
         }
@@ -392,7 +432,7 @@ public static class StorageFanOut
                 return new Level2Page(writable).DeleteByPrefix(at, prefix, batch);
             }
 
-            var (next, index) = GetStorageIndex(at);
+            var (next, index) = GetIndex(at, Level);
             var addr = Data.Addresses[index];
 
             if (addr.IsNull)
@@ -400,7 +440,7 @@ public static class StorageFanOut
                 return page;
             }
 
-            Data.Addresses[(int)at] =
+            Data.Addresses[index] =
                 batch.GetAddress(Level3Page.Wrap(batch.GetAt(addr)).DeleteByPrefix(next, prefix, batch));
 
             return page;
@@ -526,6 +566,16 @@ public static class StorageFanOut
 
             public void Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
             {
+                if (Root.IsNull == false && batch.WasWritten(Root))
+                {
+                    // Root exists, and was written in this batch. Write through.
+                    Map.Delete(key);
+                    var result = new DataPage(batch.GetAt(Root)).Set(key, data, batch);
+
+                    Debug.Assert(batch.GetAddress(result) == Root, "Should have been COWed before");
+                    return;
+                }
+
                 if (Map.TrySet(key, data))
                     return;
 
@@ -539,18 +589,8 @@ public static class StorageFanOut
                     new DataPage(page).Clear();
                 }
 
-                var root = new DataPage(batch.GetAt(Root));
-
-                if (batch.WasWritten(Root))
-                {
-                    // written this batch, write through
-                    Map.Delete(key);
-                    root.Set(key, data, batch);
-                    return;
-                }
-
-                // COW
-                root = new DataPage(batch.EnsureWritableCopy(ref Root));
+                // Ensure COWed
+                var root = new DataPage(batch.EnsureWritableCopy(ref Root));
 
                 foreach (var item in Map.EnumerateAll())
                 {
