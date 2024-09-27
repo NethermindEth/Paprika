@@ -16,6 +16,14 @@ public interface IPage
 {
 }
 
+public interface IPage<TPage> : IPage
+    where TPage : struct, IPage<TPage>
+{
+    public static abstract TPage Wrap(Page page);
+
+    public static abstract PageType DefaultType { get; }
+}
+
 /// <summary>
 /// Convenient methods for transforming page types.
 /// </summary>

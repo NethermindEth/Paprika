@@ -60,6 +60,19 @@ public static class StorageFanOut
         return (next, index);
     }
 
+    private static TPage AllocateClear<TPage>(IBatchContext batch, out DbAddress addr)
+        where TPage : struct, IPage<TPage>, IClearable
+    {
+        var p = batch.GetNewPage(out addr, false);
+
+        p.Header.PageType = TPage.DefaultType;
+        p.Header.Level = 0;
+
+        var wrapped = TPage.Wrap(p);
+        wrapped.Clear();
+        return wrapped;
+    }
+
     /// <summary>
     /// Provides a convenient data structure for <see cref="RootPage"/>,
     /// to hold a list of child addresses of <see cref="DbAddressList.IDbAddressList"/> but with addition of
@@ -93,13 +106,8 @@ public static class StorageFanOut
 
             if (addr.IsNull)
             {
-                var newPage = batch.GetNewPage(out addr, true);
+                AllocateClear<Level1Page>(batch, out addr).Set(next, key, type, data, batch);
                 _addresses[index] = addr;
-
-                newPage.Header.PageType = PageType.FanOutPage;
-                newPage.Header.Level = 0;
-
-                Level1Page.Wrap(newPage).Set(next, key, type, data, batch);
                 return;
             }
 
@@ -160,9 +168,9 @@ public static class StorageFanOut
             sliced = path.SliceFrom(IdConsumedNibbles);
 
             var combined = (path.Nibble0 << (NibblePath.NibbleShift * 3)) +
-                     (path.GetAt(1) << (NibblePath.NibbleShift * 2)) +
-                     (path.GetAt(2) << (NibblePath.NibbleShift * 1)) +
-                     path.GetAt(IdConsumedNibbles - 1);
+                           (path.GetAt(1) << (NibblePath.NibbleShift * 2)) +
+                           (path.GetAt(2) << (NibblePath.NibbleShift * 1)) +
+                           path.GetAt(IdConsumedNibbles - 1);
 
             return (uint)combined << IdShift;
         }
@@ -204,15 +212,22 @@ public static class StorageFanOut
     /// </summary>
     /// <param name="page"></param>
     [method: DebuggerStepThrough]
-    private readonly unsafe struct Level1Page(Page page) : IPage
+    private readonly unsafe struct Level1Page(Page page) : IPage<Level1Page>, IClearable
     {
         private const int Level = 1;
 
         public static Level1Page Wrap(Page page) => Unsafe.As<Page, Level1Page>(ref page);
+        public static PageType DefaultType => PageType.FanOutPage;
 
         private ref PageHeader Header => ref page.Header;
 
         private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
+
+        public void Clear()
+        {
+            Data.Ids.Clear();
+            Data.Storage.Clear();
+        }
 
         public bool TryGet(IPageResolver batch, uint at, scoped in NibblePath key, Type type,
             out ReadOnlySpan<byte> result)
@@ -245,7 +260,6 @@ public static class StorageFanOut
             return Level2Page.Wrap(batch.GetAt(addr)).TryGet(batch, next, key, out result);
         }
 
-
         public Page Set(uint at, in NibblePath key, Type type, in ReadOnlySpan<byte> data, IBatchContext batch)
         {
             if (Header.BatchId != batch.BatchId)
@@ -259,17 +273,14 @@ public static class StorageFanOut
 
             if (type == Type.Id)
             {
-                addr = Data.Ids[Level0.NormalizeAtForId(at)];
+                var normalized = Level0.NormalizeAtForId(at);
+                addr = Data.Ids[normalized];
                 if (addr.IsNull)
                 {
-                    var p = batch.GetNewPage(out addr, false);
-                    p.Header.PageType = PageType.DataPage;
-                    p.Header.Level = 0;
-
-                    new DataPage(p).Clear();
+                    AllocateClear<DataPage>(batch, out addr);
                 }
 
-                Data.Ids[Level0.NormalizeAtForId(at)] = batch.GetAddress(DataPage.Wrap(batch.GetAt(addr)).Set(key, data, batch));
+                Data.Ids[normalized] = batch.GetAddress(DataPage.Wrap(batch.GetAt(addr)).Set(key, data, batch));
                 return page;
             }
 
@@ -280,17 +291,14 @@ public static class StorageFanOut
 
             if (addr.IsNull)
             {
-                var p = batch.GetNewPage(out addr, false);
-                p.Header.PageType = PageType.FanOutPage;
-
-                var ids = new Level2Page(p);
-                ids.Clear();
+                AllocateClear<Level2Page>(batch, out addr);
             }
 
             Data.Storage[index] = batch.GetAddress(Level2Page.Wrap(batch.GetAt(addr)).Set(next, key, data, batch));
 
             return page;
         }
+
 
         public Page DeleteByPrefix(uint at, in NibblePath prefix, IBatchContext batch)
         {
@@ -369,10 +377,11 @@ public static class StorageFanOut
     }
 
     [method: DebuggerStepThrough]
-    public readonly unsafe struct Level2Page(Page page) : IPage
+    public readonly unsafe struct Level2Page(Page page) : IPage<Level2Page>, IClearable
     {
         private const int Level = 2;
         public static Level2Page Wrap(Page page) => Unsafe.As<Page, Level2Page>(ref page);
+        public static PageType DefaultType => PageType.FanOutPage;
 
         public void Clear() => Data.Addresses.Clear();
 
@@ -410,10 +419,7 @@ public static class StorageFanOut
 
             if (addr.IsNull)
             {
-                var p = batch.GetNewPage(out addr, false);
-                p.Header.PageType = PageType.FanOutPage;
-
-                new Level3Page(p).Clear();
+                AllocateClear<Level3Page>(batch, out addr);
             }
 
             Data.Addresses[index] = batch.GetAddress(Level3Page.Wrap(batch.GetAt(addr)).Set(next, key, data, batch));
@@ -471,9 +477,10 @@ public static class StorageFanOut
     }
 
     [method: DebuggerStepThrough]
-    public readonly unsafe struct Level3Page(Page page) : IPage
+    public readonly unsafe struct Level3Page(Page page) : IPage<Level3Page>, IClearable
     {
         public static Level3Page Wrap(Page page) => Unsafe.As<Page, Level3Page>(ref page);
+        public static PageType DefaultType => PageType.FanOutPage;
 
         private ref PageHeader Header => ref page.Header;
 
@@ -579,12 +586,7 @@ public static class StorageFanOut
 
                 if (Root.IsNull)
                 {
-                    var page = batch.GetNewPage(out Root, false);
-                    page.Header.PageType = PageType.DataPage;
-                    page.Header.Level = 0;
-
-                    // clear
-                    new DataPage(page).Clear();
+                    AllocateClear<DataPage>(batch, out Root);
                 }
 
                 // Ensure COWed
