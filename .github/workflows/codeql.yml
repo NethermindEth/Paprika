@@ -40,6 +40,10 @@ jobs:
           git submodule foreach git checkout main
           git submodule foreach git pull origin main
 
+      - name: List repository contents
+        run: |
+          ls -R
+
       - name: Cache dotnet
         id: cache-dotnet
         uses: actions/cache@v3
@@ -66,10 +70,6 @@ jobs:
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
           restore-keys: |
             ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
-
-      - name: List directory structure
-        run: |
-          ls -R src/Nethermind
 
       - name: Build Paprika
         run: dotnet build src/Paprika.sln -c ${{ env.BUILD_CONFIG }} -v d
