@@ -24,7 +24,7 @@ public ref struct RlpStream
 
     public void StartSequence(int contentLength)
     {
-        if (contentLength < 56)
+        if (contentLength < Rlp.SmallPrefixBarrier)
         {
             byte prefix = (byte)(192 + contentLength);
             WriteByte(prefix);
@@ -72,7 +72,7 @@ public ref struct RlpStream
         {
             WriteByte(input[0]);
         }
-        else if (input.Length < 56)
+        else if (input.Length < Rlp.SmallPrefixBarrier)
         {
             byte smallPrefix = (byte)(input.Length + 128);
             WriteByte(smallPrefix);

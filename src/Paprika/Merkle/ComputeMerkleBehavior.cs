@@ -753,7 +753,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         // Write length of length in front of the payload, resetting the stream properly
         var end = stream.Position;
         var actualLength = end - initialShift;
-        var lengthOfLength = Rlp.LengthOfLength(actualLength) + 1;
+        var lengthOfLength = Rlp.LengthOfLength(actualLength);
+        if (actualLength >= Rlp.SmallPrefixBarrier) //to match StartSequence
+            lengthOfLength++;
         var from = initialShift - lengthOfLength;
         stream.Position = from;
         stream.StartSequence(actualLength);
@@ -796,7 +798,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         RlpStream stream = new(pooled.Span.Slice(slice, totalLength));
         stream.StartSequence(contentLength);
         stream.Encode(span);
-        stream.Encode(keccakOrRlp.Keccak);
+        if (keccakOrRlp.DataType == KeccakOrRlp.Type.Rlp)
+            stream.Write(keccakOrRlp.Span);
+        else
+            stream.Encode(keccakOrRlp.Keccak);
         stream.ToKeccakOrRlp(out keccakOrRlp);
     }
 

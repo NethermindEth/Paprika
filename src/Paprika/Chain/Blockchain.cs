@@ -151,8 +151,6 @@ public class Blockchain : IAsyncDisposable
 
                 (uint _blocksByNumber, Keccak blockHash) last = default;
 
-                bool requiresForceFlush = false;
-
                 while (timer.Elapsed < _minFlushDelay && reader.TryRead(out var block))
                 {
                     last = (block.BlockNumber, block.Hash);
@@ -186,20 +184,8 @@ public class Blockchain : IAsyncDisposable
 
                     _flusherQueueCount.Set(readerCount);
 
-                    var level = readerCount switch
-                    {
-                        0 => CommitOptions.FlushDataOnly, // see: CommitOptions.FlushDataOnly
-                        1 => CommitOptions.FlushDataOnly, // see: CommitOptions.FlushDataOnly
-                        _ when readerCount <= _db.HistoryDepth => CommitOptions
-                            .DangerNoFlush, // see: CommitOptions.DangerNoFlush
-                        _ => CommitOptions.DangerNoWrite
-                    };
-
-                    // If at least one write is no write, require flush
-                    requiresForceFlush |= level == CommitOptions.DangerNoWrite;
-
                     // commit but no flush here, it's too heavy, the flush will come later
-                    await batch.Commit(level);
+                    await batch.Commit(CommitOptions.FlushDataOnly);
 
                     // inform blocks about flushing
                     lock (_blockLock)
@@ -234,14 +220,7 @@ public class Blockchain : IAsyncDisposable
 
                 var flushWatch = Stopwatch.StartNew();
 
-                if (requiresForceFlush)
-                {
-                    _db.ForceFlush();
-                }
-                else
-                {
-                    _db.Flush();
-                }
+                _db.Flush();
 
                 _flusherFlushInMs.Record((int)flushWatch.ElapsedMilliseconds);
 

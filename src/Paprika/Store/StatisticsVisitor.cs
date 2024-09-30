@@ -42,9 +42,12 @@ public class StatisticsVisitor : IPageVisitor
         public int PageCount { get; set; }
     }
 
+    public event EventHandler? TotalVisitedChanged;
+
     public IDisposable On<TPage>(scoped ref NibblePath.Builder prefix, TPage page, DbAddress addr) where TPage : unmanaged, IPage
     {
-        TotalVisited++;
+        IncTotalVisited();
+
         _current.PageCount++;
 
         var length = prefix.Current.Length;
@@ -81,13 +84,20 @@ public class StatisticsVisitor : IPageVisitor
 
     public IDisposable On<TPage>(TPage page, DbAddress addr) where TPage : unmanaged, IPage
     {
-        TotalVisited++;
+        IncTotalVisited();
+
         if (typeof(TPage) == typeof(AbandonedPage))
         {
             AbandonedCount += new AbandonedPage(page.AsPage()).CountPages();
         }
 
         return Disposable.Instance;
+    }
+
+    private void IncTotalVisited()
+    {
+        TotalVisited++;
+        TotalVisitedChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public IDisposable Scope(string name)

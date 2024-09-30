@@ -1,9 +1,11 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Globalization;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
+using Paprika.Crypto;
 using Paprika.Utils;
 
 namespace Paprika.Data;
@@ -21,7 +23,6 @@ namespace Paprika.Data;
 /// </remarks>
 public readonly ref struct SlottedArray /*: IClearable */
 {
-    public const int Alignment = 8;
     public const int HeaderSize = Header.Size;
 
     private readonly ref Header _header;
@@ -30,7 +31,13 @@ public readonly ref struct SlottedArray /*: IClearable */
     private static readonly int VectorSize =
         Vector256.IsHardwareAccelerated ? Vector256<byte>.Count : Vector128<byte>.Count;
 
+    private static readonly int UShortsPerVector = VectorSize / 2;
+
+    /// <summary>
+    /// How many vectors are used to create a batch of slots.
+    /// </summary>
     private const int VectorsByBatch = 2;
+
     private static readonly int DoubleVectorSize = VectorSize * VectorsByBatch;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -48,6 +55,38 @@ public readonly ref struct SlottedArray /*: IClearable */
         _data = buffer.Slice(Header.Size);
     }
 
+    /// <summary>
+    /// Dumps the slotted array to a hex string.
+    /// </summary>
+    public string DumpToHexString()
+    {
+        ref var start = ref Unsafe.Subtract(ref MemoryMarshal.GetReference(_data), Header.Size);
+        var length = _data.Length + Header.Size;
+
+        return MemoryMarshal.CreateSpan(ref start, length).ToHexString(false);
+    }
+
+    /// <summary>
+    /// Loads the slotted array from the hex.
+    /// </summary>
+    /// <param name="hex">The hex to load from</param>
+    /// <returns>The loaded slotted array.</returns>
+    public static SlottedArray LoadFromDump(string hex)
+    {
+        Debug.Assert(hex.Length % 2 == 0);
+
+        var bytes = new byte[hex.Length / 2];
+
+        const int charsPerByte = 2;
+
+        for (var i = 0; i < hex.Length; i += charsPerByte)
+        {
+            bytes[i / charsPerByte] = byte.Parse(hex.AsSpan(i, charsPerByte), NumberStyles.HexNumber);
+        }
+
+        return new SlottedArray(bytes);
+    }
+
     public static int MinimalSizeWithNoData => DoubleVectorSize + Header.Size;
 
     private ref ushort GetHashRef(int index)
@@ -55,8 +94,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         // Hashes are at [0, VectorSize), then [VectorSize*2, VectorSize*3), then [VectorSize*4, VectorSize*5)
         // To extract them extract the higher part and multiply by two, then add the lower part.
 
-        var uShortsPerVector = VectorSize / 2;
-        var mask = uShortsPerVector - 1;
+        var mask = UShortsPerVector - 1;
         var offset = (index & ~mask) * 2 + (index & mask);
 
         return ref Unsafe.Add(ref Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(_data)), offset);
@@ -67,18 +105,11 @@ public readonly ref struct SlottedArray /*: IClearable */
         // Slots are at [VectorSize, VectorSize*2), then [VectorSize*3, VectorSize*4), then [VectorSize*5, VectorSize*6) 
         // To extract them extract the higher part and multiply by two, then add the lower part.
         // Additionally, add one ushorts per vector
-        var uShortsPerVector = VectorSize / 2;
 
-        var mask = uShortsPerVector - 1;
-        var offset = (index & ~mask) * 2 + (index & mask) + uShortsPerVector;
+        var mask = UShortsPerVector - 1;
+        var offset = (index & ~mask) * 2 + (index & mask) + UShortsPerVector;
 
         return ref Unsafe.Add(ref Unsafe.As<byte, Slot>(ref MemoryMarshal.GetReference(_data)), offset);
-    }
-
-    public void Set(in NibblePath key, ReadOnlySpan<byte> data)
-    {
-        var succeeded = TrySet(key, data);
-        Debug.Assert(succeeded);
     }
 
     public bool TrySet(in NibblePath key, ReadOnlySpan<byte> data)
@@ -189,6 +220,26 @@ public readonly ref struct SlottedArray /*: IClearable */
     /// </summary>
     public int Count => _header.Low / Slot.TotalSize;
 
+    /// <summary>
+    /// Performs a walk through the map calculating the actual size of data stored in it.
+    /// </summary>
+    public double CalculateActualSpaceUsed()
+    {
+        var occupied = 0;
+
+        foreach (var item in EnumerateAll())
+        {
+            occupied += Slot.TotalSize;
+            occupied += item.RawData.Length;
+            if (item.Key.Length > Slot.KeyPreambleMaxEncodedLength)
+            {
+                occupied += KeyEncoding.GetBytesCount(item.Key.SliceFrom(Slot.KeyPreambleMaxEncodedLength));
+            }
+        }
+
+        return (double)occupied / _data.Length;
+    }
+
     public int CapacityLeft => _data.Length - _header.Taken;
 
     public Enumerator EnumerateAll() => new(this);
@@ -262,7 +313,9 @@ public readonly ref struct SlottedArray /*: IClearable */
         // a shortcut to not allocate, just copy the enumerator
         public readonly Enumerator GetEnumerator() => this;
 
-        public void Dispose() { }
+        public void Dispose()
+        {
+        }
     }
 
     public ref struct NibbleEnumerator
@@ -327,7 +380,9 @@ public readonly ref struct SlottedArray /*: IClearable */
         // a shortcut to not allocate, just copy the enumerator
         public readonly NibbleEnumerator GetEnumerator() => this;
 
-        public void Dispose() { }
+        public void Dispose()
+        {
+        }
     }
 
     public ref struct Nibble2Enumerator
@@ -392,7 +447,9 @@ public readonly ref struct SlottedArray /*: IClearable */
         // a shortcut to not allocate, just copy the enumerator
         public readonly Nibble2Enumerator GetEnumerator() => this;
 
-        public void Dispose() { }
+        public void Dispose()
+        {
+        }
     }
 
     /// <summary>
@@ -446,11 +503,11 @@ public readonly ref struct SlottedArray /*: IClearable */
                     map.DeleteImpl(index);
                 }
 
-                slot.MarkAsDeleted();
+                MarkAsDeleted(i);
             }
             else if (map.TrySetImpl(hash, slot.KeyPreamble, trimmed, data))
             {
-                slot.MarkAsDeleted();
+                MarkAsDeleted(i);
                 moved++;
             }
         }
@@ -565,7 +622,10 @@ public readonly ref struct SlottedArray /*: IClearable */
         // The rest of the path is not important.
         // It should allow to encode 3/4 of paths of length 2 on a single byte.
         private const byte DoubleEvenNibbleCaseByteMask = DoubleEvenNibbleCaseFirstNibbleMask << NibblePath.NibbleShift;
-        private const byte DoubleEvenNibbleCaseByteMaskValue = DoubleEvenNibbleCaseFirstNibbleMaskValue << NibblePath.NibbleShift;
+
+        private const byte DoubleEvenNibbleCaseByteMaskValue =
+            DoubleEvenNibbleCaseFirstNibbleMaskValue << NibblePath.NibbleShift;
+
         private const byte DoubleEvenNibbleCaseFirstNibbleMask = 0b1100;
         private const byte DoubleEvenNibbleCaseFirstNibbleMaskValue = 0b1000;
         private const byte DoubleEvenNibbleCaseByteCount = 1;
@@ -581,7 +641,10 @@ public readonly ref struct SlottedArray /*: IClearable */
             return key.Length switch
             {
                 PathLengthOf1 => SingleNibbleLength,
-                PathLengthOf2 => (key.Nibble0 & DoubleEvenNibbleCaseFirstNibbleMask) == DoubleEvenNibbleCaseFirstNibbleMaskValue ? DoubleEvenNibbleCaseByteCount : 2,
+                PathLengthOf2 => (key.Nibble0 & DoubleEvenNibbleCaseFirstNibbleMask) ==
+                                 DoubleEvenNibbleCaseFirstNibbleMaskValue
+                    ? DoubleEvenNibbleCaseByteCount
+                    : 2,
                 _ => key.RawSpanLength + KeyLengthLength
             };
         }
@@ -670,7 +733,8 @@ public readonly ref struct SlottedArray /*: IClearable */
                 return destination[SingleNibbleLength..];
             }
 
-            if (key.Length == PathLengthOf2 && (key.UnsafeSpan & DoubleEvenNibbleCaseByteMask) == DoubleEvenNibbleCaseByteMaskValue)
+            if (key.Length == PathLengthOf2 &&
+                (key.UnsafeSpan & DoubleEvenNibbleCaseByteMask) == DoubleEvenNibbleCaseByteMaskValue)
             {
                 destination[0] = key.UnsafeSpan;
                 return destination[DoubleEvenNibbleCaseByteCount..];
@@ -709,13 +773,14 @@ public readonly ref struct SlottedArray /*: IClearable */
         return false;
     }
 
-    public void Delete(in Item item) => DeleteImpl(item.Index);
+    public void Delete(in Item item) => DeleteImpl(item.Index, false);
 
     private void DeleteImpl(int index, bool collectTombstones = true)
     {
         // Mark as deleted first
         MarkAsDeleted(index);
-        _header.Deleted++;
+
+        Debug.Assert(_header.Deleted <= Count, "The number of deleted breached the number of items");
 
         if (collectTombstones)
         {
@@ -725,7 +790,13 @@ public readonly ref struct SlottedArray /*: IClearable */
 
     private void MarkAsDeleted(int index)
     {
-        GetSlotRef(index).MarkAsDeleted();
+        ref var slot = ref GetSlotRef(index);
+
+        Debug.Assert(slot.IsDeleted == false, "The slot is deleted again");
+
+        _header.Deleted++;
+
+        slot.MarkAsDeleted();
 
         // Provide a different hash so that further searches with TryGet won't be hitting this slot.
         //
@@ -742,45 +813,65 @@ public readonly ref struct SlottedArray /*: IClearable */
         // As data were fitting before, the will fit after so all the checks can be skipped
         var count = _header.Low / Slot.TotalSize;
 
-        // The pointer where the writing in the array ended, move it up when written.
-        var writeAt = 0;
-        var writtenTo = (ushort)_data.Length;
-        var readTo = writtenTo;
-        var newCount = (ushort)0;
+        if (count == 0 || _header.Deleted == 0)
+            return;
 
-        for (int i = 0; i < count; i++)
+        // The pointer where the writing in the array ended, move it up when written.
+        var writeAt = -1;
+
+        // The data offset where the last data was written to
+        ushort writtenTo = 0;
+        ushort readTo = 0;
+        var alive = (ushort)0;
+
+        var i = 0;
+
+        // Search for the first deleted
+        for (; i < count; i++)
         {
-            ref var slot = ref GetSlotRef(i);
+            var slot = GetSlotRef(i);
+            if (slot.IsDeleted)
+            {
+                writeAt = i; // write at this slot
+                readTo = slot.ItemAddress; // mark it as read already
+                writtenTo = (ushort)(i == 0 ? _data.Length : GetSlotRef(i - 1).ItemAddress); // memoize the previous
+
+                // move to next
+                i++;
+                break;
+            }
+
+            alive++;
+        }
+
+        for (; i < count; i++)
+        {
+            var slot = GetSlotRef(i);
             var addr = slot.ItemAddress;
 
             if (!slot.IsDeleted)
             {
-                newCount++;
+                alive++;
 
-                if (writtenTo == readTo)
+                var length = readTo - addr;
+
+                if (length > 0)
                 {
-                    // This is a case where nothing required copying so far, just move on by advancing it all.
-                    writeAt++;
-                    writtenTo = addr;
-                }
-                else
-                {
-                    // Something has been previously deleted, needs to be copied carefully
-                    var source = _data.Slice(addr, readTo - addr);
-                    writtenTo = (ushort)(writtenTo - source.Length);
-                    var destination = _data.Slice(writtenTo, source.Length);
+                    var source = _data.Slice(addr, length);
+                    writtenTo = (ushort)(writtenTo - length);
+                    var destination = _data.Slice(writtenTo, length);
                     source.CopyTo(destination);
-                    ref var destinationSlot = ref GetSlotRef(writeAt);
-
-                    // Copy hash
-                    GetHashRef(writeAt) = GetHashRef(i);
-
-                    // Copy everything, just overwrite the address
-                    destinationSlot.KeyPreamble = slot.KeyPreamble;
-                    destinationSlot.ItemAddress = writtenTo;
-
-                    writeAt++;
                 }
+
+                // Copy hash
+                GetHashRef(writeAt) = GetHashRef(i);
+
+                // Copy everything, just overwrite the address
+                ref var destinationSlot = ref GetSlotRef(writeAt);
+                destinationSlot.KeyPreamble = slot.KeyPreamble;
+                destinationSlot.ItemAddress = writtenTo;
+
+                writeAt++;
             }
 
             // Memoize to what is read to
@@ -788,7 +879,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         }
 
         // Finalize by setting the header
-        _header.Low = (ushort)(newCount * Slot.TotalSize);
+        _header.Low = (ushort)(alive * Slot.TotalSize);
         _header.High = (ushort)(_data.Length - writtenTo);
         _header.Deleted = 0;
     }
@@ -811,10 +902,10 @@ public readonly ref struct SlottedArray /*: IClearable */
             var total = slice.Length;
             _header.High = (ushort)(_header.High - total);
 
-            // cleanup
-            // Hash is already replaced with its delete. Clean the slot
-            GetSlotRef(index) = default;
+            // decrease delete count
             _header.Deleted--;
+
+            Debug.Assert(_header.Deleted <= Count);
 
             // move back by one to see if it's deleted as well
             index--;
@@ -1095,7 +1186,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         public const byte KeyPreambleWithBytes = KeyPreambleLength5OrMore << KeyPreambleLengthShift;
 
         private const byte KeyPreambleLengthShift = 1;
-        private const byte KeyPreambleMaxEncodedLength = 4;
+        public const byte KeyPreambleMaxEncodedLength = 4;
         private const byte KeySlice = 2;
 
         private const int HashByteShift = 8;
