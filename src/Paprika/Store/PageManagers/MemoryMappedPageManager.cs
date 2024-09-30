@@ -5,7 +5,6 @@ using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
-using System.Xml.Serialization;
 using Paprika.Utils;
 
 namespace Paprika.Store.PageManagers;
@@ -15,8 +14,10 @@ public sealed class MemoryMappedPageManager : PointerPageManager
     private readonly PersistenceOptions _options;
 
     /// <summary>
-    /// The only option is random access. As Paprika jumps over the file, any prefetching is futile.
-    /// Also, the file cannot be async to use some of the mmap features. So here it is, random access file. 
+    /// As Paprika jumps to various addresses in the file, using <see cref="FileOptions.SequentialScan"/>
+    /// would be harmful and <see cref="FileOptions.RandomAccess"/> is used.
+    ///
+    /// The file uses <see cref="FileOptions.Asynchronous"/> to issue proper async <see cref="WriteAt"/> operations. 
     /// </summary>
     private const FileOptions PaprikaFileOptions = FileOptions.RandomAccess | FileOptions.Asynchronous;
 
@@ -96,6 +97,8 @@ public sealed class MemoryMappedPageManager : PointerPageManager
     public string Path { get; }
 
     protected override unsafe void* Ptr => _ptr;
+
+    protected override void PrefetchHeavy(DbAddress address) => _prefetches.Writer.TryWrite(address);
 
     public override void Prefetch(ReadOnlySpan<DbAddress> addresses)
     {

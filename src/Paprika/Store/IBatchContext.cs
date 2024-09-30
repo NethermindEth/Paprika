@@ -128,8 +128,16 @@ public interface IPageResolver
     /// </summary>
     Page GetAt(DbAddress address);
 
-    void Prefetch(DbAddress address) => Prefetch(MemoryMarshal.CreateReadOnlySpan(ref address, 1));
+    /// <summary>
+    /// Issues a prefetch request for the page at the specific location <paramref name="address"/>
+    /// using mechanism defined by the <paramref name="mode"/>.
+    /// </summary>
+    void Prefetch(DbAddress address, PrefetchMode mode);
 
+    /// <summary>
+    /// Issues a prefetch request for a set of pages residing at <paramref name="addresses"/>.
+    /// The prefetch mode that is used is <see cref="PrefetchMode.Heavy"/>.
+    /// </summary>
     void Prefetch(ReadOnlySpan<DbAddress> addresses);
 
     [SkipLocalsInit]
@@ -146,4 +154,18 @@ public interface IPageResolver
 
         Prefetch(span);
     }
+}
+
+public enum PrefetchMode
+{
+    /// <summary>
+    /// Expects that the page was not evicted and only should be brought to CPU case using SSE prefetch.
+    /// </summary>
+    Soft,
+
+    /// <summary>
+    /// Expects that the page was not accessed lately or was evicted from the memory.
+    /// The page should be prefetched using platform specific heavy prefetch <see cref="Platform.Prefetch"/>.
+    /// </summary>
+    Heavy,
 }

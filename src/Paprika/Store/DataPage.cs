@@ -557,10 +557,11 @@ public readonly unsafe struct DataPage(Page page) : IPageWithData<DataPage>, ICl
             if (!sliced.IsEmpty)
             {
                 // As the CPU does not auto-prefetch across page boundaries
-                // Prefetch child page in case we go there next to reduce CPU stalls
+                // Prefetch child page in case we go there next to reduce CPU stalls.
+                // Do it using soft mode as quite likely the page is loaded to RAM but possibly not in CPU cache.
                 bucket = page.Data.Buckets[GetIndex(sliced)];
                 if (bucket.IsNull == false)
-                    batch.Prefetch(bucket);
+                    batch.Prefetch(bucket, PrefetchMode.Soft);
             }
 
             // try regular map

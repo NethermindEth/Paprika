@@ -143,7 +143,10 @@ public struct AbandonedList
             if (current.TryPeek(out var next, out _))
             {
                 Debug.Assert(next.IsNull == false, "Next should not be NULL here");
-                batch.Prefetch(next);
+
+                // Expect that the page that will be prefetched here was not used for a while.
+                // It's ok to wait a bit to have it prefetched.
+                batch.Prefetch(next, PrefetchMode.Heavy);
             }
 
             return true;

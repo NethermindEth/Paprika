@@ -126,6 +126,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             new MemoryMappedPageManager(size, historyDepth, directory,
                 flushToDisk ? PersistenceOptions.FlushFile : PersistenceOptions.MMapOnly), historyDepth);
 
+    public void Prefetch(DbAddress address, PrefetchMode mode) => _manager.Prefetch(address, mode);
+
     public void Prefetch(ReadOnlySpan<DbAddress> addresses) => _manager.Prefetch(addresses);
 
     private void ReportReads(long number) => _reads.Add(number);
@@ -506,6 +508,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             }
         }
 
+        public void Prefetch(DbAddress address, PrefetchMode mode) => db.Prefetch(address, mode);
+
         public void Prefetch(ReadOnlySpan<DbAddress> addresses) => db.Prefetch(addresses);
 
         public Page GetAt(DbAddress address) => db._manager.GetAt(address);
@@ -677,6 +681,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             var page = _db.GetAt(address);
             return page;
         }
+
+        public override void Prefetch(DbAddress address, PrefetchMode mode) => _db.Prefetch(address, mode);
 
         public override void Prefetch(ReadOnlySpan<DbAddress> addresses) => _db.Prefetch(addresses);
 
