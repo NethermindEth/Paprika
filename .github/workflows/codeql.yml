@@ -30,19 +30,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
         with:
-          submodules: 'recursive'
           fetch-depth: 0
-
-      - name: Initialize and update submodules
-        run: |
-          git submodule update --init --recursive
-          git submodule foreach git fetch --all
-          git submodule foreach git checkout main
-          git submodule foreach git pull origin main
-
-      - name: List repository contents
-        run: |
-          ls -R
 
       - name: Cache dotnet
         id: cache-dotnet
@@ -72,7 +60,9 @@ jobs:
             ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
 
       - name: Build Paprika
-        run: dotnet build src/Paprika.sln -c ${{ env.BUILD_CONFIG }} -v d
+        run: |
+          dotnet restore src/Paprika.sln
+          dotnet build src/Paprika.sln -c ${{ env.BUILD_CONFIG }} -v d
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@5618c9fc1e675841ca52c1c6b1304f5255a905a0 # v2.19.0
