@@ -685,6 +685,53 @@ public readonly ref struct NibblePath
         return new string(path);
     }
 
+    /// <summary>
+    /// For tests
+    /// </summary>
+    /// <returns></returns>
+    public string ToHexByteString()
+    {
+        if (Length == 0)
+            return "";
+
+        Span<char> path = stackalloc char[Length * 2];
+        ref var ch = ref path[0];
+
+        for (int i = _odd; i < Length + _odd; i++)
+        {
+            var b = Unsafe.Add(ref _span, i / 2);
+            var nibble = (b >> ((1 - (i & OddBit)) * NibbleShift)) & NibbleMask;
+
+            ch = Hex[0];
+            ch = ref Unsafe.Add(ref ch, 1);
+            ch = Hex[nibble];
+            ch = ref Unsafe.Add(ref ch, 1);
+        }
+
+        return new string(path).ToLower();
+    }
+
+    public void WriteToKeccak(Span<byte> keccak)
+    {
+        if (IsOdd)
+        {
+            int ki = 0;
+            for (int i = 0; i < Length / 2; i++)
+            {
+                var highByte = Unsafe.Add(ref _span, i);
+                var lowByte = Unsafe.Add(ref _span, i + 1);
+                var nibbleH = highByte & 0x0F;
+                var nibbleL = (lowByte & 0xF0) >> 4;
+
+                keccak[ki++] = (byte)((nibbleH << 4) | nibbleL);
+            }
+        }
+        else
+        {
+            RawSpan.CopyTo(keccak);
+        }
+    }
+
     private static readonly char[] Hex = "0123456789ABCDEF".ToArray();
 
     // TODO: optimize
