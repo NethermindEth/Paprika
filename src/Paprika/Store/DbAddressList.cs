@@ -188,6 +188,35 @@ public static class DbAddressList
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
+    public struct Of64 : IDbAddressList
+    {
+        public const int Count = 64;
+        public const int Size = Count / 2 * BytesPer2Addresses;
+
+        private byte _b;
+
+        public DbAddress this[int index]
+        {
+            get
+            {
+                Debug.Assert(index is >= 0 and < Count);
+                return Get(ref _b, index);
+            }
+            set
+            {
+                Debug.Assert(index is >= 0 and < Count);
+                Set(ref _b, index, value);
+            }
+        }
+
+        public void Clear() => MemoryMarshal.CreateSpan(ref _b, Size).Clear();
+
+        public static int Length => Count;
+
+        public DbAddress[] ToArray() => ToArrayImpl(this);
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     public struct Of256 : IDbAddressList
     {
         public const int Count = 256;
