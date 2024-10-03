@@ -122,12 +122,14 @@ public sealed class MemoryMappedPageManager : PointerPageManager
             PrefetchImpl(reader, this);
         }
 
+        return;
+
         [SkipLocalsInit]
         static void PrefetchImpl(ChannelReader<DbAddress> reader, MemoryMappedPageManager manager)
         {
             const int maxPrefetch = 128;
 
-            Span<UIntPtr> span = stackalloc UIntPtr[maxPrefetch];
+            Span<(UIntPtr, uint)> span = stackalloc (UIntPtr, uint)[maxPrefetch];
             var i = 0;
 
             for (; i < maxPrefetch; i++)
@@ -135,13 +137,15 @@ public sealed class MemoryMappedPageManager : PointerPageManager
                 if (reader.TryRead(out var address) == false)
                     break;
 
-                span[i] = manager.GetAt(address).Raw;
+                span[i] = (manager.GetAt(address).Raw, Page.PageSize);
             }
 
-            if (i > 0)
-            {
-                Platform.Prefetch(span[..i], Page.PageSize);
-            }
+            if (i == 0)
+                return;
+
+            // TODO: potentially sort and merge consecutive chunks
+
+            Platform.Prefetch(span[..i]);
         }
     }
 
