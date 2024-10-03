@@ -12,7 +12,6 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\Nethermind\src\Nethermind\Nethermind.Core\Nethermind.Core.csproj" />
       <ProjectReference Include="..\Paprika.Runner\Paprika.Runner.csproj" />
       <ProjectReference Include="..\Paprika\Paprika.csproj" />
     </ItemGroup>
