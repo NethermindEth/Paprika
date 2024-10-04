@@ -115,11 +115,15 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
 
         FlushToDataPage(destination, batch, new SlottedArray(copy), children);
 
+        // All flushed, set the actual data now
+        destination.Set(key, data, batch);
+
         ArrayPool<byte>.Shared.Return(buffer);
 
         RegisterForFutureReuse(children, batch);
 
-        return destination.AsPage();
+        // The destination is set over this page.
+        return page;
     }
 
     private static void RegisterForFutureReuse(ReadOnlySpan<DbAddress> children, IBatchContext batch)

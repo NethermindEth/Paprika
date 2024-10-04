@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using FluentAssertions;
+using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store;
@@ -83,10 +84,10 @@ public class AbandonedTests : BasePageTests
 
     [TestCase(20, 1, 10_000, false, TestName = "Accounts - 1")]
     [TestCase(428, 100, 10_000, false, TestName = "Accounts - 100")]
-    [TestCase(19278, 4000, 200, false,
+    [TestCase(18035, 4000, 200, false,
         TestName = "Accounts - 4000 to get a bit reuse",
         Category = Categories.LongRunning)]
-    [TestCase(48228, 10_000, 50, false,
+    [TestCase(45584, 10_000, 50, false,
         TestName = "Accounts - 10000 to breach the AbandonedPage",
         Category = Categories.LongRunning)]
     [TestCase(118364, 20_000, 50, true,
