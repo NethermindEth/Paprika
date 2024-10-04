@@ -101,17 +101,21 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
         // 1. copy the content
         // 2. reuse the page
         // TODO: replace this with unmanaged pool of Paprika?
-        var copy = ArrayPool<byte>.Shared.Rent(Data.DataSpan.Length);
-        Data.DataSpan.CopyTo(copy.AsSpan());
+        var dataSpan = Data.DataSpan;
+        var buffer = ArrayPool<byte>.Shared.Rent(dataSpan.Length);
+        var copy = buffer.AsSpan(0, dataSpan.Length);
+        
+        dataSpan.CopyTo(copy);
         var children = Data.Buckets.ToArray();
 
         // All flushing failed, requires to move to a DataPage
         var destination = new DataPage(page);
+        destination.AsPage().Header.PageType = DataPage.DefaultType;
         destination.Clear();
 
-        FlushToDataPage(destination, batch, new SlottedArray(copy.AsSpan()), children);
+        FlushToDataPage(destination, batch, new SlottedArray(copy), children);
 
-        ArrayPool<byte>.Shared.Return(copy);
+        ArrayPool<byte>.Shared.Return(buffer);
         
         RegisterForFutureReuse(children, batch);
 
