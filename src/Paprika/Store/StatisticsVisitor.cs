@@ -60,22 +60,15 @@ public class StatisticsVisitor : IPageVisitor
         {
             case PageType.DataPage:
                 var dataPage = new DataPage(p);
-                if (dataPage.IsLeaf)
-                {
-                    ref var leafCount =
-                        ref CollectionsMarshal.GetValueRefOrAddDefault(_current.LeafPageCountPerNibblePathDepth, length,
-                            out _);
-                    leafCount += 1;
-                }
                 _current.ReportMap(ref prefix, dataPage.Map);
                 break;
-            case PageType.LeafOverflow:
+            case PageType.Bottom:
                 ref var overflowCount =
                     ref CollectionsMarshal.GetValueRefOrAddDefault(_current.OverflowPageCountPerNibblePathDepth, length,
                         out _);
                 overflowCount += 1;
 
-                _current.ReportMap(ref prefix, new LeafOverflowPage(p).Map);
+                _current.ReportMap(ref prefix, new BottomPage(p).Map);
                 break;
         }
 

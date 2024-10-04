@@ -551,14 +551,14 @@ public readonly ref struct SlottedArray /*: IClearable */
         }
     }
 
-    public const int BucketCount = 16;
+    public const int OneNibbleStatsCount = 16;
 
     /// <summary>
     /// Gets the aggregated count of entries per nibble.
     /// </summary>
     public void GatherCountStats1Nibble(Span<ushort> buckets)
     {
-        Debug.Assert(buckets.Length == BucketCount);
+        Debug.Assert(buckets.Length == OneNibbleStatsCount);
 
         var to = _header.Low / Slot.TotalSize;
         for (var i = 0; i < to; i++)
@@ -578,7 +578,7 @@ public readonly ref struct SlottedArray /*: IClearable */
     /// </summary>
     public void GatherSizeStats1Nibble(Span<ushort> buckets)
     {
-        Debug.Assert(buckets.Length == BucketCount);
+        Debug.Assert(buckets.Length == OneNibbleStatsCount);
 
         var to = _header.Low / Slot.TotalSize;
         for (var i = 0; i < to; i++)

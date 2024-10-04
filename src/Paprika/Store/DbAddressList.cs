@@ -125,6 +125,18 @@ public static class DbAddressList
 
         return array;
     }
+    
+    private static bool IsAnyNullImpl<TList>(in TList list)
+        where TList : struct, IDbAddressList
+    {
+        for (var i = 0; i < TList.Length; i++)
+        {
+            if (list[i].IsNull)
+                return true;
+        }
+
+        return false;
+    }
 
     [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     public struct Of4 : IDbAddressList
@@ -156,6 +168,8 @@ public static class DbAddressList
         public void Clear() => MemoryMarshal.CreateSpan(ref _b, Count).Clear();
 
         public DbAddress[] ToArray() => ToArrayImpl(this);
+        
+        public bool IsAnyNull() => IsAnyNullImpl(this);
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]

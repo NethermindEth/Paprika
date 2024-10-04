@@ -20,9 +20,7 @@ public class DataPageTests : BasePageTests
     public void Spinning_through_same_keys_should_use_limited_number_of_pages()
     {
         var batch = NewBatch(BatchId);
-        var page = batch.GetNewPage(out _, true);
-
-        var data = new DataPage(page);
+        var data = ((IBatchContext)batch).GetNewPage<DataPage>(out _);
 
         const int spins = 100;
         const int count = 1024;
