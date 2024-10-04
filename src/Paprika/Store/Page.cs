@@ -20,7 +20,7 @@ public interface IPage<TPage> : IPage, IClearable
     where TPage : struct, IPage<TPage>
 {
     public static abstract TPage Wrap(Page page);
-    
+
     public static abstract PageType DefaultType { get; }
 }
 
@@ -98,7 +98,7 @@ public readonly unsafe struct Page : IPage, IEquatable<Page>
     public Span<byte> Span => new(_ptr, PageSize);
 
     public ref PageHeader Header => ref Unsafe.AsRef<PageHeader>(_ptr);
-    
+
     public bool Equals(Page other) => _ptr == other._ptr;
 
     public override bool Equals(object? obj) => obj is Page other && Equals(other);

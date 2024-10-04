@@ -125,7 +125,7 @@ public static class DbAddressList
 
         return array;
     }
-    
+
     private static bool IsAnyNullImpl<TList>(in TList list)
         where TList : struct, IDbAddressList
     {
@@ -168,7 +168,7 @@ public static class DbAddressList
         public void Clear() => MemoryMarshal.CreateSpan(ref _b, Count).Clear();
 
         public DbAddress[] ToArray() => ToArrayImpl(this);
-        
+
         public bool IsAnyNull() => IsAnyNullImpl(this);
     }
 

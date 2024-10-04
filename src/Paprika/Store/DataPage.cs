@@ -93,7 +93,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             }
 
             Debug.Assert(page.Header.PageType == PageType.DataPage);
-                
+
             ref var payload = ref Unsafe.AsRef<Payload>(page.Payload);
             var map = new SlottedArray(payload.DataSpan);
             var oddity = page.Header.Level % 2;

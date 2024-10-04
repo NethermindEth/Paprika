@@ -27,7 +27,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
 
         [FieldOffset(0)]
         public DbAddressList.Of4 Buckets;
-        
+
         /// <summary>
         /// The first item of map of frames to allow ref to it.
         /// </summary>
@@ -41,12 +41,12 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
     }
 
     public SlottedArray Map => new(Data.DataSpan);
-    
+
     public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
         using var scope = visitor.On(ref builder, this, addr);
     }
-    
+
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
         if (Header.BatchId != batch.BatchId)
@@ -55,7 +55,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
         }
 
         var map = Map;
-        
+
         if (data.IsEmpty)
         {
             // Delete, delete locally and in a child if it exists
@@ -70,13 +70,13 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
         }
 
         Debug.Assert(data.IsEmpty == false, "Should be an upsert, not a delete");
-        
+
         // Try set directly
         if (map.TrySet(key, data))
         {
             return page;
         }
-        
+
         // Not successful, need to flush down, try set in all existing children first
         FlushToExisting(batch, map);
 
@@ -90,7 +90,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
         if (TryFlushToNew(batch, map))
         {
             // Flush to a new succeeded, try to set.
-            
+
             if (map.TrySet(key, data))
             {
                 return page;
@@ -104,7 +104,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
         var dataSpan = Data.DataSpan;
         var buffer = ArrayPool<byte>.Shared.Rent(dataSpan.Length);
         var copy = buffer.AsSpan(0, dataSpan.Length);
-        
+
         dataSpan.CopyTo(copy);
         var children = Data.Buckets.ToArray();
 
@@ -116,7 +116,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
         FlushToDataPage(destination, batch, new SlottedArray(copy), children);
 
         ArrayPool<byte>.Shared.Return(buffer);
-        
+
         RegisterForFutureReuse(children, batch);
 
         return destination.AsPage();
@@ -137,7 +137,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
     {
         Span<BottomPage> writableChildren = stackalloc BottomPage[Payload.BucketCount];
         var existing = 0;
-        
+
         for (var i = 0; i < Payload.BucketCount; i++)
         {
             if (TryGetWritableChildAt(batch, i, out writableChildren[i]))
@@ -145,7 +145,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
                 existing |= 1 << i;
             }
         }
-        
+
         // Enumerate all and try flush
         foreach (var item in map.EnumerateAll())
         {
@@ -154,9 +154,9 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
 
             var index = GetIndex(item.Key);
             var mask = 1 << index;
-            if ((existing & mask) != mask) 
+            if ((existing & mask) != mask)
                 continue;
-            
+
             if (writableChildren[index].Map.TrySet(item.Key, item.RawData))
             {
                 map.Delete(item);
@@ -168,7 +168,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
     {
         if (Data.Buckets.IsAnyNull() == false)
             return false;
-        
+
         Span<ushort> stats = stackalloc ushort[SlottedArray.OneNibbleStatsCount];
         map.GatherCountStats1Nibble(stats);
 
@@ -182,15 +182,15 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
                 for (var j = 0; j < NibblesInBucket; j++)
                 {
                     indexed[i] = stats[i * NibblesInBucket + j];
-                }    
+                }
             }
         }
 
         const int start = -1;
-        
+
         var maxIndex = start;
         var maxValue = 0;
-        
+
         for (int i = 0; i < Payload.BucketCount; i++)
         {
             if (indexed[i] > maxValue)
@@ -207,11 +207,11 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
         }
 
         Debug.Assert(Data.Buckets[maxIndex].IsNull, "Should be null");
-        
+
         var child = batch.GetNewPage<BottomPage>(out var childAddr);
         Data.Buckets[maxIndex] = childAddr;
         child.Clear();
-        
+
         // Enumerate all and try flush
         foreach (var item in map.EnumerateAll())
         {
@@ -219,9 +219,9 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
                 continue;
 
             var index = GetIndex(item.Key);
-            if (index != maxIndex) 
+            if (index != maxIndex)
                 continue;
-            
+
             if (child.Map.TrySet(item.Key, item.RawData))
             {
                 map.Delete(item);
@@ -236,7 +236,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
         for (var i = 0; i < Payload.BucketCount; i++)
         {
             var bucket = children[i];
-            
+
             if (bucket.IsNull)
             {
                 continue;
@@ -248,13 +248,13 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
         // Copy all the entries from this
         CopyToDestination(destination, map, batch);
         return;
-        
+
         static void CopyToDestination(DataPage destination, SlottedArray map, IBatchContext batch)
         {
             foreach (var item in map.EnumerateAll())
             {
                 var result = new DataPage(destination.Set(item.Key, item.RawData, batch));
-                
+
                 Debug.Assert(result.AsPage().Raw == destination.AsPage().Raw, "Should not COW or replace the page");
             }
         }
@@ -278,8 +278,8 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
     }
 
     private const int NibblesInBucket = 16 / Payload.BucketCount;
-    
-    private static int GetIndex(in NibblePath path) => path.Nibble0 % NibblesInBucket; 
+
+    private static int GetIndex(in NibblePath path) => path.Nibble0 % NibblesInBucket;
 
     public Page DeleteByPrefix(in NibblePath prefix, IBatchContext batch)
     {

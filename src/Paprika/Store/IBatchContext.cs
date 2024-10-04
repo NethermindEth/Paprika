@@ -23,7 +23,7 @@ public interface IBatchContext : IReadOnlyBatchContext
         var page = GetNewPage(out addr, false);
         var wrapped = TPage.Wrap(page);
         wrapped.Clear();
-        
+
         page.Header.PageType = TPage.DefaultType;
         page.Header.Level = level;
         return wrapped;
