@@ -49,7 +49,10 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             if (childAddr.IsNull == false)
             {
                 var sliced = prefix.SliceFrom(ConsumedNibbles);
-                var child = new DataPage(batch.GetAt(childAddr)).DeleteByPrefix(sliced, batch);
+                var child = batch.GetAt(childAddr);
+                child = child.Header.PageType == PageType.DataPage ?
+                    new DataPage(child).DeleteByPrefix(sliced, batch) :
+                    new BottomPage(child).DeleteByPrefix(sliced, batch);
                 buckets[index] = batch.GetAddress(child);
             }
         }

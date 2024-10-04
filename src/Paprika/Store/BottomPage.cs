@@ -296,6 +296,27 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
 
         Map.DeleteByPrefix(prefix);
 
+        for (int i = 0; i < Payload.BucketCount; i++)
+        {
+            var addr = Data.Buckets[i];
+            if (addr.IsNull)
+                continue;
+
+            if (prefix.IsEmpty)
+            {
+                // can immediately reuse
+                Data.Buckets[i] = DbAddress.Null;
+                batch.RegisterForFutureReuse(batch.GetAt(addr), true);
+            }
+            else
+            {
+                var copy = batch.GetWritableCopy(batch.GetAt(addr));
+                Data.Buckets[i] = batch.GetAddress(copy);
+
+                new BottomPage(copy).Map.DeleteByPrefix(prefix);
+            }
+        }
+
         return page;
     }
 
