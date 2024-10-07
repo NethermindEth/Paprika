@@ -23,10 +23,12 @@ namespace Paprika.Store;
 /// </summary>
 public static class StorageFanOut
 {
+    public const int LevelCount = 3;
+
     public const string ScopeIds = "Ids";
     public const string ScopeStorage = "Storage";
 
-    private enum Type
+    public enum Type
     {
         /// <summary>
         /// Represents the mapping of Keccak->int
@@ -212,7 +214,7 @@ public static class StorageFanOut
     /// </summary>
     /// <param name="page"></param>
     [method: DebuggerStepThrough]
-    private readonly unsafe struct Level1Page(Page page) : IPage<Level1Page>, IClearable
+    public readonly unsafe struct Level1Page(Page page) : IPage<Level1Page>, IClearable
     {
         private const int Level = 1;
 

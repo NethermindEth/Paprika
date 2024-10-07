@@ -39,7 +39,7 @@ public static class StatisticsForPagedDb
                     new Layout("top")
                         .SplitColumns(
                             BuildReport(stats.State, "State"),
-                            BuildReport(stats.Storage, "Storage")),
+                            BuildReport(stats.Storage, "Storage", stats.StorageFanOutLevels)),
                     new Layout("bottom")
                         .Update(new Panel(new Paragraph(
                             $"- pages used for id mapping: {Page.FormatAsGb(stats.Ids.PageCount)}\n" +
@@ -62,28 +62,16 @@ public static class StatisticsForPagedDb
         }
     }
 
-    private static Layout BuildReport(StatisticsVisitor.Stats stats, string name)
+    private static Layout BuildReport(StatisticsVisitor.Stats stats, string name, int[]? fanOutLevels = null)
     {
         var up = new Layout("up");
         var sizes = new Layout("down");
-        //var leafs = new Layout("leafs");
 
-        var layout = new Layout().SplitRows(up, sizes /*, leafs*/);
+        var layout = new Layout().SplitRows(up, sizes);
 
-        // var totalMerkle = stats.MerkleBranchSize + stats.MerkleExtensionSize + stats.MerkleLeafSize;
 
         var general =
             $"Size total: {Page.FormatAsGb(stats.PageCount)}\n";
-        //+
-        // $" Merkle:    {ToGb(totalMerkle):F2}GB:\n" +
-        // $"  Branches: {ToGb(stats.MerkleBranchSize):F2}GB\n" +
-        // $"  Ext.:     {ToGb(stats.MerkleExtensionSize):F2}GB\n" +
-        // $"  Leaf:     {ToGb(stats.MerkleLeafSize):F2}GB\n" +
-        // $" Data:      {ToGb(stats.DataSize):F2}GB\n" +
-        // "---\n" +
-        // $" Branches with small empty set: {stats.MerkleBranchWithSmallEmpty}\n" +
-        // $" Branches with 15 children: {stats.MerkleBranchWithOneChildMissing}\n" +
-        // $" Branches with 3 or less children: {stats.MerkleBranchWithThreeChildrenOrLess}\n";
 
         up.Update(new Panel(general).Header($"General stats for {name}").Expand());
 
@@ -93,18 +81,31 @@ public static class StatisticsForPagedDb
         t.AddColumn(new TableColumn("Leaf page count"));
         t.AddColumn(new TableColumn("Overflow page count"));
 
-        // t.AddColumn(new TableColumn("Child page count"));
-        //
-        // t.AddColumn(new TableColumn("Entries in page"));
-        // t.AddColumn(new TableColumn("Capacity left (bytes)"));
-
-        var countByLevel = stats.PageCountPerNibblePathDepth.ToArray();
-        Array.Sort(countByLevel, (a, b) => a.Key.CompareTo(b.Key));
-
-        foreach (var (depth, count) in countByLevel)
+        if (fanOutLevels != null)
         {
-            var leafPageCount = stats.LeafPageCountPerNibblePathDepth.GetValueOrDefault(depth, 0);
-            var overflowCount = stats.OverflowPageCountPerNibblePathDepth.GetValueOrDefault(depth, 0);
+            var max = fanOutLevels.AsSpan().LastIndexOfAnyExcept(0) + 1;
+
+            for (int depth = 0; depth < max; depth++)
+            {
+                var count = fanOutLevels[depth];
+
+                t.AddRow(
+                    new Text($"{nameof(StorageFanOut)}, lvl: {depth}"),
+                    new Text(count.ToString()),
+                    new Text("-"),
+                    new Text("-")
+                );
+            }
+        }
+
+
+        var maxDepth = stats.PageCountPerNibblePathDepth.AsSpan().LastIndexOfAnyExcept(0) + 1;
+
+        for (int depth = 0; depth < maxDepth; depth++)
+        {
+            var count = stats.PageCountPerNibblePathDepth[depth];
+            var leafPageCount = stats.LeafPageCountPerNibblePathDepth[depth];
+            var overflowCount = stats.OverflowPageCountPerNibblePathDepth[depth];
 
             t.AddRow(
                 new Text(depth.ToString()),
@@ -112,15 +113,6 @@ public static class StatisticsForPagedDb
                 new Text(leafPageCount.ToString()),
                 new Text(overflowCount.ToString())
             );
-
-            // var entries = level.Entries;
-            // var capacity = level.CapacityLeft;
-            //
-            // t.AddRow(
-            //     new Text(key.ToString()),
-            //     WriteHistogram(level.ChildCount),
-            //     WriteHistogram(entries),
-            //     WriteHistogram(capacity));
         }
 
         sizes.Update(t.Expand());
