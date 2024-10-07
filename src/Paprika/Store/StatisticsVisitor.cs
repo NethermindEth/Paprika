@@ -35,11 +35,17 @@ public class StatisticsVisitor : IPageVisitor
         public readonly int[] PageCountPerNibblePathDepth = new int[Levels];
         public readonly int[] LeafPageCountPerNibblePathDepth = new int[Levels];
         public readonly int[] OverflowPageCountPerNibblePathDepth = new int[Levels];
-        public readonly IntHistogram?[] InnerPagePercentageUsed = new IntHistogram[Levels];
+        public readonly IntHistogram?[] InnerDataPagePercentageUsed = new IntHistogram[Levels];
+        public readonly IntHistogram?[] OverflowPagePercentageUsed = new IntHistogram[Levels];
+        public void ReportInnerDataPageMap(int length, in SlottedArray map) =>
+            ReportMap(InnerDataPagePercentageUsed, length, map);
 
-        public void ReportInnerDataPageMap(int length, in SlottedArray map)
+        public void ReportOverflowPageMap(int length, in SlottedArray map) =>
+            ReportMap(OverflowPagePercentageUsed, length, map);
+
+        private static void ReportMap(IntHistogram?[] histograms, int length, in SlottedArray map)
         {
-            var histogram = InnerPagePercentageUsed[length] ??= new IntHistogram(100, 5);
+            var histogram = histograms[length] ??= new IntHistogram(100, 5);
             var percentage = (int)(map.CalculateActualSpaceUsed() * 100);
 
             histogram.RecordValue(percentage);
@@ -93,7 +99,7 @@ public class StatisticsVisitor : IPageVisitor
                     break;
                 case PageType.LeafOverflow:
                     _current.OverflowPageCountPerNibblePathDepth[length] += 1;
-                    //_current.ReportMap(ref prefix, new LeafOverflowPage(p).Map);
+                    _current.ReportOverflowPageMap(length, dataPage.Map);
                     break;
             }
         }
