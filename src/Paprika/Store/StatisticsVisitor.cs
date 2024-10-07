@@ -1,8 +1,5 @@
-using System.Runtime.InteropServices;
 using HdrHistogram;
-using Paprika.Crypto;
 using Paprika.Data;
-using Paprika.Merkle;
 
 namespace Paprika.Store;
 
@@ -38,9 +35,14 @@ public class StatisticsVisitor : IPageVisitor
         public readonly int[] PageCountPerNibblePathDepth = new int[Levels];
         public readonly int[] LeafPageCountPerNibblePathDepth = new int[Levels];
         public readonly int[] OverflowPageCountPerNibblePathDepth = new int[Levels];
+        public readonly IntHistogram?[] InnerPagePercentageUsed = new IntHistogram[Levels];
 
-        public void ReportMap(scoped ref NibblePath.Builder prefix, in SlottedArray map)
+        public void ReportInnerDataPageMap(int length, in SlottedArray map)
         {
+            var histogram = InnerPagePercentageUsed[length] ??= new IntHistogram(100, 5);
+            var percentage = (int)(map.CalculateActualSpaceUsed() * 100);
+
+            histogram.RecordValue(percentage);
         }
 
         public int PageCount { get; set; }
@@ -83,11 +85,15 @@ public class StatisticsVisitor : IPageVisitor
                         _current.LeafPageCountPerNibblePathDepth[length] += 1;
                     }
 
-                    _current.ReportMap(ref prefix, dataPage.Map);
+                    if (dataPage.IsLeaf == false)
+                    {
+                        _current.ReportInnerDataPageMap(length, dataPage.Map);
+                    }
+
                     break;
                 case PageType.LeafOverflow:
                     _current.OverflowPageCountPerNibblePathDepth[length] += 1;
-                    _current.ReportMap(ref prefix, new LeafOverflowPage(p).Map);
+                    //_current.ReportMap(ref prefix, new LeafOverflowPage(p).Map);
                     break;
             }
         }
