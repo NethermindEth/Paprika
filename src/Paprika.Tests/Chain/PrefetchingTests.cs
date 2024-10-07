@@ -55,7 +55,7 @@ public class PrefetchingTests
             db.AllowAllReads();
 
             // prefetch first
-            var p = block.OpenPrefetcher();
+            var p = block.OpenPrefetcher<IdentityPrefetchMapping, Keccak, Keccak>();
             p!.CanPrefetchFurther.Should().BeTrue();
             p.PrefetchAccount(keccak);
 
@@ -78,6 +78,7 @@ public class PrefetchingTests
         start.SetAccount(k, new Account(13, bigNonce));
     }
 
+    [Parallelizable(ParallelScope.None)]
     [Explicit]
     [TestCase(true, false, Category = Categories.LongRunning, TestName = "No storage, prefetch")]
     [TestCase(false, false, Category = Categories.LongRunning, TestName = "No storage, no prefetch")]
@@ -119,7 +120,7 @@ public class PrefetchingTests
                 ? Task.FromResult(true)
                 : Task.Factory.StartNew(() =>
                 {
-                    var prefetcher = block.OpenPrefetcher();
+                    var prefetcher = block.OpenPrefetcher<IdentityPrefetchMapping, Keccak, Keccak>();
                     if (prefetcher == null)
                         return true;
 
@@ -140,7 +141,7 @@ public class PrefetchingTests
                     return true;
                 });
 
-            await Task.WhenAll(Task.Delay(50), task);
+            await Task.WhenAll(Task.Delay(25), task);
 
             if ((await task) == false)
                 prefetchFailures++;
@@ -159,12 +160,16 @@ public class PrefetchingTests
             }
         }
 
+        Keccak keccak = default;
         while (finality.TryDequeue(out var k))
         {
             blockchain.Finalize(k);
+            keccak = k;
         }
 
-        Console.WriteLine($"Prefetch failures: {prefetchFailures}. Commit time {commits.Elapsed:g}");
+        Console.WriteLine($"Prefetch failures: {prefetchFailures}. " +
+                          $"Commit time {commits.Elapsed:g}. " +
+                          $"Final Keccak: {keccak}");
     }
 
     private static void SetAccounts(ReadOnlyMemory<Keccak> slice, IWorldState block, uint i, bool storage)
@@ -177,6 +182,9 @@ public class PrefetchingTests
             block.SetAccount(keccak, new Account(i, i));
             if (storage)
             {
+                block.SetStorage(keccak, Keccak.EmptyTreeHash, value);
+                block.SetStorage(keccak, Keccak.OfAnEmptyString, value);
+                block.SetStorage(keccak, Keccak.OfAnEmptySequenceRlp, value);
                 block.SetStorage(keccak, keccak, value);
             }
         }

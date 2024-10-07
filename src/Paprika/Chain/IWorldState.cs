@@ -43,7 +43,8 @@ public interface IWorldState : IDisposable
 
     public IStateStats Stats { get; }
 
-    public IPreCommitPrefetcher? OpenPrefetcher();
+    public IPreCommitPrefetcher<TAccount, TStorage>? OpenPrefetcher<TMapping, TAccount, TStorage>()
+        where TMapping : IPrefetchMapping<TAccount, TStorage>;
 }
 
 public interface IReadOnlyWorldState : IReadOnlyCommit, IDisposable

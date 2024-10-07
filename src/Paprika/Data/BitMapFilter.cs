@@ -167,6 +167,7 @@ public static class BitMapFilter
 /// <summary>
 /// Represents a simple bitmap based filter for <see cref="ulong"/> hashes.
 /// </summary>
+[SkipLocalsInit]
 public readonly struct BitMapFilter<TAccessor>
     where TAccessor : struct, BitMapFilter.IAccessor<TAccessor>
 {
@@ -183,9 +184,47 @@ public readonly struct BitMapFilter<TAccessor>
         _accessor = accessor;
     }
 
-    public void Add(ulong hash) => this[hash] = true;
+    public void Add(ulong hash)
+    {
+        var mixed = Mix(hash);
+        var mask = GetBitMask(mixed);
+        ref var slot = ref _accessor.GetSlot(mixed >> BitsPerIntShift);
 
-    public bool MayContain(ulong hash) => this[hash];
+        slot |= mask;
+    }
+
+    /// <summary>
+    /// Adds the hash atomically.
+    /// </summary>
+    /// <param name="hash"></param>
+    /// <returns>Whether it was added after this operation.</returns>
+    public bool AddAtomic(ulong hash)
+    {
+        var mixed = Mix(hash);
+        var mask = GetBitMask(mixed);
+        ref var slot = ref _accessor.GetSlot(mixed >> BitsPerIntShift);
+
+        // was it 0 before? Yes, return true
+        return (Interlocked.Or(ref slot, mask) & mask) == 0;
+    }
+
+    public bool MayContain(ulong hash)
+    {
+        var mixed = Mix(hash);
+        var mask = GetBitMask(mixed);
+        var slot = _accessor.GetSlot(mixed >> BitsPerIntShift);
+
+        return (slot & mask) == mask;
+    }
+
+    public bool MayContainVolatile(ulong hash)
+    {
+        var mixed = Mix(hash);
+        var mask = GetBitMask(mixed);
+        var slot = _accessor.GetSlot(mixed >> BitsPerIntShift);
+
+        return (Volatile.Read(ref slot) & mask) == mask;
+    }
 
     /// <summary>
     /// Checks whether the filter may contain any of the hashes.
@@ -197,38 +236,10 @@ public readonly struct BitMapFilter<TAccessor>
         var slot0 = _accessor.GetSlot(mixed0 >> BitsPerIntShift);
         var mixed1 = Mix(hash1);
         var slot1 = _accessor.GetSlot(mixed1 >> BitsPerIntShift);
-
         return ((slot0 & GetBitMask(mixed0)) | (slot1 & GetBitMask(mixed1))) != 0;
     }
 
     public void Clear() => _accessor.Clear();
-
-    [SkipLocalsInit]
-    public bool this[ulong hash]
-    {
-        get
-        {
-            var mixed = Mix(hash);
-            var mask = GetBitMask(mixed);
-            var slot = _accessor.GetSlot(mixed >> BitsPerIntShift);
-            return (slot & mask) == mask;
-        }
-        set
-        {
-            var mixed = Mix(hash);
-            var mask = GetBitMask(mixed);
-            ref var slot = ref _accessor.GetSlot(mixed >> BitsPerIntShift);
-
-            if (value)
-            {
-                slot |= mask;
-            }
-            else
-            {
-                slot &= ~mask;
-            }
-        }
-    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int GetBitMask(uint mixed) => 1 << (int)(mixed & BitMask);
