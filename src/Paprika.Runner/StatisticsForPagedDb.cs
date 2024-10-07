@@ -80,6 +80,7 @@ public static class StatisticsForPagedDb
         t.AddColumn(new TableColumn("Page count"));
         t.AddColumn(new TableColumn("Leaf page count"));
         t.AddColumn(new TableColumn("Overflow page count"));
+        t.AddColumn(new TableColumn($"{nameof(DataPage)} % usage (P50)"));
 
         if (fanOutLevels != null)
         {
@@ -92,6 +93,7 @@ public static class StatisticsForPagedDb
                 t.AddRow(
                     new Text($"{nameof(StorageFanOut)}, lvl: {depth}"),
                     new Text(count.ToString()),
+                    new Text("-"),
                     new Text("-"),
                     new Text("-")
                 );
@@ -107,11 +109,26 @@ public static class StatisticsForPagedDb
             var leafPageCount = stats.LeafPageCountPerNibblePathDepth[depth];
             var overflowCount = stats.OverflowPageCountPerNibblePathDepth[depth];
 
+            var usage = "-";
+            var histogram = stats.InnerPagePercentageUsed[depth];
+            if (histogram != null)
+            {
+                try
+                {
+                    usage = histogram.GetValueAtPercentile(50).ToString();
+                }
+                catch
+                {
+                    // ignored
+                }
+            }
+
             t.AddRow(
                 new Text(depth.ToString()),
                 new Text(count.ToString()),
                 new Text(leafPageCount.ToString()),
-                new Text(overflowCount.ToString())
+                new Text(overflowCount.ToString()),
+                new Text(usage)
             );
         }
 

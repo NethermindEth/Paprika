@@ -1,4 +1,3 @@
-using Paprika.Crypto;
 using Paprika.Data;
 
 namespace Paprika.Store;
