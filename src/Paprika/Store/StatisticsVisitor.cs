@@ -14,6 +14,8 @@ public class StatisticsVisitor : IPageVisitor
     public readonly Stats Ids;
     public readonly Stats Storage;
 
+    public readonly int[] StorageFanOutLevels = new int[StorageFanOut.LevelCount + 1];
+
     public int AbandonedCount;
     public int TotalVisited;
 
@@ -29,11 +31,13 @@ public class StatisticsVisitor : IPageVisitor
         _current = State;
     }
 
-    public class Stats()
+    public class Stats
     {
-        public readonly Dictionary<int, int> PageCountPerNibblePathDepth = new();
-        public readonly Dictionary<int, int> LeafPageCountPerNibblePathDepth = new();
-        public readonly Dictionary<int, int> OverflowPageCountPerNibblePathDepth = new();
+        public const int Levels = 32;
+
+        public readonly int[] PageCountPerNibblePathDepth = new int[Levels];
+        public readonly int[] LeafPageCountPerNibblePathDepth = new int[Levels];
+        public readonly int[] OverflowPageCountPerNibblePathDepth = new int[Levels];
 
         public void ReportMap(scoped ref NibblePath.Builder prefix, in SlottedArray map)
         {
@@ -44,39 +48,48 @@ public class StatisticsVisitor : IPageVisitor
 
     public event EventHandler? TotalVisitedChanged;
 
-    public IDisposable On<TPage>(scoped ref NibblePath.Builder prefix, TPage page, DbAddress addr) where TPage : unmanaged, IPage
+    public IDisposable On<TPage>(scoped ref NibblePath.Builder prefix, TPage page, DbAddress addr)
+        where TPage : unmanaged, IPage
     {
         IncTotalVisited();
 
         _current.PageCount++;
 
-        var length = prefix.Current.Length;
-
-        ref var count = ref CollectionsMarshal.GetValueRefOrAddDefault(_current.PageCountPerNibblePathDepth, length, out _);
-        count += 1;
-
-        var p = page.AsPage();
-        switch (p.Header.PageType)
+        if (typeof(TPage) == typeof(StorageFanOut.Level1Page))
         {
-            case PageType.DataPage:
-                var dataPage = new DataPage(p);
-                if (dataPage.IsLeaf)
-                {
-                    ref var leafCount =
-                        ref CollectionsMarshal.GetValueRefOrAddDefault(_current.LeafPageCountPerNibblePathDepth, length,
-                            out _);
-                    leafCount += 1;
-                }
-                _current.ReportMap(ref prefix, dataPage.Map);
-                break;
-            case PageType.LeafOverflow:
-                ref var overflowCount =
-                    ref CollectionsMarshal.GetValueRefOrAddDefault(_current.OverflowPageCountPerNibblePathDepth, length,
-                        out _);
-                overflowCount += 1;
+            StorageFanOutLevels[1] += 1;
+        }
+        else if (typeof(TPage) == typeof(StorageFanOut.Level2Page))
+        {
+            StorageFanOutLevels[2] += 1;
+        }
+        else if (typeof(TPage) == typeof(StorageFanOut.Level3Page))
+        {
+            StorageFanOutLevels[3] += 1;
+        }
+        else
+        {
+            var length = prefix.Current.Length;
 
-                _current.ReportMap(ref prefix, new LeafOverflowPage(p).Map);
-                break;
+            _current.PageCountPerNibblePathDepth[length] += 1;
+
+            var p = page.AsPage();
+            switch (p.Header.PageType)
+            {
+                case PageType.DataPage:
+                    var dataPage = new DataPage(p);
+                    if (dataPage.IsLeaf)
+                    {
+                        _current.LeafPageCountPerNibblePathDepth[length] += 1;
+                    }
+
+                    _current.ReportMap(ref prefix, dataPage.Map);
+                    break;
+                case PageType.LeafOverflow:
+                    _current.OverflowPageCountPerNibblePathDepth[length] += 1;
+                    _current.ReportMap(ref prefix, new LeafOverflowPage(p).Map);
+                    break;
+            }
         }
 
         return Disposable.Instance;
