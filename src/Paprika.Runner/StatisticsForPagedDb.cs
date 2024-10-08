@@ -80,7 +80,8 @@ public static class StatisticsForPagedDb
         t.AddColumn(new TableColumn("Page count"));
         t.AddColumn(new TableColumn("Leaf page count"));
         t.AddColumn(new TableColumn("Overflow page count"));
-        t.AddColumn(new TableColumn($"{nameof(DataPage)} (P50) % usage"));
+        t.AddColumn(new TableColumn($"{nameof(DataPage)}-inner (P50) % usage"));
+        t.AddColumn(new TableColumn($"{nameof(DataPage)}-leaf (P50) % usage"));
         t.AddColumn(new TableColumn($"{nameof(LeafOverflowPage)} (P50) % usage"));
 
         if (fanOutLevels != null)
@@ -94,6 +95,7 @@ public static class StatisticsForPagedDb
                 t.AddRow(
                     new Text($"{nameof(StorageFanOut)}, lvl: {depth}"),
                     new Text(count.ToString()),
+                    new Text("-"),
                     new Text("-"),
                     new Text("-"),
                     new Text("-"),
@@ -116,6 +118,7 @@ public static class StatisticsForPagedDb
                 new Text(leafPageCount.ToString()),
                 new Text(overflowCount.ToString()),
                 new Text(GetP50(stats.InnerDataPagePercentageUsed, depth)),
+                new Text(GetP50(stats.LeafDataPagePercentageUsed, depth)),
                 new Text(GetP50(stats.OverflowPagePercentageUsed, depth))
             );
         }
