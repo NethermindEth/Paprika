@@ -519,8 +519,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         private readonly RootPage _root;
         private readonly uint _reusePagesOlderThanBatchId;
         private bool _verify = false;
-        private bool _disposed;
-
+        private bool _disposed; 
+        
         private readonly Context _ctx;
 
         /// <summary>

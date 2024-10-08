@@ -76,6 +76,11 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>, IClearable
                     buckets[index] = batch.GetAddress(child);
                 }
             }
+            else
+            {
+                batch.RegisterForFutureReuse(page);
+                return batch.NullPage;
+            }
         }
         else
         {

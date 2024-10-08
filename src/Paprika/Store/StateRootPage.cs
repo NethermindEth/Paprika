@@ -75,6 +75,12 @@ public readonly unsafe struct StateRootPage(Page page) : IPage
             return new StateRootPage(writable).DeleteByPrefix(prefix, batch);
         }
 
+        if (prefix.IsEmpty)
+        {
+            batch.RegisterForFutureReuse(page);
+            return batch.NullPage;
+        }
+
         Debug.Assert(prefix.Length > ConsumedNibbles, "Removing prefix at the root? Something went wrong.");
 
         var index = GetIndex(prefix);

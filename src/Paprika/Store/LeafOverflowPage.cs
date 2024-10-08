@@ -47,6 +47,11 @@ public readonly unsafe struct LeafOverflowPage(Page page) : IPage
             var writable = batch.GetWritableCopy(page);
             return new LeafOverflowPage(writable).DeleteByPrefix(prefix, batch);
         }
+        if (prefix.IsEmpty)
+        {
+            batch.RegisterForFutureReuse(page);
+            return batch.NullPage;
+        }
 
         Map.DeleteByPrefix(prefix);
 
