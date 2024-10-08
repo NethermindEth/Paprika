@@ -35,11 +35,34 @@ public class StatisticsVisitor : IPageVisitor
         public readonly int[] PageCountPerNibblePathDepth = new int[Levels];
         public readonly int[] LeafPageCountPerNibblePathDepth = new int[Levels];
         public readonly int[] OverflowPageCountPerNibblePathDepth = new int[Levels];
-        public readonly IntHistogram?[] InnerPagePercentageUsed = new IntHistogram[Levels];
 
-        public void ReportInnerDataPageMap(int length, in SlottedArray map)
+        /// <summary>
+        /// A histogram of used space in inner <see cref="DataPage"/>.
+        /// </summary>
+        public readonly IntHistogram?[] InnerDataPagePercentageUsed = new IntHistogram[Levels];
+
+        /// <summary>
+        /// A histogram of used space in leaf <see cref="DataPage"/>.
+        /// </summary>
+        public readonly IntHistogram?[] LeafDataPagePercentageUsed = new IntHistogram[Levels];
+
+        /// <summary>
+        /// A histogram of used space in leaf <see cref="LeafOverflowPage"/>.
+        /// </summary>
+        public readonly IntHistogram?[] OverflowPagePercentageUsed = new IntHistogram[Levels];
+
+        public void ReportInnerDataPageMap(int length, in SlottedArray map) =>
+            ReportMap(InnerDataPagePercentageUsed, length, map);
+
+        public void ReportLeafDataPageMap(int length, in SlottedArray map) =>
+            ReportMap(LeafDataPagePercentageUsed, length, map);
+
+        public void ReportOverflowPageMap(int length, in SlottedArray map) =>
+            ReportMap(OverflowPagePercentageUsed, length, map);
+
+        private static void ReportMap(IntHistogram?[] histograms, int length, in SlottedArray map)
         {
-            var histogram = InnerPagePercentageUsed[length] ??= new IntHistogram(100, 5);
+            var histogram = histograms[length] ??= new IntHistogram(100, 5);
             var percentage = (int)(map.CalculateActualSpaceUsed() * 100);
 
             histogram.RecordValue(percentage);
@@ -76,10 +99,13 @@ public class StatisticsVisitor : IPageVisitor
             _current.PageCountPerNibblePathDepth[length] += 1;
 
             var p = page.AsPage();
+
             switch (p.Header.PageType)
             {
                 case PageType.DataPage:
                     var dataPage = new DataPage(p);
+                    var map = dataPage.Map;
+
                     if (dataPage.IsLeaf)
                     {
                         _current.LeafPageCountPerNibblePathDepth[length] += 1;
@@ -87,13 +113,17 @@ public class StatisticsVisitor : IPageVisitor
 
                     if (dataPage.IsLeaf == false)
                     {
-                        _current.ReportInnerDataPageMap(length, dataPage.Map);
+                        _current.ReportInnerDataPageMap(length, map);
+                    }
+                    else
+                    {
+                        _current.ReportLeafDataPageMap(length, map);
                     }
 
                     break;
                 case PageType.LeafOverflow:
                     _current.OverflowPageCountPerNibblePathDepth[length] += 1;
-                    //_current.ReportMap(ref prefix, new LeafOverflowPage(p).Map);
+                    _current.ReportOverflowPageMap(length, new LeafOverflowPage(p).Map);
                     break;
             }
         }
@@ -143,141 +173,3 @@ public class StatisticsVisitor : IPageVisitor
         public void Dispose() => visitor._current = previous;
     }
 }
-
-//
-// public class StatisticsReporter(TrieType trieType) : IReporter
-// {
-//     public readonly SortedDictionary<int, Level> Levels = new();
-//     public readonly Dictionary<PageType, int> PageTypes = new();
-//     public int PageCount;
-//
-//     public long DataSize;
-//
-//     public long MerkleBranchSize;
-//     public long MerkleBranchWithSmallEmpty;
-//     public long MerkleBranchWithOneChildMissing;
-//     public long MerkleBranchWithThreeChildrenOrLess;
-//     public long MerkleExtensionSize;
-//     public long MerkleLeafSize;
-//
-//     public readonly IntHistogram LeafCapacityLeft = new(10000, 5);
-//     public readonly IntHistogram LeafOverflowCapacityLeft = new(10000, 5);
-//     public readonly IntHistogram LeafOverflowCount = new(100, 5);
-//
-//     public readonly IntHistogram PageAge = new(uint.MaxValue, 5);
-//
-//     public void ReportDataUsage(PageType type, int pageLevel, int trimmedNibbles, in SlottedArray array)
-//     {
-//         if (Levels.TryGetValue(pageLevel, out var lvl) == false)
-//         {
-//             lvl = Levels[pageLevel] = new Level();
-//         }
-//
-//         PageCount++;
-//
-//         lvl.Entries.RecordValue(array.Count);
-//
-//         var capacityLeft = array.CapacityLeft + 1; // to ensure zeroes are handled well
-//         lvl.CapacityLeft.RecordValue(capacityLeft);
-//
-//         if (type == PageType.LeafOverflow)
-//             LeafOverflowCapacityLeft.RecordValue(capacityLeft);
-//
-//         // analyze data
-//         foreach (var item in array.EnumerateAll())
-//         {
-//             var data = item.RawData;
-//             var size = data.Length;
-//             var isMerkle = item.Key.Length + trimmedNibbles < NibblePath.KeccakNibbleCount;
-//
-//             if (isMerkle)
-//             {
-//                 if (size > 0)
-//                 {
-//                     var nodeType = Node.Header.GetTypeFrom(data);
-//                     switch (nodeType)
-//                     {
-//                         case Node.Type.Leaf:
-//                             MerkleLeafSize += size;
-//                             break;
-//                         case Node.Type.Extension:
-//                             MerkleExtensionSize += size;
-//                             break;
-//                         case Node.Type.Branch:
-//                             MerkleBranchSize += size;
-//                             var leftover = Node.Branch.ReadFrom(data, out var branch);
-//
-//                             if (branch.Children.SetCount == 15)
-//                             {
-//                                 MerkleBranchWithOneChildMissing++;
-//                             }
-//                             else if (branch.Children.SetCount <= 3)
-//                             {
-//                                 MerkleBranchWithThreeChildrenOrLess++;
-//                             }
-//
-//                             var len = leftover.Length % Keccak.Size;
-//                             if (len > 0)
-//                             {
-//                                 NibbleSet.Readonly.ReadFrom(leftover[^len..], out var empty);
-//                                 if (empty.SetCount <= 2)
-//                                 {
-//                                     MerkleBranchWithSmallEmpty++;
-//                                 }
-//                             }
-//
-//                             break;
-//                         default:
-//                             throw new ArgumentOutOfRangeException();
-//                     }
-//                 }
-//             }
-//             else
-//             {
-//                 DataSize += size;
-//             }
-//
-//             if (!isMerkle && trieType == TrieType.Storage && data.Length > 32)
-//             {
-//                 throw new Exception(
-//                     $"Storage, not Merkle node with local key {item.Key.ToString()}, has more than 32 bytes");
-//             }
-//         }
-//     }
-//
-//     public void ReportPage(uint ageInBatches, PageType type)
-//     {
-//         PageAge.RecordValue(ageInBatches);
-//         var value = PageTypes.GetValueOrDefault(type);
-//         PageTypes[type] = value + 1;
-//     }
-//
-//     public void ReportLeafOverflowCount(byte count)
-//     {
-//         LeafOverflowCount.RecordValue(count);
-//     }
-//
-//     private const int KeyShift = 8;
-//     private const int KeyDiff = 1;
-//
-//     public static string GetNameForSize(int i)
-//     {
-//         var type = (DataType)(i & 0xFF);
-//         var str = type.ToString().Replace(", ", "-");
-//
-//         if (i >> KeyShift < KeyDiff)
-//         {
-//             return str;
-//         }
-//
-//         var merkleType = (Node.Type)((i >> KeyShift) - KeyDiff);
-//         return $"{str}-{merkleType}";
-//     }
-//
-//     public class Level
-//     {
-//         public readonly IntHistogram ChildCount = new(1000, 5);
-//         public readonly IntHistogram Entries = new(1000, 5);
-//         public readonly IntHistogram CapacityLeft = new(10000, 5);
-//     }
-// }

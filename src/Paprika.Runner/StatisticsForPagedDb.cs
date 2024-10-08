@@ -80,7 +80,9 @@ public static class StatisticsForPagedDb
         t.AddColumn(new TableColumn("Page count"));
         t.AddColumn(new TableColumn("Leaf page count"));
         t.AddColumn(new TableColumn("Overflow page count"));
-        t.AddColumn(new TableColumn($"{nameof(DataPage)} % usage (P50)"));
+        t.AddColumn(new TableColumn($"{nameof(DataPage)}-inner (P50) % usage"));
+        t.AddColumn(new TableColumn($"{nameof(DataPage)}-leaf (P50) % usage"));
+        t.AddColumn(new TableColumn($"{nameof(LeafOverflowPage)} (P50) % usage"));
 
         if (fanOutLevels != null)
         {
@@ -95,58 +97,55 @@ public static class StatisticsForPagedDb
                     new Text(count.ToString()),
                     new Text("-"),
                     new Text("-"),
+                    new Text("-"),
+                    new Text("-"),
                     new Text("-")
                 );
             }
         }
 
-
         var maxDepth = stats.PageCountPerNibblePathDepth.AsSpan().LastIndexOfAnyExcept(0) + 1;
 
-        for (int depth = 0; depth < maxDepth; depth++)
+        for (var depth = 0; depth < maxDepth; depth++)
         {
             var count = stats.PageCountPerNibblePathDepth[depth];
             var leafPageCount = stats.LeafPageCountPerNibblePathDepth[depth];
             var overflowCount = stats.OverflowPageCountPerNibblePathDepth[depth];
-
-            var usage = "-";
-            var histogram = stats.InnerPagePercentageUsed[depth];
-            if (histogram != null)
-            {
-                try
-                {
-                    usage = histogram.GetValueAtPercentile(50).ToString();
-                }
-                catch
-                {
-                    // ignored
-                }
-            }
 
             t.AddRow(
                 new Text(depth.ToString()),
                 new Text(count.ToString()),
                 new Text(leafPageCount.ToString()),
                 new Text(overflowCount.ToString()),
-                new Text(usage)
+                new Text(GetP50(stats.InnerDataPagePercentageUsed, depth)),
+                new Text(GetP50(stats.LeafDataPagePercentageUsed, depth)),
+                new Text(GetP50(stats.OverflowPagePercentageUsed, depth))
             );
         }
 
         sizes.Update(t.Expand());
 
-        // var leafsTable = new Table();
-        // leafsTable.AddColumn(new TableColumn("Leaf capacity left"));
-        // leafsTable.AddColumn(new TableColumn("Leaf->Overflow capacity left"));
-        // leafsTable.AddColumn(new TableColumn("Leaf->Overflow count"));
-        //
-        // leafsTable.AddRow(
-        //     WriteHistogram(stats.LeafCapacityLeft),
-        //     WriteHistogram(stats.LeafOverflowCapacityLeft),
-        //     WriteHistogram(stats.LeafOverflowCount));
-        //
-        // leafs.Update(leafsTable.Expand());
-
         return layout;
+
+        string GetP50(IntHistogram?[] histograms, int depth)
+        {
+            const string none = "-";
+
+            var histogram = histograms[depth];
+            if (histogram == null)
+                return none;
+
+            try
+            {
+                return histogram.GetValueAtPercentile(50).ToString();
+            }
+            catch
+            {
+                // ignored
+            }
+
+            return none;
+        }
     }
 
     // private static IRenderable WriteSizePerType(Dictionary<int, long> sizes, string prefix)

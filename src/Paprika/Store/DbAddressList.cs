@@ -70,8 +70,6 @@ public static class DbAddressList
         public DbAddress this[int index] { get; set; }
         public static abstract int Length { get; }
 
-        public void Clear();
-
         public DbAddress[] ToArray();
     }
 
