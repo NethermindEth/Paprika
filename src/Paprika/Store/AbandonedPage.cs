@@ -233,13 +233,22 @@ public readonly struct AbandonedPage(Page page) : IPage
     public void AttachTail(DbAddress tail, IBatchContext batch)
     {
         Debug.Assert(page.Header.BatchId == batch.BatchId);
-        ref var abandoned = ref Data;
 
-        while (!abandoned.Next.IsNull)
+        if (Data.Next.IsNull)
         {
-            abandoned = new AbandonedPage(batch.GetAt(abandoned.Next)).Data;
+            Data.Next = tail;
+            return;
         }
 
-        abandoned.Next = tail;
+        var prev = Data.Next;
+        var next = new AbandonedPage(batch.GetAt(prev)).Data.Next;
+
+        while (!next.IsNull)
+        {
+            prev = next;
+            next = new AbandonedPage(batch.GetAt(next)).Data.Next;
+        }
+
+        new AbandonedPage(batch.GetAt(prev)).Data.Next = tail;
     }
 }

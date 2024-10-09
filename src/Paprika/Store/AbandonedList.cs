@@ -166,7 +166,7 @@ public struct AbandonedList
     {
         if (MaxCount == EntriesCount)
         {
-            // No place, attach it to the youngest batch id
+            // No place, attach it to the youngest batch id from the sorted BatchIds
             var maxAt = MaxCount - 1;
             Debug.Assert(MaxCount > 2 && BatchIds[MaxCount - 1] > BatchIds[MaxCount - 2]);
 
