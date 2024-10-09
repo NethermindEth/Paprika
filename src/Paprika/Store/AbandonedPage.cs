@@ -54,12 +54,13 @@ public readonly struct AbandonedPage(Page page) : IPage
     public void Accept(IPageVisitor visitor, IPageResolver resolver)
     {
         var addr = Data.Next;
-        if (addr.IsNull == false)
+
+        while (!addr.IsNull)
         {
             var abandoned = new AbandonedPage(resolver.GetAt(addr));
             visitor.On(abandoned, addr);
 
-            abandoned.Accept(visitor, resolver);
+            addr = abandoned.Next;
         }
     }
 
@@ -232,13 +233,13 @@ public readonly struct AbandonedPage(Page page) : IPage
     public void AttachTail(DbAddress tail, IBatchContext batch)
     {
         Debug.Assert(page.Header.BatchId == batch.BatchId);
+        ref var abandoned = ref Data;
 
-        if (Data.Next.IsNull)
+        while (!abandoned.Next.IsNull)
         {
-            Data.Next = tail;
-            return;
+            abandoned = new AbandonedPage(batch.GetAt(abandoned.Next)).Data;
         }
 
-        new AbandonedPage(batch.GetAt(Data.Next)).AttachTail(tail, batch);
+        abandoned.Next = tail;
     }
 }
