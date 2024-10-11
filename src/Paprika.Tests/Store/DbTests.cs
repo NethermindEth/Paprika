@@ -106,31 +106,7 @@ public class DbTests
             await block.Commit(CommitOptions.FlushDataOnly);
         }
 
-        // start read batch, it will make new allocs only
-        var read = db.BeginReadOnlyBatch();
-
-        for (var i = 0; i < blocksDuringReadAcquired; i++)
-        {
-            // ReSharper disable once ConvertToUsingDeclaration
-            using (var block = db.BeginNextBatch())
-            {
-                // assert previous
-                block.ShouldHaveAccount(Key0, GetValue(i + start));
-
-                // write current
-                block.SetAccount(Key0, GetValue(i));
-
-                block.VerifyDbPagesOnCommit();
-                await block.Commit(CommitOptions.FlushDataOnly);
-
-                read.ShouldHaveAccount(Key0, GetValue(start));
-            }
-        }
-
-        var snapshot = db.Megabytes;
-
-        // disable read
-        read.Dispose();
+        var actualSize = await SetAndSnapshotSize(db);
 
         // write again
         for (var i = 0; i < blocksPostRead; i++)
@@ -145,11 +121,37 @@ public class DbTests
             }
         }
 
-        db.Megabytes.Should().Be(snapshot, "Database should not grow without read transaction active.");
+        db.Megabytes.Should().Be(actualSize, "Database should not grow without read transaction active.");
 
-        Console.WriteLine($"Uses {db.Megabytes:P}MB out of pre-allocated {size / MB}MB od disk.");
+        Console.WriteLine($"Uses {db.Megabytes:P}MB out of pre-allocated {actualSize / MB}MB od disk.");
 
         AssertPageMetadataAssigned(db);
+        return;
+
+        static async Task<double> SetAndSnapshotSize(PagedDb db)
+        {
+            using var read = db.BeginReadOnlyBatch();
+
+            for (var i = 0; i < blocksDuringReadAcquired; i++)
+            {
+                // ReSharper disable once ConvertToUsingDeclaration
+                using (var block = db.BeginNextBatch())
+                {
+                    // assert previous
+                    block.ShouldHaveAccount(Key0, GetValue(i + start));
+
+                    // write current
+                    block.SetAccount(Key0, GetValue(i));
+
+                    block.VerifyDbPagesOnCommit();
+                    await block.Commit(CommitOptions.FlushDataOnly);
+
+                    read.ShouldHaveAccount(Key0, GetValue(start));
+                }
+            }
+
+            return db.Megabytes;
+        }
     }
 
     [Test]
@@ -212,7 +214,7 @@ public class DbTests
         random.NextBytes(storageKeys);
         random.NextBytes(value);
 
-        var readBatches = new List<IReadOnlyBatch>();
+        using var reads = new CompositeDisposable<IVisitableReadOnlyBatch>();
 
         for (var i = 0; i < batches; i++)
         {
@@ -225,20 +227,15 @@ public class DbTests
 
             await batch.Commit(CommitOptions.FlushDataAndRoot);
 
-            readBatches.Add(db.BeginReadOnlyBatch());
+            reads.Add(db.BeginReadOnlyBatch());
         }
 
-        foreach (var read in readBatches)
+        foreach (var read in reads)
         {
             for (var slot = 0; slot < storageSlots; slot++)
             {
                 read.AssertStorageValue(account, GetStorageAddress(slot), value);
             }
-        }
-
-        foreach (var read in readBatches)
-        {
-            read.Dispose();
         }
 
         return;

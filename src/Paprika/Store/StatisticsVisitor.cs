@@ -128,7 +128,7 @@ public class StatisticsVisitor : IPageVisitor
             }
         }
 
-        return Disposable.Instance;
+        return NoopDisposable.Instance;
     }
 
     public IDisposable On<TPage>(TPage page, DbAddress addr) where TPage : unmanaged, IPage
@@ -140,7 +140,7 @@ public class StatisticsVisitor : IPageVisitor
             AbandonedCount += new AbandonedPage(page.AsPage()).CountPages();
         }
 
-        return Disposable.Instance;
+        return NoopDisposable.Instance;
     }
 
     private void IncTotalVisited()
@@ -162,7 +162,7 @@ public class StatisticsVisitor : IPageVisitor
                 _current = Storage;
                 return new ModeScope(this, previous);
             case nameof(StorageFanOut):
-                return Disposable.Instance;
+                return NoopDisposable.Instance;
             default:
                 throw new NotImplementedException($"Not implemented for {name}");
         }
