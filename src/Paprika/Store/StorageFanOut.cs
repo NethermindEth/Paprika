@@ -62,19 +62,6 @@ public static class StorageFanOut
         return (next, index);
     }
 
-    private static TPage AllocateClear<TPage>(IBatchContext batch, out DbAddress addr)
-        where TPage : struct, IPage<TPage>, IClearable
-    {
-        var p = batch.GetNewPage(out addr, false);
-
-        p.Header.PageType = TPage.DefaultType;
-        p.Header.Level = 0;
-
-        var wrapped = TPage.Wrap(p);
-        wrapped.Clear();
-        return wrapped;
-    }
-
     /// <summary>
     /// Provides a convenient data structure for <see cref="RootPage"/>,
     /// to hold a list of child addresses of <see cref="DbAddressList.IDbAddressList"/> but with addition of
@@ -108,7 +95,7 @@ public static class StorageFanOut
 
             if (addr.IsNull)
             {
-                AllocateClear<Level1Page>(batch, out addr).Set(next, key, type, data, batch);
+                batch.GetNewCleanPage<Level1Page>(out addr).Set(next, key, type, data, batch);
                 _addresses[index] = addr;
                 return;
             }
@@ -279,7 +266,7 @@ public static class StorageFanOut
                 addr = Data.Ids[normalized];
                 if (addr.IsNull)
                 {
-                    AllocateClear<DataPage>(batch, out addr);
+                    batch.GetNewCleanPage<DataPage>(out addr);
                 }
 
                 Data.Ids[normalized] = batch.GetAddress(DataPage.Wrap(batch.GetAt(addr)).Set(key, data, batch));
@@ -293,7 +280,7 @@ public static class StorageFanOut
 
             if (addr.IsNull)
             {
-                AllocateClear<Level2Page>(batch, out addr);
+                batch.GetNewCleanPage<Level2Page>(out addr);
             }
 
             Data.Storage[index] = batch.GetAddress(Level2Page.Wrap(batch.GetAt(addr)).Set(next, key, data, batch));
@@ -421,7 +408,7 @@ public static class StorageFanOut
 
             if (addr.IsNull)
             {
-                AllocateClear<Level3Page>(batch, out addr);
+                batch.GetNewCleanPage<Level3Page>(out addr);
             }
 
             Data.Addresses[index] = batch.GetAddress(Level3Page.Wrap(batch.GetAt(addr)).Set(next, key, data, batch));
@@ -588,7 +575,7 @@ public static class StorageFanOut
 
                 if (Root.IsNull)
                 {
-                    AllocateClear<DataPage>(batch, out Root);
+                    batch.GetNewCleanPage<DataPage>(out Root);
                 }
 
                 // Ensure COWed

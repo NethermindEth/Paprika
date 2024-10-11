@@ -16,7 +16,7 @@ public interface IPage
 {
 }
 
-public interface IPage<TPage> : IPage
+public interface IPage<TPage> : IPage, IClearable
     where TPage : struct, IPage<TPage>
 {
     public static abstract TPage Wrap(Page page);
