@@ -22,6 +22,8 @@ public interface IPage<TPage> : IPage, IClearable
     public static abstract TPage Wrap(Page page);
 
     public static abstract PageType DefaultType { get; }
+
+    public bool IsClean { get; }
 }
 
 /// <summary>

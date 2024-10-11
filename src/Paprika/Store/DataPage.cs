@@ -371,6 +371,8 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>, IClearable
         Data.Buckets.Clear();
     }
 
+    public bool IsClean => new SlottedArray(Data.DataSpan).IsEmpty && Data.Buckets.IsClean;
+
     private static DbAddress EnsureExistingChildWritable(IBatchContext batch, ref Payload payload, byte nibble)
     {
         var childAddr = payload.Buckets[nibble];

@@ -252,6 +252,8 @@ public readonly struct AbandonedPage(Page page) : IPage<AbandonedPage>
         Data.Count = default;
     }
 
+    public bool IsClean => Data.Next.IsNull && Data.Count == 0;
+
     public static AbandonedPage Wrap(Page page) => Unsafe.As<Page, AbandonedPage>(ref page);
 
     public static PageType DefaultType => PageType.Abandoned;

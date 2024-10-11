@@ -201,7 +201,7 @@ public static class StorageFanOut
     /// </summary>
     /// <param name="page"></param>
     [method: DebuggerStepThrough]
-    public readonly unsafe struct Level1Page(Page page) : IPage<Level1Page>, IClearable
+    public readonly unsafe struct Level1Page(Page page) : IPage<Level1Page>
     {
         private const int Level = 1;
 
@@ -217,6 +217,8 @@ public static class StorageFanOut
             Data.Ids.Clear();
             Data.Storage.Clear();
         }
+
+        public bool IsClean => Data.Ids.IsClean & Data.Storage.IsClean;
 
         public bool TryGet(IPageResolver batch, uint at, scoped in NibblePath key, Type type,
             out ReadOnlySpan<byte> result)
@@ -373,6 +375,7 @@ public static class StorageFanOut
         public static PageType DefaultType => PageType.FanOutPage;
 
         public void Clear() => Data.Addresses.Clear();
+        public bool IsClean => Data.Addresses.IsClean;
 
         private ref PageHeader Header => ref page.Header;
 
@@ -484,6 +487,20 @@ public static class StorageFanOut
             }
         }
 
+        public bool IsClean
+        {
+            get
+            {
+                foreach (ref readonly var bucket in Data.Buckets)
+                {
+                    if (bucket.IsClean == false)
+                        return false;
+                }
+
+                return true;
+            }
+        }
+
         public bool TryGet(IPageResolver batch, uint at, in NibblePath key, out ReadOnlySpan<byte> result)
         {
             return Data.Buckets[(int)at].TryGet(batch, key, out result);
@@ -528,7 +545,7 @@ public static class StorageFanOut
         }
 
         [StructLayout(LayoutKind.Explicit, Size = Size)]
-        private struct Bucket
+        private struct Bucket : IClearable
         {
             public const int Size = 1016;
             private const int DataSize = Size - DbAddress.Size;
@@ -544,6 +561,8 @@ public static class StorageFanOut
                 Root = default;
                 Map.Clear();
             }
+
+            public bool IsClean => Root.IsNull && Map.IsEmpty;
 
             public bool TryGet(IPageResolver batch, in NibblePath key, out ReadOnlySpan<byte> result)
             {

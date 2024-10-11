@@ -58,6 +58,8 @@ public readonly unsafe struct LeafOverflowPage(Page page) : IPage<LeafOverflowPa
         Map.Clear();
     }
 
+    public bool IsClean => Map.IsEmpty;
+
     public static LeafOverflowPage Wrap(Page page) => Unsafe.As<Page, LeafOverflowPage>(ref page);
 
     public static PageType DefaultType => PageType.LeafOverflow;
