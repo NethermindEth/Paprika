@@ -720,6 +720,9 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
             _written.Add(addr);
 
+            // Clear whole header first
+            page.Header = default;
+
             AssignBatchId(page);
             return page;
         }
