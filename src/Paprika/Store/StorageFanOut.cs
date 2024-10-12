@@ -23,10 +23,12 @@ namespace Paprika.Store;
 /// </summary>
 public static class StorageFanOut
 {
+    public const int LevelCount = 3;
+
     public const string ScopeIds = "Ids";
     public const string ScopeStorage = "Storage";
 
-    private enum Type
+    public enum Type
     {
         /// <summary>
         /// Represents the mapping of Keccak->int
@@ -58,19 +60,6 @@ public static class StorageFanOut
         var next = nextMask & at;
 
         return (next, index);
-    }
-
-    private static TPage AllocateClear<TPage>(IBatchContext batch, out DbAddress addr)
-        where TPage : struct, IPage<TPage>, IClearable
-    {
-        var p = batch.GetNewPage(out addr, false);
-
-        p.Header.PageType = TPage.DefaultType;
-        p.Header.Level = 0;
-
-        var wrapped = TPage.Wrap(p);
-        wrapped.Clear();
-        return wrapped;
     }
 
     /// <summary>
@@ -106,7 +95,7 @@ public static class StorageFanOut
 
             if (addr.IsNull)
             {
-                AllocateClear<Level1Page>(batch, out addr).Set(next, key, type, data, batch);
+                batch.GetNewCleanPage<Level1Page>(out addr).Set(next, key, type, data, batch);
                 _addresses[index] = addr;
                 return;
             }
@@ -212,7 +201,7 @@ public static class StorageFanOut
     /// </summary>
     /// <param name="page"></param>
     [method: DebuggerStepThrough]
-    private readonly unsafe struct Level1Page(Page page) : IPage<Level1Page>, IClearable
+    public readonly unsafe struct Level1Page(Page page) : IPage<Level1Page>
     {
         private const int Level = 1;
 
@@ -228,6 +217,8 @@ public static class StorageFanOut
             Data.Ids.Clear();
             Data.Storage.Clear();
         }
+
+        public bool IsClean => Data.Ids.IsClean & Data.Storage.IsClean;
 
         public bool TryGet(IPageResolver batch, uint at, scoped in NibblePath key, Type type,
             out ReadOnlySpan<byte> result)
@@ -277,7 +268,7 @@ public static class StorageFanOut
                 addr = Data.Ids[normalized];
                 if (addr.IsNull)
                 {
-                    AllocateClear<DataPage>(batch, out addr);
+                    batch.GetNewCleanPage<DataPage>(out addr);
                 }
 
                 Data.Ids[normalized] = batch.GetAddress(DataPage.Wrap(batch.GetAt(addr)).Set(key, data, batch));
@@ -291,7 +282,7 @@ public static class StorageFanOut
 
             if (addr.IsNull)
             {
-                AllocateClear<Level2Page>(batch, out addr);
+                batch.GetNewCleanPage<Level2Page>(out addr);
             }
 
             Data.Storage[index] = batch.GetAddress(Level2Page.Wrap(batch.GetAt(addr)).Set(next, key, data, batch));
@@ -384,6 +375,7 @@ public static class StorageFanOut
         public static PageType DefaultType => PageType.FanOutPage;
 
         public void Clear() => Data.Addresses.Clear();
+        public bool IsClean => Data.Addresses.IsClean;
 
         private ref PageHeader Header => ref page.Header;
 
@@ -419,7 +411,7 @@ public static class StorageFanOut
 
             if (addr.IsNull)
             {
-                AllocateClear<Level3Page>(batch, out addr);
+                batch.GetNewCleanPage<Level3Page>(out addr);
             }
 
             Data.Addresses[index] = batch.GetAddress(Level3Page.Wrap(batch.GetAt(addr)).Set(next, key, data, batch));
@@ -495,6 +487,20 @@ public static class StorageFanOut
             }
         }
 
+        public bool IsClean
+        {
+            get
+            {
+                foreach (ref readonly var bucket in Data.Buckets)
+                {
+                    if (bucket.IsClean == false)
+                        return false;
+                }
+
+                return true;
+            }
+        }
+
         public bool TryGet(IPageResolver batch, uint at, in NibblePath key, out ReadOnlySpan<byte> result)
         {
             return Data.Buckets[(int)at].TryGet(batch, key, out result);
@@ -539,7 +545,7 @@ public static class StorageFanOut
         }
 
         [StructLayout(LayoutKind.Explicit, Size = Size)]
-        private struct Bucket
+        private struct Bucket : IClearable
         {
             public const int Size = 1016;
             private const int DataSize = Size - DbAddress.Size;
@@ -555,6 +561,8 @@ public static class StorageFanOut
                 Root = default;
                 Map.Clear();
             }
+
+            public bool IsClean => Root.IsNull && Map.IsEmpty;
 
             public bool TryGet(IPageResolver batch, in NibblePath key, out ReadOnlySpan<byte> result)
             {
@@ -586,7 +594,7 @@ public static class StorageFanOut
 
                 if (Root.IsNull)
                 {
-                    AllocateClear<DataPage>(batch, out Root);
+                    batch.GetNewCleanPage<DataPage>(out Root);
                 }
 
                 // Ensure COWed

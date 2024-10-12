@@ -53,10 +53,9 @@ public readonly unsafe struct StateRootPage(Page page) : IPage
 
         if (addr.IsNull)
         {
-            var child = batch.GetNewPage(out addr, true);
-            child.Header.Level = ConsumedNibbles;
-            child.Header.PageType = PageType.DataPage;
-            new DataPage(child).Set(sliced, data, batch);
+            batch
+                .GetNewCleanPage<DataPage>(out addr, ConsumedNibbles)
+                .Set(sliced, data, batch);
         }
         else
         {
