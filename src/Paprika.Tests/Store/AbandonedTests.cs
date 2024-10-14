@@ -245,6 +245,7 @@ public class AbandonedTests : BasePageTests
     }
 
     [Test]
+    [Category(Categories.LongRunning)]
     public async Task Abandoned_chain_creation_with_overflow()
     {
         // Minimum iterations required to overflow the abandoned list (AbandonedList.MaxCount).
@@ -259,7 +260,7 @@ public class AbandonedTests : BasePageTests
         var accountValue = new byte[2900];
         new Random(17).NextBytes(accountValue);
 
-        using var db = PagedDb.NativeMemoryDb(150000 * Page.PageSize, HistoryDepth);
+        using var db = PagedDb.NativeMemoryDb(140000 * Page.PageSize, HistoryDepth);
 
         // Start read only batch to ensure that new pages are allocated instead of reusing
         // the abandoned pages.
