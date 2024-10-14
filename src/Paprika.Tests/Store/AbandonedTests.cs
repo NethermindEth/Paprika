@@ -245,14 +245,15 @@ public class AbandonedTests : BasePageTests
     }
 
     [Test]
-    [Category(Categories.LongRunning)]
     public async Task Abandoned_chain_creation_with_overflow()
     {
-        // Minimum iterations required to overflow the abandoned list (AbandonedList.MaxCount).
-        const int minIterations = 60;
+        const int delta = 10;
 
-        // Minimum accounts required to overflow an abandoned page (AbandonedPage.Payload.MaxCount * 2).
-        const int numAccounts = 2000;
+        // Minimum iterations required to overflow the abandoned list.
+        const int minIterations = AbandonedList.MaxCount + delta;
+
+        // Minimum accounts required to overflow an abandoned page.
+        int numAccounts = AbandonedPage.MaxCount * 2 + delta;
 
         var keccaks = Initialize(numAccounts);
 
@@ -260,7 +261,7 @@ public class AbandonedTests : BasePageTests
         var accountValue = new byte[2900];
         new Random(17).NextBytes(accountValue);
 
-        using var db = PagedDb.NativeMemoryDb(140000 * Page.PageSize, HistoryDepth);
+        using var db = PagedDb.NativeMemoryDb(150000 * Page.PageSize, HistoryDepth);
 
         // Start read only batch to ensure that new pages are allocated instead of reusing
         // the abandoned pages.

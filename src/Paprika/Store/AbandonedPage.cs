@@ -23,6 +23,7 @@ public readonly struct AbandonedPage(Page page) : IPage
     public DbAddress Next => Data.Next;
 
     public int Count => Data.Count;
+    public static int MaxCount => Payload.MaxCount;
 
     private unsafe ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
 
