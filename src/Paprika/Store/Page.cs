@@ -16,12 +16,14 @@ public interface IPage
 {
 }
 
-public interface IPage<TPage> : IPage
+public interface IPage<TPage> : IPage, IClearable
     where TPage : struct, IPage<TPage>
 {
     public static abstract TPage Wrap(Page page);
 
     public static abstract PageType DefaultType { get; }
+
+    public bool IsClean { get; }
 }
 
 /// <summary>

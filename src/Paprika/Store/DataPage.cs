@@ -191,11 +191,8 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>, IClearable
                 // Create a child
 
                 // Get new page without clearing. Clearing is done manually.
-                var child = batch.GetNewPage(out childAddr, false);
-                new DataPage(child).Clear();
-
-                child.Header.PageType = PageType.DataPage;
-                child.Header.Level = (byte)(page.Header.Level + ConsumedNibbles);
+                var level = (byte)(page.Header.Level + ConsumedNibbles);
+                var child = batch.GetNewCleanPage<DataPage>(out childAddr, level);
 
                 // Set the mode for the new child to Merkle to make it spread content on the NibblePath length basis
                 child.Header.Metadata = Modes.Leaf;
@@ -350,23 +347,15 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>, IClearable
             var addr = payload.Buckets[bucket];
 
             LeafOverflowPage leafOverflowPage;
-            Page overflowPage;
 
             if (addr.IsNull)
             {
-                // Manual clear below
-                overflowPage = batch.GetNewPage(out addr, clear: false);
-
-                overflowPage.Header.PageType = PageType.LeafOverflow;
-                leafOverflowPage = new LeafOverflowPage(overflowPage);
-                leafOverflowPage.Map.Clear();
+                leafOverflowPage = batch.GetNewCleanPage<LeafOverflowPage>(out addr);
             }
             else
             {
-                overflowPage = batch.EnsureWritableCopy(ref addr);
-                leafOverflowPage = new LeafOverflowPage(overflowPage);
-
-                Debug.Assert(overflowPage.Header.PageType == PageType.LeafOverflow);
+                leafOverflowPage = new LeafOverflowPage(batch.EnsureWritableCopy(ref addr));
+                Debug.Assert(leafOverflowPage.AsPage().Header.PageType == PageType.LeafOverflow);
             }
 
             payload.Buckets[bucket] = addr;
@@ -381,6 +370,8 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>, IClearable
         new SlottedArray(Data.DataSpan).Clear();
         Data.Buckets.Clear();
     }
+
+    public bool IsClean => new SlottedArray(Data.DataSpan).IsEmpty && Data.Buckets.IsClean;
 
     private static DbAddress EnsureExistingChildWritable(IBatchContext batch, ref Payload payload, byte nibble)
     {

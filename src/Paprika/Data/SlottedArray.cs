@@ -241,6 +241,7 @@ public readonly ref struct SlottedArray /*: IClearable */
     }
 
     public int CapacityLeft => _data.Length - _header.Taken;
+    public bool IsEmpty => _header is { Low: 0, Deleted: 0, High: 0 };
 
     public Enumerator EnumerateAll() => new(this);
     public NibbleEnumerator EnumerateNibble(byte nibble) => new(this, nibble);

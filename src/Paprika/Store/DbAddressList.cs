@@ -70,6 +70,8 @@ public static class DbAddressList
         public DbAddress this[int index] { get; set; }
         public static abstract int Length { get; }
 
+        public bool IsClean { get; }
+
         public DbAddress[] ToArray();
     }
 
@@ -124,6 +126,20 @@ public static class DbAddressList
         return array;
     }
 
+    private static bool IsCleanImpl<TList>(in TList list)
+        where TList : struct, IDbAddressList
+    {
+        for (var i = 0; i < TList.Length; i++)
+        {
+            if (list[i].IsNull == false)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
     public struct Of4 : IDbAddressList
     {
@@ -153,6 +169,8 @@ public static class DbAddressList
 
         public void Clear() => MemoryMarshal.CreateSpan(ref _b, Count).Clear();
 
+        public bool IsClean => IsCleanImpl(this);
+
         public DbAddress[] ToArray() => ToArrayImpl(this);
     }
 
@@ -177,6 +195,8 @@ public static class DbAddressList
                 Set(ref _b, index, value);
             }
         }
+
+        public bool IsClean => IsCleanImpl(this);
 
         public void Clear() => MemoryMarshal.CreateSpan(ref _b, Size).Clear();
 
@@ -209,6 +229,8 @@ public static class DbAddressList
 
         public void Clear() => MemoryMarshal.CreateSpan(ref _b, Size).Clear();
 
+        public bool IsClean => IsCleanImpl(this);
+
         public static int Length => Count;
 
         public DbAddress[] ToArray() => ToArrayImpl(this);
@@ -238,6 +260,8 @@ public static class DbAddressList
 
         public void Clear() => MemoryMarshal.CreateSpan(ref _b, Size).Clear();
 
+        public bool IsClean => IsCleanImpl(this);
+
         public static int Length => Count;
 
         public DbAddress[] ToArray() => ToArrayImpl(this);
@@ -266,6 +290,8 @@ public static class DbAddressList
         }
 
         public void Clear() => MemoryMarshal.CreateSpan(ref _b, Size).Clear();
+
+        public bool IsClean => IsCleanImpl(this);
 
         public DbAddress[] ToArray() => ToArrayImpl(this);
 

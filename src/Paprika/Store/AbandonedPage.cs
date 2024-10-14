@@ -13,7 +13,7 @@ namespace Paprika.Store;
 /// are written over a single <see cref="uint"/> using a flag <see cref="PackedFlag"/>.
 /// </remarks>
 [method: DebuggerStepThrough]
-public readonly struct AbandonedPage(Page page) : IPage
+public readonly struct AbandonedPage(Page page) : IPage<AbandonedPage>
 {
     private const uint PackedFlag = 0x8000_0000u;
     private const uint PackedDiff = 1;
@@ -22,7 +22,6 @@ public readonly struct AbandonedPage(Page page) : IPage
     public uint BatchId => Header.BatchId;
     public DbAddress Next => Data.Next;
 
-    public int Count => Data.Count;
     public static int MaxCount => Payload.MaxCount;
 
     private unsafe ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
@@ -176,13 +175,9 @@ public readonly struct AbandonedPage(Page page) : IPage
 
         while (to < abandoned.Count)
         {
-            // TODO: consider not clearing the page
-            batch.GetNewPage(out var addr, true);
+            var page = batch.GetNewCleanPage<AbandonedPage>(out var addr);
 
-            var page = new AbandonedPage(batch.GetAt(addr));
-            page.Header.PageType = PageType.Abandoned;
             page.Data.Next = next;
-            page.Data.Count = 0; // initialize
 
             next = addr;
 
@@ -252,4 +247,16 @@ public readonly struct AbandonedPage(Page page) : IPage
 
         new AbandonedPage(batch.GetAt(prev)).Data.Next = tail;
     }
+
+    public void Clear()
+    {
+        Data.Next = default;
+        Data.Count = default;
+    }
+
+    public bool IsClean => Data.Next.IsNull && Data.Count == 0;
+
+    public static AbandonedPage Wrap(Page page) => Unsafe.As<Page, AbandonedPage>(ref page);
+
+    public static PageType DefaultType => PageType.Abandoned;
 }
