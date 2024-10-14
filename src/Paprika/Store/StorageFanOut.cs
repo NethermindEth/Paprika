@@ -646,7 +646,11 @@ public static class StorageFanOut
                 if (Root.IsNull)
                     return;
 
-                new DataPage(resolver.GetAt(Root)).Accept(ref builder, visitor, resolver, Root);
+                var root = resolver.GetAt(Root);
+                if (root.Header.PageType == PageType.DataPage)
+                    new DataPage(root).Accept(ref builder, visitor, resolver, Root);
+                else
+                    new BottomPage(root).Accept(ref builder, visitor, resolver, Root);
             }
 
             public void Prefetch(IPageResolver resolver)

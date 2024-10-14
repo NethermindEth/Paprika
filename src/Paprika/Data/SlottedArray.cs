@@ -525,7 +525,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         var to = Count;
         var moved = 0;
 
-        for (int i = 0; i < to; i++)
+        for (var i = 0; i < to; i++)
         {
             ref var slot = ref GetSlotRef(i);
             if (slot.IsDeleted)
