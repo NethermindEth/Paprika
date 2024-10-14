@@ -12,9 +12,9 @@ public interface IBatchContext : IReadOnlyBatchContext
     DbAddress GetAddress(Page page);
 
     /// <summary>
-    /// Gets an unused page that is not clean.
+    /// Gets a new (potentially reused) page. If <paramref name="clear"/> is set, the page will be cleared. 
     /// </summary>
-    /// <returns></returns>
+    /// <returns>A new page.</returns>
     Page GetNewPage(out DbAddress addr, bool clear);
 
     TPage GetNewPage<TPage>(out DbAddress addr, byte level = 0)
@@ -27,6 +27,27 @@ public interface IBatchContext : IReadOnlyBatchContext
         page.Header.PageType = TPage.DefaultType;
         page.Header.Level = level;
         return wrapped;
+    }
+
+    /// <summary>
+    /// Gets a new (potentially reused) page that is clean and ready to be used.
+    /// </summary>
+    /// <param name="addr">The address of the page that is returned.</param>
+    /// <param name="level">The level to be assigned to.</param>
+    /// <typeparam name="TPage"></typeparam>
+    /// <returns>The typed page.</returns>
+    TPage GetNewCleanPage<TPage>(out DbAddress addr, byte level = 0)
+        where TPage : struct, IPage<TPage>, IClearable
+    {
+        var page = GetNewPage(out addr, false);
+
+        page.Header.PageType = TPage.DefaultType;
+        page.Header.Level = level;
+
+        var result = TPage.Wrap(page);
+        result.Clear();
+
+        return result;
     }
 
     /// <summary>

@@ -11,7 +11,7 @@ namespace Paprika.Store;
 /// One of the bottom pages in the tree.
 /// </summary>
 [method: DebuggerStepThrough]
-public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<BottomPage>
+public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 {
     private ref PageHeader Header => ref page.Header;
 
@@ -170,7 +170,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
 
     private bool TryFlushToNew(IBatchContext batch, in SlottedArray map)
     {
-        if (Data.Buckets.IsAnyNull() == false)
+        if (Data.Buckets.IsClean)
             return false;
 
         Span<ushort> stats = stackalloc ushort[SlottedArray.OneNibbleStatsCount];
@@ -346,4 +346,6 @@ public readonly unsafe struct BottomPage(Page page) : IPage, IClearable, IPage<B
     public static BottomPage Wrap(Page page) => Unsafe.As<Page, BottomPage>(ref page);
 
     public static PageType DefaultType => PageType.Bottom;
+
+    public bool IsClean => Map.IsEmpty && Data.Buckets.IsClean;
 }

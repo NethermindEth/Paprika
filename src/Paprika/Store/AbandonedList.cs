@@ -166,16 +166,9 @@ public struct AbandonedList
     {
         if (MaxCount == EntriesCount)
         {
-            // No place, find the youngest and attach to it
-            var maxAt = 0;
-
-            for (var i = 1; i < MaxCount; i++)
-            {
-                if (BatchIds[i] > BatchIds[maxAt])
-                {
-                    maxAt = i;
-                }
-            }
+            // No place, attach it to the youngest batch id from the sorted BatchIds
+            var maxAt = MaxCount - 1;
+            Debug.Assert(MaxCount > 2 && BatchIds[MaxCount - 1] > BatchIds[MaxCount - 2]);
 
             // 1. Attach the previously existing abandoned as tail to the current one
             new AbandonedPage(batch.GetAt(head)).AttachTail(Addresses[maxAt], batch);

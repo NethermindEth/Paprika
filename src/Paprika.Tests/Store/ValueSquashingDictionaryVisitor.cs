@@ -44,12 +44,12 @@ public class ValueSquashingDictionaryVisitor(IPageResolver resolver) : IPageVisi
                 break;
         }
 
-        return Disposable.Instance;
+        return NoopDisposable.Instance;
     }
 
     public IDisposable On<TPage>(TPage page, DbAddress addr)
         where TPage : unmanaged, IPage =>
-        Disposable.Instance;
+        NoopDisposable.Instance;
 
-    public IDisposable Scope(string name) => Disposable.Instance;
+    public IDisposable Scope(string name) => NoopDisposable.Instance;
 }

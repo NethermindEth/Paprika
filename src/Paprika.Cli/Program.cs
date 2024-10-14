@@ -7,6 +7,7 @@ app.Configure(cfg =>
 {
     cfg.AddCommand<StatisticsSettings.Command>("stats");
     cfg.AddCommand<StorageVisitSettings.Command>("storage");
+    cfg.AddCommand<VerifyWholeTreeSettings.Command>("verify");
 
     cfg.SetExceptionHandler(ex =>
     {

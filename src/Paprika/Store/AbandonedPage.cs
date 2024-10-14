@@ -13,7 +13,7 @@ namespace Paprika.Store;
 /// are written over a single <see cref="uint"/> using a flag <see cref="PackedFlag"/>.
 /// </remarks>
 [method: DebuggerStepThrough]
-public readonly struct AbandonedPage(Page page) : IPage
+public readonly struct AbandonedPage(Page page) : IPage<AbandonedPage>
 {
     private const uint PackedFlag = 0x8000_0000u;
     private const uint PackedDiff = 1;
@@ -21,8 +21,6 @@ public readonly struct AbandonedPage(Page page) : IPage
     private ref PageHeader Header => ref page.Header;
     public uint BatchId => Header.BatchId;
     public DbAddress Next => Data.Next;
-
-    public int Count => Data.Count;
 
     private unsafe ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
 
@@ -54,12 +52,13 @@ public readonly struct AbandonedPage(Page page) : IPage
     public void Accept(IPageVisitor visitor, IPageResolver resolver)
     {
         var addr = Data.Next;
-        if (addr.IsNull == false)
+
+        while (!addr.IsNull)
         {
             var abandoned = new AbandonedPage(resolver.GetAt(addr));
             visitor.On(abandoned, addr);
 
-            abandoned.Accept(visitor, resolver);
+            addr = abandoned.Next;
         }
     }
 
@@ -174,13 +173,9 @@ public readonly struct AbandonedPage(Page page) : IPage
 
         while (to < abandoned.Count)
         {
-            // TODO: consider not clearing the page
-            batch.GetNewPage(out var addr, true);
+            var page = batch.GetNewCleanPage<AbandonedPage>(out var addr);
 
-            var page = new AbandonedPage(batch.GetAt(addr));
-            page.Header.PageType = PageType.Abandoned;
             page.Data.Next = next;
-            page.Data.Count = 0; // initialize
 
             next = addr;
 
@@ -239,6 +234,27 @@ public readonly struct AbandonedPage(Page page) : IPage
             return;
         }
 
-        new AbandonedPage(batch.GetAt(Data.Next)).AttachTail(tail, batch);
+        var prev = Data.Next;
+        var next = new AbandonedPage(batch.GetAt(prev)).Data.Next;
+
+        while (!next.IsNull)
+        {
+            prev = next;
+            next = new AbandonedPage(batch.GetAt(next)).Data.Next;
+        }
+
+        new AbandonedPage(batch.GetAt(prev)).Data.Next = tail;
     }
+
+    public void Clear()
+    {
+        Data.Next = default;
+        Data.Count = default;
+    }
+
+    public bool IsClean => Data.Next.IsNull && Data.Count == 0;
+
+    public static AbandonedPage Wrap(Page page) => Unsafe.As<Page, AbandonedPage>(ref page);
+
+    public static PageType DefaultType => PageType.Abandoned;
 }

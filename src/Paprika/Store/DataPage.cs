@@ -23,6 +23,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
 
     public static DataPage Wrap(Page page) => Unsafe.As<Page, DataPage>(ref page);
     public static PageType DefaultType => PageType.DataPage;
+    public bool IsClean => Map.IsEmpty && Data.Buckets.IsClean;
 
     private ref PageHeader Header => ref page.Header;
 
@@ -196,7 +197,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
 
     public void Clear()
     {
-        new SlottedArray(Data.DataSpan).Clear();
+        Map.Clear();
         Data.Buckets.Clear();
     }
 
@@ -394,8 +395,6 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
     }
 
     public SlottedArray Map => new(Data.DataSpan);
-
-    public int CapacityLeft => Map.CapacityLeft;
 
     public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {

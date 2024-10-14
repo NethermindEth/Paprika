@@ -1,4 +1,3 @@
-using Paprika.Crypto;
 using Paprika.Data;
 
 namespace Paprika.Store;
@@ -20,18 +19,4 @@ public interface IPageVisitor
 public interface IVisitable
 {
     void Accept(IPageVisitor visitor);
-}
-
-public sealed class Disposable : IDisposable
-{
-    private Disposable()
-    {
-    }
-
-    public static readonly IDisposable Instance = new Disposable();
-
-    public void Dispose()
-    {
-
-    }
 }
