@@ -21,17 +21,16 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
     private struct Payload
     {
         private const int Size = Page.PageSize - PageHeader.Size;
-        private const int AddressListSize = DbAddressList.Of4.Size;
-        public const int BucketCount = DbAddressList.Of4.Count;
-        private const int DataSize = Size - AddressListSize;
+        private const int DataOffset = DbAddress.Size;
+        private const int DataSize = Size - DataOffset;
 
         [FieldOffset(0)]
-        public DbAddressList.Of4 Buckets;
+        public DbAddress Next;
 
         /// <summary>
         /// The first item of map of frames to allow ref to it.
         /// </summary>
-        [FieldOffset(AddressListSize)]
+        [FieldOffset(DataOffset)]
         private byte DataStart;
 
         /// <summary>
@@ -61,9 +60,10 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
             // Delete, delete locally and in a child if it exists
             map.Delete(key);
 
-            if (key.IsEmpty == false && TryGetWritableChildAt(batch, GetIndex(key), out var child))
+            // Delete recursively, this might be later optimized with the tombstoning
+            if (Data.Next.IsNull == false)
             {
-                child.Map.Delete(key);
+                Data.Next = batch.GetAddress(new BottomPage(batch.GetAt(Data.Next)).Set(key, data, batch));
             }
 
             return page;
@@ -77,24 +77,17 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
             return page;
         }
 
-        // Not successful, need to flush down, try set in all existing children first
-        FlushToExisting(batch, map);
+        // Page is full, ensure child
+        var child = Data.Next.IsNull
+            ? batch.GetNewPage<BottomPage>(out Data.Next, 0)
+            : new BottomPage(batch.EnsureWritableCopy(ref Data.Next));
+
+        map.MoveNonEmptyKeysTo(child.Map, true);
 
         // Try set again
         if (map.TrySet(key, data))
         {
             return page;
-        }
-
-        // Flushing to existing didn't help. Try to allocate and flush to a new
-        if (TryFlushToNew(batch, map))
-        {
-            // Flush to a new succeeded, try to set.
-
-            if (map.TrySet(key, data))
-            {
-                return page;
-            }
         }
 
         // Reuse this page for easier management and no need of copying it back in the parent.
@@ -106,148 +99,32 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         var copy = buffer.AsSpan(0, dataSpan.Length);
 
         dataSpan.CopyTo(copy);
-        var children = Data.Buckets.ToArray();
 
         // All flushing failed, requires to move to a DataPage
         var destination = new DataPage(page);
-        destination.AsPage().Header.PageType = DataPage.DefaultType;
+        var p = destination.AsPage();
+        p.Header.PageType = DataPage.DefaultType;
+        p.Header.Metadata = default; // clear metadata
         destination.Clear();
 
-        FlushToDataPage(destination, batch, new SlottedArray(copy), children);
+        FlushToDataPage(destination, batch, new SlottedArray(copy), child);
 
         // All flushed, set the actual data now
         destination.Set(key, data, batch);
 
         ArrayPool<byte>.Shared.Return(buffer);
 
-        RegisterForFutureReuse(children, batch);
+        // Register child for reuse
+        batch.RegisterForFutureReuse(child.AsPage(), true);
 
         // The destination is set over this page.
         return page;
     }
 
-    private static void RegisterForFutureReuse(ReadOnlySpan<DbAddress> children, IBatchContext batch)
+    private static void FlushToDataPage(DataPage destination, IBatchContext batch, in SlottedArray map, in BottomPage child)
     {
-        foreach (var bucket in children)
-        {
-            if (bucket.IsNull == false)
-                batch.RegisterForFutureReuse(batch.GetAt(bucket), true);
-        }
-
-        // This page is not reused as it has been repurposed to data page.
-    }
-
-    private void FlushToExisting(IBatchContext batch, in SlottedArray map)
-    {
-        Span<BottomPage> writableChildren = stackalloc BottomPage[Payload.BucketCount];
-        var existing = 0;
-
-        for (var i = 0; i < Payload.BucketCount; i++)
-        {
-            if (TryGetWritableChildAt(batch, i, out writableChildren[i]))
-            {
-                existing |= 1 << i;
-            }
-        }
-
-        // Enumerate all and try flush
-        foreach (var item in map.EnumerateAll())
-        {
-            if (item.Key.IsEmpty)
-                continue;
-
-            var index = GetIndex(item.Key);
-            var mask = 1 << index;
-            if ((existing & mask) != mask)
-                continue;
-
-            if (writableChildren[index].Map.TrySet(item.Key, item.RawData))
-            {
-                map.Delete(item);
-            }
-        }
-    }
-
-    private bool TryFlushToNew(IBatchContext batch, in SlottedArray map)
-    {
-        if (Data.Buckets.IsClean)
-            return false;
-
-        Span<ushort> stats = stackalloc ushort[SlottedArray.OneNibbleStatsCount];
-        map.GatherCountStats1Nibble(stats);
-
-        // Combine stats to be aligned with buckets count
-        Span<ushort> indexed = stackalloc ushort[Payload.BucketCount];
-        for (var i = 0; i < Payload.BucketCount; i++)
-        {
-            if (Data.Buckets[i].IsNull)
-            {
-                // Count only these, which are not children atm
-                for (var j = 0; j < NibblesInBucket; j++)
-                {
-                    indexed[i] = stats[i * NibblesInBucket + j];
-                }
-            }
-        }
-
-        const int start = -1;
-
-        var maxIndex = start;
-        var maxValue = 0;
-
-        for (int i = 0; i < Payload.BucketCount; i++)
-        {
-            if (indexed[i] > maxValue)
-            {
-                maxValue = indexed[i];
-                maxIndex = i;
-            }
-        }
-
-        if (maxIndex == start)
-        {
-            // None of the existing data has a shared prefix that does not exist
-            return false;
-        }
-
-        Debug.Assert(Data.Buckets[maxIndex].IsNull, "Should be null");
-
-        var child = batch.GetNewPage<BottomPage>(out var childAddr);
-        Data.Buckets[maxIndex] = childAddr;
-        child.Clear();
-
-        // Enumerate all and try flush
-        foreach (var item in map.EnumerateAll())
-        {
-            if (item.Key.IsEmpty)
-                continue;
-
-            var index = GetIndex(item.Key);
-            if (index != maxIndex)
-                continue;
-
-            if (child.Map.TrySet(item.Key, item.RawData))
-            {
-                map.Delete(item);
-            }
-        }
-
-        return true;
-    }
-
-    private static void FlushToDataPage(DataPage destination, IBatchContext batch, in SlottedArray map, ReadOnlySpan<DbAddress> children)
-    {
-        for (var i = 0; i < Payload.BucketCount; i++)
-        {
-            var bucket = children[i];
-
-            if (bucket.IsNull)
-            {
-                continue;
-            }
-
-            CopyToDestination(destination, new BottomPage(batch.GetAt(bucket)).Map, batch);
-        }
+        // Copy from the child first
+        CopyToDestination(destination, child.Map, batch);
 
         // Copy all the entries from this
         CopyToDestination(destination, map, batch);
@@ -264,27 +141,6 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         }
     }
 
-    private bool TryGetWritableChildAt(IBatchContext batch, int index, out BottomPage child)
-    {
-        var addr = Data.Buckets[index];
-        if (addr.IsNull)
-        {
-            child = default;
-            return false;
-        }
-
-        var p = batch.GetWritableCopy(batch.GetAt(addr));
-
-        Data.Buckets[index] = batch.GetAddress(p);
-
-        child = new BottomPage(p);
-        return true;
-    }
-
-    private const int NibblesInBucket = 16 / Payload.BucketCount;
-
-    private static int GetIndex(in NibblePath path) => path.Nibble0 % NibblesInBucket;
-
     public Page DeleteByPrefix(in NibblePath prefix, IBatchContext batch)
     {
         if (Header.BatchId != batch.BatchId)
@@ -296,24 +152,18 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
         Map.DeleteByPrefix(prefix);
 
-        for (int i = 0; i < Payload.BucketCount; i++)
+        // Child
+        if (Data.Next.IsNull == false)
         {
-            var addr = Data.Buckets[i];
-            if (addr.IsNull)
-                continue;
-
             if (prefix.IsEmpty)
             {
-                // can immediately reuse
-                Data.Buckets[i] = DbAddress.Null;
-                batch.RegisterForFutureReuse(batch.GetAt(addr), true);
+                // Empty prefix, registered child for reuse
+                batch.RegisterForFutureReuse(batch.GetAt(Data.Next), true);
+                Data.Next = default;
             }
             else
             {
-                var copy = batch.GetWritableCopy(batch.GetAt(addr));
-                Data.Buckets[i] = batch.GetAddress(copy);
-
-                new BottomPage(copy).Map.DeleteByPrefix(prefix);
+                new BottomPage(batch.EnsureWritableCopy(ref Data.Next)).DeleteByPrefix(prefix, batch);
             }
         }
 
@@ -323,7 +173,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
     public void Clear()
     {
         Map.Clear();
-        Data.Buckets.Clear();
+        Data.Next = default;
     }
 
     [SkipLocalsInit]
@@ -335,8 +185,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         if (key.IsEmpty)
             return false;
 
-        var index = GetIndex(key);
-        var addr = Data.Buckets[index];
+        var addr = Data.Next;
         if (addr.IsNull)
             return false;
 
@@ -347,5 +196,5 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
     public static PageType DefaultType => PageType.Bottom;
 
-    public bool IsClean => Map.IsEmpty && Data.Buckets.IsClean;
+    public bool IsClean => Map.IsEmpty && Data.Next.IsNull;
 }
