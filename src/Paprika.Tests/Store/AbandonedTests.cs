@@ -247,7 +247,7 @@ public class AbandonedTests : BasePageTests
     [Test]
     public async Task Abandoned_chain_creation_with_overflow()
     {
-        // Minimum iterations required to overflow the abadoned list (AbandonedList.MaxCount).
+        // Minimum iterations required to overflow the abandoned list (AbandonedList.MaxCount).
         const int minIterations = 60;
 
         // Minimum accounts required to overflow an abandoned page (AbandonedPage.Payload.MaxCount * 2).
