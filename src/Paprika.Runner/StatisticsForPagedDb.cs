@@ -77,11 +77,11 @@ public static class StatisticsForPagedDb
 
         var t = new Table();
         t.AddColumn(new TableColumn("Depth"));
-        t.AddColumn(new TableColumn("Page count"));
-        t.AddColumn(new TableColumn("Leaf page count"));
-        t.AddColumn(new TableColumn("Overflow page count"));
-        t.AddColumn(new TableColumn($"{nameof(DataPage)}-inner (P50) % usage"));
-        t.AddColumn(new TableColumn($"{nameof(DataPage)}-leaf (P50) % usage"));
+        t.AddColumn(new TableColumn("Total page count"));
+        t.AddColumn(new TableColumn("Data page count"));
+        t.AddColumn(new TableColumn("Bottom page count"));
+        t.AddColumn(new TableColumn($"{nameof(DataPage)} P50 % usage"));
+        t.AddColumn(new TableColumn($"{nameof(BottomPage)} P50 % usage"));
 
         if (fanOutLevels != null)
         {
@@ -102,20 +102,24 @@ public static class StatisticsForPagedDb
             }
         }
 
-        var maxDepth = stats.PageCountPerNibblePathDepth.AsSpan().LastIndexOfAnyExcept(0) + 1;
+        var maxDepthDataPage = stats.DataPagePageCountPerNibblePathDepth.AsSpan().LastIndexOfAnyExcept(0) + 1;
+        var maxDepthBottomPage = stats.BottomPageCountPerNibblePathDepth.AsSpan().LastIndexOfAnyExcept(0) + 1;
+
+        var maxDepth = Math.Max(maxDepthDataPage, maxDepthBottomPage);
 
         for (var depth = 0; depth < maxDepth; depth++)
         {
-            var count = stats.PageCountPerNibblePathDepth[depth];
+            var dataPageCount = stats.DataPagePageCountPerNibblePathDepth[depth];
             var bottomPageCount = stats.BottomPageCountPerNibblePathDepth[depth];
+            var count = dataPageCount + bottomPageCount;
 
             t.AddRow(
                 new Text(depth.ToString()),
                 new Text(count.ToString()),
+                new Text(dataPageCount.ToString()),
                 new Text(bottomPageCount.ToString()),
-                new Text(GetP50(stats.InnerDataPagePercentageUsed, depth)),
-                new Text(GetP50(stats.LeafDataPagePercentageUsed, depth)),
-                new Text(GetP50(stats.OverflowPagePercentageUsed, depth))
+                new Text(GetP50(stats.DataPagePercentageUsed, depth)),
+                new Text(GetP50(stats.BottomPagePercentageUsed, depth))
             );
         }
 

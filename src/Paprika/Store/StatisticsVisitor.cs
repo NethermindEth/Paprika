@@ -32,32 +32,25 @@ public class StatisticsVisitor : IPageVisitor
     {
         public const int Levels = 32;
 
-        public readonly int[] PageCountPerNibblePathDepth = new int[Levels];
+        public readonly int[] DataPagePageCountPerNibblePathDepth = new int[Levels];
         public readonly int[] BottomPageCountPerNibblePathDepth = new int[Levels];
 
         /// <summary>
         /// A histogram of used space in inner <see cref="DataPage"/>.
         /// </summary>
-        public readonly IntHistogram?[] InnerDataPagePercentageUsed = new IntHistogram[Levels];
+        public readonly IntHistogram?[] DataPagePercentageUsed = new IntHistogram[Levels];
 
         /// <summary>
-        /// A histogram of used space in leaf <see cref="DataPage"/>.
+        /// A histogram of used space in leaf <see cref="BottomPage"/>.
         /// </summary>
-        public readonly IntHistogram?[] LeafDataPagePercentageUsed = new IntHistogram[Levels];
+        public readonly IntHistogram?[] BottomPagePercentageUsed = new IntHistogram[Levels];
 
-        /// <summary>
-        /// A histogram of used space in leaf <see cref="LeafOverflowPage"/>.
-        /// </summary>
-        public readonly IntHistogram?[] OverflowPagePercentageUsed = new IntHistogram[Levels];
+        public void ReportDataPageMap(int length, in SlottedArray map) =>
+            ReportMap(DataPagePercentageUsed, length, map);
 
-        public void ReportInnerDataPageMap(int length, in SlottedArray map) =>
-            ReportMap(InnerDataPagePercentageUsed, length, map);
 
-        public void ReportLeafDataPageMap(int length, in SlottedArray map) =>
-            ReportMap(LeafDataPagePercentageUsed, length, map);
-
-        public void ReportOverflowPageMap(int length, in SlottedArray map) =>
-            ReportMap(OverflowPagePercentageUsed, length, map);
+        public void ReportBottomPageMap(int length, in SlottedArray map) =>
+            ReportMap(BottomPagePercentageUsed, length, map);
 
         private static void ReportMap(IntHistogram?[] histograms, int length, in SlottedArray map)
         {
@@ -96,22 +89,17 @@ public class StatisticsVisitor : IPageVisitor
         {
             var length = prefix.Current.Length;
 
-            _current.PageCountPerNibblePathDepth[length] += 1;
-
             var p = page.AsPage();
 
             switch (p.Header.PageType)
             {
                 case PageType.DataPage:
-                    var dataPage = new DataPage(p);
-                    var map = dataPage.Map;
-
-                    _current.ReportInnerDataPageMap(length, map);
-
+                    _current.DataPagePageCountPerNibblePathDepth[length] += 1;
+                    _current.ReportDataPageMap(length, new DataPage(p).Map);
                     break;
                 case PageType.Bottom:
                     _current.BottomPageCountPerNibblePathDepth[length] += 1;
-                    // TODO
+                    _current.ReportBottomPageMap(length, new DataPage(p).Map);
                     break;
                 default:
                     throw new Exception($"Not handled type {p.Header.PageType}");
