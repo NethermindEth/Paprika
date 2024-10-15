@@ -520,7 +520,8 @@ public readonly ref struct SlottedArray /*: IClearable */
         }
     }
 
-    public void MoveNonEmptyKeysTo(in SlottedArray destination, bool treatEmptyAsTombstone = false)
+    public bool MoveNonEmptyKeysTo<TNibbleSelector>(in SlottedArray destination, bool treatEmptyAsTombstone = false)
+        where TNibbleSelector : INibbleSelector
     {
         var to = Count;
         var moved = 0;
@@ -533,6 +534,13 @@ public readonly ref struct SlottedArray /*: IClearable */
 
             if (slot.HasAtLeastOneNibble == false)
                 continue;
+
+            if (typeof(TNibbleSelector) != typeof(AllNibblesSelector))
+            {
+                var nibble = slot.GetNibble0(GetHashRef(i));
+                if (TNibbleSelector.Should(nibble) == false)
+                    continue;
+            }
 
             var payload = GetSlotPayload(i);
 
@@ -573,6 +581,8 @@ public readonly ref struct SlottedArray /*: IClearable */
             CollectTombstones();
             Defragment();
         }
+
+        return moved > 0;
     }
 
     public void RemoveKeysFrom(in SlottedArray source)

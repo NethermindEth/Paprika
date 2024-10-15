@@ -84,10 +84,10 @@ public class AbandonedTests : BasePageTests
 
     [TestCase(20, 1, 10_000, false, TestName = "Accounts - 1")]
     [TestCase(428, 100, 10_000, false, TestName = "Accounts - 100")]
-    [TestCase(18005, 4000, 200, false,
+    [TestCase(19284, 4000, 200, false,
         TestName = "Accounts - 4000 to get a bit reuse",
         Category = Categories.LongRunning)]
-    [TestCase(45471, 10_000, 50, false,
+    [TestCase(47990, 10_000, 50, false,
         TestName = "Accounts - 10000 to breach the AbandonedPage",
         Category = Categories.LongRunning)]
     [TestCase(118364, 20_000, 50, true,

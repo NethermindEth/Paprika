@@ -650,7 +650,7 @@ public class SlottedArrayTests
         original.SetAssert(key4, Data(4));
         original.SetAssert(key5, Data(5));
 
-        original.MoveNonEmptyKeysTo(copy0);
+        original.MoveNonEmptyKeysTo<AllNibblesSelector>(copy0);
 
         // original should have only empty
         original.Count.Should().Be(1);

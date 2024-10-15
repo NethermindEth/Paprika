@@ -1,5 +1,4 @@
 ﻿using System.Buffers;
-using System.Collections.Specialized;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -21,17 +20,22 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
     private struct Payload
     {
         private const int Size = Page.PageSize - PageHeader.Size;
-        private const int DataOffset = DbAddress.Size;
-        private const int DataSize = Size - DataOffset;
+        private const int BucketSize = DbAddress.Size * 2;
 
-        [FieldOffset(0)]
-        public DbAddress Next;
+        /// <summary>
+        /// The size of the raw byte data held in this page. Must be long aligned.
+        /// </summary>
+        private const int DataSize = Size - BucketSize;
+
+        private const int DataOffset = Size - DataSize;
+
+        [FieldOffset(0)] public DbAddress Left;
+        [FieldOffset(DbAddress.Size)] public DbAddress Right;
 
         /// <summary>
         /// The first item of map of frames to allow ref to it.
         /// </summary>
-        [FieldOffset(DataOffset)]
-        private byte DataStart;
+        [FieldOffset(DataOffset)] private byte DataStart;
 
         /// <summary>
         /// Writable area.
@@ -45,10 +49,19 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
     {
         using var scope = visitor.On(ref builder, this, addr);
 
-        if (Data.Next.IsNull)
-            return;
+        AcceptChild(ref builder, visitor, resolver, Data.Left);
+        AcceptChild(ref builder, visitor, resolver, Data.Right);
 
-        new BottomPage(resolver.GetAt(Data.Next)).Accept(ref builder, visitor, resolver, Data.Next);
+        return;
+
+        static void AcceptChild(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver,
+            DbAddress addr)
+        {
+            if (addr.IsNull == false)
+            {
+                new BottomPage(resolver.GetAt(addr)).Accept(ref builder, visitor, resolver, addr);
+            }
+        }
     }
 
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
@@ -60,64 +73,34 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
         var map = Map;
 
-        if (data.IsEmpty)
+        if (data.IsEmpty && ((Data.Left.IsNull && Data.Right.IsNull) || key.IsEmpty))
         {
-            // Delete, delete locally and in a child if it exists
+            // Delete with no children can be executed immediately, also empty key
             map.Delete(key);
-
-            // Delete recursively, this might be later optimized with the tombstoning
-            if (Data.Next.IsNull == false)
-            {
-                Data.Next = batch.GetAddress(new BottomPage(batch.GetAt(Data.Next)).Set(key, data, batch));
-            }
-
             return page;
         }
 
-        Debug.Assert(data.IsEmpty == false, "Should be an upsert, not a delete");
-
-        // Try set directly
+        // Try setting value directly
         if (map.TrySet(key, data))
         {
             return page;
         }
 
-        // Page is full, ensure child
-        var child = Data.Next.IsNull
-            ? batch.GetNewPage<BottomPage>(out Data.Next, 0)
-            : new BottomPage(batch.EnsureWritableCopy(ref Data.Next));
-
-        child.MoveNonEmptyKeysFrom(map, batch);
-
-        // Try set again
-        if (map.TrySet(key, data))
+        // TODO: Consider selecting a better half first? A bigger one? Balancing
+        // Try left
+        if (TryFlushDown<LowerHalfSelector>(map, batch) && map.TrySet(key, data))
         {
             return page;
         }
 
-        // At this point, moving to the child failed to get more space.
-        // It's time to check if the child has a child, if not, create a link.
-        if (child.Data.Next.IsNull)
+        // Try right
+        if (TryFlushDown<UpperHalfSelector>(map, batch) && map.TrySet(key, data))
         {
-            // Let's create an additional page between this page and its child. This will be 2 levels of descendants.
-            var current = Data.Next;
-            child = batch.GetNewPage<BottomPage>(out Data.Next);
-            child.Data.Next = current;
-
-            // Now, the new child has space, let's try to move again.
-            child.MoveNonEmptyKeysFrom(map, batch);
-
-            // Try set again
-            if (map.TrySet(key, data))
-            {
-                return page;
-            }
+            return page;
         }
 
         // Capture descendants addresses
-        Span<DbAddress> descendants = stackalloc DbAddress[2];
-        descendants[0] = Data.Next;
-        descendants[1] = new BottomPage(batch.GetAt(Data.Next)).Data.Next;
+        Span<DbAddress> descendants = [Data.Left, Data.Right];
 
         // Reuse this page for easier management and no need of copying it back in the parent.
         // 1. copy the content
@@ -143,45 +126,41 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
         ArrayPool<byte>.Shared.Return(buffer);
 
-        // Register descendants for reuse
-        foreach (var descendant in descendants)
-        {
-            batch.RegisterForFutureReuse(batch.GetAt(descendant), true);
-        }
-
         // The destination is set over this page.
         return page;
     }
 
-    private void MoveNonEmptyKeysFrom(in SlottedArray source, IBatchContext batch)
+    private bool TryFlushDown<TSelector>(in SlottedArray map, IBatchContext batch)
+        where TSelector : INibbleSelector
     {
-        Debug.Assert(batch.WasWritten(batch.GetAddress(page)), "This page should have been COWed");
+        ref var addr = ref typeof(TSelector) == typeof(LowerHalfSelector) ? ref Data.Left : ref Data.Right;
 
-        if (Data.Next.IsNull == false)
-        {
-            // Move to child first
-            var child = new BottomPage(batch.EnsureWritableCopy(ref Data.Next));
-            child.MoveNonEmptyKeysFrom(Map, batch);
-        }
+        var child = addr.IsNull
+            ? batch.GetNewCleanPage<BottomPage>(out addr, 0)
+            : new BottomPage(batch.EnsureWritableCopy(ref addr));
 
-        // Move to this Map
-        source.MoveNonEmptyKeysTo(Map, true);
+        return map.MoveNonEmptyKeysTo<TSelector>(child.Map, true);
     }
 
-    private static void FlushToDataPage(DataPage destination, IBatchContext batch, in SlottedArray map, in Span<DbAddress> descendants)
+    private static void FlushToDataPage(DataPage destination, IBatchContext batch, in SlottedArray map,
+        in Span<DbAddress> descendants)
     {
-        // The ordering of descendants is important. We start with the most nested ones
+        // The ordering of descendants might be important. Start with the most nested ones first.
         for (var i = descendants.Length - 1; i >= 0; i--)
         {
-            var descendant = new BottomPage(batch.GetAt(descendants[i]));
+            var page = batch.GetAt(descendants[i]);
+            var descendant = new BottomPage(page);
             CopyToDestination(destination, descendant.Map, batch);
+
+            // Already copied, register for immediate reuse
+            batch.RegisterForFutureReuse(page, true);
         }
 
         // Copy all the entries from this
         CopyToDestination(destination, map, batch);
         return;
 
-        static void CopyToDestination(DataPage destination, SlottedArray map, IBatchContext batch)
+        static void CopyToDestination(DataPage destination, in SlottedArray map, IBatchContext batch)
         {
             foreach (var item in map.EnumerateAll())
             {
@@ -203,19 +182,26 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
         Map.DeleteByPrefix(prefix);
 
-        // Child
-        if (Data.Next.IsNull == false)
-        {
-            new BottomPage(batch.EnsureWritableCopy(ref Data.Next)).DeleteByPrefix(prefix, batch);
-        }
+        DeleteByPrefixImpl(ref Data.Left, prefix, batch);
+        DeleteByPrefixImpl(ref Data.Right, prefix, batch);
 
         return page;
+
+        static void DeleteByPrefixImpl(ref DbAddress addr, in NibblePath prefix, IBatchContext batch)
+        {
+            if (addr.IsNull)
+                return;
+
+            var child = new BottomPage(batch.EnsureWritableCopy(ref addr));
+            child.DeleteByPrefix(prefix, batch);
+        }
     }
 
     public void Clear()
     {
         Map.Clear();
-        Data.Next = default;
+        Data.Left = default;
+        Data.Right = default;
     }
 
     [SkipLocalsInit]
@@ -224,17 +210,19 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         if (Map.TryGet(key, out result))
             return true;
 
-        var addr = Data.Next;
+        if (key.IsEmpty)
+            return false;
+
+        var addr = LowerHalfSelector.Should(key.Nibble0) ? Data.Left : Data.Right;
         if (addr.IsNull)
             return false;
 
-        // Recursive call
-        return new BottomPage(batch.GetAt(addr)).TryGet(batch, key, out result);
+        return new BottomPage(batch.GetAt(addr)).Map.TryGet(key, out result);
     }
 
     public static BottomPage Wrap(Page page) => Unsafe.As<Page, BottomPage>(ref page);
 
     public static PageType DefaultType => PageType.Bottom;
 
-    public bool IsClean => Map.IsEmpty && Data.Next.IsNull;
+    public bool IsClean => Map.IsEmpty && Data.Left.IsNull && Data.Right.IsNull;
 }
