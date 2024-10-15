@@ -520,6 +520,36 @@ public readonly ref struct SlottedArray /*: IClearable */
         }
     }
 
+    /// <summary>
+    /// Checks whether the map has any entry matching the given <typeparamref name="TNibbleSelector"/>.
+    /// </summary>
+    public bool HasAny<TNibbleSelector>()
+        where TNibbleSelector : INibbleSelector
+    {
+        var to = Count;
+
+        for (var i = 0; i < to; i++)
+        {
+            ref var slot = ref GetSlotRef(i);
+            if (slot.IsDeleted)
+                continue;
+
+            if (slot.HasAtLeastOneNibble == false)
+                continue;
+
+            if (typeof(TNibbleSelector) == typeof(AllNibblesSelector))
+            {
+                return true;
+            }
+
+            var nibble = slot.GetNibble0(GetHashRef(i));
+            if (TNibbleSelector.Should(nibble))
+                return true;
+        }
+
+        return false;
+    }
+
     public bool MoveNonEmptyKeysTo<TNibbleSelector>(in SlottedArray destination, bool treatEmptyAsTombstone = false)
         where TNibbleSelector : INibbleSelector
     {
