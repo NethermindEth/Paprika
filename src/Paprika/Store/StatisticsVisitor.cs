@@ -99,7 +99,9 @@ public class StatisticsVisitor : IPageVisitor
                     break;
                 case PageType.Bottom:
                     _current.BottomPageCountPerNibblePathDepth[length] += 1;
-                    _current.ReportBottomPageMap(length, new DataPage(p).Map);
+                    _current.ReportBottomPageMap(length, new BottomPage(p).Map);
+                    break;
+                case PageType.StateRoot:
                     break;
                 default:
                     throw new Exception($"Not handled type {p.Header.PageType}");
