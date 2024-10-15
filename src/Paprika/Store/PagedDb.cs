@@ -726,6 +726,9 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
             _written.Add(addr);
 
+            // Clear whole header first
+            page.Header = default;
+
             AssignBatchId(page);
             return page;
         }
@@ -916,7 +919,7 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
         return Mark(addr);
     }
 
-    public IDisposable Scope(string name) => Disposable.Instance;
+    public IDisposable Scope(string name) => NoopDisposable.Instance;
 
     private static TDestinationPage As<TPage, TDestinationPage>(in TPage page)
         where TDestinationPage : IPage
@@ -937,7 +940,7 @@ internal class MissingPagesVisitor : IPageVisitor, IDisposable
     private IDisposable Mark(DbAddress addr)
     {
         _pages[addr] = false;
-        return Disposable.Instance;
+        return NoopDisposable.Instance;
     }
 
     public void Dispose() => _pages.Dispose();

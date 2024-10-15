@@ -20,17 +20,3 @@ public interface IVisitable
 {
     void Accept(IPageVisitor visitor);
 }
-
-public sealed class Disposable : IDisposable
-{
-    private Disposable()
-    {
-    }
-
-    public static readonly IDisposable Instance = new Disposable();
-
-    public void Dispose()
-    {
-
-    }
-}
