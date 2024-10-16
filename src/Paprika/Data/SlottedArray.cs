@@ -537,7 +537,7 @@ public readonly ref struct SlottedArray /*: IClearable */
             if (slot.HasAtLeastOneNibble == false)
                 continue;
 
-            if (typeof(TNibbleSelector) == typeof(AllNibblesSelector))
+            if (typeof(TNibbleSelector) == typeof(NibbleSelector.All))
             {
                 return true;
             }
@@ -565,7 +565,7 @@ public readonly ref struct SlottedArray /*: IClearable */
             if (slot.HasAtLeastOneNibble == false)
                 continue;
 
-            if (typeof(TNibbleSelector) != typeof(AllNibblesSelector))
+            if (typeof(TNibbleSelector) != typeof(NibbleSelector.All))
             {
                 var nibble = slot.GetNibble0(GetHashRef(i));
                 if (TNibbleSelector.Should(nibble) == false)
