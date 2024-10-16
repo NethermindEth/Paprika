@@ -35,6 +35,8 @@ public class StatisticsVisitor : IPageVisitor
         public readonly int[] DataPagePageCountPerNibblePathDepth = new int[Levels];
         public readonly int[] BottomPageCountPerNibblePathDepth = new int[Levels];
 
+        public int BottomLevel = 0;
+
         /// <summary>
         /// A histogram of used space in inner <see cref="DataPage"/>.
         /// </summary>
@@ -98,9 +100,10 @@ public class StatisticsVisitor : IPageVisitor
                     _current.ReportDataPageMap(length, new DataPage(p).Map);
                     break;
                 case PageType.Bottom:
-                    _current.BottomPageCountPerNibblePathDepth[length] += 1;
+                    var bottomLevel = _current.BottomLevel;
+                    _current.BottomPageCountPerNibblePathDepth[length + bottomLevel] += 1;
                     _current.ReportBottomPageMap(length, new BottomPage(p).Map);
-                    break;
+                    return new BottomLevelUp(_current);
                 case PageType.StateRoot:
                     break;
                 default:
@@ -109,6 +112,22 @@ public class StatisticsVisitor : IPageVisitor
         }
 
         return NoopDisposable.Instance;
+    }
+
+    private sealed class BottomLevelUp : IDisposable
+    {
+        private readonly Stats _stats;
+
+        public BottomLevelUp(Stats stats)
+        {
+            _stats = stats;
+            _stats.BottomLevel++;
+        }
+
+        public void Dispose()
+        {
+            _stats.BottomLevel--;
+        }
     }
 
     public IDisposable On<TPage>(TPage page, DbAddress addr) where TPage : unmanaged, IPage
