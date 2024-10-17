@@ -11,7 +11,7 @@ namespace Paprika.Store;
 public struct AbandonedList
 {
     /// <summary>
-    /// The start for spans of <see cref="BatchIds"/> and <see cref="Addresses"/>.
+    /// The start for <see cref="Addresses"/> span.
     /// </summary>
     private const int EntriesStart = DbAddress.Size + sizeof(uint);
 
@@ -21,10 +21,6 @@ public struct AbandonedList
 
     [FieldOffset(0)] private DbAddress Current;
     [FieldOffset(DbAddress.Size)] private uint EntriesCount;
-
-    [FieldOffset(EntriesStart)] private uint BatchIdStart;
-
-    private Span<uint> BatchIds => MemoryMarshal.CreateSpan(ref BatchIdStart, MaxCount);
 
     [FieldOffset(MaxCount * sizeof(uint) + EntriesStart)]
     private DbAddress AddressStart;
@@ -45,37 +41,33 @@ public struct AbandonedList
                 return false;
             }
 
-            // find first batch matching the range
-            var id = BatchIds[0];
+            // check if the first page matches the specified batch range
+            var at = Addresses[0];
+
+            Debug.Assert(at.IsNull == false);
+
+            var page = batch.GetAt(at);
+            var abandoned = new AbandonedPage(page);
+
+            var id = abandoned.BatchId;
             if (minBatchId > 2 && id < minBatchId)
             {
-                var at = Addresses[0];
-
-                Debug.Assert(at.IsNull == false);
-
                 Current = at;
-                var page = batch.GetAt(at);
-                var abandoned = new AbandonedPage(page);
                 if (abandoned.Next.IsNull)
                 {
                     if (EntriesCount == 1)
                     {
                         // empty all
                         Addresses[0] = default;
-                        BatchIds[0] = default;
                         EntriesCount = 0;
                     }
                     else
                     {
                         var resized = (int)EntriesCount - 1;
 
-                        // at least two entries, copy slices to move
+                        // at least two entries, copy slice to move
                         Addresses.Slice(1, resized).CopyTo(Addresses.Slice(0, resized));
-                        BatchIds.Slice(1, resized).CopyTo(BatchIds.Slice(0, resized));
-
                         Addresses[resized] = default;
-                        BatchIds[resized] = default;
-
                         EntriesCount--;
                     }
                 }
@@ -166,15 +158,13 @@ public struct AbandonedList
     {
         if (MaxCount == EntriesCount)
         {
-            // No place, attach it to the youngest batch id from the sorted BatchIds
+            // No place, attach it to the last page which has the youngest batch id. Addresses
+            // are always sorted by batch ids, hence the last page.
             var maxAt = MaxCount - 1;
-            Debug.Assert(MaxCount > 2 && BatchIds[MaxCount - 1] > BatchIds[MaxCount - 2]);
 
             // 1. Attach the previously existing abandoned as tail to the current one
             new AbandonedPage(batch.GetAt(head)).AttachTail(Addresses[maxAt], batch);
-            // 2. Update the batch id
-            BatchIds[maxAt] = batch.BatchId;
-            // 3. Set properly the address to the head that has been chained up
+            // 2. Set properly the address to the head that has been chained up
             Addresses[maxAt] = head;
         }
         else
@@ -184,7 +174,6 @@ public struct AbandonedList
 
             Debug.Assert(Addresses[at] == DbAddress.Null);
 
-            BatchIds[at] = batch.BatchId;
             Addresses[at] = head;
 
             EntriesCount++;
@@ -218,7 +207,6 @@ public struct AbandonedList
             const int notFound = -1;
 
             return Addresses.IndexOfAnyExcept(DbAddress.Null) == notFound &&
-                   BatchIds.IndexOfAnyExcept(default(uint)) == notFound &&
                    EntriesCount == 0 &&
                    Current == DbAddress.Null;
         }
