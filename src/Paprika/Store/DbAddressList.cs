@@ -37,7 +37,7 @@ public static class DbAddressList
         ref var slot = ref Unsafe.Add(ref b, i * BytesPer2Addresses +
                                              odd * ShiftToOdd); // branchless shift for odds
 
-        uint value = Unsafe.ReadUnaligned<uint>(ref slot) >> (HalfByteShift * odd); // branchless shift for odds 
+        var value = Unsafe.ReadUnaligned<uint>(ref slot) >> (HalfByteShift * odd); // branchless shift for odds 
         return DbAddress.Page(value & ValueMask);
     }
 

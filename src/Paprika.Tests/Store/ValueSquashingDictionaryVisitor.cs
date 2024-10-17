@@ -39,8 +39,8 @@ public class ValueSquashingDictionaryVisitor(IPageResolver resolver) : IPageVisi
             case PageType.DataPage:
                 ReportMap(ref prefix, new DataPage(p).Map);
                 break;
-            case PageType.LeafOverflow:
-                ReportMap(ref prefix, new LeafOverflowPage(p).Map);
+            case PageType.Bottom:
+                ReportMap(ref prefix, new BottomPage(p).Map);
                 break;
         }
 

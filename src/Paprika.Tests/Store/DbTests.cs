@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using FluentAssertions;
+using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store;
@@ -204,7 +205,7 @@ public class DbTests
         using var db = PagedDb.NativeMemoryDb(size);
 
         const int batches = 25;
-        const int storageSlots = 10_000;
+        const int storageSlots = 20_000;
         const int storageKeyLength = 32;
 
         var value = new byte[32];
