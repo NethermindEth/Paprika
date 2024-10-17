@@ -54,8 +54,8 @@ public class ValueReportingVisitor(IPageResolver resolver) : IPageVisitor, IDisp
             case PageType.DataPage:
                 ReportMap(node, new DataPage(p).Map);
                 break;
-            case PageType.LeafOverflow:
-                ReportMap(node, new LeafOverflowPage(p).Map);
+            case PageType.Bottom:
+                ReportMap(node, new BottomPage(p).Map);
                 break;
         }
 

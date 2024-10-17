@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using FluentAssertions;
+using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store;
@@ -83,10 +84,10 @@ public class AbandonedTests : BasePageTests
 
     [TestCase(20, 1, 10_000, false, TestName = "Accounts - 1")]
     [TestCase(428, 100, 10_000, false, TestName = "Accounts - 100")]
-    [TestCase(19278, 4000, 200, false,
+    [TestCase(21796, 4000, 200, false,
         TestName = "Accounts - 4000 to get a bit reuse",
         Category = Categories.LongRunning)]
-    [TestCase(48228, 10_000, 50, false,
+    [TestCase(55480, 10_000, 50, false,
         TestName = "Accounts - 10000 to breach the AbandonedPage",
         Category = Categories.LongRunning)]
     [TestCase(118364, 20_000, 50, true,
@@ -261,7 +262,7 @@ public class AbandonedTests : BasePageTests
         var accountValue = new byte[2900];
         new Random(17).NextBytes(accountValue);
 
-        using var db = PagedDb.NativeMemoryDb(150000 * Page.PageSize, HistoryDepth);
+        using var db = PagedDb.NativeMemoryDb(165_000 * Page.PageSize, HistoryDepth);
 
         // Start read only batch to ensure that new pages are allocated instead of reusing
         // the abandoned pages.

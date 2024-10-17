@@ -126,6 +126,7 @@ public static class DbAddressList
         return array;
     }
 
+
     private static bool IsCleanImpl<TList>(in TList list)
         where TList : struct, IDbAddressList
     {

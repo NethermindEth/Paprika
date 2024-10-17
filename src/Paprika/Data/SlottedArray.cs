@@ -520,6 +520,101 @@ public readonly ref struct SlottedArray /*: IClearable */
         }
     }
 
+    /// <summary>
+    /// Checks whether the map has any entry matching the given <typeparamref name="TNibbleSelector"/>.
+    /// </summary>
+    public bool HasAny<TNibbleSelector>()
+        where TNibbleSelector : INibbleSelector
+    {
+        var to = Count;
+
+        for (var i = 0; i < to; i++)
+        {
+            ref var slot = ref GetSlotRef(i);
+            if (slot.IsDeleted)
+                continue;
+
+            if (slot.HasAtLeastOneNibble == false)
+                continue;
+
+            if (typeof(TNibbleSelector) == typeof(NibbleSelector.All))
+            {
+                return true;
+            }
+
+            var nibble = slot.GetNibble0(GetHashRef(i));
+            if (TNibbleSelector.Should(nibble))
+                return true;
+        }
+
+        return false;
+    }
+
+    public bool MoveNonEmptyKeysTo<TNibbleSelector>(in SlottedArray destination, bool treatEmptyAsTombstone = false)
+        where TNibbleSelector : INibbleSelector
+    {
+        var to = Count;
+        var moved = 0;
+
+        for (var i = 0; i < to; i++)
+        {
+            ref var slot = ref GetSlotRef(i);
+            if (slot.IsDeleted)
+                continue;
+
+            if (slot.HasAtLeastOneNibble == false)
+                continue;
+
+            if (typeof(TNibbleSelector) != typeof(NibbleSelector.All))
+            {
+                var nibble = slot.GetNibble0(GetHashRef(i));
+                if (TNibbleSelector.Should(nibble) == false)
+                    continue;
+            }
+
+            var payload = GetSlotPayload(i);
+
+            Span<byte> data;
+
+            NibblePath trimmed;
+            if (slot.HasKeyBytes)
+            {
+                data = KeyEncoding.ReadFrom(payload, out trimmed);
+            }
+            else
+            {
+                trimmed = default;
+                data = payload;
+            }
+
+            var hash = GetHashRef(i);
+            if (data.IsEmpty && treatEmptyAsTombstone)
+            {
+                // special case for tombstones in overflows
+                var index = destination.TryGetImpl(trimmed, hash, slot.KeyPreamble, out _);
+                if (index != NotFound)
+                {
+                    destination.DeleteImpl(index);
+                }
+
+                MarkAsDeleted(i);
+            }
+            else if (destination.TrySetImpl(hash, slot.KeyPreamble, trimmed, data))
+            {
+                MarkAsDeleted(i);
+                moved++;
+            }
+        }
+
+        if (moved > 0)
+        {
+            CollectTombstones();
+            Defragment();
+        }
+
+        return moved > 0;
+    }
+
     public void RemoveKeysFrom(in SlottedArray source)
     {
         var to = source.Count;
@@ -552,14 +647,14 @@ public readonly ref struct SlottedArray /*: IClearable */
         }
     }
 
-    public const int BucketCount = 16;
+    public const int OneNibbleStatsCount = 16;
 
     /// <summary>
     /// Gets the aggregated count of entries per nibble.
     /// </summary>
     public void GatherCountStats1Nibble(Span<ushort> buckets)
     {
-        Debug.Assert(buckets.Length == BucketCount);
+        Debug.Assert(buckets.Length == OneNibbleStatsCount);
 
         var to = _header.Low / Slot.TotalSize;
         for (var i = 0; i < to; i++)
@@ -579,7 +674,7 @@ public readonly ref struct SlottedArray /*: IClearable */
     /// </summary>
     public void GatherSizeStats1Nibble(Span<ushort> buckets)
     {
-        Debug.Assert(buckets.Length == BucketCount);
+        Debug.Assert(buckets.Length == OneNibbleStatsCount);
 
         var to = _header.Low / Slot.TotalSize;
         for (var i = 0; i < to; i++)

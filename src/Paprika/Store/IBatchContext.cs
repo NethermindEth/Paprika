@@ -17,6 +17,18 @@ public interface IBatchContext : IReadOnlyBatchContext
     /// <returns>A new page.</returns>
     Page GetNewPage(out DbAddress addr, bool clear);
 
+    TPage GetNewPage<TPage>(out DbAddress addr, byte level = 0)
+        where TPage : struct, IPage<TPage>
+    {
+        var page = GetNewPage(out addr, false);
+        var wrapped = TPage.Wrap(page);
+        wrapped.Clear();
+
+        page.Header.PageType = TPage.DefaultType;
+        page.Header.Level = level;
+        return wrapped;
+    }
+
     /// <summary>
     /// Gets a new (potentially reused) page that is clean and ready to be used.
     /// </summary>

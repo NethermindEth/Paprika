@@ -32,33 +32,27 @@ public class StatisticsVisitor : IPageVisitor
     {
         public const int Levels = 32;
 
-        public readonly int[] PageCountPerNibblePathDepth = new int[Levels];
-        public readonly int[] LeafPageCountPerNibblePathDepth = new int[Levels];
-        public readonly int[] OverflowPageCountPerNibblePathDepth = new int[Levels];
+        public readonly int[] DataPagePageCountPerNibblePathDepth = new int[Levels];
+        public readonly int[] BottomPageCountPerNibblePathDepth = new int[Levels];
+
+        public int BottomLevel = 0;
 
         /// <summary>
         /// A histogram of used space in inner <see cref="DataPage"/>.
         /// </summary>
-        public readonly IntHistogram?[] InnerDataPagePercentageUsed = new IntHistogram[Levels];
+        public readonly IntHistogram?[] DataPagePercentageUsed = new IntHistogram[Levels];
 
         /// <summary>
-        /// A histogram of used space in leaf <see cref="DataPage"/>.
+        /// A histogram of used space in leaf <see cref="BottomPage"/>.
         /// </summary>
-        public readonly IntHistogram?[] LeafDataPagePercentageUsed = new IntHistogram[Levels];
+        public readonly IntHistogram?[] BottomPagePercentageUsed = new IntHistogram[Levels];
 
-        /// <summary>
-        /// A histogram of used space in leaf <see cref="LeafOverflowPage"/>.
-        /// </summary>
-        public readonly IntHistogram?[] OverflowPagePercentageUsed = new IntHistogram[Levels];
+        public void ReportDataPageMap(int length, in SlottedArray map) =>
+            ReportMap(DataPagePercentageUsed, length, map);
 
-        public void ReportInnerDataPageMap(int length, in SlottedArray map) =>
-            ReportMap(InnerDataPagePercentageUsed, length, map);
 
-        public void ReportLeafDataPageMap(int length, in SlottedArray map) =>
-            ReportMap(LeafDataPagePercentageUsed, length, map);
-
-        public void ReportOverflowPageMap(int length, in SlottedArray map) =>
-            ReportMap(OverflowPagePercentageUsed, length, map);
+        public void ReportBottomPageMap(int length, in SlottedArray map) =>
+            ReportMap(BottomPagePercentageUsed, length, map);
 
         private static void ReportMap(IntHistogram?[] histograms, int length, in SlottedArray map)
         {
@@ -80,15 +74,16 @@ public class StatisticsVisitor : IPageVisitor
 
         _current.PageCount++;
 
-        if (typeof(TPage) == typeof(StorageFanOut.Level1Page))
+        var t = typeof(TPage);
+        if (t == typeof(StorageFanOut.Level1Page))
         {
             StorageFanOutLevels[1] += 1;
         }
-        else if (typeof(TPage) == typeof(StorageFanOut.Level2Page))
+        else if (t == typeof(StorageFanOut.Level2Page))
         {
             StorageFanOutLevels[2] += 1;
         }
-        else if (typeof(TPage) == typeof(StorageFanOut.Level3Page))
+        else if (t == typeof(StorageFanOut.Level3Page))
         {
             StorageFanOutLevels[3] += 1;
         }
@@ -96,39 +91,43 @@ public class StatisticsVisitor : IPageVisitor
         {
             var length = prefix.Current.Length;
 
-            _current.PageCountPerNibblePathDepth[length] += 1;
-
             var p = page.AsPage();
 
             switch (p.Header.PageType)
             {
                 case PageType.DataPage:
-                    var dataPage = new DataPage(p);
-                    var map = dataPage.Map;
-
-                    if (dataPage.IsLeaf)
-                    {
-                        _current.LeafPageCountPerNibblePathDepth[length] += 1;
-                    }
-
-                    if (dataPage.IsLeaf == false)
-                    {
-                        _current.ReportInnerDataPageMap(length, map);
-                    }
-                    else
-                    {
-                        _current.ReportLeafDataPageMap(length, map);
-                    }
-
+                    _current.DataPagePageCountPerNibblePathDepth[length] += 1;
+                    _current.ReportDataPageMap(length, new DataPage(p).Map);
                     break;
-                case PageType.LeafOverflow:
-                    _current.OverflowPageCountPerNibblePathDepth[length] += 1;
-                    _current.ReportOverflowPageMap(length, new LeafOverflowPage(p).Map);
+                case PageType.Bottom:
+                    var bottomLevel = _current.BottomLevel;
+                    _current.BottomPageCountPerNibblePathDepth[length + bottomLevel] += 1;
+                    _current.ReportBottomPageMap(length, new BottomPage(p).Map);
+                    return new BottomLevelUp(_current);
+                case PageType.StateRoot:
                     break;
+                default:
+                    throw new Exception($"Not handled type {p.Header.PageType}");
             }
         }
 
         return NoopDisposable.Instance;
+    }
+
+    private sealed class BottomLevelUp : IDisposable
+    {
+        private readonly Stats _stats;
+
+        public BottomLevelUp(Stats stats)
+        {
+            _stats = stats;
+            _stats.BottomLevel++;
+        }
+
+        public void Dispose()
+        {
+            _stats.BottomLevel--;
+        }
     }
 
     public IDisposable On<TPage>(TPage page, DbAddress addr) where TPage : unmanaged, IPage

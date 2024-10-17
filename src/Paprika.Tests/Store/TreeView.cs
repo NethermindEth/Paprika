@@ -42,9 +42,9 @@ public class TreeView(IPageResolver resolver) : IPageVisitor, IDisposable
         {
             text += ReportUsage(p.Cast<DataPage>().Map);
         }
-        else if (typeof(TPage) == typeof(LeafOverflowPage))
+        else if (typeof(TPage) == typeof(BottomPage))
         {
-            text += ReportUsage(p.Cast<LeafOverflowPage>().Map);
+            text += ReportUsage(p.Cast<BottomPage>().Map);
         }
 
         return BuildNode(text);
