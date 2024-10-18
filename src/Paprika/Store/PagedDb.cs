@@ -642,14 +642,14 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             _db._reusablePages.Set(_db._registeredForReuse.Count);
 #endif
 
-            await _db._manager.FlushPages(_written, options);
+            await _db._manager.WritePages(_written, options);
 
             var newRootPage = _db.SetNewRoot(_root);
 
             // report
             _db.ReportDbSize(GetRootSizeInMb(_root));
 
-            await _db._manager.FlushRootPage(newRootPage, options);
+            await _db._manager.WriteRootPage(newRootPage, options);
 
             lock (_db._batchLock)
             {
@@ -660,8 +660,6 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
             _db.ReportCommit(watch.Elapsed);
         }
-
-        IBatchStats? IBatch.Stats => Stats;
 
         public void VerifyDbPagesOnCommit()
         {
