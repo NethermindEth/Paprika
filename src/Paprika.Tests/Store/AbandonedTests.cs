@@ -262,7 +262,11 @@ public class AbandonedTests : BasePageTests
         var accountValue = new byte[2900];
         new Random(17).NextBytes(accountValue);
 
-        using var db = PagedDb.NativeMemoryDb(165_000 * Page.PageSize, HistoryDepth);
+        using var db = PagedDb.NativeMemoryDb(350_000 * Page.PageSize, HistoryDepth);
+
+        // Ensure that AbandonedList can pack maximum number of abandoned page addresses.
+        const int estimatedMetadataSize = 32;
+        AbandonedList.MaxCount.Should().BeGreaterThan(AbandonedList.Size / DbAddress.Size - estimatedMetadataSize);
 
         // Start read only batch to ensure that new pages are allocated instead of reusing
         // the abandoned pages.
