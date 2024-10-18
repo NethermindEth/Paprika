@@ -101,14 +101,16 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     public Keccak GetHash(NibblePath path, IReadOnlyWorldState commit, bool ignoreCache = false)
     {
-        const ComputeHint hint = ComputeHint.None;
+        ComputeHint hint = ComputeHint.None;
         var wrapper = new CommitWrapper(commit, true);
+
+        if (ignoreCache)
+            hint |= ComputeHint.SkipCachedInformation;
 
         UIntPtr stack = default;
         using var ctx = new ComputeContext(wrapper, TrieType.State, hint, CacheBudget.Options.None.Build(), _pool,
             ref stack);
 
-        //TODO - this should be taken into account by CalculateHash method
         if (path.Length == NibblePath.KeccakNibbleCount)
         {
             //Merkle leaves are omitted at this height, so need to pick up keccak from parent (branch)
@@ -117,66 +119,57 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             if (!merkleData.Span.IsEmpty)
             {
                 var leftover = Node.ReadFrom(out var parenType, out var leaf, out _, out var branch, merkleData.Span);
-                if (parenType == Node.Type.Branch)
+                if (parenType == Node.Type.Branch && !ignoreCache)
                 {
-                    if (!ignoreCache)
-                    {
-                        Span<byte> rlpMemoization = stackalloc byte[RlpMemo.Size];
-                        RlpMemo memo = RlpMemo.Decompress(leftover, branch.Children, rlpMemoization);
-                        if (memo.TryGetKeccak(path[NibblePath.KeccakNibbleCount - 1], out var keccakSpan))
-                            return new Keccak(keccakSpan);
-                    }
-                    EncodeLeaf(Key.Merkle(path), ctx, NibblePath.Empty, out var keccakOrRlp);
-                    return keccakOrRlp.Keccak;
-                }
-                if (parenType == Node.Type.Leaf && leaf.Path[0] == path[path.Length - 1])
-                {
-                    EncodeLeaf(parentKey, ctx, leaf.Path, out var keccakOrRlp);
-                    return keccakOrRlp.Keccak;
+                    Span<byte> rlpMemoization = stackalloc byte[RlpMemo.Size];
+                    RlpMemo memo = RlpMemo.Decompress(leftover, branch.Children, rlpMemoization);
+                    if (memo.TryGetKeccak(path[NibblePath.KeccakNibbleCount - 1], out var keccakSpan))
+                        return new Keccak(keccakSpan);
                 }
             }
-            else
-            {
-                EncodeLeaf(Key.Merkle(path), ctx, NibblePath.Empty, out var keccakOrRlp);
-                return keccakOrRlp.Keccak;
-            }
+
+            EncodeLeaf(Key.Merkle(path), ctx, NibblePath.Empty, out var keccakOrRlp);
+            return keccakOrRlp.Keccak;
         }
 
         var root = Key.Merkle(path);
-
         Compute(in root, ctx, out KeccakOrRlp hash);
         return hash.Keccak;
     }
 
-    public Keccak GetStorageHash(IReadOnlyWorldState commit, in Keccak account, NibblePath storagePath = default)
+    public Keccak GetStorageHash(IReadOnlyWorldState commit, in Keccak account, NibblePath storagePath = default, bool ignoreCache = false)
     {
-        //TODO - this should be taken into account by CalculateHash method
-        if (storagePath.Length == NibblePath.KeccakNibbleCount)
-        {
-            //Merkle leaves are omitted at this height, so need to pick up keccak from parent (branch)
-            var branchKey = Key.Merkle(storagePath.SliceTo(storagePath.Length - 1));
-            using var branchOwner = commit.Get(branchKey);
-            if (!branchOwner.Span.IsEmpty)
-            {
-                var leftover = Node.ReadFrom(out var type, out var leaf, out var ext, out var branch, branchOwner.Span);
-                if (type != Node.Type.Branch)
-                    throw new Exception("Expected branch type");
-
-                Span<byte> rlpMemoization = stackalloc byte[RlpMemo.Size];
-                RlpMemo memo = RlpMemo.Decompress(leftover, branch.Children, rlpMemoization);
-                if (memo.TryGetKeccak(storagePath[NibblePath.KeccakNibbleCount - 1], out var keccakSpan))
-                    return new Keccak(keccakSpan);
-            }
-        }
-
-        const ComputeHint hint = ComputeHint.DontUseParallel;
+        ComputeHint hint = ComputeHint.DontUseParallel;
+        if (ignoreCache)
+            hint |= ComputeHint.SkipCachedInformation;
         var prefixed = new PrefixingCommit(new CommitWrapper(commit, true));
         prefixed.SetPrefix(account);
 
-        var root = Key.Merkle(storagePath);
         UIntPtr stack = default;
         using var ctx = new ComputeContext(prefixed, TrieType.Storage, hint, CacheBudget.Options.None.Build(), _pool,
             ref stack);
+
+        if (storagePath.Length == NibblePath.KeccakNibbleCount)
+        {
+            //Merkle leaves are omitted at this height, so need to pick up keccak from parent (branch)
+            var parentKey = Key.Merkle(storagePath.SliceTo(storagePath.Length - 1));
+            using var merkleData = prefixed.Get(parentKey);
+            if (!merkleData.Span.IsEmpty)
+            {
+                var leftover = Node.ReadFrom(out var parenType, out var leaf, out _, out var branch, merkleData.Span);
+                if (parenType == Node.Type.Branch && !ignoreCache)
+                {
+                    Span<byte> rlpMemoization = stackalloc byte[RlpMemo.Size];
+                    RlpMemo memo = RlpMemo.Decompress(leftover, branch.Children, rlpMemoization);
+                    if (memo.TryGetKeccak(storagePath[NibblePath.KeccakNibbleCount - 1], out var keccakSpan))
+                        return new Keccak(keccakSpan);
+                }
+            }
+            EncodeLeaf(Key.Merkle(storagePath), ctx, NibblePath.Empty, out var keccakOrRlp);
+            return keccakOrRlp.Keccak;
+        }
+
+        var root = Key.Merkle(storagePath);
         Compute(in root, ctx, out KeccakOrRlp hash);
         return hash.Keccak;
     }
@@ -280,6 +273,42 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             {
                 ScatterGather(commit, GetStorageWorkItems(commit, budget));
             }
+        }
+    }
+
+    public Keccak RecalculateStorageTrie(ICommit commit, Keccak account, CacheBudget budget)
+    {
+        var page = _pool.Rent(false);
+        var prefixed = new PrefixingCommit(commit);
+        prefixed.SetPrefix(account);
+
+        try
+        {
+            commit.Visit((in Key key, ReadOnlySpan<byte> value) =>
+            {
+                var keccak = key.Path.UnsafeAsKeccak;
+                if (account != keccak)
+                    return;
+
+                if (value.IsEmpty)
+                    Delete(in key.StoragePath, 0, prefixed!, budget);
+                else
+                    MarkPathDirty(in key.StoragePath, page.Span, prefixed!, budget, TrieType.Storage);
+            }, TrieType.Storage);
+
+            // Don't parallelize this work as it would be counter-productive to have parallel over parallel.
+            const ComputeHint hint = ComputeHint.DontUseParallel;
+
+            // compute new storage root hash
+            UIntPtr stack = default;
+            using var ctx = new ComputeContext(prefixed, TrieType.Storage, hint, budget, _pool, ref stack);
+            Compute(Key.Merkle(NibblePath.Empty), ctx, out var keccakOrRlp);
+            return keccakOrRlp.Keccak;
+        }
+        finally
+        {
+            _pool.Return(page);
+            page = default;
         }
     }
 

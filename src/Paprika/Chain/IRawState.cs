@@ -16,7 +16,11 @@ public interface IRawState : IReadOnlyWorldState
 
     Keccak GetHash(in NibblePath path, bool ignoreCache);
 
-    Keccak GetStorageHash(in Keccak account, in NibblePath path);
+    Keccak GetStorageHash(in Keccak account, in NibblePath path, bool ignoreCache);
+
+    Keccak RecalculateRootHash();
+
+    bool IsPersisted(in Keccak account, NibblePath path);
 
     void CreateMerkleBranch(in Keccak account, in NibblePath storagePath, byte[] childNibbles, Keccak[] childHashes, bool persist = true);
     void CreateMerkleExtension(in Keccak account, in NibblePath storagePath, in NibblePath extPath, bool persist = true);
