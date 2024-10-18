@@ -150,4 +150,51 @@ public class RawStateTests
         using var read = db.BeginReadOnlyBatch();
         read.TryGet(Key.Account(account), out _).Should().BeFalse();
     }
+
+    [Test]
+    public async Task DeleteByShortPrefix()
+    {
+        var account1 = new Keccak(new byte[]
+            { 1, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
+
+        var account2 = new Keccak(new byte[]
+            { 18, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
+
+        using var db = PagedDb.NativeMemoryDb(64 * 1024, 2);
+        var merkle = new ComputeMerkleBehavior();
+
+        await using var blockchain = new Blockchain(db, merkle);
+
+        using var raw = blockchain.StartRaw();
+
+        raw.SetAccount(account1, new Account(1, 1));
+        raw.SetAccount(account2, new Account(2, 2));
+        raw.Commit();
+
+        raw.RegisterDeleteByPrefix(Key.Account(NibblePath.FromKey(account2).SliceTo(1)));
+        raw.Commit();
+
+        raw.Finalize(1);
+
+        //check account 1 is still present and account 2 is deleted
+        using var read = db.BeginReadOnlyBatch();
+        read.TryGet(Key.Account(account1), out _).Should().BeTrue();
+        read.TryGet(Key.Account(account2), out _).Should().BeFalse();
+
+        //let's re-add 2nd account and delete using empty prefix
+        using var raw2 = blockchain.StartRaw();
+
+        raw2.SetAccount(account2, new Account(2, 2));
+        raw2.Commit();
+
+        raw2.RegisterDeleteByPrefix(Key.Account(NibblePath.Empty));
+        raw2.Commit();
+
+        raw2.Finalize(2);
+
+        //no accounts should be present
+        using var read2 = db.BeginReadOnlyBatch();
+        read2.TryGet(Key.Account(account1), out _).Should().BeFalse();
+        read2.TryGet(Key.Account(account2), out _).Should().BeFalse();
+    }
 }
