@@ -16,13 +16,13 @@ public struct AbandonedList
     private const int EntriesStart = DbAddress.Size + sizeof(uint);
 
     public const int Size = Page.PageSize - PageHeader.Size - RootPage.Payload.AbandonedStart - EntriesStart;
-    private const int EntrySize = sizeof(uint) + DbAddress.Size;
+    private const int EntrySize = DbAddress.Size;
     public const int MaxCount = (Size - EntriesStart) / EntrySize;
 
     [FieldOffset(0)] private DbAddress Current;
     [FieldOffset(DbAddress.Size)] private uint EntriesCount;
 
-    [FieldOffset(MaxCount * sizeof(uint) + EntriesStart)]
+    [FieldOffset(EntriesStart)]
     private DbAddress AddressStart;
 
     private Span<DbAddress> Addresses => MemoryMarshal.CreateSpan(ref AddressStart, MaxCount);
