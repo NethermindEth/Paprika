@@ -280,8 +280,8 @@ public class PooledSpanDictionary : IDisposable
         var size = PreambleLength + AddressLength + KeyLengthLength + key.Length + ValueLengthLength + dataLength;
         Span<byte> destination = Write(size, out var address);
 
-		//never save Proof type of entries
-		//TODO - needs to be moved out of this class
+        //never save Proof type of entries
+        //TODO - needs to be moved out of this class
         if (oldMetadata == (byte)EntryType.Proof && metadata == (byte)EntryType.Persistent)
             metadata = oldMetadata.Value;
 
