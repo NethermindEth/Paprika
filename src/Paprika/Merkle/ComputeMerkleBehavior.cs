@@ -85,7 +85,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// Calculates state root hash, passing through all the account and storage tries and building a new value
     /// that is not based on any earlier calculation. It's time consuming.
     /// </summary>
-    public Keccak CalculateStateRootHash(IReadOnlyWorldState commit)
+    public Keccak CalculateStateRootHash(IReadOnlyCommit commit)
     {
         const ComputeHint hint = ComputeHint.ForceStorageRootHashRecalculation | ComputeHint.SkipCachedInformation;
         var wrapper = new CommitWrapper(commit, true);
@@ -183,10 +183,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     class CommitWrapper : IChildCommit
     {
-        private readonly IReadOnlyWorldState _readOnly;
+        private readonly IReadOnlyCommit _readOnly;
         private readonly bool _allowChildCommits;
 
-        public CommitWrapper(IReadOnlyWorldState readOnly, bool allowChildCommits = false)
+        public CommitWrapper(IReadOnlyCommit readOnly, bool allowChildCommits = false)
         {
             _readOnly = readOnly;
             _allowChildCommits = allowChildCommits;

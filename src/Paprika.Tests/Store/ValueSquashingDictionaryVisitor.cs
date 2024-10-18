@@ -39,17 +39,17 @@ public class ValueSquashingDictionaryVisitor(IPageResolver resolver) : IPageVisi
             case PageType.DataPage:
                 ReportMap(ref prefix, new DataPage(p).Map);
                 break;
-            case PageType.LeafOverflow:
-                ReportMap(ref prefix, new LeafOverflowPage(p).Map);
+            case PageType.Bottom:
+                ReportMap(ref prefix, new BottomPage(p).Map);
                 break;
         }
 
-        return Disposable.Instance;
+        return NoopDisposable.Instance;
     }
 
     public IDisposable On<TPage>(TPage page, DbAddress addr)
         where TPage : unmanaged, IPage =>
-        Disposable.Instance;
+        NoopDisposable.Instance;
 
-    public IDisposable Scope(string name) => Disposable.Instance;
+    public IDisposable Scope(string name) => NoopDisposable.Instance;
 }

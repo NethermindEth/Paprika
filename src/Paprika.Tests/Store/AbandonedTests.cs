@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using FluentAssertions;
+using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store;
@@ -83,13 +84,13 @@ public class AbandonedTests : BasePageTests
 
     [TestCase(20, 1, 10_000, false, TestName = "Accounts - 1")]
     [TestCase(428, 100, 10_000, false, TestName = "Accounts - 100")]
-    [TestCase(19278, 4000, 200, false,
+    [TestCase(21796, 4000, 200, false,
         TestName = "Accounts - 4000 to get a bit reuse",
         Category = Categories.LongRunning)]
-    [TestCase(48228, 10_000, 50, false,
+    [TestCase(55480, 10_000, 50, false,
         TestName = "Accounts - 10000 to breach the AbandonedPage",
         Category = Categories.LongRunning)]
-    [TestCase(88262, 20_000, 50, true,
+    [TestCase(118364, 20_000, 50, true,
         TestName = "Storage - 20_000 accounts with a single storage slot",
         Category = Categories.LongRunning)]
     public async Task Reuse_in_limited_environment(int pageCount, int accounts, int repeats, bool isStorage)
@@ -167,13 +168,6 @@ public class AbandonedTests : BasePageTests
 
         return;
 
-        static Keccak[] Initialize(int accounts)
-        {
-            var keccaks = new Keccak[accounts];
-            const int seed = 13;
-            new Random(seed).NextBytes(MemoryMarshal.Cast<Keccak, byte>(keccaks.AsSpan()));
-            return keccaks;
-        }
     }
 
     [Test]
@@ -249,5 +243,63 @@ public class AbandonedTests : BasePageTests
 
             await block.Commit(CommitOptions.FlushDataAndRoot);
         }
+    }
+
+    [Test]
+    public async Task Abandoned_chain_creation_with_overflow()
+    {
+        const int delta = 10;
+
+        // Minimum iterations required to overflow the abandoned list.
+        const int minIterations = AbandonedList.MaxCount + delta;
+
+        // Minimum accounts required to overflow an abandoned page.
+        int numAccounts = AbandonedPage.MaxCount * 2 + delta;
+
+        var keccaks = Initialize(numAccounts);
+
+        // Set big value.
+        var accountValue = new byte[2900];
+        new Random(17).NextBytes(accountValue);
+
+        using var db = PagedDb.NativeMemoryDb(165_000 * Page.PageSize, HistoryDepth);
+
+        // Start read only batch to ensure that new pages are allocated instead of reusing
+        // the abandoned pages.
+        using (var read = db.BeginReadOnlyBatch())
+        {
+            for (var i = 0; i < minIterations; i++)
+            {
+                using var block = db.BeginNextBatch();
+                foreach (var keccak in keccaks)
+                {
+                    block.SetAccount(keccak, accountValue);
+                }
+
+                block.VerifyDbPagesOnCommit();
+                await block.Commit(CommitOptions.FlushDataAndRoot);
+            }
+        }
+
+        // Try reusing the abandoned pages.
+        for (var i = 0; i < minIterations; i++)
+        {
+            using var block = db.BeginNextBatch();
+            foreach (var keccak in keccaks)
+            {
+                block.SetAccount(keccak, accountValue);
+            }
+
+            block.VerifyDbPagesOnCommit();
+            await block.Commit(CommitOptions.FlushDataAndRoot);
+        }
+    }
+
+    private static Keccak[] Initialize(int accounts)
+    {
+        var keccaks = new Keccak[accounts];
+        const int seed = 13;
+        new Random(seed).NextBytes(MemoryMarshal.Cast<Keccak, byte>(keccaks.AsSpan()));
+        return keccaks;
     }
 }

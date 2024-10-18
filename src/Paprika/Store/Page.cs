@@ -16,26 +16,14 @@ public interface IPage
 {
 }
 
-public interface IPageWithData<TPage> : IPage
-    where TPage : struct, IPageWithData<TPage>
+public interface IPage<TPage> : IPage, IClearable
+    where TPage : struct, IPage<TPage>
 {
-    /// <summary>
-    /// Wraps the raw page as <typeparamref name="TPage"/>
-    /// </summary>
-    static abstract TPage Wrap(Page page);
+    public static abstract TPage Wrap(Page page);
 
-    void Clear();
+    public static abstract PageType DefaultType { get; }
 
-    bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result);
-
-    /// <summary>
-    /// Delete all the values by the given prefix in the page and below.
-    /// </summary>
-    Page DeleteByPrefix(in NibblePath prefix, IBatchContext batch);
-
-    Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch);
-
-    void Accept(ref NibblePath.Builder prefix, IPageVisitor visitor, IPageResolver resolver, DbAddress addr);
+    public bool IsClean { get; }
 }
 
 /// <summary>

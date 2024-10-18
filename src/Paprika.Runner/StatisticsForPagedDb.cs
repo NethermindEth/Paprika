@@ -39,7 +39,7 @@ public static class StatisticsForPagedDb
                     new Layout("top")
                         .SplitColumns(
                             BuildReport(stats.State, "State"),
-                            BuildReport(stats.Storage, "Storage")),
+                            BuildReport(stats.Storage, "Storage", stats.StorageFanOutLevels)),
                     new Layout("bottom")
                         .Update(new Panel(new Paragraph(
                             $"- pages used for id mapping: {Page.FormatAsGb(stats.Ids.PageCount)}\n" +
@@ -62,82 +62,90 @@ public static class StatisticsForPagedDb
         }
     }
 
-    private static Layout BuildReport(StatisticsVisitor.Stats stats, string name)
+    private static Layout BuildReport(StatisticsVisitor.Stats stats, string name, int[]? fanOutLevels = null)
     {
         var up = new Layout("up");
         var sizes = new Layout("down");
-        //var leafs = new Layout("leafs");
 
-        var layout = new Layout().SplitRows(up, sizes /*, leafs*/);
+        var layout = new Layout().SplitRows(up, sizes);
 
-        // var totalMerkle = stats.MerkleBranchSize + stats.MerkleExtensionSize + stats.MerkleLeafSize;
 
         var general =
             $"Size total: {Page.FormatAsGb(stats.PageCount)}\n";
-        //+
-        // $" Merkle:    {ToGb(totalMerkle):F2}GB:\n" +
-        // $"  Branches: {ToGb(stats.MerkleBranchSize):F2}GB\n" +
-        // $"  Ext.:     {ToGb(stats.MerkleExtensionSize):F2}GB\n" +
-        // $"  Leaf:     {ToGb(stats.MerkleLeafSize):F2}GB\n" +
-        // $" Data:      {ToGb(stats.DataSize):F2}GB\n" +
-        // "---\n" +
-        // $" Branches with small empty set: {stats.MerkleBranchWithSmallEmpty}\n" +
-        // $" Branches with 15 children: {stats.MerkleBranchWithOneChildMissing}\n" +
-        // $" Branches with 3 or less children: {stats.MerkleBranchWithThreeChildrenOrLess}\n";
 
         up.Update(new Panel(general).Header($"General stats for {name}").Expand());
 
         var t = new Table();
         t.AddColumn(new TableColumn("Depth"));
-        t.AddColumn(new TableColumn("Page count"));
-        t.AddColumn(new TableColumn("Leaf page count"));
-        t.AddColumn(new TableColumn("Overflow page count"));
+        t.AddColumn(new TableColumn("Total page count"));
+        t.AddColumn(new TableColumn("Data page count"));
+        t.AddColumn(new TableColumn("Bottom page count"));
+        t.AddColumn(new TableColumn($"{nameof(DataPage)} P50 % usage"));
+        t.AddColumn(new TableColumn($"{nameof(BottomPage)} P50 % usage"));
 
-        // t.AddColumn(new TableColumn("Child page count"));
-        //
-        // t.AddColumn(new TableColumn("Entries in page"));
-        // t.AddColumn(new TableColumn("Capacity left (bytes)"));
-
-        var countByLevel = stats.PageCountPerNibblePathDepth.ToArray();
-        Array.Sort(countByLevel, (a, b) => a.Key.CompareTo(b.Key));
-
-        foreach (var (depth, count) in countByLevel)
+        if (fanOutLevels != null)
         {
-            var leafPageCount = stats.LeafPageCountPerNibblePathDepth.GetValueOrDefault(depth, 0);
-            var overflowCount = stats.OverflowPageCountPerNibblePathDepth.GetValueOrDefault(depth, 0);
+            var max = fanOutLevels.AsSpan().LastIndexOfAnyExcept(0) + 1;
+
+            for (int depth = 0; depth < max; depth++)
+            {
+                var count = fanOutLevels[depth];
+
+                t.AddRow(
+                    new Text($"{nameof(StorageFanOut)}, lvl: {depth}"),
+                    new Text(count.ToString()),
+                    new Text("-"),
+                    new Text("-"),
+                    new Text("-"),
+                    new Text("-")
+                );
+            }
+        }
+
+        var maxDepthDataPage = stats.DataPagePageCountPerNibblePathDepth.AsSpan().LastIndexOfAnyExcept(0) + 1;
+        var maxDepthBottomPage = stats.BottomPageCountPerNibblePathDepth.AsSpan().LastIndexOfAnyExcept(0) + 1;
+
+        var maxDepth = Math.Max(maxDepthDataPage, maxDepthBottomPage);
+
+        for (var depth = 0; depth < maxDepth; depth++)
+        {
+            var dataPageCount = stats.DataPagePageCountPerNibblePathDepth[depth];
+            var bottomPageCount = stats.BottomPageCountPerNibblePathDepth[depth];
+            var count = dataPageCount + bottomPageCount;
 
             t.AddRow(
                 new Text(depth.ToString()),
                 new Text(count.ToString()),
-                new Text(leafPageCount.ToString()),
-                new Text(overflowCount.ToString())
+                new Text(dataPageCount.ToString()),
+                new Text(bottomPageCount.ToString()),
+                new Text(GetP50(stats.DataPagePercentageUsed, depth)),
+                new Text(GetP50(stats.BottomPagePercentageUsed, depth))
             );
-
-            // var entries = level.Entries;
-            // var capacity = level.CapacityLeft;
-            //
-            // t.AddRow(
-            //     new Text(key.ToString()),
-            //     WriteHistogram(level.ChildCount),
-            //     WriteHistogram(entries),
-            //     WriteHistogram(capacity));
         }
 
         sizes.Update(t.Expand());
 
-        // var leafsTable = new Table();
-        // leafsTable.AddColumn(new TableColumn("Leaf capacity left"));
-        // leafsTable.AddColumn(new TableColumn("Leaf->Overflow capacity left"));
-        // leafsTable.AddColumn(new TableColumn("Leaf->Overflow count"));
-        //
-        // leafsTable.AddRow(
-        //     WriteHistogram(stats.LeafCapacityLeft),
-        //     WriteHistogram(stats.LeafOverflowCapacityLeft),
-        //     WriteHistogram(stats.LeafOverflowCount));
-        //
-        // leafs.Update(leafsTable.Expand());
-
         return layout;
+
+        string GetP50(IntHistogram?[] histograms, int depth)
+        {
+            const string none = "-";
+
+            var histogram = histograms[depth];
+            if (histogram == null)
+                return none;
+
+            try
+            {
+                return histogram.GetValueAtPercentile(50).ToString();
+            }
+            catch
+            {
+                // ignored
+            }
+
+            return none;
+        }
     }
 
     // private static IRenderable WriteSizePerType(Dictionary<int, long> sizes, string prefix)

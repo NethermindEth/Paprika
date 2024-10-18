@@ -351,9 +351,9 @@ public class Blockchain : IAsyncDisposable
         return new ReadOnlyState(keccak, new ReadOnlyBatchCountingRefs(batch), ancestors, filter, _pool);
     }
 
-    public IReadOnlyWorldState StartReadOnlyLatestFromDb()
+    public static IReadOnlyWorldState StartReadOnlyLatestFromDb(IDb db)
     {
-        var batch = _db.BeginReadOnlyBatch($"Blockchain dependency LATEST");
+        var batch = db.BeginReadOnlyBatch($"Blockchain dependency LATEST");
         return new ReadOnlyState(batch.Metadata.StateHash, new ReadOnlyBatchCountingRefs(batch), []);
     }
 
