@@ -80,7 +80,7 @@ public sealed class MemoryMappedPageManager : PointerPageManager
 
     protected override unsafe void* Ptr => _ptr;
 
-    public override async ValueTask FlushPages(ICollection<DbAddress> dbAddresses, CommitOptions options)
+    public override async ValueTask WritePages(ICollection<DbAddress> dbAddresses, CommitOptions options)
     {
         if (_options == PersistenceOptions.MMapOnly)
             return;
@@ -148,7 +148,7 @@ public sealed class MemoryMappedPageManager : PointerPageManager
 
     public override Page GetAtForWriting(DbAddress address, bool reused) => GetAt(address);
 
-    public override async ValueTask FlushRootPage(DbAddress root, CommitOptions options)
+    public override async ValueTask WriteRootPage(DbAddress root, CommitOptions options)
     {
         if (_options == PersistenceOptions.MMapOnly)
             return;

@@ -33,22 +33,9 @@ public interface IBatch : IReadOnlyBatch
     ValueTask Commit(CommitOptions options);
 
     /// <summary>
-    /// Gets the low levels stats of the given batch.
-    /// </summary>
-    IBatchStats? Stats { get; }
-
-    /// <summary>
     /// Performs a time-consuming verification when <see cref="Commit"/> is called that all the pages are reachable.
     /// </summary>
     void VerifyDbPagesOnCommit();
-}
-
-public interface IBatchStats
-{
-    public int DataPageNewLeafsAllocated { get; }
-    public int LeafPageTurnedIntoDataPage { get; }
-
-    public int LeafPageAllocatedOverflows { get; }
 }
 
 public enum CommitOptions

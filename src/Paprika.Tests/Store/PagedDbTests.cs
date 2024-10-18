@@ -337,39 +337,6 @@ public class PagedDbTests
     }
 
     [Test]
-    [Ignore("No stats gathered atm")]
-    public async Task Reports_stats()
-    {
-        const int accounts = 10_000;
-        var data = new byte[100];
-
-        using var db = PagedDb.NativeMemoryDb(32 * Mb, 2);
-
-        using var batch = db.BeginNextBatch();
-
-        for (var i = 0; i < accounts; i++)
-        {
-            var keccak = default(Keccak);
-
-            BinaryPrimitives.WriteInt32BigEndian(keccak.BytesAsSpan, i);
-
-            // account first & data
-            batch.SetRaw(Key.Account(keccak), data);
-            batch.SetRaw(Key.StorageCell(NibblePath.FromKey(keccak), keccak), data);
-        }
-
-        await batch.Commit(CommitOptions.FlushDataAndRoot);
-
-        var stats = batch.Stats;
-
-        stats.Should().NotBeNull();
-
-        //stats!.LeafPageAllocatedOverflows.Should().BeGreaterThan(0);
-        stats.LeafPageTurnedIntoDataPage.Should().BeGreaterThan(0);
-        stats.DataPageNewLeafsAllocated.Should().BeGreaterThan(0);
-    }
-
-    [Test]
     public async Task Snapshotting()
     {
         const byte historyDepth = 16;
