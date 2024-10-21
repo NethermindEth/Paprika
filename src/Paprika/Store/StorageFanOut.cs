@@ -579,13 +579,19 @@ public static class StorageFanOut
 
             public void Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
             {
+                Page root;
+
                 if (Root.IsNull == false && batch.WasWritten(Root))
                 {
                     // Root exists, and was written in this batch. Write through.
                     Map.Delete(key);
-                    var result = new DataPage(batch.GetAt(Root)).Set(key, data, batch);
 
-                    Debug.Assert(batch.GetAddress(result) == Root, "Should have been COWed before");
+                    root = batch.GetAt(Root);
+                    root = root.Header.PageType == PageType.DataPage
+                        ? new DataPage(root).Set(key, data, batch)
+                        : new BottomPage(root).Set(key, data, batch);
+
+                    Debug.Assert(batch.GetAddress(root) == Root, "Should have been COWed before");
                     return;
                 }
 
@@ -594,23 +600,29 @@ public static class StorageFanOut
 
                 if (Root.IsNull)
                 {
-                    batch.GetNewCleanPage<DataPage>(out Root);
+                    batch.GetNewCleanPage<BottomPage>(out Root);
                 }
 
                 // Ensure COWed
-                var root = new DataPage(batch.EnsureWritableCopy(ref Root));
+                root = batch.EnsureWritableCopy(ref Root);
 
                 foreach (var item in Map.EnumerateAll())
                 {
-                    var result = root.Set(item.Key, item.RawData, batch);
-                    Debug.Assert(result.Raw == root.AsPage().Raw);
+                    root = root.Header.PageType == PageType.DataPage
+                        ? new DataPage(root).Set(item.Key, item.RawData, batch)
+                        : new BottomPage(root).Set(item.Key, item.RawData, batch);
+
+                    Debug.Assert(batch.GetAddress(root) == Root, "Should have been COWed before");
                 }
 
                 // Clear map, all copied
                 Map.Clear();
 
                 // Set below
-                root.Set(key, data, batch);
+                if (root.Header.PageType == PageType.DataPage)
+                    new DataPage(root).Set(key, data, batch);
+                else
+                    new BottomPage(root).Set(key, data, batch);
             }
 
             public void DeleteByPrefix(in NibblePath prefix, IBatchContext batch)
@@ -620,7 +632,13 @@ public static class StorageFanOut
                 if (Root.IsNull)
                     return;
 
-                Root = batch.GetAddress(new DataPage(batch.GetAt(Root)).DeleteByPrefix(prefix, batch));
+                var root = batch.GetAt(Root);
+
+                root = root.Header.PageType == PageType.DataPage
+                    ? new DataPage(root).DeleteByPrefix(prefix, batch)
+                    : new BottomPage(root).DeleteByPrefix(prefix, batch);
+
+                Root = batch.GetAddress(root);
             }
 
             public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver)
@@ -628,7 +646,11 @@ public static class StorageFanOut
                 if (Root.IsNull)
                     return;
 
-                new DataPage(resolver.GetAt(Root)).Accept(ref builder, visitor, resolver, Root);
+                var root = resolver.GetAt(Root);
+                if (root.Header.PageType == PageType.DataPage)
+                    new DataPage(root).Accept(ref builder, visitor, resolver, Root);
+                else
+                    new BottomPage(root).Accept(ref builder, visitor, resolver, Root);
             }
 
             public void PrefetchForAccept(IPageResolver resolver)

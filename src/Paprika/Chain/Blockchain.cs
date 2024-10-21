@@ -348,6 +348,8 @@ public class Blockchain : IAsyncDisposable
         return new ReadOnlyState(batch.Metadata.StateHash, new ReadOnlyBatchCountingRefs(batch), []);
     }
 
+    public IReadOnlyWorldState StartReadOnlyLatestFromDb() => StartReadOnlyLatestFromDb(_db);
+
     private (IReadOnlyBatch batch, CommittedBlockState[] ancestors) BuildBlockDataDependencies(Keccak parentKeccak)
     {
         parentKeccak = Normalize(parentKeccak);

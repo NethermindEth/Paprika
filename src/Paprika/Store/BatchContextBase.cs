@@ -71,6 +71,4 @@ abstract class BatchContextBase(uint batchId) : IBatchContext
 
         return page;
     }
-
-    public BatchStats? Stats { get; } = new();
 }

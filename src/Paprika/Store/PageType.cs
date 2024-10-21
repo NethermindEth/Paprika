@@ -20,9 +20,9 @@ public enum PageType : byte
     Abandoned = 3,
 
     /// <summary>
-    /// <see cref="LeafOverflowPage"/>
+    /// <see cref="BottomPage"/>
     /// </summary>
-    LeafOverflow = 4,
+    Bottom = 4,
 
     /// <summary>
     /// <see cref="StorageFanOut"/>

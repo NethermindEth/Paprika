@@ -63,9 +63,10 @@ public abstract class BasePageTests
 
         public override void RegisterForFutureReuse(Page page, bool possibleImmediateReuse = false)
         {
-            _toReuse.Add(GetAddress(page))
+            var addr = GetAddress(page);
+            _toReuse.Add(addr)
                 .Should()
-                .BeTrue("Page should not be registered as reusable before");
+                .BeTrue($"Page at {addr} should not be registered as reusable before");
         }
 
         public override Dictionary<Keccak, uint> IdCache { get; } = new();

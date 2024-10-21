@@ -17,7 +17,7 @@ public unsafe class ClearableTests : IDisposable
     public void AbandonedPage() => TestPage<AbandonedPage>();
 
     [Test]
-    public void LeafOverflowPage() => TestPage<LeafOverflowPage>();
+    public void BottomPage() => TestPage<BottomPage>();
 
     [Test]
     public void StorageFanOut_Level1Page() => TestPage<StorageFanOut.Level1Page>();
