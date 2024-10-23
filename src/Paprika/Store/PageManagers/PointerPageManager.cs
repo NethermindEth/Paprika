@@ -11,18 +11,18 @@ public abstract unsafe class PointerPageManager(long size) : IPageManager
 
     protected abstract void* Ptr { get; }
 
-    public void Prefetch(DbAddress address)
+    public void Prefetch(DbAddress addr)
     {
         if (Sse.IsSupported)
         {
-            if (address.IsNull || address.Raw > (uint)MaxPage)
+            if (addr.IsNull || addr.Raw > (uint)MaxPage)
             {
                 return;
             }
 
             // Fetch to L2 cache as we don't know if will need it
             // So don't pollute L1 cache
-            Sse.Prefetch1((byte*)Ptr + address.FileOffset);
+            Sse.Prefetch1((byte*)Ptr + addr.FileOffset);
         }
     }
 
