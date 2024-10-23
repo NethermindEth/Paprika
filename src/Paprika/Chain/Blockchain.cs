@@ -180,8 +180,12 @@ public class Blockchain : IAsyncDisposable
 
                     _flusherQueueCount.Set(readerCount);
 
-                    // commit but no flush here, it's too heavy, the flush will come later
-                    await batch.Commit(CommitOptions.FlushDataOnly);
+                    var noMoreBlocksToApply = readerCount == 0;
+
+                    // Commit, but flush only if there's nothing more to apply.
+                    await batch.Commit(noMoreBlocksToApply
+                            ? CommitOptions.FlushDataOnly
+                            : CommitOptions.DangerNoFlush);
 
                     // inform blocks about flushing
                     lock (_blockLock)
