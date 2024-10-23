@@ -124,7 +124,7 @@ public interface IPageResolver
     /// </summary>
     Page GetAt(DbAddress address);
 
-    void Prefetch(DbAddress address);
+    void Prefetch(DbAddress addr);
 
     void Prefetch(ReadOnlySpan<DbAddress> addresses)
     {

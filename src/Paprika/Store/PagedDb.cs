@@ -126,7 +126,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             new MemoryMappedPageManager(size, historyDepth, directory,
                 flushToDisk ? PersistenceOptions.FlushFile : PersistenceOptions.MMapOnly), historyDepth);
 
-    public void Prefetch(DbAddress address) => _manager.Prefetch(address);
+    public void Prefetch(DbAddress addr) => _manager.Prefetch(addr);
 
     private void ReportReads(long number) => _reads.Add(number);
 
@@ -427,8 +427,6 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
     public Page GetAt(DbAddress address) => _manager.GetAt(address);
 
-    private Page GetAtForWriting(DbAddress address, bool reused) => _manager.GetAtForWriting(address, reused);
-
     /// <summary>
     /// Sets the new root but does not bump the _lastRoot that should be done in a lock.
     /// </summary>
@@ -506,16 +504,88 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             }
         }
 
-        public void Prefetch(DbAddress address) => db.Prefetch(address);
+        public void Prefetch(DbAddress addr) => db.Prefetch(addr);
 
         public Page GetAt(DbAddress address) => db._manager.GetAt(address);
 
         public override string ToString() => $"{nameof(ReadOnlyBatch)}, Name: {name}, BatchId: {BatchId}";
     }
 
+    /// <summary>
+    /// A linked batch allows for an arbitrary depth nesting of transactions and committing them bottom up.
+    /// </summary>
+    /// <remarks>
+    /// As the mapping are stored in the page table, the linked batch allows to query the data with
+    /// one dictionary lookup and a fallback to the database.
+    /// 
+    /// Additionally, it can be built with other linked batches as dependencies and copy from their page tables.
+    /// The crux here is that only the previous one requires visiting as it has the copies of the page mapping
+    /// from the previous one. As the pages are overwritten when needed, the dictionary should not be too big. 
+    /// </remarks>
+    private class LinkedBatch : Batch
+    {
+        private static readonly UIntPtr WriteMarker = new(1UL << (UIntPtr.Size == 4 ? 31 : 63));
+        private static readonly UIntPtr AddressMask = ~WriteMarker;
+
+        private readonly Dictionary<DbAddress, UIntPtr> _pageTable = new();
+
+        public LinkedBatch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx)
+            : base(db, root, reusePagesOlderThanBatchId, ctx)
+        {
+        }
+
+        public override void Prefetch(DbAddress addr) { }
+
+        protected override unsafe Page GetAtImpl(DbAddress addr, bool write)
+        {
+            ref var slot = ref CollectionsMarshal.GetValueRefOrNullRef(_pageTable, addr);
+
+            if (Unsafe.IsNullRef(ref slot) == false)
+            {
+                // The value exists
+
+                var writtenThisBatch = (slot & WriteMarker) == WriteMarker;
+
+                var ptr = (byte*)(slot & AddressMask).ToPointer();
+                var source = new Page(ptr);
+
+                if (!write || writtenThisBatch)
+                {
+                    return source;
+                }
+
+                // Not written this batch, allocate and copy.
+                return MakeCopy(source, out slot);
+            }
+
+            // Does not exist, fetch from db
+            var fromDb = Db.GetAt(addr);
+
+            // Make copy on write, while return raw from db if a read.
+            if (!write)
+            {
+                return fromDb;
+            }
+
+            // The entry did not exist before, create one
+            var copy = MakeCopy(fromDb, out slot);
+            _pageTable[addr] = slot;
+            return copy;
+        }
+
+        private static Page MakeCopy(Page source, out UIntPtr slot)
+        {
+            throw new Exception("Use pool, get a page and map to it");
+            Page copy = default;
+            source.CopyTo(copy);
+            slot = copy.Raw | WriteMarker;
+            return copy;
+        }
+    }
+
     class Batch : BatchContextBase, IBatch
     {
-        private readonly PagedDb _db;
+        protected readonly PagedDb Db;
         private readonly RootPage _root;
         private readonly uint _reusePagesOlderThanBatchId;
         private bool _verify = false;
@@ -543,7 +613,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         public Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx) : base(
             root.Header.BatchId)
         {
-            _db = db;
+            Db = db;
             _root = root;
             _reusePagesOlderThanBatchId = reusePagesOlderThanBatchId;
             _ctx = ctx;
@@ -577,7 +647,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             }
         }
 
-        public void VerifyNoPagesMissing() => MissingPagesVisitor.VerifyNoPagesMissing(_root, _db, this);
+        public void VerifyNoPagesMissing() => MissingPagesVisitor.VerifyNoPagesMissing(_root, Db, this);
 
         public void SetMetadata(uint blockNumber, in Keccak blockHash)
         {
@@ -632,33 +702,33 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             }
 
             // report metrics
-            _db.ReportPageStatsPerCommit(_written.Count, _metrics.PagesReused, _metrics.PagesAllocated,
+            Db.ReportPageStatsPerCommit(_written.Count, _metrics.PagesReused, _metrics.PagesAllocated,
                 _abandoned.Count, _metrics.RegisteredToReuseAfterWritingThisBatch);
 
-            _db.ReportReads(_metrics.Reads);
-            _db.ReportWrites(_metrics.Writes);
+            Db.ReportReads(_metrics.Reads);
+            Db.ReportWrites(_metrics.Writes);
 
 #if TRACKING_REUSED_PAGES
             _db._reusablePages.Set(_db._registeredForReuse.Count);
 #endif
 
-            await _db._manager.WritePages(_written, options);
+            await Db._manager.WritePages(_written, options);
 
-            var newRootPage = _db.SetNewRoot(_root);
+            var newRootPage = Db.SetNewRoot(_root);
 
             // report
-            _db.ReportDbSize(GetRootSizeInMb(_root));
+            Db.ReportDbSize(GetRootSizeInMb(_root));
 
-            await _db._manager.WriteRootPage(newRootPage, options);
+            await Db._manager.WriteRootPage(newRootPage, options);
 
-            lock (_db._batchLock)
+            lock (Db._batchLock)
             {
-                _db.CommitNewRoot();
-                Debug.Assert(ReferenceEquals(this, _db._batchCurrent));
-                _db._batchCurrent = null;
+                Db.CommitNewRoot();
+                Debug.Assert(ReferenceEquals(this, Db._batchCurrent));
+                Db._batchCurrent = null;
             }
 
-            _db.ReportCommit(watch.Elapsed);
+            Db.ReportCommit(watch.Elapsed);
         }
 
         public void VerifyDbPagesOnCommit()
@@ -667,42 +737,40 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         }
 
         [DebuggerStepThrough]
-        public override Page GetAt(DbAddress address)
+        public sealed override Page GetAt(DbAddress address)
         {
             // Getting a page beyond root!
             var nextFree = _root.Data.NextFreePage;
             Debug.Assert(address < nextFree, $"Breached the next free page, NextFree: {nextFree}, retrieved {address}");
-            var page = _db.GetAt(address);
-            return page;
+
+            return GetAtImpl(address, false);
         }
 
-        public override void Prefetch(DbAddress address) => _db.Prefetch(address);
+        protected virtual Page GetAtImpl(DbAddress addr, bool write) => Db.GetAt(addr);
 
-        public override DbAddress GetAddress(Page page) => _db.GetAddress(page);
+        public override void Prefetch(DbAddress addr) => Db.Prefetch(addr);
+
+        public override DbAddress GetAddress(Page page) => Db.GetAddress(page);
 
         public override Page GetNewPage(out DbAddress addr, bool clear)
         {
-            bool reused;
             if (_reusedImmediately.TryPop(out addr))
             {
-                reused = true;
                 _metrics.PagesReused++;
             }
             else if (TryGetNoLongerUsedPage(out addr))
             {
-                reused = true;
                 _metrics.PagesReused++;
             }
             else
             {
-                reused = false;
                 _metrics.PagesAllocated++;
 
                 // on failure to reuse a page, default to allocating a new one.
                 addr = _root.Data.GetNextFreePage();
             }
 
-            var page = _db.GetAtForWriting(addr, reused);
+            var page = GetAtImpl(addr, true);
 
             // if (reused)
             // {
@@ -780,7 +848,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
         public override void RegisterForFutureReuse(Page page, bool possibleImmediateReuse = false)
         {
-            var addr = _db.GetAddress(page);
+            var addr = Db.GetAddress(page);
 
             if (page.Header.BatchId == BatchId)
             {
@@ -813,16 +881,16 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         {
             _disposed = true;
 
-            lock (_db._batchLock)
+            lock (Db._batchLock)
             {
-                if (ReferenceEquals(_db._batchCurrent, this))
+                if (ReferenceEquals(Db._batchCurrent, this))
                 {
-                    _db._batchCurrent = null;
+                    Db._batchCurrent = null;
                 }
 
                 // clear and return
                 _ctx.Clear();
-                _db._ctx = _ctx;
+                Db._ctx = _ctx;
             }
         }
     }
