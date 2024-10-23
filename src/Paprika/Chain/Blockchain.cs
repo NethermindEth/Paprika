@@ -183,6 +183,7 @@ public class Blockchain : IAsyncDisposable
                     var noMoreBlocksToApply = readerCount == 0;
 
                     // Commit, but flush only if there's nothing more to apply.
+                    // If there are more blocks, leave it to the external _db.Flush() called outside of this loop.
                     await batch.Commit(noMoreBlocksToApply
                             ? CommitOptions.FlushDataOnly
                             : CommitOptions.DangerNoFlush);
