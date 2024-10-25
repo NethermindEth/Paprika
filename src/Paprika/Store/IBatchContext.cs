@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using Paprika.Crypto;
 
 namespace Paprika.Store;
@@ -103,22 +102,6 @@ public interface IBatchContext : IReadOnlyBatchContext
     /// <param name="pageType">The page type to assign.</param>
     /// <returns>The page either allocated or get.</returns>
     Page TryGetPageAlloc(ref DbAddress addr, PageType pageType);
-
-    BatchStats? Stats { get; }
-}
-
-public class BatchStats : IBatchStats
-{
-    public int DataPageNewLeafsAllocated { get; private set; }
-    public int LeafPageTurnedIntoDataPage { get; private set; }
-
-    public int LeafPageAllocatedOverflows { get; private set; }
-
-    public void DataPageAllocatesNewLeaf() => DataPageNewLeafsAllocated++;
-
-    public void LeafPageTurnsIntoDataPage() => LeafPageTurnedIntoDataPage++;
-
-    public void LeafPageAllocatesOverflows(int count) => LeafPageAllocatedOverflows += count;
 }
 
 public interface IReadOnlyBatchContext : IPageResolver
@@ -129,24 +112,6 @@ public interface IReadOnlyBatchContext : IPageResolver
     uint BatchId { get; }
 
     IDictionary<Keccak, uint> IdCache { get; }
-}
-
-public static class ReadOnlyBatchContextExtensions
-{
-    public static void AssertRead(this IReadOnlyBatchContext batch, in PageHeader header)
-    {
-        if (header.BatchId > batch.BatchId)
-        {
-            ThrowWrongBatch(header);
-        }
-
-        [DoesNotReturn]
-        [StackTraceHidden]
-        static void ThrowWrongBatch(in PageHeader header)
-        {
-            throw new Exception($"The page that is at batch {header.BatchId} should not be read by a batch with lower batch number {header.BatchId}.");
-        }
-    }
 }
 
 /// <summary>

@@ -184,8 +184,13 @@ public class Blockchain : IAsyncDisposable
 
                     _flusherQueueCount.Set(readerCount);
 
-                    // commit but no flush here, it's too heavy, the flush will come later
-                    await batch.Commit(CommitOptions.FlushDataOnly);
+                    var noMoreBlocksToApply = readerCount == 0;
+
+                    // Commit, but flush only if there's nothing more to apply.
+                    // If there are more blocks, leave it to the external _db.Flush() called outside of this loop.
+                    await batch.Commit(noMoreBlocksToApply
+                            ? CommitOptions.FlushDataOnly
+                            : CommitOptions.DangerNoFlush);
 
                     // inform blocks about flushing
                     lock (_blockLock)
@@ -356,6 +361,8 @@ public class Blockchain : IAsyncDisposable
         var batch = db.BeginReadOnlyBatch($"Blockchain dependency LATEST");
         return new ReadOnlyState(batch.Metadata.StateHash, new ReadOnlyBatchCountingRefs(batch), []);
     }
+
+    public IReadOnlyWorldState StartReadOnlyLatestFromDb() => StartReadOnlyLatestFromDb(_db);
 
     private (IReadOnlyBatch batch, CommittedBlockState[] ancestors) BuildBlockDataDependencies(Keccak parentKeccak)
     {
@@ -640,24 +647,14 @@ public class Blockchain : IAsyncDisposable
 
             var hash = _hash!.Value;
 
-            bool earlyReturn = false;
-
             if (hash == ParentHash)
             {
                 if (hash == Keccak.EmptyTreeHash)
                 {
-                    earlyReturn = true;
+                    return null;
                 }
-                else if (!raw)
-                {
-                    //TODO - cannot process genesis block with throwing the exception
-                    //ThrowSameState();
-                    earlyReturn = true;
-                }
-            }
-
-            if (earlyReturn)
-            {
+                //TODO - cannot process genesis block with throwing the exception
+                //ThrowSameState();
                 return null;
             }
 
@@ -693,7 +690,37 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private static bool OmitUseOnce(byte metadata) => (metadata != (int)EntryType.UseOnce && metadata != (int)EntryType.Proof);
 
-        public CommittedBlockState CommitRaw() => CommitImpl(0, true)!;
+        /// <summary>
+        /// Applies this state directly on the <see cref="IBatch"/>
+        /// without creating an in-memory representation of the committed state.
+        /// </summary>
+        public void ApplyRaw(IBatch batch)
+        {
+            _prefetcher?.BlockFurtherPrefetching();
+
+            EnsureHash();
+
+            var hash = _hash!.Value;
+
+            var earlyReturn = false;
+
+            if (hash == ParentHash)
+            {
+                if (hash == Keccak.EmptyTreeHash)
+                {
+                    earlyReturn = true;
+                }
+            }
+
+            if (earlyReturn)
+            {
+                return;
+            }
+
+            ApplyImpl(batch, _state, _blockchain);
+            ApplyImpl(batch, _storage, _blockchain);
+            ApplyImpl(batch, _preCommit, _blockchain);
+        }
 
         public void Reset()
         {
@@ -1577,33 +1604,7 @@ public class Blockchain : IAsyncDisposable
                 }
             }
 
-            Apply(batch, _committed);
-        }
-
-        private void Apply(IBatch batch, PooledSpanDictionary dict)
-        {
-            var preCommit = _blockchain._preCommit;
-
-            var page = _blockchain._pool.Rent(false);
-            try
-            {
-                var span = page.Span;
-
-                foreach (var kvp in dict)
-                {
-                    if (kvp.Metadata == (byte)EntryType.Persistent)
-                    {
-                        Key.ReadFrom(kvp.Key, out var key);
-                        //Console.WriteLine($"{Environment.CurrentManagedThreadId}: Apply {key.ToString()} - value: {kvp.Value.ToHexString(true)}");
-                        var data = preCommit == null ? kvp.Value : preCommit.InspectBeforeApply(key, kvp.Value, span);
-                        batch.SetRaw(key, data);
-                    }
-                }
-            }
-            finally
-            {
-                _blockchain._pool.Return(page);
-            }
+            ApplyImpl(batch, _committed, _blockchain);
         }
 
         public override string ToString() =>
@@ -1873,13 +1874,12 @@ public class Blockchain : IAsyncDisposable
             //commit without hash recalc - useful for storage ranges in snap sync
             if (ensureHash)
                 Hash = _current.Hash;
-
+           
             using var batch = _db.BeginNextBatch();
 
             DeleteByPrefixes(batch);
 
-            using var committed = _current.CommitRaw();
-            committed.Apply(batch);
+            _current.ApplyRaw(batch);
             _current.Dispose();
 
             //batch.VerifyDbPagesOnCommit();
@@ -2228,6 +2228,31 @@ public class Blockchain : IAsyncDisposable
         }
 
         return filter;
+    }
+
+    private static void ApplyImpl(IBatch batch, PooledSpanDictionary dict, Blockchain blockchain)
+    {
+        var preCommit = blockchain._preCommit;
+
+        var page = blockchain._pool.Rent(false);
+        try
+        {
+            var span = page.Span;
+
+            foreach (var kvp in dict)
+            {
+                if (kvp.Metadata == (byte)EntryType.Persistent)
+                {
+                    Key.ReadFrom(kvp.Key, out var key);
+                    var data = preCommit == null ? kvp.Value : preCommit.InspectBeforeApply(key, kvp.Value, span);
+                    batch.SetRaw(key, data);
+                }
+            }
+        }
+        finally
+        {
+            blockchain._pool.Return(page);
+        }
     }
 
     /// <summary>

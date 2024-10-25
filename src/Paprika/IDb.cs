@@ -1,4 +1,5 @@
 using Paprika.Crypto;
+using Paprika.Store;
 
 namespace Paprika;
 
@@ -17,7 +18,7 @@ public interface IDb
     IReadOnlyBatch BeginReadOnlyBatch(string name = "");
 
     /// <summary>
-    /// Force flush
+    /// Performs a flush using <see cref="IPageManager.Flush"/>. 
     /// </summary>
     void Flush();
 
