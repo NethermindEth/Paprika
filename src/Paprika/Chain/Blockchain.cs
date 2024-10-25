@@ -696,35 +696,9 @@ public class Blockchain : IAsyncDisposable
                 return;
             }
 
-            Apply(batch, _state, _blockchain);
-            Apply(batch, _storage, _blockchain);
-            Apply(batch, _preCommit, _blockchain);
-            return;
-
-            static void Apply(IBatch batch, PooledSpanDictionary dict, Blockchain blockchain)
-            {
-                var preCommit = blockchain._preCommit;
-
-                var page = blockchain._pool.Rent(false);
-                try
-                {
-                    var span = page.Span;
-
-                    foreach (var kvp in dict)
-                    {
-                        if (kvp.Metadata == (byte)EntryType.Persistent)
-                        {
-                            Key.ReadFrom(kvp.Key, out var key);
-                            var data = preCommit == null ? kvp.Value : preCommit.InspectBeforeApply(key, kvp.Value, span);
-                            batch.SetRaw(key, data);
-                        }
-                    }
-                }
-                finally
-                {
-                    blockchain._pool.Return(page);
-                }
-            }
+            ApplyImpl(batch, _state, _blockchain);
+            ApplyImpl(batch, _storage, _blockchain);
+            ApplyImpl(batch, _preCommit, _blockchain);
         }
 
         public void Reset()
@@ -1468,32 +1442,7 @@ public class Blockchain : IAsyncDisposable
                 }
             }
 
-            Apply(batch, _committed);
-        }
-
-        private void Apply(IBatch batch, PooledSpanDictionary dict)
-        {
-            var preCommit = _blockchain._preCommit;
-
-            var page = _blockchain._pool.Rent(false);
-            try
-            {
-                var span = page.Span;
-
-                foreach (var kvp in dict)
-                {
-                    if (kvp.Metadata == (byte)EntryType.Persistent)
-                    {
-                        Key.ReadFrom(kvp.Key, out var key);
-                        var data = preCommit == null ? kvp.Value : preCommit.InspectBeforeApply(key, kvp.Value, span);
-                        batch.SetRaw(key, data);
-                    }
-                }
-            }
-            finally
-            {
-                _blockchain._pool.Return(page);
-            }
+            ApplyImpl(batch, _committed, _blockchain);
         }
 
         public override string ToString() =>
@@ -2011,5 +1960,30 @@ public class Blockchain : IAsyncDisposable
         }
 
         return filter;
+    }
+
+    private static void ApplyImpl(IBatch batch, PooledSpanDictionary dict, Blockchain blockchain)
+    {
+        var preCommit = blockchain._preCommit;
+
+        var page = blockchain._pool.Rent(false);
+        try
+        {
+            var span = page.Span;
+
+            foreach (var kvp in dict)
+            {
+                if (kvp.Metadata == (byte)EntryType.Persistent)
+                {
+                    Key.ReadFrom(kvp.Key, out var key);
+                    var data = preCommit == null ? kvp.Value : preCommit.InspectBeforeApply(key, kvp.Value, span);
+                    batch.SetRaw(key, data);
+                }
+            }
+        }
+        finally
+        {
+            blockchain._pool.Return(page);
+        }
     }
 }
