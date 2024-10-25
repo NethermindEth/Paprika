@@ -627,23 +627,14 @@ public class Blockchain : IAsyncDisposable
 
             var hash = _hash!.Value;
 
-            bool earlyReturn = false;
-
             if (hash == ParentHash)
             {
                 if (hash == Keccak.EmptyTreeHash)
                 {
-                    earlyReturn = true;
+                    return null;
                 }
-                else if (!raw)
-                {
-                    ThrowSameState();
-                }
-            }
 
-            if (earlyReturn)
-            {
-                return null;
+                ThrowSameState();
             }
 
             BlockNumber = blockNumber;
@@ -678,7 +669,37 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private static bool OmitUseOnce(byte metadata) => metadata != (int)EntryType.UseOnce;
 
-        public CommittedBlockState CommitRaw() => CommitImpl(0, true)!;
+        /// <summary>
+        /// Applies this state directly on the <see cref="IBatch"/>
+        /// without creating an in-memory representation of the committed state.
+        /// </summary>
+        public void ApplyRaw(IBatch batch)
+        {
+            _prefetcher?.BlockFurtherPrefetching();
+
+            EnsureHash();
+
+            var hash = _hash!.Value;
+
+            var earlyReturn = false;
+
+            if (hash == ParentHash)
+            {
+                if (hash == Keccak.EmptyTreeHash)
+                {
+                    earlyReturn = true;
+                }
+            }
+
+            if (earlyReturn)
+            {
+                return;
+            }
+
+            ApplyImpl(batch, _state, _blockchain);
+            ApplyImpl(batch, _storage, _blockchain);
+            ApplyImpl(batch, _preCommit, _blockchain);
+        }
 
         public void Reset()
         {
@@ -1421,32 +1442,7 @@ public class Blockchain : IAsyncDisposable
                 }
             }
 
-            Apply(batch, _committed);
-        }
-
-        private void Apply(IBatch batch, PooledSpanDictionary dict)
-        {
-            var preCommit = _blockchain._preCommit;
-
-            var page = _blockchain._pool.Rent(false);
-            try
-            {
-                var span = page.Span;
-
-                foreach (var kvp in dict)
-                {
-                    if (kvp.Metadata == (byte)EntryType.Persistent)
-                    {
-                        Key.ReadFrom(kvp.Key, out var key);
-                        var data = preCommit == null ? kvp.Value : preCommit.InspectBeforeApply(key, kvp.Value, span);
-                        batch.SetRaw(key, data);
-                    }
-                }
-            }
-            finally
-            {
-                _blockchain._pool.Return(page);
-            }
+            ApplyImpl(batch, _committed, _blockchain);
         }
 
         public override string ToString() =>
@@ -1708,31 +1704,20 @@ public class Blockchain : IAsyncDisposable
         {
             ThrowOnFinalized();
 
-            // Committing Nth block:
-            // 1. open read tx as this block did
-            // 2. open write tx and apply Nth block onto it
-            // 3. start new N+1th block
-            // 4. use read tx as the read + add the current as parent
-
-            var read = _db.BeginReadOnlyBatch();
-
             Hash = _current.Hash;
 
             using var batch = _db.BeginNextBatch();
 
             DeleteByPrefixes(batch);
 
-            var committed = _current.CommitRaw();
-            committed.Apply(batch);
+            _current.ApplyRaw(batch);
             _current.Dispose();
 
             batch.Commit(CommitOptions.DangerNoWrite);
 
-            // Lease is taken automatically by the ctor of the block state, not needed
-            //_current.AcquireLease();
-            var ancestors = new[] { committed };
+            var read = _db.BeginReadOnlyBatch();
 
-            _current = new BlockState(Keccak.Zero, read, ancestors, _blockchain);
+            _current = new BlockState(Keccak.Zero, read, [], _blockchain);
         }
 
         private void DeleteByPrefixes(IBatch batch)
@@ -1975,5 +1960,30 @@ public class Blockchain : IAsyncDisposable
         }
 
         return filter;
+    }
+
+    private static void ApplyImpl(IBatch batch, PooledSpanDictionary dict, Blockchain blockchain)
+    {
+        var preCommit = blockchain._preCommit;
+
+        var page = blockchain._pool.Rent(false);
+        try
+        {
+            var span = page.Span;
+
+            foreach (var kvp in dict)
+            {
+                if (kvp.Metadata == (byte)EntryType.Persistent)
+                {
+                    Key.ReadFrom(kvp.Key, out var key);
+                    var data = preCommit == null ? kvp.Value : preCommit.InspectBeforeApply(key, kvp.Value, span);
+                    batch.SetRaw(key, data);
+                }
+            }
+        }
+        finally
+        {
+            blockchain._pool.Return(page);
+        }
     }
 }
