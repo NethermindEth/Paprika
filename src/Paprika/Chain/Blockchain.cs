@@ -110,6 +110,8 @@ public class Blockchain : IAsyncDisposable
         _verify = true;
     }
 
+    public int PoolAllocatedMB => _pool.AllocatedMB ?? int.MaxValue;
+
     private static Channel<CommittedBlockState> CreateChannel(int? finalizationQueueLimit)
     {
         if (finalizationQueueLimit == null)
