@@ -69,7 +69,7 @@ public interface IPreCommitBehavior
 /// <remarks>
 /// Use <see cref="Visit"/> to access all the keys.
 /// </remarks>
-public interface ICommit
+public interface ICommit : ISpanOwner
 {
     /// <summary>
     /// Tries to retrieve the result stored under the given key.
@@ -161,9 +161,9 @@ public readonly ref struct ReadOnlySpanOwnerWithMetadata<T>(ReadOnlySpanOwner<T>
     public void Dispose() => _owner.Dispose();
 
     /// <summary>
-    /// Answers whether this span is owned and provided by <paramref name="owner"/>.
+    /// Answers whether this span is owned and provided by <paramref name="spanOwner"/>.
     /// </summary>
-    public bool IsOwnedBy(object owner) => _owner.IsOwnedBy(owner);
+    public bool IsOwnedBy(ISpanOwner spanOwner) => _owner.IsOwnedBy(spanOwner);
 
     /// <summary>
     /// Increases the <see cref="QueryDepth"/> of this span owner, reporting it as more nested.
