@@ -252,7 +252,6 @@ public class PooledSpanDictionary : IDisposable
 
         var (leftover, bucket) = GetBucketAndLeftover(mixed);
 
-        byte? oldMetadata = null;
         if (append == false)
         {
             var search = TryGetImpl(key, leftover, bucket);
@@ -265,7 +264,6 @@ public class PooledSpanDictionary : IDisposable
                         return;
                 }
 
-                oldMetadata = search.Metadata;
                 // Destroy the search as it should not be visible later and move on with inserting as usual
                 search.Destroy();
             }
@@ -280,10 +278,6 @@ public class PooledSpanDictionary : IDisposable
         var size = PreambleLength + AddressLength + KeyLengthLength + key.Length + ValueLengthLength + dataLength;
         Span<byte> destination = Write(size, out var address);
 
-        //never save Proof type of entries
-        //TODO - needs to be moved out of this class
-        if (oldMetadata == (byte)EntryType.Proof && metadata == (byte)EntryType.Persistent)
-            metadata = oldMetadata.Value;
 
         // Write preamble, big endian
         destination[0] = (byte)((leftover >> 16) | (uint)(metadata << MetadataShift));

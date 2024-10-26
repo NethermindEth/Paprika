@@ -501,7 +501,7 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// A simple set filter to assert whether the given key was set in a given block, used to speed up getting the keys.
         /// </summary>
-        private readonly BitFilter _filter;
+        protected readonly BitFilter _filter;
 
         private readonly Dictionary<Keccak, int>? _stats;
 
@@ -538,7 +538,7 @@ public class Blockchain : IAsyncDisposable
         private readonly CacheBudget _cacheBudgetStorageAndStage;
         private readonly CacheBudget _cacheBudgetPreCommit;
 
-        private Keccak? _hash;
+        protected Keccak? _hash;
 
         private int _dbReads;
 
@@ -867,7 +867,7 @@ public class Blockchain : IAsyncDisposable
             return ((ComputeMerkleBehavior)_blockchain._preCommit).RecalculateStorageTrie(this, account, _cacheBudgetPreCommit);
         }
 
-        private BufferPool Pool => _blockchain._pool;
+        protected BufferPool Pool => _blockchain._pool;
 
         [SkipLocalsInit]
         public void DestroyAccount(in Keccak address)
@@ -1005,7 +1005,7 @@ public class Blockchain : IAsyncDisposable
         }
 
         [SkipLocalsInit]
-        private void SetImpl(in Key key, in ReadOnlySpan<byte> payload, EntryType type, PooledSpanDictionary dict)
+        protected virtual void SetImpl(in Key key, in ReadOnlySpan<byte> payload, EntryType type, PooledSpanDictionary dict)
         {
             // clean precalculated hash
             _hash = null;
@@ -1017,7 +1017,7 @@ public class Blockchain : IAsyncDisposable
             dict.Set(k, hash, payload, (byte)type);
         }
 
-        private void SetImpl(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1,
+        protected virtual void SetImpl(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1,
             EntryType type,
             PooledSpanDictionary dict)
         {
@@ -1064,7 +1064,7 @@ public class Blockchain : IAsyncDisposable
 
             foreach (var kvp in dict)
             {
-                if (kvp.Metadata == (byte)EntryType.Persistent || kvp.Metadata == (byte)EntryType.Proof)
+                if (kvp.Metadata == (byte)EntryType.Persistent)
                 {
                     Key.ReadFrom(kvp.Key, out var key);
                     action(key, kvp.Value);
@@ -1255,7 +1255,7 @@ public class Blockchain : IAsyncDisposable
         }
 
         [SkipLocalsInit]
-        public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
+        public virtual ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
         {
             var hash = GetHash(key);
             var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
@@ -1267,7 +1267,7 @@ public class Blockchain : IAsyncDisposable
         /// A recursive search through the block and its parent until null is found at the end of the weekly referenced
         /// chain.
         /// </summary>
-        private ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
+        protected ReadOnlySpanOwnerWithMetadata<byte> TryGet(scoped in Key key, scoped ReadOnlySpan<byte> keyWritten,
             ulong bloom)
         {
             var owner = TryGetLocal(key, keyWritten, bloom, out var succeeded);
@@ -1419,6 +1419,84 @@ public class Blockchain : IAsyncDisposable
 
         public IEnumerable<(uint blockNumber, Keccak hash)> Ancestors =>
             _ancestors.Select(ancestor => (ancestor.BlockNumber, ancestor.Hash));
+    }
+
+    /// <summary>
+    /// BlockState implementation for snap sync - used only in RawState implementation
+    /// Handles boundary proof node data in a separate dictionary
+    /// </summary>
+    private class SyncBlockState : BlockState
+    {
+        private readonly PooledSpanDictionary _proofKeys;
+        private readonly HashSet<ulong> _proofHashSet;
+
+        public SyncBlockState(Keccak parentStateRoot, IReadOnlyBatch batch, CommittedBlockState[] ancestors,
+            Blockchain blockchain) : base(parentStateRoot, batch, ancestors, blockchain)
+        {
+            if (_proofKeys != null)
+                _proofKeys.Dispose();
+
+            _proofKeys = new PooledSpanDictionary(Pool, true);
+            _proofHashSet = new HashSet<ulong>();
+        }
+
+        public override ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
+        {
+            var hash = GetHash(key);
+            var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+
+            if (_proofHashSet.Contains(hash) && _proofKeys.TryGet(keyWritten, hash, out var span))
+            {
+                AcquireLease();
+                return new ReadOnlySpanOwner<byte>(span, this).WithDepth(0);
+            }
+            return TryGet(key, keyWritten, hash);
+        }
+
+        protected override void SetImpl(in Key key, in ReadOnlySpan<byte> payload, EntryType type, PooledSpanDictionary dict)
+        {
+            // clean precalculated hash
+            _hash = null;
+
+            var hash = GetHash(key);
+            var k = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+
+            if (type == EntryType.Proof || (type == EntryType.Persistent && _proofHashSet.Contains(hash)))
+            {
+                _proofKeys.Set(k, hash, payload, (byte)type);
+                _proofHashSet.Add(hash);
+                return;
+            }
+
+            _filter.Add(hash);
+            dict.Set(k, hash, payload, (byte)type);
+        }
+
+        protected override void SetImpl(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1, EntryType type, PooledSpanDictionary dict)
+        {
+            // clean precalculated hash
+            _hash = null;
+
+            var hash = GetHash(key);
+            var k = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+
+            if (type == EntryType.Proof || (type == EntryType.Persistent && _proofHashSet.Contains(hash)))
+            {
+                _proofKeys.Set(k, hash, payload0, payload1, (byte)type);
+                _proofHashSet.Add(hash);
+                return;
+            }
+
+            _filter.Add(hash);
+            dict.Set(k, hash, payload0, payload1, (byte)type);
+        }
+
+        protected override void CleanUp()
+        {
+            _proofHashSet.Clear();
+            _proofKeys.Dispose();
+            base.CleanUp();
+        }
     }
 
     public bool HasState(in Keccak keccak)
@@ -1772,7 +1850,7 @@ public class Blockchain : IAsyncDisposable
         private ArrayBufferWriter<byte> _prefixesToDelete = new();
         private readonly Blockchain _blockchain;
         private readonly IDb _db;
-        private BlockState _current;
+        private SyncBlockState _current;
 
         private bool _finalized;
 
@@ -1780,14 +1858,14 @@ public class Blockchain : IAsyncDisposable
         {
             _blockchain = blockchain;
             _db = db;
-            _current = new BlockState(Keccak.Zero, _db.BeginReadOnlyBatch(), [], _blockchain);
+            _current = new SyncBlockState(Keccak.Zero, _db.BeginReadOnlyBatch(), [], _blockchain);
         }
 
         public RawState(Blockchain blockchain, IDb db, Keccak rootHash)
         {
             _blockchain = blockchain;
             _db = db;
-            _current = new BlockState(rootHash, _db.BeginReadOnlyBatch(), [], _blockchain);
+            _current = new SyncBlockState(rootHash, _db.BeginReadOnlyBatch(), [], _blockchain);
             Hash = rootHash;
         }
 
@@ -1867,7 +1945,7 @@ public class Blockchain : IAsyncDisposable
             batch.Commit(CommitOptions.DangerNoWrite);
 
             IReadOnlyBatch readOnly = _db.BeginReadOnlyBatch();
-            _current = new BlockState(Keccak.Zero, readOnly, [], _blockchain);
+            _current = new SyncBlockState(Keccak.Zero, readOnly, [], _blockchain);
         }
 
         public void Finalize(uint blockNumber)
