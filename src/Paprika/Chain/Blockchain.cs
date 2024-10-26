@@ -698,25 +698,6 @@ public class Blockchain : IAsyncDisposable
         {
             _prefetcher?.BlockFurtherPrefetching();
 
-            EnsureHash();
-
-            var hash = _hash!.Value;
-
-            var earlyReturn = false;
-
-            if (hash == ParentHash)
-            {
-                if (hash == Keccak.EmptyTreeHash)
-                {
-                    earlyReturn = true;
-                }
-            }
-
-            if (earlyReturn)
-            {
-                return;
-            }
-
             ApplyImpl(batch, _state, _blockchain);
             ApplyImpl(batch, _storage, _blockchain);
             ApplyImpl(batch, _preCommit, _blockchain);
