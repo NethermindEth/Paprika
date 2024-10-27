@@ -278,37 +278,40 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     public Keccak RecalculateStorageTrie(ICommit commit, Keccak account, CacheBudget budget)
     {
-        var page = _pool.Rent(false);
-        var prefixed = new PrefixingCommit(commit);
-        prefixed.SetPrefix(account);
-
-        try
+        using (_storageProcessing.Measure())
         {
-            commit.Visit((in Key key, ReadOnlySpan<byte> value) =>
+            var page = _pool.Rent(false);
+            var prefixed = new PrefixingCommit(commit);
+            prefixed.SetPrefix(account);
+
+            try
             {
-                var keccak = key.Path.UnsafeAsKeccak;
-                if (account != keccak)
-                    return;
+                commit.Visit((in Key key, ReadOnlySpan<byte> value) =>
+                {
+                    var keccak = key.Path.UnsafeAsKeccak;
+                    if (account != keccak)
+                        return;
 
-                if (value.IsEmpty)
-                    Delete(in key.StoragePath, 0, prefixed!, budget);
-                else
-                    MarkPathDirty(in key.StoragePath, page.Span, prefixed!, budget, TrieType.Storage);
-            }, TrieType.Storage);
+                    if (value.IsEmpty)
+                        Delete(in key.StoragePath, 0, prefixed!, budget);
+                    else
+                        MarkPathDirty(in key.StoragePath, page.Span, prefixed!, budget, TrieType.Storage);
+                }, TrieType.Storage);
 
-            // Don't parallelize this work as it would be counter-productive to have parallel over parallel.
-            const ComputeHint hint = ComputeHint.DontUseParallel;
+                // Don't parallelize this work as it would be counter-productive to have parallel over parallel.
+                const ComputeHint hint = ComputeHint.DontUseParallel;
 
-            // compute new storage root hash
-            UIntPtr stack = default;
-            using var ctx = new ComputeContext(prefixed, TrieType.Storage, hint, budget, _pool, ref stack);
-            Compute(Key.Merkle(NibblePath.Empty), ctx, out var keccakOrRlp);
-            return keccakOrRlp.Keccak;
-        }
-        finally
-        {
-            _pool.Return(page);
-            page = default;
+                // compute new storage root hash
+                UIntPtr stack = default;
+                using var ctx = new ComputeContext(prefixed, TrieType.Storage, hint, budget, _pool, ref stack);
+                Compute(Key.Merkle(NibblePath.Empty), ctx, out var keccakOrRlp);
+                return keccakOrRlp.Keccak;
+            }
+            finally
+            {
+                _pool.Return(page);
+                page = default;
+            }
         }
     }
 
