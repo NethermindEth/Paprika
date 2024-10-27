@@ -298,8 +298,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         MarkPathDirty(in key.StoragePath, page.Span, prefixed!, budget, TrieType.Storage);
                 }, TrieType.Storage);
 
-                // Don't parallelize this work as it would be counter-productive to have parallel over parallel.
-                const ComputeHint hint = ComputeHint.DontUseParallel;
+                // Allow parallelism - this always processes single storage trie (for a single account)
+                const ComputeHint hint = ComputeHint.None;
 
                 // compute new storage root hash
                 UIntPtr stack = default;
