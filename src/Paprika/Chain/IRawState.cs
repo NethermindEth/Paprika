@@ -26,6 +26,8 @@ public interface IRawState : IReadOnlyWorldState
     void CreateMerkleExtension(in Keccak account, in NibblePath storagePath, in NibblePath extPath, bool persist = true);
     void CreateMerkleLeaf(in Keccak account, in NibblePath storagePath, in NibblePath leafPath);
 
+    void ProcessProofNodes(in Keccak account, Span<byte> packedProofPaths, int proofCount);
+
     /// <summary>
     /// Registers a deletion that will be applied when <see cref="Commit"/> is called.
     /// </summary>

@@ -516,7 +516,7 @@ public class Blockchain : IAsyncDisposable
         private readonly CommittedBlockState[] _ancestors;
         private readonly BitFilter _ancestorsFilter;
 
-        private readonly Blockchain _blockchain;
+        protected readonly Blockchain _blockchain;
 
         /// <summary>
         /// The maps mapping accounts information, written in this block.
@@ -532,7 +532,7 @@ public class Blockchain : IAsyncDisposable
         /// The values set the <see cref="IPreCommitBehavior"/> during the <see cref="ICommit.Visit"/> invocation.
         /// It's both storage & state as it's metadata for the pre-commit behavior.
         /// </summary>
-        private PooledSpanDictionary _preCommit = null!;
+        protected PooledSpanDictionary _preCommit = null!;
 
         private PreCommitPrefetcher? _prefetcher;
 
@@ -1499,6 +1499,134 @@ public class Blockchain : IAsyncDisposable
             _proofKeys.Dispose();
             base.CleanUp();
         }
+
+        /// <summary>
+        /// Process snap sync proof nodes to establish which ones can be safely persisted
+        /// </summary>
+        /// <param name="accountKeccak"></param>
+        /// <param name="packedProofPaths"></param>
+        /// <param name="proofCount"></param>
+        /// <exception cref="InvalidDataException"></exception>
+        public void ProcessProofNodes(Keccak accountKeccak, Span<byte> packedProofPaths, int proofCount)
+        {
+            Span<byte> workingSpan = stackalloc byte[NibblePath.MaxLengthValue * 2 + 1];
+            Span<byte> rlpMemoization = stackalloc byte[RlpMemo.Size];
+            Span<byte> targetKeySpan = stackalloc byte[NibblePath.FullKeccakByteLength * 2 + 1];
+            Span<byte> nodeWorkingSpan = stackalloc byte[Node.Extension.MaxByteLength];
+
+            var accountPath = NibblePath.FromKey(accountKeccak);
+
+            Dictionary<ulong, bool> proofNodeResults = new Dictionary<ulong, bool>();
+
+            for (int j = 0; j < proofCount; j++)
+            {
+                byte len = packedProofPaths[j * 33];
+                Span<byte> rawPath = new Span<byte>(ref packedProofPaths[j * 33 + 1]);
+
+                NibblePath path = NibblePath.FromKey(rawPath, 0, len);
+
+                if (accountKeccak == Keccak.Zero && path.IsEmpty)
+                    continue;
+
+                Key key = accountKeccak != Keccak.Zero
+                    ? Key.Raw(accountPath, DataType.Merkle, path)
+                    : Key.Merkle(path);
+
+                var hash = GetHash(key);
+                var k = key.WriteTo(targetKeySpan);
+
+                proofNodeResults[hash] = false;
+
+                if (!_proofKeys.TryGet(k, hash, out var span))
+                    continue;
+
+                var leftover = Node.ReadFrom(out var type, out _, out var ext, out var branch, span);
+                switch (type)
+                {
+                    case Node.Type.Branch:
+
+                        bool allChildrenPersisted = true;
+
+                        RlpMemo memo = RlpMemo.Decompress(leftover, branch.Children, rlpMemoization);
+
+                        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+                        {
+                            if (branch.Children[i])
+                            {
+                                var childPath = path.AppendNibble(i, workingSpan);
+
+                                Key childKey = accountKeccak != Keccak.Zero
+                                    ? Key.Raw(accountPath, DataType.Merkle, childPath)
+                                    : Key.Merkle(childPath);
+                                var childHash = GetHash(childKey);
+
+                                bool isPersisted;
+                                //double check due to potential hash collision
+                                if (_proofHashSet.Contains(childHash) && proofNodeResults.TryGetValue(childHash, out bool thisRoundPersisted))
+                                {
+                                    isPersisted = thisRoundPersisted;
+                                }
+                                else if (memo.TryGetKeccak(i, out var memoKeccak))
+                                {
+                                    isPersisted = IsPersistedWithHash(accountKeccak, childPath, new Keccak(memoKeccak));
+                                }
+                                else
+                                {
+                                    //Rlp shorted than 32 bytes - assume persisted
+                                    isPersisted = true;
+                                }
+
+                                if (!isPersisted)
+                                {
+                                    allChildrenPersisted = false;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (allChildrenPersisted)
+                        {
+                            proofNodeResults[hash] = true;
+                            _preCommit.Set(k, hash, branch.WriteTo(nodeWorkingSpan), memo.Raw, (byte)EntryType.Persistent);
+                        }
+
+                        break;
+                    case Node.Type.Extension:
+
+                        var extChildPath = path.Append(ext.Path, workingSpan);
+                        Key extChildKey = accountKeccak != Keccak.Zero
+                            ? Key.Raw(accountPath, DataType.Merkle, extChildPath)
+                            : Key.Merkle(extChildPath);
+                        var extChildHash = GetHash(extChildKey);
+
+                        if (_proofHashSet.Contains(extChildHash) && proofNodeResults[extChildHash] || IsPersisted(accountKeccak, extChildPath))
+                        {
+                            proofNodeResults[hash] = true;
+                            _preCommit.Set(k, hash, ext.WriteTo(nodeWorkingSpan), (byte)EntryType.Persistent);
+                        }
+
+                        break;
+                    case Node.Type.Leaf:
+                        throw new InvalidDataException("Should not process leaf proof node!");
+                }
+            }
+        }
+
+        private bool IsPersistedWithHash(in Keccak account, NibblePath path, Keccak expectedHash)
+        {
+            var preCommitBehavior = (ComputeMerkleBehavior)_blockchain._preCommit;
+            var hash = account == Keccak.Zero ? preCommitBehavior.GetHash(path, this, false) : preCommitBehavior.GetStorageHash(this, account, path, false);
+
+            return hash == expectedHash;
+        }
+
+        private bool IsPersisted(in Keccak account, NibblePath path)
+        {
+            var preCommitBehavior = (ComputeMerkleBehavior)_blockchain._preCommit;
+            var hash = account == Keccak.Zero ? preCommitBehavior.GetHash(path, this, false) : preCommitBehavior.GetStorageHash(this, account, path, false);
+
+            return hash == Keccak.EmptyTreeHash;
+        }
     }
 
     public bool HasState(in Keccak keccak)
@@ -1912,6 +2040,11 @@ public class Blockchain : IAsyncDisposable
             Key key = account == Keccak.Zero ? Key.Merkle(storagePath) : Key.Raw(NibblePath.FromKey(account), DataType.Merkle, storagePath);
 
             _current.SetLeaf(key, leafPath);
+        }
+
+        public void ProcessProofNodes(in Keccak account, Span<byte> packedProofPaths, int proofCount)
+        {
+            _current.ProcessProofNodes(account, packedProofPaths, proofCount);
         }
 
         public void RegisterDeleteByPrefix(in Key prefix)
