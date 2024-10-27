@@ -29,7 +29,7 @@ public class RawStateTests
         }
 
         raw.DestroyAccount(account);
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         raw.Finalize(1);
 
@@ -55,13 +55,13 @@ public class RawStateTests
 
         using var raw = blockchain.StartRaw();
         raw.SetAccount(a, new Account(valueA, valueA));
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         raw.SetAccount(b, new Account(valueB, valueB));
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         raw.SetAccount(c, new Account(valueC, valueC));
-        raw.Commit();
+        raw.Commit(keepOpened:true);
 
         var root = raw.Hash;
 
@@ -90,11 +90,11 @@ public class RawStateTests
         for (uint i = 0; i < 1_000; i++)
         {
             raw.SetAccount(account, new Account(i, i));
-            raw.Commit();
+            raw.Commit(keepOpened: true);
         }
 
         raw.DestroyAccount(account);
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         raw.Finalize(1);
 
@@ -114,10 +114,10 @@ public class RawStateTests
         using var raw = blockchain.StartRaw();
 
         raw.SetAccount(account, new Account(1, 1));
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         raw.RegisterDeleteByPrefix(Key.Account(account));
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         raw.Finalize(1);
 
@@ -144,10 +144,10 @@ public class RawStateTests
 
         raw.SetAccount(account1, new Account(1, 1));
         raw.SetAccount(account2, new Account(2, 2));
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         raw.RegisterDeleteByPrefix(Key.Account(NibblePath.FromKey(account2).SliceTo(2)));
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         raw.Finalize(1);
 
@@ -170,13 +170,13 @@ public class RawStateTests
 
         raw.SetAccount(account, new Account(1, 1));
         raw.SetStorage(account, Values.Key2, new byte[] { 1, 2, 3, 4, 5 });
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         using var read = db.BeginReadOnlyBatch();
         read.TryGet(Key.StorageCell(NibblePath.FromKey(account), Values.Key2), out _).Should().BeTrue();
 
         raw.RegisterDeleteByPrefix(Key.StorageCell(NibblePath.FromKey(account), NibblePath.Empty));
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         raw.Finalize(1);
 

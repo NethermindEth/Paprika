@@ -37,7 +37,12 @@ public interface IRawState : IReadOnlyWorldState
     /// <summary>
     /// Commits the pending changes.
     /// </summary>
-    void Commit(bool ensureHash = true);
+    void Commit(bool ensureHash = true, bool keepOpened = false);
+
+    /// <summary>
+    /// Open new readonly transaction and create state
+    /// </summary>
+    public void Open();
 
     /// <summary>
     /// Finalizes the raw state flushing the metadata.

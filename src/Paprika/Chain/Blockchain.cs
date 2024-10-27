@@ -1977,10 +1977,10 @@ public class Blockchain : IAsyncDisposable
     /// </summary>
     private class RawState : IRawState
     {
-        private ArrayBufferWriter<byte> _prefixesToDelete = new();
+        private readonly ArrayBufferWriter<byte> _prefixesToDelete = new();
         private readonly Blockchain _blockchain;
         private readonly IDb _db;
-        private SyncBlockState _current;
+        private SyncBlockState? _current;
 
         private bool _finalized;
 
@@ -2001,7 +2001,7 @@ public class Blockchain : IAsyncDisposable
 
         public void Dispose()
         {
-            _current.Dispose();
+            _current?.Dispose();
         }
 
         public Account GetAccount(in Keccak address) => _current.GetAccount(address);
@@ -2061,7 +2061,7 @@ public class Blockchain : IAsyncDisposable
 
         public void DestroyAccount(in Keccak address) => _current.DestroyAccount(address);
 
-        public void Commit(bool ensureHash)
+        public void Commit(bool ensureHash, bool keepOpened)
         {
             ThrowOnFinalized();
 
@@ -2075,12 +2075,13 @@ public class Blockchain : IAsyncDisposable
 
             _current.ApplyRaw(batch);
             _current.Dispose();
+            _current = null;
 
             //batch.VerifyDbPagesOnCommit();
             batch.Commit(CommitOptions.DangerNoWrite);
 
-            IReadOnlyBatch readOnly = _db.BeginReadOnlyBatch();
-            _current = new SyncBlockState(Keccak.Zero, readOnly, [], _blockchain);
+            if (keepOpened)
+                Open();
         }
 
         public void Finalize(uint blockNumber)
@@ -2097,6 +2098,14 @@ public class Blockchain : IAsyncDisposable
             _blockchain._accessor?.OnRawStateFinalize(Hash);
 
             _finalized = true;
+        }
+
+        public void Open()
+        {
+            if (_current != null)
+                return;
+
+            _current = new SyncBlockState(Keccak.Zero, _db.BeginReadOnlyBatch(), [], _blockchain);
         }
 
         private void DeleteByPrefixes(IBatch batch)
@@ -2144,7 +2153,7 @@ public class Blockchain : IAsyncDisposable
 
         public void Discard()
         {
-            _current.Reset();
+            _current?.Reset();
         }
 
         public string DumpTrie()
