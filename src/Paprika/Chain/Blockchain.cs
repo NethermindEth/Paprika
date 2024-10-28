@@ -187,8 +187,8 @@ public class Blockchain : IAsyncDisposable
                     // Commit, but flush only if there's nothing more to apply.
                     // If there are more blocks, leave it to the external _db.Flush() called outside of this loop.
                     await batch.Commit(noMoreBlocksToApply
-                            ? CommitOptions.FlushDataOnly
-                            : CommitOptions.DangerNoFlush);
+                        ? CommitOptions.FlushDataOnly
+                        : CommitOptions.DangerNoFlush);
 
                     // inform blocks about flushing
                     lock (_blockLock)
@@ -500,7 +500,7 @@ public class Blockchain : IAsyncDisposable
 
         private readonly ReadOnlyBatchCountingRefs _batch;
         private readonly CommittedBlockState[] _ancestors;
-        private readonly BitFilter _ancestorsFilter;
+        private readonly BitFilter? _ancestorsFilter;
 
         private readonly Blockchain _blockchain;
 
@@ -1141,7 +1141,7 @@ public class Blockchain : IAsyncDisposable
         {
             var destroyedHash = CommittedBlockState.GetDestroyedHash(key);
 
-            if (_ancestorsFilter.MayContainAny(keyHash, destroyedHash))
+            if (_ancestorsFilter.HasValue && _ancestorsFilter.GetValueOrDefault().MayContainAny(keyHash, destroyedHash))
             {
                 ushort depth = 1;
 
@@ -1258,7 +1258,7 @@ public class Blockchain : IAsyncDisposable
             _xorMissed.Dispose();
             _prefetcher?.Dispose();
             _filter.Return(Pool);
-            _ancestorsFilter.Return(Pool);
+            _ancestorsFilter?.Return(Pool);
 
             // release all the ancestors
             foreach (var ancestor in _ancestors)
@@ -1482,7 +1482,8 @@ public class Blockchain : IAsyncDisposable
             Hash = stateRoot;
         }
 
-        public ReadOnlyState(Keccak stateRoot, ReadOnlyBatchCountingRefs batch, CommittedBlockState[] ancestors, BitFilter ancestorsFilter, BufferPool pool)
+        public ReadOnlyState(Keccak stateRoot, ReadOnlyBatchCountingRefs batch, CommittedBlockState[] ancestors,
+            BitFilter? ancestorsFilter, BufferPool pool)
         {
             _batch = batch;
             _ancestors = ancestors;
@@ -1547,7 +1548,8 @@ public class Blockchain : IAsyncDisposable
             {
                 var destroyedHash = CommittedBlockState.GetDestroyedHash(key);
 
-                if (_ancestorsFilter == null || _ancestorsFilter.GetValueOrDefault().MayContainAny(keyHash, destroyedHash))
+                if (_ancestorsFilter == null ||
+                    _ancestorsFilter.GetValueOrDefault().MayContainAny(keyHash, destroyedHash))
                 {
                     ushort depth = 1;
 
@@ -1730,6 +1732,7 @@ public class Blockchain : IAsyncDisposable
                 prefixes = Key.ReadFrom(prefixes, out var prefixToDelete);
                 batch.DeleteByPrefix(prefixToDelete);
             }
+
             _prefixesToDelete.ResetWrittenCount();
         }
 
@@ -1953,8 +1956,11 @@ public class Blockchain : IAsyncDisposable
     /// </summary>
     /// <param name="ancestors"></param>
     /// <returns></returns>
-    private BitFilter CreateAncestorsFilter(CommittedBlockState[] ancestors)
+    private BitFilter? CreateAncestorsFilter(CommittedBlockState[] ancestors)
     {
+        if (ancestors.Length == 0)
+            return null;
+
         var filter = CreateBitFilter();
         foreach (var ancestor in ancestors)
         {
