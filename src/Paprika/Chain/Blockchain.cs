@@ -54,6 +54,7 @@ public class Blockchain : IAsyncDisposable
     private readonly Counter<long> _bloomMissedReads;
     private readonly Histogram<int> _cacheUsageState;
     private readonly Histogram<int> _cacheUsagePreCommit;
+    private readonly Histogram<int> _prefetchCount;
     private readonly MetricsExtensions.IAtomicIntGauge _flusherQueueCount;
 
     private readonly IDb _db;
@@ -97,6 +98,8 @@ public class Blockchain : IAsyncDisposable
             "How much used was the transient cache");
         _cacheUsagePreCommit = _meter.CreateHistogram<int>("PreCommit transient cache usage per commit", "%",
             "How much used was the transient cache");
+        _prefetchCount = _meter.CreateHistogram<int>("Prefetch count",
+            "Number of prefetches performed by the prefetcher", "count");
 
         // pool
         _pool = new(1024, true, _meter);
@@ -623,7 +626,11 @@ public class Blockchain : IAsyncDisposable
 
         private CommittedBlockState? CommitImpl(uint blockNumber, bool raw)
         {
-            _prefetcher?.BlockFurtherPrefetching();
+            if (_prefetcher != null)
+            {
+                _prefetcher.BlockFurtherPrefetching();
+                _blockchain._prefetchCount.Record(_prefetcher.PrefetchCount);
+            }
 
             EnsureHash();
 
@@ -738,23 +745,23 @@ public class Blockchain : IAsyncDisposable
 
             private bool _prefetchPossible = true;
 
-            // Filter of two has 64k buckets.
-            private readonly BitMapFilter<BitMapFilter.Of2> _filter;
+            private readonly BitFilter _prefetched;
             private readonly PooledSpanDictionary _cache;
             private readonly BlockState _parent;
             private readonly BufferPool _pool;
             private readonly ReaderWriterLockSlim _rwl;
             private readonly ReaderWriterLockRelease _release;
+            private readonly BitFilter _hashes;
 
             public PreCommitPrefetcher(PooledSpanDictionary cache, BlockState parent, BufferPool pool)
             {
                 _cache = cache;
                 _parent = parent;
                 _pool = pool;
-                var accessor = new BitMapFilter.Of2(pool.Rent(true), pool.Rent(true));
                 _rwl = new ReaderWriterLockSlim();
                 _release = new ReaderWriterLockRelease(_rwl);
-                _filter = new BitMapFilter<BitMapFilter.Of2>(accessor);
+                _prefetched = _parent._blockchain.CreateBitFilter();
+                _hashes = _parent._blockchain.CreateBitFilter();
             }
 
             public bool CanPrefetchFurther => Volatile.Read(ref _prefetchPossible);
@@ -775,7 +782,7 @@ public class Blockchain : IAsyncDisposable
                     false);
             }
 
-            private bool ShouldPrefetch(ulong hash) => _filter.AddAtomic(hash);
+            private bool ShouldPrefetch(ulong hash) => _prefetched.AddAtomic(hash);
 
             public void PrefetchStorage(in Keccak account, in Keccak storage)
             {
@@ -799,6 +806,8 @@ public class Blockchain : IAsyncDisposable
 
             private IPreCommitBehavior PreCommit => _parent._blockchain._preCommit;
 
+            public int PrefetchCount { get; private set; }
+
             public void BlockFurtherPrefetching()
             {
                 _rwl.EnterWriteLock();
@@ -813,11 +822,7 @@ public class Blockchain : IAsyncDisposable
                 }
 
                 // Copy cache entries
-                foreach (var kv in _cache)
-                {
-                    Key.ReadFrom(kv.Key, out var key);
-                    _parent._filter.Add(GetHash(key));
-                }
+                _parent._filter.OrWith(_hashes);
             }
 
             [SkipLocalsInit]
@@ -853,6 +858,9 @@ public class Blockchain : IAsyncDisposable
                         return false;
 
                     _cache.Set(k, hash, payload, (byte)type);
+                    _hashes.Add(hash);
+
+                    PrefetchCount++;
                 }
                 finally
                 {
@@ -864,7 +872,8 @@ public class Blockchain : IAsyncDisposable
 
             public void Dispose()
             {
-                _filter.Return(_pool);
+                _prefetched.Return(_pool);
+                _hashes.Return(_pool);
                 _rwl.Dispose();
             }
         }
