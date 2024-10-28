@@ -85,28 +85,20 @@ var size = (path.Contains("mainnet") ? 320L : 64L) * GB;
 
 if (dbExists)
 {
-    Console.WriteLine($"DB detected at {dataPath}. Will run just statistics...");
-}
-else
-{
-    Directory.CreateDirectory(dataPath);
-    Console.WriteLine($"Using persistent DB on disk, located: {dataPath}");
-    Console.WriteLine("Initializing db of size {0}GB", size / GB);
+    Console.WriteLine($"DB detected at {dataPath}. Not running import");
+    return;
 }
 
-// reporting
-const string metrics = "Metrics";
-const string stats = "Stats";
+Directory.CreateDirectory(dataPath);
+Console.WriteLine($"Using persistent DB on disk, located: {dataPath}");
+Console.WriteLine("Initializing db of size {0}GB", size / GB);
 
-var layout = new Layout("Runner")
-    .SplitRows(new Layout(metrics), new Layout(stats));
-
+var layout = new Layout("Metrics");
 using var reporter = new MetricsReporter();
-layout[metrics].Update(reporter.Renderer);
-layout[stats].Update(new Panel("Statistics will appear here after the import finishes").Header("Statistics").Expand());
+layout.Update(reporter.Renderer);
 
 var spectre = new CancellationTokenSource();
-var reportingTask = Task.Run(() => AnsiConsole.Live(dbExists ? layout.GetLayout(stats) : layout)
+var reportingTask = Task.Run(() => AnsiConsole.Live(layout)
     .StartAsync(async ctx =>
     {
         while (spectre.IsCancellationRequested == false)
@@ -124,96 +116,52 @@ var reportingTask = Task.Run(() => AnsiConsole.Live(dbExists ? layout.GetLayout(
 
 var sw = Stopwatch.StartNew();
 
-//using var db = new Db(dataPath, 64, size, sync: false);
 using var db = PagedDb.MemoryMappedDb(size, 32, dataPath, false);
 
 const bool skipStorage = false;
 
-// var storageCapture = new PaprikaStorageCapturingVisitor();
-// root.Accept(storageCapture, store, false, nibbles);
-// File.WriteAllText("storage-big-tree.txt",storageCapture.Payload);
-
 using var preCommit = new ComputeMerkleBehavior(1);
 
 var rootHashActual = Keccak.Zero;
-if (dbExists == false)
+var budget = new CacheBudget.Options(1_000, 8);
+await using (var blockchain =
+             new Blockchain(db, preCommit, TimeSpan.FromSeconds(10),
+                 budget,
+                 budget, 50, () => reporter.Observe()))
 {
-    await using (var blockchain =
-                 new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), new CacheBudget.Options(1_000, 8), new CacheBudget.Options(1_000, 8), 50, () => reporter.Observe()))
+    var visitor = new PaprikaCopyingVisitor(blockchain, 10_000, skipStorage);
+    var visit = Task.Run(() =>
     {
-        var visitor = new PaprikaCopyingVisitor(blockchain, 10_000, skipStorage);
-        Console.WriteLine("Starting...");
-
-        var visit = Task.Run(() =>
+        try
         {
-            try
+            trie.Accept(visitor, trie.RootHash, new VisitingOptions
             {
-                trie.Accept(visitor, trie.RootHash, new VisitingOptions
-                {
-                    ExpectAccounts = true,
-                    MaxDegreeOfParallelism = 8,
-                    //FullScanMemoryBudget = 1L * 1024 * 1024 * 1024
-                });
+                ExpectAccounts = true,
+                MaxDegreeOfParallelism = 8,
+                //FullScanMemoryBudget = 1L * 1024 * 1024 * 1024
+            });
 
-                visitor.Finish();
-            }
-            catch
-            {
-                spectre.Cancel();
-                throw;
-            }
-        });
+            visitor.Finish();
+        }
+        catch
+        {
+            spectre.Cancel();
+            throw;
+        }
+    });
 
-        var copy = visitor.Copy();
-        await Task.WhenAll(visit, copy);
+    var copy = visitor.Copy();
+    await Task.WhenAll(visit, copy);
 
-        rootHashActual = await copy;
-    }
-
-    db.ForceFlush();
-
-    // LMDB
-    // db.ForceSync();
-}
-else
-{
-    using var read = db.BeginReadOnlyBatch();
-    StatisticsForPagedDb.Report(layout[stats], read, db);
-    // await using (var blockchain =
-    //              new Blockchain(db, preCommit, TimeSpan.FromSeconds(10), CacheBudget.Options.None, 100, () => reporter.Observe()))
-    // {
-    //     
-    //     var visitor = new PaprikaAccountValidatingVisitor(blockchain, preCommit, 1000);
-    //
-    //     var visit = Task.Run(() =>
-    //     {
-    //         root.Accept(visitor, store, true, nibbles);
-    //         visitor.Finish();
-    //     });
-    //
-    //     var validation = visitor.Validate();
-    //     await Task.WhenAll(visit, validation);
-    //
-    //     var report = await validation;
-    //
-    //     File.WriteAllText("validation-report.txt", report);
-    //
-    //     layout[stats].Update(new Panel("validation-report.txt").Header("Paprika accounts different from the original")
-    //         .Expand());
-    // }
-
-    // LMDB
-    // var statistics = db.GatherStats();
-    // layout[stats].Update(new Panel(statistics.ToString()).Header("LMDB stats"));
+    rootHashActual = await copy;
 }
 
+db.ForceFlush();
 spectre.Cancel();
 await reportingTask;
 
-if (dbExists == false)
-{
-    Console.WriteLine($"Root: {trie.RootHash} was being imported to Paprika in {sw.Elapsed:g} and resulted in {rootHashActual}");
-}
+AnsiConsole.WriteLine(
+        $"Root: {trie.RootHash} was being imported to Paprika in {sw.Elapsed:g} and resulted in {rootHashActual}");
 
 return;
 
@@ -230,18 +178,3 @@ DbSettings GetSettings(string dbName)
 
     return new DbSettings(dbName, dbPath);
 }
-
-// static TrieNode MoveDownInTree(byte[] nibbles, PatriciaTree trie, ITrieNodeResolver store)
-// {
-//     var root = trie.RootRef!;
-//
-//     for (var i = 0; i < nibbles.Length; i++)
-//     {
-//         root.ResolveNode(store, ReadFlags.HintCacheMiss);
-//         root = root.GetChild(store, nibbles[i])!;
-//     }
-//
-//     root.ResolveNode(store, ReadFlags.HintCacheMiss);
-//
-//     return root;
-// }
