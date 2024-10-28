@@ -20,9 +20,9 @@ public abstract class BitMapFilterTests<TAccessor> : IDisposable
 
         for (ulong i = 0; i < count; i++)
         {
-            filter[i].Should().BeFalse();
-            filter[i] = true;
-            filter[i].Should().BeTrue();
+            filter.MayContain(i).Should().BeFalse();
+            filter.Add(i);
+            filter.MayContain(i).Should().BeTrue();
         }
 
         filter.Return(_pool);
@@ -49,6 +49,26 @@ public abstract class BitMapFilterTests<TAccessor> : IDisposable
         filter1.Return(_pool);
         filter2.Return(_pool);
     }
+
+    [Test]
+    public void Atomic_non_colliding_sets()
+    {
+        var filter = Build(_pool);
+
+        var count = filter.BucketCount;
+
+        Parallel.For(0, count, i =>
+        {
+            var hash = (uint)i;
+            filter.MayContainVolatile(hash).Should().BeFalse();
+            filter.AddAtomic(hash).Should().BeTrue();
+            filter.MayContainVolatile(hash).Should().BeTrue();
+            filter.AddAtomic(hash).Should().BeFalse();
+        });
+
+        filter.Return(_pool);
+    }
+
 
     public void Dispose() => _pool.Dispose();
 }
