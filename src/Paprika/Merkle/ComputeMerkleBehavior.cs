@@ -1448,6 +1448,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         for (var i = 0; i <= path.Length; i++)
         {
+            if (context.CanPrefetchFurther == false)
+            {
+                return;
+            }
+
             var slice = path.SliceTo(i);
             var key = isAccountPrefetch ? Key.Merkle(slice) : Key.Raw(accountPath, DataType.Merkle, slice);
             var leftoverPath = path.SliceFrom(i);
@@ -1470,8 +1475,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 case Node.Type.Leaf:
                     if (nonLocal)
                     {
-                        // data came from the depth
-                        context.Set(key, owner.Span, EntryType.UseOnce);
+                        // Data came from the depth, try set
+                        if (context.Set(key, owner.Span, EntryType.UseOnce) == false)
+                        {
+                            // No set, no prefetch
+                            return;
+                        }
                     }
                     return;
                 case Node.Type.Extension:
@@ -1479,7 +1488,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         if (nonLocal)
                         {
                             // data came from the depth
-                            context.Set(key, owner.Span, EntryType.UseOnce);
+                            if (context.Set(key, owner.Span, EntryType.UseOnce) == false)
+                            {
+                                // No set, no prefetch
+                                return;
+                            }
                         }
 
                         var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
@@ -1499,7 +1512,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     if (nonLocal)
                     {
                         // Will be modified and we can set to persistent already
-                        context.Set(key, owner.Span, EntryType.Persistent);
+                        if (context.Set(key, owner.Span, EntryType.Persistent) == false)
+                        {
+                            // No set, no prefetch
+                            return;
+                        }
                     }
 
                     var nibble = path[i];
