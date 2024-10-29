@@ -782,9 +782,14 @@ public class Blockchain : IAsyncDisposable
                 if (CanPrefetchFurther == false)
                     return;
 
-                PrefetchAccount(account);
-
+                // Try account first
                 var accountHash = account.GetHashCodeUlong();
+                if (ShouldPrefetch(accountHash))
+                {
+                    ThreadPool.QueueUserWorkItem(key => { _parent._blockchain._preCommit.Prefetch(key, this); }, account,
+                        false);
+                }
+
                 var storageHash = storage.GetHashCodeUlong();
 
                 if (ShouldPrefetch(accountHash ^ storageHash) == false)
