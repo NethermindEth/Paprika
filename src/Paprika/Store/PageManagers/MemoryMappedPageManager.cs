@@ -21,18 +21,15 @@ public sealed class MemoryMappedPageManager : PointerPageManager
     private const string PaprikaFileName = "paprika.db";
 
     private readonly SafeFileHandle _file;
-    private readonly SafeFileHandle _handle;
     private readonly MemoryMappedFile _mapped;
     private readonly MemoryMappedViewAccessor _whole;
     private readonly unsafe byte* _ptr;
-
 
     // Flusher section
     private readonly Stack<PageMemoryOwner> _owners = new();
     private readonly List<PageMemoryOwner> _ownersUsed = new();
     private readonly List<Task> _pendingWrites = new();
     private DbAddress[] _toWrite = new DbAddress[1];
-
 
     // Metrics
     private readonly Meter _meter;
