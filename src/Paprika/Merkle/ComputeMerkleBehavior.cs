@@ -63,7 +63,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         s_parallelOptions = new()
         {
             // Override default with setting
-            MaxDegreeOfParallelism = Math.Max(1, maxDegreeOfParallelism < 0 ? Environment.ProcessorCount : maxDegreeOfParallelism)
+            MaxDegreeOfParallelism = Math.Max(1,
+                maxDegreeOfParallelism < 0 ? Environment.ProcessorCount : maxDegreeOfParallelism)
         };
 
         // Metrics
@@ -440,7 +441,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     }
 
     [SkipLocalsInit]
-    private void EncodeLeaf(scoped in Key key, scoped in ComputeContext ctx, scoped in NibblePath leafPath, out KeccakOrRlp keccakOrRlp)
+    private void EncodeLeaf(scoped in Key key, scoped in ComputeContext ctx, scoped in NibblePath leafPath,
+        out KeccakOrRlp keccakOrRlp)
     {
         var leafTotalPath =
             key.Path.Append(leafPath, stackalloc byte[NibblePath.MaxLengthValue * 2 + 1]);
@@ -672,7 +674,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     public static Span<byte> MakeRlpWritable(ReadOnlySpan<byte> previousRlp) =>
         MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(previousRlp), previousRlp.Length);
 
-    private void EncodeExtension(scoped in Key key, scoped in ComputeContext ctx, scoped in Node.Extension ext, out KeccakOrRlp keccakOrRlp)
+    private void EncodeExtension(scoped in Key key, scoped in ComputeContext ctx, scoped in Node.Extension ext,
+        out KeccakOrRlp keccakOrRlp)
     {
         using var pooled = ctx.Rent();
 
@@ -1468,55 +1471,34 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             // read the existing one
             Node.ReadFrom(out var type, out _, out var ext, out var branch, owner.Span);
 
-            var nonLocal = owner.QueryDepth > 0;
-
             switch (type)
             {
                 case Node.Type.Leaf:
-                    if (nonLocal)
-                    {
-                        // Data came from the depth, try set
-                        if (context.Set(key, owner.Span, EntryType.UseOnce) == false)
-                        {
-                            // No set, no prefetch
-                            return;
-                        }
-                    }
+                    TryCache(context, key, owner, EntryType.UseOnce);
                     return;
+
                 case Node.Type.Extension:
+                    if (TryCache(context, key, owner, EntryType.UseOnce) == false)
                     {
-                        if (nonLocal)
-                        {
-                            // data came from the depth
-                            if (context.Set(key, owner.Span, EntryType.UseOnce) == false)
-                            {
-                                // No set, no prefetch
-                                return;
-                            }
-                        }
-
-                        var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
-                        if (diffAt == ext.Path.Length)
-                        {
-                            // The path overlaps with what is there, move forward
-                            i += ext.Path.Length - 1;
-
-                            // Consider adding the extension here?
-                            continue;
-                        }
-
-                        // The paths are different, handle by MarkPathAsDirty
                         return;
                     }
-                case Node.Type.Branch:
-                    if (nonLocal)
+
+                    var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
+                    if (diffAt == ext.Path.Length)
                     {
-                        // Will be modified and we can set to persistent already
-                        if (context.Set(key, owner.Span, EntryType.Persistent) == false)
-                        {
-                            // No set, no prefetch
-                            return;
-                        }
+                        // The path overlaps with what is there, move forward
+                        i += ext.Path.Length - 1;
+
+                        // Consider adding the extension here?
+                        continue;
+                    }
+
+                    // The paths are different, handle by MarkPathAsDirty
+                    return;
+                case Node.Type.Branch:
+                    if (TryCache(context, key, owner, EntryType.Persistent) == false)
+                    {
+                        return;
                     }
 
                     var nibble = path[i];
@@ -1536,6 +1518,17 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 default:
                     return;
             }
+        }
+
+        return;
+
+        static bool TryCache(IPrefetcherContext context, in Key key, in ReadOnlySpanOwnerWithMetadata<byte> owner,
+            EntryType type)
+        {
+            var local = owner.QueryDepth == 0;
+            if (local)
+                return true;
+            return context.Set(key, owner.Span, type);
         }
     }
 

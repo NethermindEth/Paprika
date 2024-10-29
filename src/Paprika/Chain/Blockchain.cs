@@ -738,11 +738,6 @@ public class Blockchain : IAsyncDisposable
 
         private class PreCommitPrefetcher : IDisposable, IPreCommitPrefetcher, IPrefetcherContext
         {
-            private sealed class ReaderWriterLockRelease(ReaderWriterLockSlim rwl) : IDisposable
-            {
-                public void Dispose() => rwl.ExitReadLock();
-            }
-
             private bool _prefetchPossible = true;
 
             private readonly BitFilter _prefetched;
@@ -750,7 +745,6 @@ public class Blockchain : IAsyncDisposable
             private readonly BlockState _parent;
             private readonly BufferPool _pool;
             private readonly ReaderWriterLockSlim _rwl;
-            private readonly ReaderWriterLockRelease _release;
             private readonly BitFilter _hashes;
 
             public PreCommitPrefetcher(PooledSpanDictionary cache, BlockState parent, BufferPool pool)
@@ -759,7 +753,6 @@ public class Blockchain : IAsyncDisposable
                 _parent = parent;
                 _pool = pool;
                 _rwl = new ReaderWriterLockSlim();
-                _release = new ReaderWriterLockRelease(_rwl);
                 _prefetched = _parent._blockchain.CreateBitFilter();
                 _hashes = _parent._blockchain.CreateBitFilter();
             }
@@ -833,14 +826,19 @@ public class Blockchain : IAsyncDisposable
 
                 _rwl.EnterReadLock();
 
-                if (_cache.TryGet(keyWritten, hash, out var data))
+                try
                 {
-                    // No ownership needed, it's all local here
-                    var owner = new ReadOnlySpanOwner<byte>(data, _release);
-                    return new ReadOnlySpanOwnerWithMetadata<byte>(owner, 0);
+                    if (_cache.TryGet(keyWritten, hash, out var data))
+                    {
+                        // No ownership needed, it's all local here
+                        var owner = new ReadOnlySpanOwner<byte>(data, null);
+                        return new ReadOnlySpanOwnerWithMetadata<byte>(owner, 0);
+                    }
                 }
-
-                _rwl.ExitReadLock();
+                finally
+                {
+                    _rwl.ExitReadLock();
+                }
 
                 return _parent.TryGetAncestors(key, keyWritten, hash);
             }
