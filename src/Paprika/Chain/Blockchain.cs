@@ -771,7 +771,12 @@ public class Blockchain : IAsyncDisposable
                     return;
                 }
 
-                ThreadPool.QueueUserWorkItem(key => { _parent._blockchain._preCommit.Prefetch(key, this); }, account,
+                ThreadPool.QueueUserWorkItem(
+                    static item =>
+                    {
+                        item.ctx.PreCommit.Prefetch(item.account, item.ctx);
+                    },
+                    (ctx: this, account),
                     false);
             }
 
@@ -784,22 +789,38 @@ public class Blockchain : IAsyncDisposable
 
                 // Try account first
                 var accountHash = account.GetHashCodeUlong();
-                if (ShouldPrefetch(accountHash))
-                {
-                    ThreadPool.QueueUserWorkItem(key => { _parent._blockchain._preCommit.Prefetch(key, this); }, account,
-                        false);
-                }
+                var prefetchAccount = ShouldPrefetch(accountHash);
 
                 var storageHash = storage.GetHashCodeUlong();
+                var prefetchStorage = ShouldPrefetch(accountHash ^ storageHash);
 
-                if (ShouldPrefetch(accountHash ^ storageHash) == false)
+                if (!prefetchStorage && !prefetchAccount)
                 {
+                    // both are prefetched
                     return;
                 }
 
-                ThreadPool.QueueUserWorkItem(
-                    key => { PreCommit.Prefetch(key.account, key.storage, this); },
-                    (account, storage), false);
+                if (prefetchAccount && prefetchStorage)
+                {
+                    // both require prefetching
+                    ThreadPool.QueueUserWorkItem(
+                        static item =>
+                        {
+                            item.ctx.PreCommit.Prefetch(item.account, item.ctx);
+                            item.ctx.PreCommit.Prefetch(item.account, item.storage, item.ctx);
+                        },
+                        (ctx: this, account, storage), false);
+                }
+                else
+                {
+                    // if only one requires prefetching it should be storage
+                    ThreadPool.QueueUserWorkItem(
+                        static item =>
+                        {
+                            item.ctx.PreCommit.Prefetch(item.account, item.storage, item.ctx);
+                        },
+                        (ctx: this, account, storage), false);
+                }
             }
 
             private IPreCommitBehavior PreCommit => _parent._blockchain._preCommit;
