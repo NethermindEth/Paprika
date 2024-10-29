@@ -1474,11 +1474,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             switch (type)
             {
                 case Node.Type.Leaf:
-                    TryCache(context, key, owner, EntryType.UseOnce);
+                    TryCache(context, key, owner);
                     return;
 
                 case Node.Type.Extension:
-                    if (TryCache(context, key, owner, EntryType.UseOnce) == false)
+                    if (TryCache(context, key, owner) == false)
                     {
                         return;
                     }
@@ -1496,6 +1496,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     // The paths are different, handle by MarkPathAsDirty
                     return;
                 case Node.Type.Branch:
+                    // Use EntryType.Persistent as branches will be overwritten
+                    // so that the prefetcher can handle the burden of copying.
                     if (TryCache(context, key, owner, EntryType.Persistent) == false)
                     {
                         return;
@@ -1523,7 +1525,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         return;
 
         static bool TryCache(IPrefetcherContext context, in Key key, in ReadOnlySpanOwnerWithMetadata<byte> owner,
-            EntryType type)
+            EntryType type = EntryType.UseOnce)
         {
             var local = owner.QueryDepth == 0;
             if (local)
