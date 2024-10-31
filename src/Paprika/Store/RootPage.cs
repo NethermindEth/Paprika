@@ -114,7 +114,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
             return new StateRootPage(batch.GetAt(Data.StateRoot)).TryGet(batch, key.Path, out result);
         }
 
-        var cache = batch.IdCache;
+        var cache = batch.StorageCache;
         var keccak = key.Path.UnsafeAsKeccak;
 
         if (cache.TryGetValue(keccak, out var id))
@@ -143,7 +143,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
             }
         }
 
-        return Data.Storage.TryGetStorage(id, key.StoragePath, out result, batch);
+        return Data.Storage.TryGetStorage(key, out result, batch);
     }
 
     public void SetRaw(in Key key, IBatchContext batch, ReadOnlySpan<byte> rawData)
@@ -156,7 +156,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         {
             var keccak = key.Path.UnsafeAsKeccak;
 
-            if (batch.IdCache.TryGetValue(keccak, out var id) == false)
+            if (batch.StorageCache.TryGetValue(keccak, out var id) == false)
             {
                 // try fetch existing first
                 if (Data.Storage.TryGetId(keccak, out id, batch) == false)
@@ -164,7 +164,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
                     Data.AccountCounter++;
 
                     // memoize in cache
-                    batch.IdCache[keccak] = id = Data.AccountCounter;
+                    batch.StorageCache[keccak] = id = Data.AccountCounter;
 
                     // update root
                     Data.Storage.SetId(keccak, id, batch);
@@ -172,7 +172,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
                 else
                 {
                     // memoize in cache
-                    batch.IdCache[keccak] = id;
+                    batch.StorageCache[keccak] = id;
                 }
             }
 
@@ -194,7 +194,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         SetAtRoot(batch, account, ReadOnlySpan<byte>.Empty, ref Data.StateRoot);
 
         // Remove the cached
-        batch.IdCache.Remove(keccak);
+        batch.StorageCache.Remove(keccak);
     }
 
     public void DeleteByPrefix(in Key prefix, IBatchContext batch)
@@ -209,7 +209,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         {
             var keccak = prefix.Path.UnsafeAsKeccak;
 
-            if (batch.IdCache.TryGetValue(keccak, out var id) == false)
+            if (batch.StorageCache.TryGetValue(keccak, out var id) == false)
             {
                 // Not in cache, try fetch from db
                 if (Data.Storage.TryGetId(keccak, out id, batch) == false)

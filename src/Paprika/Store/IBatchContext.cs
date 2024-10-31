@@ -111,7 +111,10 @@ public interface IReadOnlyBatchContext : IPageResolver
     /// </summary>
     uint BatchId { get; }
 
-    IDictionary<Keccak, uint> IdCache { get; }
+    /// <summary>
+    /// Cache used by the storage access to speed up read/write operations.
+    /// </summary>
+    IDictionary<Keccak, UIntPtr> StorageCache { get; }
 }
 
 /// <summary>
