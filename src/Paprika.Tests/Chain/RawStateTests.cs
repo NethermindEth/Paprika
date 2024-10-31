@@ -197,7 +197,7 @@ public class RawStateTests
         read2.TryGet(Key.Account(account1), out _).Should().BeFalse();
         read2.TryGet(Key.Account(account2), out _).Should().BeFalse();
     }
-  
+
     [Test]
     public void DeleteByPrefixStorage()
     {
