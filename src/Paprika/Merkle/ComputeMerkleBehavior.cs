@@ -63,7 +63,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         s_parallelOptions = new()
         {
             // Override default with setting
-            MaxDegreeOfParallelism = Math.Max(1, maxDegreeOfParallelism < 0 ? Environment.ProcessorCount : maxDegreeOfParallelism)
+            MaxDegreeOfParallelism = Math.Max(1,
+                maxDegreeOfParallelism < 0 ? Environment.ProcessorCount : maxDegreeOfParallelism)
         };
 
         // Metrics
@@ -440,7 +441,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     }
 
     [SkipLocalsInit]
-    private void EncodeLeaf(scoped in Key key, scoped in ComputeContext ctx, scoped in NibblePath leafPath, out KeccakOrRlp keccakOrRlp)
+    private void EncodeLeaf(scoped in Key key, scoped in ComputeContext ctx, scoped in NibblePath leafPath,
+        out KeccakOrRlp keccakOrRlp)
     {
         var leafTotalPath =
             key.Path.Append(leafPath, stackalloc byte[NibblePath.MaxLengthValue * 2 + 1]);
@@ -672,7 +674,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     public static Span<byte> MakeRlpWritable(ReadOnlySpan<byte> previousRlp) =>
         MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(previousRlp), previousRlp.Length);
 
-    private void EncodeExtension(scoped in Key key, scoped in ComputeContext ctx, scoped in Node.Extension ext, out KeccakOrRlp keccakOrRlp)
+    private void EncodeExtension(scoped in Key key, scoped in ComputeContext ctx, scoped in Node.Extension ext,
+        out KeccakOrRlp keccakOrRlp)
     {
         using var pooled = ctx.Rent();
 
@@ -705,67 +708,56 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// This component appends the prefix to all the commit operations.
     /// It's useful for storage operations, that have their key prefixed with the account.
     /// </summary>
-    private class PrefixingCommit : ICommit
+    private class PrefixingCommit(ICommit commit) : ICommit
     {
-        private readonly ICommit _commit;
         private Keccak _keccak;
-
-        public PrefixingCommit(ICommit commit)
-        {
-            _commit = commit;
-        }
 
         public void SetPrefix(in NibblePath path) => SetPrefix(path.UnsafeAsKeccak);
 
         public void SetPrefix(in Keccak keccak) => _keccak = keccak;
 
         public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) =>
-            _commit.Get(Build(key));
+            commit.Get(Build(key));
 
         public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type) =>
-            _commit.Set(Build(key), in payload, type);
+            commit.Set(Build(key), in payload, type);
 
         public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1, EntryType type)
-            => _commit.Set(Build(key), payload0, payload1, type);
+            => commit.Set(Build(key), payload0, payload1, type);
 
         /// <summary>
         /// Builds the <see cref="_keccak"/> aware key, treating the path as the path for the storage.
         /// </summary>
         private Key Build(scoped in Key key) => Key.Raw(NibblePath.FromKey(_keccak), key.Type, key.Path);
 
-        public IChildCommit GetChild() => new ChildCommit(this, _commit.GetChild());
+        public IChildCommit GetChild() => new ChildCommit(this, commit.GetChild());
 
         public void Visit(CommitAction action, TrieType type) => throw new Exception("Should not be called");
+
+        public bool Owns(object? actualSpanOwner) => ReferenceEquals(actualSpanOwner, commit);
 
         public IReadOnlyDictionary<Keccak, int> Stats =>
             throw new NotImplementedException("No stats for the child commit");
 
-        private class ChildCommit : IChildCommit
+        private class ChildCommit(PrefixingCommit parent, IChildCommit commit) : IChildCommit
         {
-            private readonly PrefixingCommit _parent;
-            private readonly IChildCommit _commit;
-
-            public ChildCommit(PrefixingCommit parent, IChildCommit commit)
-            {
-                _parent = parent;
-                _commit = commit;
-            }
-
             public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) =>
-                _commit.Get(_parent.Build(key));
+                commit.Get(parent.Build(key));
 
             public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type) =>
-                _commit.Set(_parent.Build(key), payload, type);
+                commit.Set(parent.Build(key), payload, type);
 
             public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1,
                 EntryType type) =>
-                _commit.Set(_parent.Build(key), payload0, payload1, type);
+                commit.Set(parent.Build(key), payload0, payload1, type);
 
-            public void Dispose() => _commit.Dispose();
+            public void Dispose() => commit.Dispose();
 
-            public void Commit() => _commit.Commit();
+            public void Commit() => commit.Commit();
 
-            public IChildCommit GetChild() => new ChildCommit(_parent, _commit.GetChild());
+            public IChildCommit GetChild() => new ChildCommit(parent, commit.GetChild());
+
+            public bool Owns(object? actualSpanOwner) => ReferenceEquals(actualSpanOwner, commit);
 
             public IReadOnlyDictionary<Keccak, int> Stats =>
                 throw new NotImplementedException("No stats for the child commit");
@@ -1459,6 +1451,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         for (var i = 0; i <= path.Length; i++)
         {
+            if (context.CanPrefetchFurther == false)
+            {
+                return;
+            }
+
             var slice = path.SliceTo(i);
             var key = isAccountPrefetch ? Key.Merkle(slice) : Key.Raw(accountPath, DataType.Merkle, slice);
             var leftoverPath = path.SliceFrom(i);
@@ -1474,43 +1471,36 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             // read the existing one
             Node.ReadFrom(out var type, out _, out var ext, out var branch, owner.Span);
 
-            var nonLocal = owner.QueryDepth > 0;
-
             switch (type)
             {
                 case Node.Type.Leaf:
-                    if (nonLocal)
-                    {
-                        // data came from the depth
-                        context.Set(key, owner.Span, EntryType.UseOnce);
-                    }
+                    TryCache(context, key, owner);
                     return;
+
                 case Node.Type.Extension:
+                    if (TryCache(context, key, owner) == false)
                     {
-                        if (nonLocal)
-                        {
-                            // data came from the depth
-                            context.Set(key, owner.Span, EntryType.UseOnce);
-                        }
-
-                        var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
-                        if (diffAt == ext.Path.Length)
-                        {
-                            // The path overlaps with what is there, move forward
-                            i += ext.Path.Length - 1;
-
-                            // Consider adding the extension here?
-                            continue;
-                        }
-
-                        // The paths are different, handle by MarkPathAsDirty
                         return;
                     }
-                case Node.Type.Branch:
-                    if (nonLocal)
+
+                    var diffAt = ext.Path.FindFirstDifferentNibble(leftoverPath);
+                    if (diffAt == ext.Path.Length)
                     {
-                        // Will be modified and we can set to persistent already
-                        context.Set(key, owner.Span, EntryType.Persistent);
+                        // The path overlaps with what is there, move forward
+                        i += ext.Path.Length - 1;
+
+                        // Consider adding the extension here?
+                        continue;
+                    }
+
+                    // The paths are different, handle by MarkPathAsDirty
+                    return;
+                case Node.Type.Branch:
+                    // Use EntryType.Persistent as branches will be overwritten
+                    // so that the prefetcher can handle the burden of copying.
+                    if (TryCache(context, key, owner, EntryType.Persistent) == false)
+                    {
+                        return;
                     }
 
                     var nibble = path[i];
@@ -1530,6 +1520,17 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 default:
                     return;
             }
+        }
+
+        return;
+
+        static bool TryCache(IPrefetcherContext context, in Key key, in ReadOnlySpanOwnerWithMetadata<byte> owner,
+            EntryType type = EntryType.UseOnce)
+        {
+            var local = owner.QueryDepth == 0;
+            if (local)
+                return true;
+            return context.Set(key, owner.Span, type);
         }
     }
 

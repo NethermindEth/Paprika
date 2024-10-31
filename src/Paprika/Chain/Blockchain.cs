@@ -54,6 +54,7 @@ public class Blockchain : IAsyncDisposable
     private readonly Counter<long> _bloomMissedReads;
     private readonly Histogram<int> _cacheUsageState;
     private readonly Histogram<int> _cacheUsagePreCommit;
+    private readonly Histogram<int> _prefetchCount;
     private readonly MetricsExtensions.IAtomicIntGauge _flusherQueueCount;
 
     private readonly IDb _db;
@@ -97,6 +98,8 @@ public class Blockchain : IAsyncDisposable
             "How much used was the transient cache");
         _cacheUsagePreCommit = _meter.CreateHistogram<int>("PreCommit transient cache usage per commit", "%",
             "How much used was the transient cache");
+        _prefetchCount = _meter.CreateHistogram<int>("Prefetch count",
+            "Number of prefetches performed by the prefetcher", "count");
 
         // pool
         _pool = new(1024, true, _meter);
@@ -109,6 +112,8 @@ public class Blockchain : IAsyncDisposable
     {
         _verify = true;
     }
+
+    public int PoolAllocatedMB => _pool.AllocatedMB ?? int.MaxValue;
 
     private static Channel<CommittedBlockState> CreateChannel(int? finalizationQueueLimit)
     {
@@ -180,8 +185,13 @@ public class Blockchain : IAsyncDisposable
 
                     _flusherQueueCount.Set(readerCount);
 
-                    // commit but no flush here, it's too heavy, the flush will come later
-                    await batch.Commit(CommitOptions.FlushDataOnly);
+                    var noMoreBlocksToApply = readerCount == 0;
+
+                    // Commit, but flush only if there's nothing more to apply.
+                    // If there are more blocks, leave it to the external _db.Flush() called outside of this loop.
+                    await batch.Commit(noMoreBlocksToApply
+                        ? CommitOptions.FlushDataOnly
+                        : CommitOptions.DangerNoFlush);
 
                     // inform blocks about flushing
                     lock (_blockLock)
@@ -493,7 +503,7 @@ public class Blockchain : IAsyncDisposable
 
         private readonly ReadOnlyBatchCountingRefs _batch;
         private readonly CommittedBlockState[] _ancestors;
-        private readonly BitFilter _ancestorsFilter;
+        private readonly BitFilter? _ancestorsFilter;
 
         private readonly Blockchain _blockchain;
 
@@ -616,29 +626,24 @@ public class Blockchain : IAsyncDisposable
 
         private CommittedBlockState? CommitImpl(uint blockNumber, bool raw)
         {
-            _prefetcher?.BlockFurtherPrefetching();
+            if (_prefetcher != null)
+            {
+                _prefetcher.BlockFurtherPrefetching();
+                _blockchain._prefetchCount.Record(_prefetcher.PrefetchCount);
+            }
 
             EnsureHash();
 
             var hash = _hash!.Value;
 
-            bool earlyReturn = false;
-
             if (hash == ParentHash)
             {
                 if (hash == Keccak.EmptyTreeHash)
                 {
-                    earlyReturn = true;
+                    return null;
                 }
-                else if (!raw)
-                {
-                    ThrowSameState();
-                }
-            }
 
-            if (earlyReturn)
-            {
-                return null;
+                ThrowSameState();
             }
 
             BlockNumber = blockNumber;
@@ -673,7 +678,37 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private static bool OmitUseOnce(byte metadata) => metadata != (int)EntryType.UseOnce;
 
-        public CommittedBlockState CommitRaw() => CommitImpl(0, true)!;
+        /// <summary>
+        /// Applies this state directly on the <see cref="IBatch"/>
+        /// without creating an in-memory representation of the committed state.
+        /// </summary>
+        public void ApplyRaw(IBatch batch)
+        {
+            _prefetcher?.BlockFurtherPrefetching();
+
+            EnsureHash();
+
+            var hash = _hash!.Value;
+
+            var earlyReturn = false;
+
+            if (hash == ParentHash)
+            {
+                if (hash == Keccak.EmptyTreeHash)
+                {
+                    earlyReturn = true;
+                }
+            }
+
+            if (earlyReturn)
+            {
+                return;
+            }
+
+            ApplyImpl(batch, _state, _blockchain);
+            ApplyImpl(batch, _storage, _blockchain);
+            ApplyImpl(batch, _preCommit, _blockchain);
+        }
 
         public void Reset()
         {
@@ -695,19 +730,32 @@ public class Blockchain : IAsyncDisposable
 
             if (_blockchain._preCommit.CanPrefetch)
             {
-                return _prefetcher = new PreCommitPrefetcher(_preCommit, this);
+                return _prefetcher = new PreCommitPrefetcher(_preCommit, this, _blockchain._pool);
             }
 
             return null;
         }
 
-        private class PreCommitPrefetcher(PooledSpanDictionary cache, BlockState parent)
-            : IDisposable, IPreCommitPrefetcher, IPrefetcherContext
+        private class PreCommitPrefetcher : IDisposable, IPreCommitPrefetcher, IPrefetcherContext
         {
             private bool _prefetchPossible = true;
 
-            private readonly HashSet<int> _prefetched = new();
-            private readonly HashSet<ulong> _cached = new();
+            private readonly BitFilter _prefetched;
+            private readonly PooledSpanDictionary _cache;
+            private readonly BlockState _parent;
+            private readonly BufferPool _pool;
+            private readonly ReaderWriterLockSlim _rwl;
+            private readonly BitFilter _hashes;
+
+            public PreCommitPrefetcher(PooledSpanDictionary cache, BlockState parent, BufferPool pool)
+            {
+                _cache = cache;
+                _parent = parent;
+                _pool = pool;
+                _rwl = new ReaderWriterLockSlim();
+                _prefetched = _parent._blockchain.CreateBitFilter();
+                _hashes = _parent._blockchain.CreateBitFilter();
+            }
 
             public bool CanPrefetchFurther => Volatile.Read(ref _prefetchPossible);
 
@@ -716,63 +764,84 @@ public class Blockchain : IAsyncDisposable
                 if (CanPrefetchFurther == false)
                     return;
 
-                var accountHash = account.GetHashCode();
+                var accountHash = account.GetHashCodeUlong();
 
-                lock (cache)
+                if (ShouldPrefetch(accountHash) == false)
                 {
-                    if (_prefetchPossible == false)
-                    {
-                        return;
-                    }
-
-                    if (_prefetched.Add(accountHash))
-                    {
-                        parent._blockchain._preCommit.Prefetch(account, this);
-                    }
+                    return;
                 }
+
+                ThreadPool.QueueUserWorkItem(
+                    static item =>
+                    {
+                        item.ctx.PreCommit.Prefetch(item.account, item.ctx);
+                    },
+                    (ctx: this, account),
+                    false);
             }
+
+            private bool ShouldPrefetch(ulong hash) => _prefetched.AddAtomic(hash);
 
             public void PrefetchStorage(in Keccak account, in Keccak storage)
             {
                 if (CanPrefetchFurther == false)
                     return;
 
-                var accountHash = account.GetHashCode();
-                var storageHash = storage.GetHashCode();
-                var storageCombined = accountHash ^ storageHash;
+                // Try account first
+                var accountHash = account.GetHashCodeUlong();
+                var prefetchAccount = ShouldPrefetch(accountHash);
 
-                lock (cache)
+                var storageHash = storage.GetHashCodeUlong();
+                var prefetchStorage = ShouldPrefetch(accountHash ^ storageHash);
+
+                if (!prefetchStorage && !prefetchAccount)
                 {
-                    if (_prefetchPossible == false)
-                    {
-                        return;
-                    }
+                    // both are prefetched
+                    return;
+                }
 
-                    if (_prefetched.Add(accountHash))
-                    {
-                        // prefetch account
-                        parent._blockchain._preCommit.Prefetch(account, this);
-                    }
-
-                    if (_prefetched.Add(storageCombined))
-                    {
-                        // prefetch account
-                        parent._blockchain._preCommit.Prefetch(account, storage, this);
-                    }
+                if (prefetchAccount && prefetchStorage)
+                {
+                    // both require prefetching
+                    ThreadPool.QueueUserWorkItem(
+                        static item =>
+                        {
+                            item.ctx.PreCommit.Prefetch(item.account, item.ctx);
+                            item.ctx.PreCommit.Prefetch(item.account, item.storage, item.ctx);
+                        },
+                        (ctx: this, account, storage), false);
+                }
+                else
+                {
+                    // if only one requires prefetching it should be storage
+                    ThreadPool.QueueUserWorkItem(
+                        static item =>
+                        {
+                            item.ctx.PreCommit.Prefetch(item.account, item.storage, item.ctx);
+                        },
+                        (ctx: this, account, storage), false);
                 }
             }
 
+            private IPreCommitBehavior PreCommit => _parent._blockchain._preCommit;
+
+            public int PrefetchCount { get; private set; }
+
             public void BlockFurtherPrefetching()
             {
-                lock (cache)
+                _rwl.EnterWriteLock();
+
+                try
                 {
                     _prefetchPossible = false;
                 }
-
-                foreach (var key in _cached)
+                finally
                 {
-                    parent._filter.Add(key);
+                    _rwl.ExitWriteLock();
                 }
+
+                // Copy cache entries
+                _parent._filter.OrWith(_hashes);
             }
 
             [SkipLocalsInit]
@@ -781,29 +850,55 @@ public class Blockchain : IAsyncDisposable
                 var hash = GetHash(key);
                 var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
-                if (_cached.Contains(hash) && cache.TryGet(keyWritten, hash, out var data))
+                _rwl.EnterReadLock();
+
+                try
                 {
-                    // No ownership needed, it's all local here
-                    var owner = new ReadOnlySpanOwner<byte>(data, null);
-                    return new ReadOnlySpanOwnerWithMetadata<byte>(owner, 0);
+                    if (_cache.TryGet(keyWritten, hash, out var data))
+                    {
+                        // No ownership needed, it's all local here
+                        var owner = new ReadOnlySpanOwner<byte>(data, null);
+                        return new ReadOnlySpanOwnerWithMetadata<byte>(owner, 0);
+                    }
+                }
+                finally
+                {
+                    _rwl.ExitReadLock();
                 }
 
-                return parent.TryGetAncestors(key, keyWritten, hash);
+                return _parent.TryGetAncestors(key, keyWritten, hash);
             }
 
             [SkipLocalsInit]
-            public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type)
+            public bool Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type)
             {
                 var hash = GetHash(key);
-
-                _cached.Add(hash);
-
                 var k = key.WriteTo(stackalloc byte[key.MaxByteLength]);
-                cache.Set(k, hash, payload, (byte)type);
+
+                _rwl.EnterWriteLock();
+                try
+                {
+                    if (_prefetchPossible == false)
+                        return false;
+
+                    _cache.Set(k, hash, payload, (byte)type);
+                    _hashes.Add(hash);
+
+                    PrefetchCount++;
+                }
+                finally
+                {
+                    _rwl.ExitWriteLock();
+                }
+
+                return true;
             }
 
             public void Dispose()
             {
+                _prefetched.Return(_pool);
+                _hashes.Return(_pool);
+                _rwl.Dispose();
             }
         }
 
@@ -1113,7 +1208,7 @@ public class Blockchain : IAsyncDisposable
         {
             var destroyedHash = CommittedBlockState.GetDestroyedHash(key);
 
-            if (_ancestorsFilter.MayContainAny(keyHash, destroyedHash))
+            if (_ancestorsFilter.HasValue && _ancestorsFilter.GetValueOrDefault().MayContainAny(keyHash, destroyedHash))
             {
                 ushort depth = 1;
 
@@ -1230,7 +1325,7 @@ public class Blockchain : IAsyncDisposable
             _xorMissed.Dispose();
             _prefetcher?.Dispose();
             _filter.Return(Pool);
-            _ancestorsFilter.Return(Pool);
+            _ancestorsFilter?.Return(Pool);
 
             // release all the ancestors
             foreach (var ancestor in _ancestors)
@@ -1416,32 +1511,7 @@ public class Blockchain : IAsyncDisposable
                 }
             }
 
-            Apply(batch, _committed);
-        }
-
-        private void Apply(IBatch batch, PooledSpanDictionary dict)
-        {
-            var preCommit = _blockchain._preCommit;
-
-            var page = _blockchain._pool.Rent(false);
-            try
-            {
-                var span = page.Span;
-
-                foreach (var kvp in dict)
-                {
-                    if (kvp.Metadata == (byte)EntryType.Persistent)
-                    {
-                        Key.ReadFrom(kvp.Key, out var key);
-                        var data = preCommit == null ? kvp.Value : preCommit.InspectBeforeApply(key, kvp.Value, span);
-                        batch.SetRaw(key, data);
-                    }
-                }
-            }
-            finally
-            {
-                _blockchain._pool.Return(page);
-            }
+            ApplyImpl(batch, _committed, _blockchain);
         }
 
         public override string ToString() =>
@@ -1479,7 +1549,8 @@ public class Blockchain : IAsyncDisposable
             Hash = stateRoot;
         }
 
-        public ReadOnlyState(Keccak stateRoot, ReadOnlyBatchCountingRefs batch, CommittedBlockState[] ancestors, BitFilter ancestorsFilter, BufferPool pool)
+        public ReadOnlyState(Keccak stateRoot, ReadOnlyBatchCountingRefs batch, CommittedBlockState[] ancestors,
+            BitFilter? ancestorsFilter, BufferPool pool)
         {
             _batch = batch;
             _ancestors = ancestors;
@@ -1544,7 +1615,8 @@ public class Blockchain : IAsyncDisposable
             {
                 var destroyedHash = CommittedBlockState.GetDestroyedHash(key);
 
-                if (_ancestorsFilter == null || _ancestorsFilter.GetValueOrDefault().MayContainAny(keyHash, destroyedHash))
+                if (_ancestorsFilter == null ||
+                    _ancestorsFilter.GetValueOrDefault().MayContainAny(keyHash, destroyedHash))
                 {
                     ushort depth = 1;
 
@@ -1703,31 +1775,20 @@ public class Blockchain : IAsyncDisposable
         {
             ThrowOnFinalized();
 
-            // Committing Nth block:
-            // 1. open read tx as this block did
-            // 2. open write tx and apply Nth block onto it
-            // 3. start new N+1th block
-            // 4. use read tx as the read + add the current as parent
-
-            var read = _db.BeginReadOnlyBatch();
-
             Hash = _current.Hash;
 
             using var batch = _db.BeginNextBatch();
 
             DeleteByPrefixes(batch);
 
-            var committed = _current.CommitRaw();
-            committed.Apply(batch);
+            _current.ApplyRaw(batch);
             _current.Dispose();
 
             batch.Commit(CommitOptions.DangerNoWrite);
 
-            // Lease is taken automatically by the ctor of the block state, not needed
-            //_current.AcquireLease();
-            var ancestors = new[] { committed };
+            var read = _db.BeginReadOnlyBatch();
 
-            _current = new BlockState(Keccak.Zero, read, ancestors, _blockchain);
+            _current = new BlockState(Keccak.Zero, read, [], _blockchain);
         }
 
         private void DeleteByPrefixes(IBatch batch)
@@ -1738,6 +1799,7 @@ public class Blockchain : IAsyncDisposable
                 prefixes = Key.ReadFrom(prefixes, out var prefixToDelete);
                 batch.DeleteByPrefix(prefixToDelete);
             }
+
             _prefixesToDelete.ResetWrittenCount();
         }
 
@@ -1961,8 +2023,11 @@ public class Blockchain : IAsyncDisposable
     /// </summary>
     /// <param name="ancestors"></param>
     /// <returns></returns>
-    private BitFilter CreateAncestorsFilter(CommittedBlockState[] ancestors)
+    private BitFilter? CreateAncestorsFilter(CommittedBlockState[] ancestors)
     {
+        if (ancestors.Length == 0)
+            return null;
+
         var filter = CreateBitFilter();
         foreach (var ancestor in ancestors)
         {
@@ -1970,5 +2035,30 @@ public class Blockchain : IAsyncDisposable
         }
 
         return filter;
+    }
+
+    private static void ApplyImpl(IBatch batch, PooledSpanDictionary dict, Blockchain blockchain)
+    {
+        var preCommit = blockchain._preCommit;
+
+        var page = blockchain._pool.Rent(false);
+        try
+        {
+            var span = page.Span;
+
+            foreach (var kvp in dict)
+            {
+                if (kvp.Metadata == (byte)EntryType.Persistent)
+                {
+                    Key.ReadFrom(kvp.Key, out var key);
+                    var data = preCommit == null ? kvp.Value : preCommit.InspectBeforeApply(key, kvp.Value, span);
+                    batch.SetRaw(key, data);
+                }
+            }
+        }
+        finally
+        {
+            blockchain._pool.Return(page);
+        }
     }
 }

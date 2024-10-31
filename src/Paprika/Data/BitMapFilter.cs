@@ -183,9 +183,44 @@ public readonly struct BitMapFilter<TAccessor>
         _accessor = accessor;
     }
 
-    public void Add(ulong hash) => this[hash] = true;
+    public void Add(ulong hash)
+    {
+        ref var slot = ref GetSlot(hash, out var mask);
+        slot |= mask;
+    }
 
-    public bool MayContain(ulong hash) => this[hash];
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ref int GetSlot(ulong hash, out int mask)
+    {
+        var mixed = Mix(hash);
+        mask = GetBitMask(mixed);
+        return ref _accessor.GetSlot(mixed >> BitsPerIntShift);
+    }
+
+    /// <summary>
+    /// Adds the hash atomically.
+    /// </summary>
+    /// <param name="hash"></param>
+    /// <returns>Whether it was added after this operation.</returns>
+    public bool AddAtomic(ulong hash)
+    {
+        ref var slot = ref GetSlot(hash, out var mask);
+
+        // was it 0 before? Yes, return true
+        return (Interlocked.Or(ref slot, mask) & mask) == 0;
+    }
+
+    public bool MayContain(ulong hash)
+    {
+        ref var slot = ref GetSlot(hash, out var mask);
+        return (slot & mask) == mask;
+    }
+
+    public bool MayContainVolatile(ulong hash)
+    {
+        ref var slot = ref GetSlot(hash, out var mask);
+        return (Volatile.Read(ref slot) & mask) == mask;
+    }
 
     /// <summary>
     /// Checks whether the filter may contain any of the hashes.
@@ -202,33 +237,6 @@ public readonly struct BitMapFilter<TAccessor>
     }
 
     public void Clear() => _accessor.Clear();
-
-    [SkipLocalsInit]
-    public bool this[ulong hash]
-    {
-        get
-        {
-            var mixed = Mix(hash);
-            var mask = GetBitMask(mixed);
-            var slot = _accessor.GetSlot(mixed >> BitsPerIntShift);
-            return (slot & mask) == mask;
-        }
-        set
-        {
-            var mixed = Mix(hash);
-            var mask = GetBitMask(mixed);
-            ref var slot = ref _accessor.GetSlot(mixed >> BitsPerIntShift);
-
-            if (value)
-            {
-                slot |= mask;
-            }
-            else
-            {
-                slot &= ~mask;
-            }
-        }
-    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int GetBitMask(uint mixed) => 1 << (int)(mixed & BitMask);

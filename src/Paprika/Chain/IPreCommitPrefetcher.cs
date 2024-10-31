@@ -33,6 +33,8 @@ public interface IPreCommitPrefetcher
 /// </summary>
 public interface IPrefetcherContext
 {
+    bool CanPrefetchFurther { get; }
+
     /// <summary>
     /// Tries to retrieve the result stored under the given key.
     /// </summary>
@@ -44,5 +46,5 @@ public interface IPrefetcherContext
     /// <summary>
     /// Sets the value under the given key.
     /// </summary>
-    void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type = EntryType.Persistent);
+    bool Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type = EntryType.Persistent);
 }
