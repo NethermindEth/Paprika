@@ -9,6 +9,8 @@ public readonly ref struct ReadOnlySpanOwner<T>(ReadOnlySpan<T> span, IDisposabl
 
     public bool IsEmpty => Span.IsEmpty;
 
+    public bool HasOwner => owner != null;
+
     /// <summary>
     /// Disposes the owner provided as <see cref="IDisposable"/> once.
     /// </summary>

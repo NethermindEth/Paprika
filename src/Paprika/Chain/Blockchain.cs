@@ -746,6 +746,7 @@ public class Blockchain : IAsyncDisposable
             private readonly BufferPool _pool;
             private readonly ReaderWriterLockSlim _rwl;
             private readonly BitFilter _hashes;
+            private readonly RwlRelease _release;
 
             public PreCommitPrefetcher(PooledSpanDictionary cache, BlockState parent, BufferPool pool)
             {
@@ -755,6 +756,7 @@ public class Blockchain : IAsyncDisposable
                 _rwl = new ReaderWriterLockSlim();
                 _prefetched = _parent._blockchain.CreateBitFilter();
                 _hashes = _parent._blockchain.CreateBitFilter();
+                _release = new RwlRelease(_rwl);
             }
 
             public bool CanPrefetchFurther => Volatile.Read(ref _prefetchPossible);
@@ -772,10 +774,7 @@ public class Blockchain : IAsyncDisposable
                 }
 
                 ThreadPool.QueueUserWorkItem(
-                    static item =>
-                    {
-                        item.ctx.PreCommit.Prefetch(item.account, item.ctx);
-                    },
+                    static item => { item.ctx.PreCommit.Prefetch(item.account, item.ctx); },
                     (ctx: this, account),
                     false);
             }
@@ -815,10 +814,7 @@ public class Blockchain : IAsyncDisposable
                 {
                     // if only one requires prefetching it should be storage
                     ThreadPool.QueueUserWorkItem(
-                        static item =>
-                        {
-                            item.ctx.PreCommit.Prefetch(item.account, item.storage, item.ctx);
-                        },
+                        static item => { item.ctx.PreCommit.Prefetch(item.account, item.storage, item.ctx); },
                         (ctx: this, account, storage), false);
                 }
             }
@@ -845,45 +841,52 @@ public class Blockchain : IAsyncDisposable
             }
 
             [SkipLocalsInit]
-            public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
+            public ReadOnlySpanOwner<byte> Get(scoped in Key key, SpanFunc<EntryType> entryMapping)
             {
                 var hash = GetHash(key);
                 var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
+                // take read lock
                 _rwl.EnterReadLock();
 
-                try
+                if (TryReadFromCache(keyWritten, hash, out var cached))
                 {
-                    if (_cache.TryGet(keyWritten, hash, out var data))
+                    if (cached.IsEmpty)
                     {
-                        // No ownership needed, it's all local here
-                        var owner = new ReadOnlySpanOwner<byte>(data, null);
-                        return new ReadOnlySpanOwnerWithMetadata<byte>(owner, 0);
+                        _rwl.ExitReadLock();
+                        return default;
                     }
+
+                    // Dummy copy to expel the CS8352 error
+                    ref readonly var start = ref cached[0];
+                    return new ReadOnlySpanOwner<byte>(MemoryMarshal.CreateReadOnlySpan(in start, cached.Length),
+                        _release);
                 }
-                finally
+
+                // No data in the cache, exit read lock.
+                _rwl.ExitReadLock();
+
+                // First, try to see without lock whether can prefetch further.
+                if (CanPrefetchFurther == false)
                 {
-                    _rwl.ExitReadLock();
+                    return default;
                 }
 
-                return _parent.TryGetAncestors(key, keyWritten, hash);
-            }
+                // We can prefetch so scan the ancestors. No using as we'll return it
+                var ancestor = _parent.TryGetAncestors(key, keyWritten, hash);
 
-            [SkipLocalsInit]
-            public bool Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type)
-            {
-                var hash = GetHash(key);
-                var k = key.WriteTo(stackalloc byte[key.MaxByteLength]);
-
+                // Write lock
                 _rwl.EnterWriteLock();
                 try
                 {
-                    if (_prefetchPossible == false)
-                        return false;
+                    // Recheck first
+                    if (CanPrefetchFurther == false)
+                    {
+                        return default;
+                    }
 
-                    _cache.Set(k, hash, payload, (byte)type);
-                    _hashes.Add(hash);
-
+                    var span = ancestor.Span;
+                    _cache.Set(keyWritten, hash, span, (byte)entryMapping(span));
                     PrefetchCount++;
                 }
                 finally
@@ -891,7 +894,36 @@ public class Blockchain : IAsyncDisposable
                     _rwl.ExitWriteLock();
                 }
 
-                return true;
+                // The data are in cache, but it's easier and faster to return the owner from ancestors.
+
+                if (ancestor.IsEmpty)
+                {
+                    // An empty ancestor can be disposed fast, and return immediately.
+                    ancestor.Dispose();
+                    return default;
+                }
+
+                // No dispose, the owner must live.
+                return ancestor.Owner;
+            }
+
+            private bool TryReadFromCache(scoped in Span<byte> keyWritten, ulong hash, out ReadOnlySpan<byte> data)
+            {
+                Debug.Assert(_rwl.IsReadLockHeld);
+
+                if (CanPrefetchFurther == false)
+                {
+                    // Cannot prefetch further. Return empty and mark as retrieved
+                    data = default;
+                    return true;
+                }
+
+                if (_cache.TryGet(keyWritten, hash, out data))
+                    return true;
+
+                // No data in cache exit but return that data were not retrieved.
+                data = default;
+                return false;
             }
 
             public void Dispose()
@@ -899,6 +931,11 @@ public class Blockchain : IAsyncDisposable
                 _prefetched.Return(_pool);
                 _hashes.Return(_pool);
                 _rwl.Dispose();
+            }
+
+            private sealed class RwlRelease(ReaderWriterLockSlim rwl) : IDisposable
+            {
+                public void Dispose() => rwl.ExitReadLock();
             }
         }
 

@@ -1,5 +1,7 @@
-﻿using Paprika.Crypto;
+﻿using System.Buffers;
+using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Utils;
 
 namespace Paprika.Chain;
 
@@ -29,7 +31,7 @@ public interface IPreCommitPrefetcher
 }
 
 /// <summary>
-/// Allows <see cref="IPreCommitBehavior.Prefetch"/> to access ancestors data.
+/// Allows <see cref="IPreCommitBehavior"/> prefetches to access ancestors data.
 /// </summary>
 public interface IPrefetcherContext
 {
@@ -37,14 +39,10 @@ public interface IPrefetcherContext
 
     /// <summary>
     /// Tries to retrieve the result stored under the given key.
+    /// If it fails to get it from the current state, it will fetch it from the ancestors and store it accordingly to the
+    /// <paramref name="entryMapping"/>.
     /// </summary>
-    /// <remarks>
-    /// Returns a result as an owner that must be disposed properly (using var owner = Get)
-    /// </remarks>
-    public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key);
-
-    /// <summary>
-    /// Sets the value under the given key.
-    /// </summary>
-    bool Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type = EntryType.Persistent);
+    public ReadOnlySpanOwner<byte> Get(scoped in Key key, SpanFunc<EntryType> entryMapping);
 }
+
+public delegate TResult SpanFunc<TResult>(in ReadOnlySpan<byte> data);
