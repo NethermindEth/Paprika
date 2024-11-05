@@ -153,6 +153,11 @@ public readonly ref struct ReadOnlySpanOwnerWithMetadata<T>(ReadOnlySpanOwner<T>
 
     public ReadOnlySpan<T> Span => _owner.Span;
 
+    /// <summary>
+    /// Returns the underlying owner. It's up to the caller to navigate the lifetime properly.
+    /// </summary>
+    public ReadOnlySpanOwner<T> Owner => _owner;
+
     public bool IsEmpty => _owner.IsEmpty;
 
     /// <summary>
@@ -164,15 +169,6 @@ public readonly ref struct ReadOnlySpanOwnerWithMetadata<T>(ReadOnlySpanOwner<T>
     /// Answers whether this span is owned and provided by <paramref name="spanOwner"/>.
     /// </summary>
     public bool IsOwnedBy(ISpanOwner spanOwner) => _owner.IsOwnedBy(spanOwner);
-
-    /// <summary>
-    /// Increases the <see cref="QueryDepth"/> of this span owner, reporting it as more nested.
-    /// </summary>
-    public ReadOnlySpanOwnerWithMetadata<T> Nest()
-    {
-        return new ReadOnlySpanOwnerWithMetadata<T>(_owner,
-            QueryDepth == DatabaseQueryDepth ? QueryDepth : (ushort)(QueryDepth + 1));
-    }
 }
 
 public static class ReadOnlySpanOwnerExtensions
