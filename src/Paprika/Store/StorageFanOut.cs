@@ -574,7 +574,11 @@ public static class StorageFanOut
                 if (Root.IsNull)
                     return false;
 
-                return new DataPage(batch.GetAt(Root)).TryGet(batch, key, out result);
+                var root = batch.GetAt(Root);
+
+                return root.Header.PageType == PageType.DataPage
+                    ? new DataPage(root).TryGet(batch, key, out result)
+                    : new BottomPage(root).TryGet(batch, key, out result);
             }
 
             public void Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
