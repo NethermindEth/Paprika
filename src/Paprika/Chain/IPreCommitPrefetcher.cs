@@ -1,5 +1,4 @@
-﻿using System.Buffers;
-using Paprika.Crypto;
+﻿using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Utils;
 

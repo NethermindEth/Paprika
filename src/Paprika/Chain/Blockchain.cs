@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.CodeDom.Compiler;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
@@ -736,27 +737,30 @@ public class Blockchain : IAsyncDisposable
             return null;
         }
 
-        private class PreCommitPrefetcher : IDisposable, IPreCommitPrefetcher, IPrefetcherContext
+        private class PreCommitPrefetcher : IDisposable, IPreCommitPrefetcher, IPrefetcherContext, IThreadPoolWorkItem
         {
             private bool _prefetchPossible = true;
 
+            private readonly ConcurrentQueue<(Keccak, Keccak)> _items = new();
             private readonly BitFilter _prefetched;
             private readonly PooledSpanDictionary _cache;
             private readonly BlockState _parent;
             private readonly BufferPool _pool;
-            private readonly ReaderWriterLockSlim _rwl;
             private readonly BitFilter _hashes;
-            private readonly RwlRelease _release;
+
+            private const int Working = 1;
+            private const int NotWorking = 0;
+            private volatile int _working = NotWorking;
+
+            private static readonly Keccak JustAccount = Keccak.Zero;
 
             public PreCommitPrefetcher(PooledSpanDictionary cache, BlockState parent, BufferPool pool)
             {
                 _cache = cache;
                 _parent = parent;
                 _pool = pool;
-                _rwl = new ReaderWriterLockSlim();
                 _prefetched = _parent._blockchain.CreateBitFilter();
                 _hashes = _parent._blockchain.CreateBitFilter();
-                _release = new RwlRelease(_rwl);
             }
 
             public bool CanPrefetchFurther => Volatile.Read(ref _prefetchPossible);
@@ -773,10 +777,19 @@ public class Blockchain : IAsyncDisposable
                     return;
                 }
 
-                ThreadPool.QueueUserWorkItem(
-                    static item => { item.ctx.PreCommit.Prefetch(item.account, item.ctx); },
-                    (ctx: this, account),
-                    false);
+                _items.Enqueue((account, JustAccount));
+                EnsureRunning();
+            }
+
+            private void EnsureRunning()
+            {
+                if (_working == NotWorking)
+                {
+                    if (Interlocked.CompareExchange(ref _working, Working, NotWorking) == NotWorking)
+                    {
+                        ThreadPool.UnsafeQueueUserWorkItem(this, false);
+                    }
+                }
             }
 
             private bool ShouldPrefetch(ulong hash) => _prefetched.AddAtomic(hash);
@@ -790,33 +803,40 @@ public class Blockchain : IAsyncDisposable
                 var accountHash = account.GetHashCodeUlong();
                 var prefetchAccount = ShouldPrefetch(accountHash);
 
+                if (prefetchAccount)
+                {
+                    _items.Enqueue((account, JustAccount));
+                }
+
                 var storageHash = storage.GetHashCodeUlong();
                 var prefetchStorage = ShouldPrefetch(accountHash ^ storageHash);
 
-                if (!prefetchStorage && !prefetchAccount)
+                if (prefetchStorage)
                 {
-                    // both are prefetched
-                    return;
+                    _items.Enqueue((account, storage));
                 }
 
-                if (prefetchAccount && prefetchStorage)
+                if (prefetchStorage || prefetchAccount)
                 {
-                    // both require prefetching
-                    ThreadPool.QueueUserWorkItem(
-                        static item =>
-                        {
-                            item.ctx.PreCommit.Prefetch(item.account, item.ctx);
-                            item.ctx.PreCommit.Prefetch(item.account, item.storage, item.ctx);
-                        },
-                        (ctx: this, account, storage), false);
+                    EnsureRunning();
                 }
-                else
+            }
+
+            void IThreadPoolWorkItem.Execute()
+            {
+                while (CanPrefetchFurther && _items.TryDequeue(out (Keccak account, Keccak storage) item))
                 {
-                    // if only one requires prefetching it should be storage
-                    ThreadPool.QueueUserWorkItem(
-                        static item => { item.ctx.PreCommit.Prefetch(item.account, item.storage, item.ctx); },
-                        (ctx: this, account, storage), false);
+                    if (item.storage.Equals(JustAccount))
+                    {
+                        PreCommit.Prefetch(item.account, this);
+                    }
+                    else
+                    {
+                        PreCommit.Prefetch(item.account, item.storage, this);
+                    }
                 }
+
+                _working = NotWorking;
             }
 
             private IPreCommitBehavior PreCommit => _parent._blockchain._preCommit;
@@ -825,16 +845,11 @@ public class Blockchain : IAsyncDisposable
 
             public void BlockFurtherPrefetching()
             {
-                _rwl.EnterWriteLock();
+                // Mark as not possible to prefetch
+                Volatile.Write(ref _prefetchPossible, false);
 
-                try
-                {
-                    _prefetchPossible = false;
-                }
-                finally
-                {
-                    _rwl.ExitWriteLock();
-                }
+                // Spin until worker is done
+                SpinWait.SpinUntil(() => _working == NotWorking);
 
                 // Copy cache entries
                 _parent._filter.OrWith(_hashes);
@@ -843,59 +858,34 @@ public class Blockchain : IAsyncDisposable
             [SkipLocalsInit]
             public ReadOnlySpanOwner<byte> Get(scoped in Key key, SpanFunc<EntryType> entryMapping)
             {
+                if (CanPrefetchFurther == false)
+                {
+                    // Nothing more to do
+                    return default;
+                }
+
                 var hash = GetHash(key);
                 var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
-                // take read lock
-                _rwl.EnterReadLock();
-
-                if (TryReadFromCache(keyWritten, hash, out var cached))
+                if (_cache.TryGet(keyWritten, hash, out var cached))
                 {
-                    if (cached.IsEmpty)
-                    {
-                        _rwl.ExitReadLock();
-                        return default;
-                    }
-
-                    // Dummy copy to expel the CS8352 error
-                    ref readonly var start = ref cached[0];
-                    return new ReadOnlySpanOwner<byte>(MemoryMarshal.CreateReadOnlySpan(in start, cached.Length),
-                        _release);
+                    return new ReadOnlySpanOwner<byte>(cached, null);
                 }
 
-                // No data in the cache, exit read lock.
-                _rwl.ExitReadLock();
-
-                // First, try to see without lock whether can prefetch further.
                 if (CanPrefetchFurther == false)
                 {
+                    // Cannot, return
                     return default;
                 }
 
                 // We can prefetch so scan the ancestors. No using as we'll return it
                 var ancestor = _parent.TryGetAncestors(key, keyWritten, hash);
 
-                // Write lock
-                _rwl.EnterWriteLock();
-                try
-                {
-                    // Recheck first
-                    if (CanPrefetchFurther == false)
-                    {
-                        return default;
-                    }
-
-                    var span = ancestor.Span;
-                    _cache.Set(keyWritten, hash, span, (byte)entryMapping(span));
-                    PrefetchCount++;
-                }
-                finally
-                {
-                    _rwl.ExitWriteLock();
-                }
+                var span = ancestor.Span;
+                _cache.Set(keyWritten, hash, span, (byte)entryMapping(span));
+                PrefetchCount++;
 
                 // The data are in cache, but it's easier and faster to return the owner from ancestors.
-
                 if (ancestor.IsEmpty)
                 {
                     // An empty ancestor can be disposed fast, and return immediately.
@@ -907,35 +897,10 @@ public class Blockchain : IAsyncDisposable
                 return ancestor.Owner;
             }
 
-            private bool TryReadFromCache(scoped in Span<byte> keyWritten, ulong hash, out ReadOnlySpan<byte> data)
-            {
-                Debug.Assert(_rwl.IsReadLockHeld);
-
-                if (CanPrefetchFurther == false)
-                {
-                    // Cannot prefetch further. Return empty and mark as retrieved
-                    data = default;
-                    return true;
-                }
-
-                if (_cache.TryGet(keyWritten, hash, out data))
-                    return true;
-
-                // No data in cache exit but return that data were not retrieved.
-                data = default;
-                return false;
-            }
-
             public void Dispose()
             {
                 _prefetched.Return(_pool);
                 _hashes.Return(_pool);
-                _rwl.Dispose();
-            }
-
-            private sealed class RwlRelease(ReaderWriterLockSlim rwl) : IDisposable
-            {
-                public void Dispose() => rwl.ExitReadLock();
             }
         }
 
