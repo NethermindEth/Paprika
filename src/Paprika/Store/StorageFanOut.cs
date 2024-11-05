@@ -571,7 +571,8 @@ public static class StorageFanOut
                     return true;
                 }
 
-                if (Root.IsNull)
+                // If key is empty it should be in the bucket, if root is null, not progress as well
+                if (key.IsEmpty || Root.IsNull)
                     return false;
 
                 var root = batch.GetAt(Root);
@@ -585,7 +586,8 @@ public static class StorageFanOut
             {
                 Page root;
 
-                if (Root.IsNull == false && batch.WasWritten(Root))
+                // Try writing through if the key is non empty, the root exists and the Root was written in this batch
+                if (key.IsEmpty == false && Root.IsNull == false && batch.WasWritten(Root))
                 {
                     // Root exists, and was written in this batch. Write through.
                     Map.Delete(key);
@@ -612,15 +614,33 @@ public static class StorageFanOut
 
                 foreach (var item in Map.EnumerateAll())
                 {
+                    if (item.Key.IsEmpty)
+                    {
+                        // Omit flushing down the empty key
+                        continue;
+                    }
+
                     root = root.Header.PageType == PageType.DataPage
                         ? new DataPage(root).Set(item.Key, item.RawData, batch)
                         : new BottomPage(root).Set(item.Key, item.RawData, batch);
 
                     Debug.Assert(batch.GetAddress(root) == Root, "Should have been COWed before");
+
+                    // Delete each item that is moved
+                    Map.Delete(item);
                 }
 
-                // Clear map, all copied
-                Map.Clear();
+                if (key.IsEmpty)
+                {
+                    if (Map.TrySet(key, data))
+                    {
+                        return;
+                    }
+
+                    throw new Exception("Should be able to set the value");
+                }
+
+                Debug.Assert(key.IsEmpty == false, "Key should not be empty here");
 
                 // Set below
                 if (root.Header.PageType == PageType.DataPage)
