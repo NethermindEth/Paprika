@@ -746,7 +746,7 @@ public class Blockchain : IAsyncDisposable
             private readonly PooledSpanDictionary _cache;
             private readonly BlockState _parent;
             private readonly BufferPool _pool;
-            
+
             private const int Working = 1;
             private const int NotWorking = 0;
             private volatile int _working = NotWorking;
