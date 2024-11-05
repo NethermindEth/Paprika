@@ -11,7 +11,6 @@ using Paprika.Store;
 
 namespace Paprika.Tests.Chain;
 
-
 public class PrefetchingTests
 {
     [Test]
@@ -183,19 +182,25 @@ public class PrefetchingTests
 
             Console.WriteLine($"Prefetch failures: {prefetchFailures}. Commit time {commits.Elapsed:g}");
         }
-    }
 
-    private static void SetAccounts(ReadOnlyMemory<Keccak> slice, IWorldState block, uint i, bool storage)
-    {
-        Span<byte> value = stackalloc byte[sizeof(uint)];
-        BinaryPrimitives.WriteUInt32LittleEndian(value, i);
-
-        foreach (var keccak in slice.Span)
+        static void SetAccounts(ReadOnlyMemory<Keccak> slice, IWorldState block, uint i, bool storage)
         {
-            block.SetAccount(keccak, new Account(i, i));
-            if (storage)
+            Span<byte> value = stackalloc byte[sizeof(uint)];
+            BinaryPrimitives.WriteUInt32LittleEndian(value, i);
+
+            foreach (var keccak in slice.Span)
             {
-                block.SetStorage(keccak, keccak, value);
+                block.SetAccount(keccak, new Account(i, i));
+                if (storage)
+                {
+                    block.SetStorage(keccak, keccak, value);
+
+                    if (i == startBlockNumber)
+                    {
+                        // Additional slot for the start, so that a branch is created and there's something to prefetch.
+                        block.SetStorage(keccak, Keccak.EmptyTreeHash, value);
+                    }
+                }
             }
         }
     }
