@@ -746,8 +746,7 @@ public class Blockchain : IAsyncDisposable
             private readonly PooledSpanDictionary _cache;
             private readonly BlockState _parent;
             private readonly BufferPool _pool;
-            private readonly BitFilter _hashes;
-
+            
             private const int Working = 1;
             private const int NotWorking = 0;
             private volatile int _working = NotWorking;
@@ -760,7 +759,6 @@ public class Blockchain : IAsyncDisposable
                 _parent = parent;
                 _pool = pool;
                 _prefetched = _parent._blockchain.CreateBitFilter();
-                _hashes = _parent._blockchain.CreateBitFilter();
             }
 
             public bool CanPrefetchFurther => Volatile.Read(ref _prefetchPossible);
@@ -850,9 +848,6 @@ public class Blockchain : IAsyncDisposable
 
                 // Spin until worker is done
                 SpinWait.SpinUntil(() => _working == NotWorking);
-
-                // Copy cache entries
-                _parent._filter.OrWith(_hashes);
             }
 
             [SkipLocalsInit]
@@ -883,6 +878,7 @@ public class Blockchain : IAsyncDisposable
 
                 var span = ancestor.Span;
                 _cache.Set(keyWritten, hash, span, (byte)entryMapping(span));
+                _parent._filter.AddAtomic(hash);
                 PrefetchCount++;
 
                 // The data are in cache, but it's easier and faster to return the owner from ancestors.
@@ -900,7 +896,6 @@ public class Blockchain : IAsyncDisposable
             public void Dispose()
             {
                 _prefetched.Return(_pool);
-                _hashes.Return(_pool);
             }
         }
 
@@ -1051,10 +1046,15 @@ public class Blockchain : IAsyncDisposable
             _hash = null;
 
             var hash = GetHash(key);
-            _filter.Add(hash);
+            AddToFilter(hash);
 
             var k = key.WriteTo(stackalloc byte[key.MaxByteLength]);
             dict.Set(k, hash, payload, (byte)type);
+        }
+
+        private void AddToFilter(ulong hash)
+        {
+            _filter.AddAtomic(hash);
         }
 
         private void SetImpl(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1,
@@ -1065,7 +1065,7 @@ public class Blockchain : IAsyncDisposable
             _hash = null;
 
             var hash = GetHash(key);
-            _filter.Add(hash);
+            AddToFilter(hash);
 
             var k = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
