@@ -3,6 +3,7 @@ using System.Diagnostics.Contracts;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics.X86;
 using Paprika.Chain;
 using Paprika.Store;
 
@@ -183,10 +184,23 @@ public static class BitMapFilter
             Parallel.For(0, PageCount, i =>
             {
                 var page = pages[i];
-                foreach (var t in others)
+                var length = others.Length;
+
+                for (var j = 0; j < length - 1; j++)
                 {
-                    page.OrWith(t.Accessor._pages[i]);
+                    if (Sse.IsSupported)
+                    {
+                        // prefetch next
+                        unsafe
+                        {
+                            Sse.Prefetch2(others[j + 1].Accessor._pages[i].Payload);
+                        }
+                    }
+
+                    page.OrWith(others[j].Accessor._pages[i]);
                 }
+
+                page.OrWith(others[length - 1].Accessor._pages[i]);
             });
         }
 
