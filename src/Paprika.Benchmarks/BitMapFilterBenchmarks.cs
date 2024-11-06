@@ -67,14 +67,14 @@ public class BitMapFilterBenchmarks
     }
 
     [Benchmark]
-    //[Arguments(16)]
-    //[Arguments(32)]
+    [Arguments(16)]
+    [Arguments(32)]
     [Arguments(MaxFilterCount)]
     public void Or_BitMapFilter_OfN_128_Multiple(int count)
     {
         var a = new BitMapFilter<BitMapFilter.OfN<BitMapFilter.OfNSize128>>(new BitMapFilter.OfN<BitMapFilter.OfNSize128>(_pages16A));
-        //var filters = _filters.AsSpan(0, count).ToArray();
-        a.OrWith(_filters);
+        var filters = _filters.AsSpan(0, count).ToArray();
+        a.OrWith(filters);
     }
 
     [Benchmark(OperationsPerInvoke = 4)]
