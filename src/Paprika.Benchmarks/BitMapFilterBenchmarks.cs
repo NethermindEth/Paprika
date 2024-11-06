@@ -1,12 +1,15 @@
 ﻿using System.Runtime.InteropServices;
 using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Diagnostics.dotMemory;
 using Paprika.Data;
 using Paprika.Store;
 
 namespace Paprika.Benchmarks;
 
-[DisassemblyDiagnoser]
+[DisassemblyDiagnoser(maxDepth: 2)]
 [MemoryDiagnoser]
+//[DotMemoryDiagnoser]
+
 public class BitMapFilterBenchmarks
 {
     private readonly Page[] _pages1A = AlignedAlloc(1);
@@ -15,11 +18,14 @@ public class BitMapFilterBenchmarks
     private readonly Page[] _pages2A = AlignedAlloc(2);
     private readonly Page[] _pages2B = AlignedAlloc(2);
 
-    private readonly Page[] _pages16A = AlignedAlloc(128);
-    private readonly Page[] _pages16B = AlignedAlloc(128);
+    private readonly Page[] _pages16A = AlignedAlloc(BitMapFilter.OfNSize128.Count);
+    private readonly Page[] _pages16B = AlignedAlloc(BitMapFilter.OfNSize128.Count);
 
-    private readonly BitMapFilter<BitMapFilter.OfN>[] _filters = Enumerable.Range(0, MaxFilterCount)
-        .Select(i => new BitMapFilter<BitMapFilter.OfN>(new BitMapFilter.OfN(AlignedAlloc(128))))
+    private readonly BitMapFilter<BitMapFilter.OfN<BitMapFilter.OfNSize128>>[] _filters = Enumerable
+        .Range(0, MaxFilterCount)
+        .Select(i =>
+            new BitMapFilter<BitMapFilter.OfN<BitMapFilter.OfNSize128>>(
+                new BitMapFilter.OfN<BitMapFilter.OfNSize128>(AlignedAlloc(BitMapFilter.OfNSize128.Count))))
         .ToArray();
 
     private const int MaxFilterCount = 64;
@@ -51,8 +57,8 @@ public class BitMapFilterBenchmarks
     [Benchmark(OperationsPerInvoke = 4)]
     public void Or_BitMapFilter_OfN_128()
     {
-        var a = new BitMapFilter<BitMapFilter.OfN>(new BitMapFilter.OfN(_pages16A));
-        var b = new BitMapFilter<BitMapFilter.OfN>(new BitMapFilter.OfN(_pages16B));
+        var a = new BitMapFilter<BitMapFilter.OfN<BitMapFilter.OfNSize128>>(new BitMapFilter.OfN<BitMapFilter.OfNSize128>(_pages16A));
+        var b = new BitMapFilter<BitMapFilter.OfN<BitMapFilter.OfNSize128>>(new BitMapFilter.OfN<BitMapFilter.OfNSize128>(_pages16B));
 
         a.OrWith(b);
         a.OrWith(b);
@@ -61,20 +67,20 @@ public class BitMapFilterBenchmarks
     }
 
     [Benchmark]
-    [Arguments(16)]
-    [Arguments(32)]
+    //[Arguments(16)]
+    //[Arguments(32)]
     [Arguments(MaxFilterCount)]
     public void Or_BitMapFilter_OfN_128_Multiple(int count)
     {
-        var a = new BitMapFilter<BitMapFilter.OfN>(new BitMapFilter.OfN(_pages16A));
-        _filters.AsSpan(0, count).ToArray();
+        var a = new BitMapFilter<BitMapFilter.OfN<BitMapFilter.OfNSize128>>(new BitMapFilter.OfN<BitMapFilter.OfNSize128>(_pages16A));
+        //var filters = _filters.AsSpan(0, count).ToArray();
         a.OrWith(_filters);
     }
 
     [Benchmark(OperationsPerInvoke = 4)]
     public int MayContainAny_BitMapFilter_OfN_128()
     {
-        var a = new BitMapFilter<BitMapFilter.OfN>(new BitMapFilter.OfN(_pages16A));
+        var a = new BitMapFilter<BitMapFilter.OfN<BitMapFilter.OfNSize128>>(new BitMapFilter.OfN<BitMapFilter.OfNSize128>(_pages16A));
 
         return (a.MayContainAny(13, 17) ? 1 : 0) +
                (a.MayContainAny(2342, 2345) ? 1 : 0) +
