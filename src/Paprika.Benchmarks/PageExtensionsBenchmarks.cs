@@ -4,6 +4,7 @@ using Paprika.Store;
 
 namespace Paprika.Benchmarks;
 
+[DisassemblyDiagnoser]
 public class PageExtensionsBenchmarks
 {
     private readonly Page _a;
