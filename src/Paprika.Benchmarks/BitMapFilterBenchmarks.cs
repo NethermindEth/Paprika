@@ -18,6 +18,12 @@ public class BitMapFilterBenchmarks
     private readonly Page[] _pages16A = AlignedAlloc(128);
     private readonly Page[] _pages16B = AlignedAlloc(128);
 
+    private readonly BitMapFilter<BitMapFilter.OfN>[] _filters = Enumerable.Range(0, MaxFilterCount)
+        .Select(i => new BitMapFilter<BitMapFilter.OfN>(new BitMapFilter.OfN(AlignedAlloc(128))))
+        .ToArray();
+
+    private const int MaxFilterCount = 64;
+
     [Benchmark(OperationsPerInvoke = 4)]
     public void Or_BitMapFilter_Of1()
     {
@@ -57,16 +63,12 @@ public class BitMapFilterBenchmarks
     [Benchmark]
     [Arguments(16)]
     [Arguments(32)]
-    [Arguments(64)]
+    [Arguments(MaxFilterCount)]
     public void Or_BitMapFilter_OfN_128_Multiple(int count)
     {
         var a = new BitMapFilter<BitMapFilter.OfN>(new BitMapFilter.OfN(_pages16A));
-
-        var filters = Enumerable.Range(0, count)
-            .Select(i => new BitMapFilter<BitMapFilter.OfN>(new BitMapFilter.OfN(_pages16B)))
-            .ToArray();
-
-        a.OrWith(filters);
+        _filters.AsSpan(0, count).ToArray();
+        a.OrWith(_filters);
     }
 
     [Benchmark(OperationsPerInvoke = 4)]
