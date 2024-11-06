@@ -2031,11 +2031,7 @@ public class Blockchain : IAsyncDisposable
             return null;
 
         var filter = CreateBitFilter();
-        foreach (var ancestor in ancestors)
-        {
-            filter.OrWith(ancestor.Filter);
-        }
-
+        filter.OrWith(ancestors.Select(a => a.Filter).ToArray());
         return filter;
     }
 

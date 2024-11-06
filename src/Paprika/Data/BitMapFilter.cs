@@ -45,6 +45,22 @@ public static class BitMapFilter
 
         [Pure]
         void OrWith(in TAccessor other);
+
+        [Pure]
+        void OrWith<TAncestorProvider>(TAncestorProvider[] others)
+            where TAncestorProvider : struct, IAccessorProvider<TAccessor>
+        {
+            foreach (var other in others)
+            {
+                OrWith(other.Accessor);
+            }
+        }
+    }
+
+    public interface IAccessorProvider<TAccessor>
+        where TAccessor : struct, IAccessor<TAccessor>
+    {
+        public TAccessor Accessor { get; }
     }
 
     public readonly struct Of1(Page page) : IAccessor<Of1>
@@ -167,7 +183,7 @@ public static class BitMapFilter
 /// <summary>
 /// Represents a simple bitmap based filter for <see cref="ulong"/> hashes.
 /// </summary>
-public readonly struct BitMapFilter<TAccessor>
+public readonly struct BitMapFilter<TAccessor> : BitMapFilter.IAccessorProvider<TAccessor>
     where TAccessor : struct, BitMapFilter.IAccessor<TAccessor>
 {
     private readonly TAccessor _accessor;
@@ -253,7 +269,17 @@ public readonly struct BitMapFilter<TAccessor>
         _accessor.OrWith(other._accessor);
     }
 
+    /// <summary>
+    /// Applies OR operation with all the <paramref name="others"/> filters and stores it in this one.
+    /// </summary>
+    /// <remarks>
+    /// A bulk version of <see cref="OrWith(in Paprika.Data.BitMapFilter{TAccessor})"/>.
+    /// </remarks>
+    public void OrWith(BitMapFilter<TAccessor>[] others) => _accessor.OrWith(others);
+
     public int BucketCount => _accessor.BucketCount;
 
     public void Return(BufferPool pool) => _accessor.Return(pool);
+
+    public TAccessor Accessor => _accessor;
 }

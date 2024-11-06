@@ -54,6 +54,21 @@ public class BitMapFilterBenchmarks
         a.OrWith(b);
     }
 
+    [Benchmark]
+    [Arguments(16)]
+    [Arguments(32)]
+    [Arguments(64)]
+    public void Or_BitMapFilter_OfN_128_Multiple(int count)
+    {
+        var a = new BitMapFilter<BitMapFilter.OfN>(new BitMapFilter.OfN(_pages16A));
+
+        var filters = Enumerable.Range(0, count)
+            .Select(i => new BitMapFilter<BitMapFilter.OfN>(new BitMapFilter.OfN(_pages16B)))
+            .ToArray();
+
+        a.OrWith(filters);
+    }
+
     [Benchmark(OperationsPerInvoke = 4)]
     public int MayContainAny_BitMapFilter_OfN_128()
     {
