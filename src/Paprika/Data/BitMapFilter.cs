@@ -174,6 +174,22 @@ public static class BitMapFilter
             }
         }
 
+        [Pure]
+        public void OrWith<TAncestorProvider>(TAncestorProvider[] others)
+            where TAncestorProvider : struct, IAccessorProvider<OfN>
+        {
+            var pages = _pages;
+
+            Parallel.For(0, PageCount, i =>
+            {
+                var page = pages[i];
+                foreach (var t in others)
+                {
+                    page.OrWith(t.Accessor._pages[i]);
+                }
+            });
+        }
+
         public int BucketCount => Page.PageSize * BitsPerByte * PageCount;
 
         private int PageCount => _pageMask + 1;
