@@ -739,7 +739,7 @@ public class Blockchain : IAsyncDisposable
 
         private class PreCommitPrefetcher : IDisposable, IPreCommitPrefetcher, IPrefetcherContext, IThreadPoolWorkItem
         {
-            private bool _prefetchPossible = true;
+            private volatile bool _prefetchPossible = true;
 
             private readonly ConcurrentQueue<(Keccak, Keccak)> _items = new();
             private readonly BitFilter _prefetched;
@@ -761,7 +761,7 @@ public class Blockchain : IAsyncDisposable
                 _prefetched = _parent._blockchain.CreateBitFilter();
             }
 
-            public bool CanPrefetchFurther => Volatile.Read(ref _prefetchPossible);
+            public bool CanPrefetchFurther => _prefetchPossible;
 
             public void PrefetchAccount(in Keccak account)
             {
@@ -822,15 +822,25 @@ public class Blockchain : IAsyncDisposable
 
             void IThreadPoolWorkItem.Execute()
             {
-                while (CanPrefetchFurther && _items.TryDequeue(out (Keccak account, Keccak storage) item))
+                while (_items.TryDequeue(out (Keccak account, Keccak storage) item))
                 {
-                    if (item.storage.Equals(JustAccount))
+                    lock (_cache)
                     {
-                        PreCommit.Prefetch(item.account, this);
-                    }
-                    else
-                    {
-                        PreCommit.Prefetch(item.account, item.storage, this);
+                        if (_prefetchPossible == false)
+                        {
+                            // We leave _working set to Working so that next Prefetch operations
+                            // never ensure that a task is running.
+                            return;
+                        }
+
+                        if (item.storage.Equals(JustAccount))
+                        {
+                            PreCommit.Prefetch(item.account, this);
+                        }
+                        else
+                        {
+                            PreCommit.Prefetch(item.account, item.storage, this);
+                        }
                     }
                 }
 
@@ -843,11 +853,13 @@ public class Blockchain : IAsyncDisposable
 
             public void BlockFurtherPrefetching()
             {
-                // Mark as not possible to prefetch
-                Volatile.Write(ref _prefetchPossible, false);
-
-                // Spin until worker is done
-                SpinWait.SpinUntil(() => _working == NotWorking);
+                lock (_cache)
+                {
+                    // Just set the prefetch possible to false and return.
+                    // As every operation in IThreadPoolWorkItem.Execute takes this lock, it's safe.
+                    // This has one additional benefit. There's no need to worry about whether a worker runs or not atm.
+                    _prefetchPossible = false;
+                }
             }
 
             [SkipLocalsInit]
