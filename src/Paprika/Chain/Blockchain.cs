@@ -13,7 +13,7 @@ using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Store;
 using Paprika.Utils;
-using BitFilter = Paprika.Data.BitMapFilter<Paprika.Data.BitMapFilter.OfN>;
+using BitFilter = Paprika.Data.BitMapFilter<Paprika.Data.BitMapFilter.OfN<Paprika.Data.BitMapFilter.OfNSize128>>;
 
 namespace Paprika.Chain;
 
@@ -483,7 +483,7 @@ public class Blockchain : IAsyncDisposable
         }
     }
 
-    private BitFilter CreateBitFilter() => BitMapFilter.CreateOfN(_pool, BitMapFilterSizePerBlock);
+    private BitFilter CreateBitFilter() => BitMapFilter.CreateOfN<BitMapFilter.OfNSize128>(_pool);
 
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload.
@@ -2031,11 +2031,7 @@ public class Blockchain : IAsyncDisposable
             return null;
 
         var filter = CreateBitFilter();
-        foreach (var ancestor in ancestors)
-        {
-            filter.OrWith(ancestor.Filter);
-        }
-
+        filter.OrWith(ancestors.Select(a => a.Filter).ToArray());
         return filter;
     }
 
