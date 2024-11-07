@@ -3,6 +3,7 @@ using System.Diagnostics.Contracts;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics.X86;
 using Paprika.Chain;
 using Paprika.Store;
 
@@ -18,15 +19,16 @@ public static class BitMapFilter
 
     public static BitMapFilter<Of2> CreateOf2(BufferPool pool) => new(new Of2(pool.Rent(true), pool.Rent(true)));
 
-    public static BitMapFilter<OfN> CreateOfN(BufferPool pool, int n)
+    public static BitMapFilter<OfN<TSize>> CreateOfN<TSize>(BufferPool pool)
+        where TSize : IOfNSize
     {
-        var pages = new Page[n];
-        for (var i = 0; i < n; i++)
+        var pages = new Page[TSize.Count];
+        for (var i = 0; i < TSize.Count; i++)
         {
             pages[i] = pool.Rent(true);
         }
 
-        return new BitMapFilter<OfN>(new OfN(pages));
+        return new BitMapFilter<OfN<TSize>>(new OfN<TSize>(pages));
     }
 
     public interface IAccessor<TAccessor>
@@ -45,6 +47,15 @@ public static class BitMapFilter
 
         [Pure]
         void OrWith(in TAccessor other);
+
+        [Pure]
+        void OrWith(TAccessor[] others)
+        {
+            foreach (var other in others)
+            {
+                OrWith(other);
+            }
+        }
     }
 
     public readonly struct Of1(Page page) : IAccessor<Of1>
@@ -105,24 +116,34 @@ public static class BitMapFilter
         }
     }
 
-    public readonly struct OfN : IAccessor<OfN>
+    public interface IOfNSize
+    {
+        public static abstract int Count { get; }
+    }
+
+    public struct OfNSize128 : IOfNSize
+    {
+        public static int Count => 128;
+    }
+
+    public readonly struct OfN<TSize> : IAccessor<OfN<TSize>>
+        where TSize : IOfNSize
     {
         private readonly Page[] _pages;
-        private readonly byte _pageMask;
-        private readonly byte _pageMaskShift;
+
+        private static int PageMask => TSize.Count - 1;
+        private static int PageMaskShift => BitOperations.Log2((uint)TSize.Count);
 
         public OfN(Page[] pages)
         {
             _pages = pages;
-            Debug.Assert(BitOperations.IsPow2(pages.Length));
-            _pageMask = (byte)(pages.Length - 1);
-            _pageMaskShift = (byte)BitOperations.Log2((uint)pages.Length);
+            Debug.Assert(pages.Length == TSize.Count);
         }
 
         public unsafe ref int GetSlot(uint hash)
         {
-            var page = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_pages), (int)(hash & _pageMask));
-            var index = (hash >> _pageMaskShift) & SlotsPerPageMask;
+            var page = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_pages), (int)(hash & PageMask));
+            var index = (hash >> PageMaskShift) & SlotsPerPageMask;
 
             return ref Unsafe.Add(ref Unsafe.AsRef<int>(page.Raw.ToPointer()), index);
         }
@@ -143,11 +164,11 @@ public static class BitMapFilter
             }
         }
 
-        public void OrWith(in OfN other)
+        public void OrWith(in OfN<TSize> other)
         {
             var count = PageCount;
 
-            Debug.Assert(other.PageCount == count);
+            Debug.Assert(PageCount == count);
 
             ref var a = ref MemoryMarshal.GetArrayDataReference(_pages);
             ref var b = ref MemoryMarshal.GetArrayDataReference(other._pages);
@@ -158,9 +179,37 @@ public static class BitMapFilter
             }
         }
 
+        [Pure]
+        public void OrWith(OfN<TSize>[] others)
+        {
+            var pages = _pages;
+
+            Parallel.For(0, PageCount, i =>
+            {
+                var page = pages[i];
+                var length = others.Length;
+
+                for (var j = 0; j < length - 1; j++)
+                {
+                    if (Sse.IsSupported)
+                    {
+                        // prefetch next
+                        unsafe
+                        {
+                            Sse.Prefetch2(others[j + 1]._pages[i].Payload);
+                        }
+                    }
+
+                    page.OrWith(others[j]._pages[i]);
+                }
+
+                page.OrWith(others[length - 1]._pages[i]);
+            });
+        }
+
         public int BucketCount => Page.PageSize * BitsPerByte * PageCount;
 
-        private int PageCount => _pageMask + 1;
+        private static int PageCount => TSize.Count;
     }
 }
 
@@ -251,6 +300,23 @@ public readonly struct BitMapFilter<TAccessor>
     public void OrWith(in BitMapFilter<TAccessor> other)
     {
         _accessor.OrWith(other._accessor);
+    }
+
+    /// <summary>
+    /// Applies OR operation with all the <paramref name="others"/> filters and stores it in this one.
+    /// </summary>
+    /// <remarks>
+    /// A bulk version of <see cref="OrWith(in Paprika.Data.BitMapFilter{TAccessor})"/>.
+    /// </remarks>
+    public void OrWith(BitMapFilter<TAccessor>[] others)
+    {
+        var copy = new TAccessor[others.Length];
+        for (int i = 0; i < others.Length; i++)
+        {
+            copy[i] = others[i]._accessor;
+        }
+
+        _accessor.OrWith(copy);
     }
 
     public int BucketCount => _accessor.BucketCount;

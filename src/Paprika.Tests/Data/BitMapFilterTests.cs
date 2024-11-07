@@ -1,4 +1,5 @@
-﻿using FluentAssertions;
+﻿using System.Runtime.CompilerServices;
+using FluentAssertions;
 using Paprika.Chain;
 using Paprika.Data;
 
@@ -69,6 +70,12 @@ public abstract class BitMapFilterTests<TAccessor> : IDisposable
         filter.Return(_pool);
     }
 
+    [Test]
+    public void Size()
+    {
+        Console.WriteLine(Unsafe.SizeOf<BitMapFilter<TAccessor>>());
+    }
+
 
     public void Dispose() => _pool.Dispose();
 }
@@ -86,10 +93,13 @@ public class BitMapFilterTestsOf2 : BitMapFilterTests<BitMapFilter.Of2>
 }
 
 [TestFixture]
-public class BitMapFilterTestsOf4 : BitMapFilterTests<BitMapFilter.OfN>
+public class BitMapFilterTestsOf4 : BitMapFilterTests<BitMapFilter.OfN<OfSize4>>
 {
-    protected override BitMapFilter<BitMapFilter.OfN> Build(BufferPool pool) => BitMapFilter.CreateOfN(pool, 4);
+    protected override BitMapFilter<BitMapFilter.OfN<OfSize4>> Build(BufferPool pool) =>
+        BitMapFilter.CreateOfN<OfSize4>(pool);
 }
 
-
-
+public struct OfSize4 : BitMapFilter.IOfNSize
+{
+    public static int Count => 4;
+}

@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using BenchmarkDotNet.Attributes;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -29,7 +28,7 @@ public unsafe class SlottedArrayBenchmarks
     public SlottedArrayBenchmarks()
     {
         // Create keys
-        _keys = AllocAlignedPage();
+        _keys = Allocator.AllocAlignedPage();
 
         var span = new Span<byte>(_keys, Page.PageSize);
         for (byte i = 0; i < KeyCount; i++)
@@ -41,7 +40,7 @@ public unsafe class SlottedArrayBenchmarks
         }
 
         // Map
-        _map = AllocAlignedPage();
+        _map = Allocator.AllocAlignedPage();
         Span<byte> value = stackalloc byte[1];
 
         var map = new SlottedArray(new Span<byte>(_map, Page.PageSize));
@@ -55,7 +54,7 @@ public unsafe class SlottedArrayBenchmarks
         }
 
         // Hash colliding
-        _hashCollidingKeys = AllocAlignedPage();
+        _hashCollidingKeys = Allocator.AllocAlignedPage();
 
         // Create keys so that two consecutive ones share the hash.
         // This should make it somewhat realistic where there are some collisions but not a lot of them.
@@ -72,7 +71,7 @@ public unsafe class SlottedArrayBenchmarks
             hashCollidingKeys[i * BytesPerKeyHashColliding + 2] = (byte)(i / 2);
         }
 
-        _hashCollidingMap = AllocAlignedPage();
+        _hashCollidingMap = Allocator.AllocAlignedPage();
 
         var hashColliding = new SlottedArray(new Span<byte>(_hashCollidingMap, Page.PageSize));
         for (byte i = 0; i < HashCollidingKeyCount; i++)
@@ -82,16 +81,6 @@ public unsafe class SlottedArrayBenchmarks
             {
                 throw new Exception("Not enough memory");
             }
-        }
-
-        return;
-
-        static void* AllocAlignedPage()
-        {
-            const UIntPtr size = Page.PageSize;
-            var memory = NativeMemory.AlignedAlloc(size, size);
-            NativeMemory.Clear(memory, size);
-            return memory;
         }
     }
 
