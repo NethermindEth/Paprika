@@ -43,6 +43,11 @@ public sealed class MemoryMappedPageManager : PointerPageManager
 
         if (!File.Exists(Path))
         {
+            var directory = System.IO.Path.GetDirectoryName(Path);
+            if (!Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
             _file = File.OpenHandle(Path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.ReadWrite, PaprikaFileOptions);
 
             // set length
