@@ -84,10 +84,7 @@ public class PrefetchingTests
         blockchain.Finalize(hash);
         await blockchain.WaitTillFlush(hash);
 
-        using (RlpMemo.NoDecompression())
-        {
-            hash = BuildBlock(blockchain, hash, 2);
-        }
+        hash = BuildBlock(blockchain, hash, 2);
 
         return;
 
@@ -104,9 +101,13 @@ public class PrefetchingTests
             using var block = blockchain.StartNew(parent);
             var random = new Random(seed);
 
+            // Open prefetcher on blocks beyond first
+            IPreCommitPrefetcher? prefetcher = null;
+
             for (var i = 0; i < contracts; i++)
             {
                 var contract = random.NextKeccak();
+                prefetcher?.PrefetchAccount(contract);
 
                 if (isFirst)
                 {
@@ -116,11 +117,17 @@ public class PrefetchingTests
                 for (var j = 0; j < slots; j++)
                 {
                     var storage = random.NextKeccak();
+                    prefetcher?.PrefetchStorage(contract, storage);
                     block.SetStorage(contract, storage, value);
                 }
             }
 
-            return block.Commit(number);
+            prefetcher?.SpinTillPrefetchDone();
+
+            using (RlpMemo.NoDecompression())
+            {
+                return block.Commit(number);
+            }
         }
     }
 

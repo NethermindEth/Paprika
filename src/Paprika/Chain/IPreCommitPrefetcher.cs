@@ -27,6 +27,11 @@ public interface IPreCommitPrefetcher
     /// <param name="account">The account to be prefetched.</param>
     /// <param name="storage">The storage slot</param>
     void PrefetchStorage(in Keccak account, in Keccak storage);
+
+    /// <summary>
+    /// <see cref="SpinWait.SpinUntil(System.Func{bool})"/> the prefetch is done.
+    /// </summary>
+    void SpinTillPrefetchDone();
 }
 
 /// <summary>

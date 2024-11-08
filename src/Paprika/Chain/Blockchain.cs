@@ -792,6 +792,11 @@ public class Blockchain : IAsyncDisposable
                 }
             }
 
+            public void SpinTillPrefetchDone()
+            {
+                SpinWait.SpinUntil(() => _working == NotWorking);
+            }
+
             private bool ShouldPrefetch(ulong hash) => _prefetched.AddAtomic(hash);
 
             public void PrefetchStorage(in Keccak account, in Keccak storage)
