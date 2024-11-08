@@ -100,7 +100,7 @@ public class Blockchain : IAsyncDisposable
         _cacheUsagePreCommit = _meter.CreateHistogram<int>("PreCommit transient cache usage per commit", "%",
             "How much used was the transient cache");
         _prefetchCount = _meter.CreateHistogram<int>("Prefetch count",
-            "Number of prefetches performed by the prefetcher", "count");
+            "Key count", "Keys prefetched in the background by the prefetcher");
 
         // pool
         _pool = new(1024, true, _meter);
