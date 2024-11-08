@@ -757,7 +757,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
             public IChildCommit GetChild() => new ChildCommit(parent, commit.GetChild());
 
-            public bool Owns(object? actualSpanOwner) => ReferenceEquals(actualSpanOwner, commit);
+            public bool Owns(object? actualSpanOwner) => ReferenceEquals(actualSpanOwner, parent);
 
             public IReadOnlyDictionary<Keccak, int> Stats =>
                 throw new NotImplementedException("No stats for the child commit");
