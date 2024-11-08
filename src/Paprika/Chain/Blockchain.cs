@@ -750,6 +750,7 @@ public class Blockchain : IAsyncDisposable
             private const int Working = 1;
             private const int NotWorking = 0;
             private volatile int _working = NotWorking;
+            private readonly Page _workspace;
 
             private static readonly Keccak JustAccount = Keccak.Zero;
 
@@ -759,6 +760,7 @@ public class Blockchain : IAsyncDisposable
                 _parent = parent;
                 _pool = pool;
                 _prefetched = _parent._blockchain.CreateBitFilter();
+                _workspace = pool.Rent(false);
             }
 
             public bool CanPrefetchFurther => _prefetchPossible;
@@ -863,7 +865,7 @@ public class Blockchain : IAsyncDisposable
             }
 
             [SkipLocalsInit]
-            public ReadOnlySpanOwner<byte> Get(scoped in Key key, SpanFunc<EntryType> entryMapping)
+            public ReadOnlySpanOwner<byte> Get(scoped in Key key, TransformPrefetchedData transform)
             {
                 if (CanPrefetchFurther == false)
                 {
@@ -889,7 +891,13 @@ public class Blockchain : IAsyncDisposable
                 var ancestor = _parent.TryGetAncestors(key, keyWritten, hash);
 
                 var span = ancestor.Span;
-                _cache.Set(keyWritten, hash, span, (byte)entryMapping(span));
+
+                // Transform data before storing them in the cache. This is done so that Decompress for example is run on
+                // this thread, no on the one that marks paths as dirty.
+                var transformed = transform(span, _workspace.Span, out var entryType);
+
+                // Store the transformed so that, if a buffer reuse occurs in the transform it can be done before the next one is called.
+                _cache.Set(keyWritten, hash, transformed, (byte)entryType);
                 _parent._filter.AddAtomic(hash);
                 PrefetchCount++;
 
@@ -907,6 +915,7 @@ public class Blockchain : IAsyncDisposable
 
             public void Dispose()
             {
+                _pool.Return(_workspace);
                 _prefetched.Return(_pool);
             }
         }
