@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics.X86;
 using Paprika.Chain;
 using Paprika.Store;
+using Paprika.Utils;
 
 namespace Paprika.Data;
 
@@ -184,7 +185,7 @@ public static class BitMapFilter
         {
             var pages = _pages;
 
-            Parallel.For(0, PageCount, i =>
+            WorkProcessor.For(0, PageCount, i =>
             {
                 var page = pages[i];
                 var length = others.Length;
