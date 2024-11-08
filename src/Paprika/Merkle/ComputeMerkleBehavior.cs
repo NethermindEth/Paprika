@@ -605,7 +605,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             var budget = ctx.Budget;
 
             // parallel calculation
-            Parallel.For((long)0, NibbleSet.NibbleCount, s_parallelOptions, nibble =>
+            WorkProcessor.For(0, NibbleSet.NibbleCount, s_parallelOptions, nibble =>
             {
                 var childPath = NibblePath.Single((byte)nibble, 0);
 
