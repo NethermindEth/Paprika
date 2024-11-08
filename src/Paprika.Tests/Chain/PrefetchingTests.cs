@@ -102,7 +102,7 @@ public class PrefetchingTests
             var random = new Random(seed);
 
             // Open prefetcher on blocks beyond first
-            IPreCommitPrefetcher? prefetcher = null;
+            var prefetcher = isFirst == false ? block.OpenPrefetcher() : null;
 
             for (var i = 0; i < contracts; i++)
             {
