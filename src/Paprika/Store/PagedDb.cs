@@ -525,7 +525,10 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     private class HeadBatch : Batch
     {
         private readonly BufferPool _pool;
+
+
         private readonly Dictionary<DbAddress, Page> _pageTable = new();
+        private readonly Dictionary<Page, DbAddress> _pageTableReversed = new();
 
         public HeadBatch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx, BufferPool pool)
             : base(db, root, reusePagesOlderThanBatchId, ctx)
