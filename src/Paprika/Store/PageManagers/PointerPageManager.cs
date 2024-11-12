@@ -50,8 +50,6 @@ public abstract unsafe class PointerPageManager(long size) : IPageManager
             .ToInt64() / Page.PageSize));
     }
 
-    public virtual Page GetAtForWriting(DbAddress address, bool reused) => GetAt(address);
-
     public abstract ValueTask WritePages(ICollection<DbAddress> addresses, CommitOptions options);
 
     public abstract ValueTask WriteRootPage(DbAddress rootPage, CommitOptions options);

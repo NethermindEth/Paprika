@@ -3,7 +3,25 @@ using Paprika.Data;
 
 namespace Paprika;
 
-public interface IBatch : IReadOnlyBatch
+public interface IBatch : IDataSetter, IReadOnlyBatch
+{
+    /// <summary>
+    /// Commits the block returning its root hash.
+    /// </summary>
+    /// <param name="options">How to commit.</param>
+    /// <returns>The state root hash.</returns>
+    ValueTask Commit(CommitOptions options);
+
+    /// <summary>
+    /// Performs a time-consuming verification when <see cref="Commit"/> is called that all the pages are reachable.
+    /// </summary>
+    void VerifyDbPagesOnCommit();
+}
+
+/// <summary>
+/// An interface of anything <see cref="IBatch"/>-like capable of setting the data.
+/// </summary>
+public interface IDataSetter
 {
     /// <summary>
     /// Sets the metadata of the root of the current batch.
@@ -24,18 +42,6 @@ public interface IBatch : IReadOnlyBatch
     /// Deletes all the keys that share the given prefix.
     /// </summary>
     void DeleteByPrefix(in Key prefix);
-
-    /// <summary>
-    /// Commits the block returning its root hash.
-    /// </summary>
-    /// <param name="options">How to commit.</param>
-    /// <returns>The state root hash.</returns>
-    ValueTask Commit(CommitOptions options);
-
-    /// <summary>
-    /// Performs a time-consuming verification when <see cref="Commit"/> is called that all the pages are reachable.
-    /// </summary>
-    void VerifyDbPagesOnCommit();
 }
 
 public enum CommitOptions

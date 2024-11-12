@@ -59,7 +59,6 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     private readonly Histogram<int> _commitAbandonedSameBatch;
     private readonly MetricsExtensions.IAtomicIntGauge _dbSize;
 
-
     // pooled objects
     private Context? _ctx;
     private readonly BufferPool _pooledRoots;
@@ -523,20 +522,35 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     ///
     /// When committing, filter the page table to find pages that have the same batch id as this one. 
     /// </remarks>
-    private class HeadTrackingBatch : Batch
+    private class HeadTrackingBatch : BatchBase
     {
         private readonly BufferPool _pool;
 
         private readonly Dictionary<DbAddress, Page> _pageTable = new();
         private readonly Dictionary<Page, DbAddress> _pageTableReversed = new();
+        private readonly uint _reusePagesOlderThanBatchId;
 
-        public HeadTrackingBatch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx, BufferPool pool)
-            : base(db, root, reusePagesOlderThanBatchId, ctx)
+        public HeadTrackingBatch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx,
+            BufferPool pool) : base(db, ctx)
         {
+            Root = root;
+
             _pool = pool;
+            _reusePagesOlderThanBatchId = reusePagesOlderThanBatchId;
         }
 
-        public override void Prefetch(DbAddress addr) { }
+        public override void Prefetch(DbAddress addr)
+        {
+        }
+
+        public override uint BatchId { get; }
+
+        protected override RootPage Root { get; }
+
+        protected override uint ReusePagesOlderThanBatchId => _reusePagesOlderThanBatchId;
+
+        public override DbAddress GetAddress(Page page) =>
+            _pageTableReversed.TryGetValue(page, out var addr) ? addr : Db.GetAddress(page);
 
         protected override Page GetAtImpl(DbAddress addr, bool write)
         {
@@ -583,12 +597,80 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
-    class Batch : BatchContextBase, IBatch
+    private sealed class Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx)
+        : BatchBase(db, ctx), IBatch
+    {
+        private bool _verify;
+
+        protected override RootPage Root { get; } = root;
+
+        protected override uint ReusePagesOlderThanBatchId { get; } = reusePagesOlderThanBatchId;
+        protected override Page GetAtImpl(DbAddress addr, bool write) => Db.GetAt(addr);
+
+        public override DbAddress GetAddress(Page page) => Db.GetAddress(page);
+
+        public void VerifyDbPagesOnCommit()
+        {
+            _verify = true;
+        }
+
+        public void VerifyNoPagesMissing() => MissingPagesVisitor.VerifyNoPagesMissing(Root, Db, this);
+
+        public async ValueTask Commit(CommitOptions options)
+        {
+            var watch = Stopwatch.StartNew();
+
+            CheckDisposed();
+
+            // memoize the abandoned so that it's preserved for future uses
+            var abandoned = MemoizeAbandoned();
+
+            if (_verify)
+            {
+                VerifyNoPagesMissing();
+            }
+
+            // report metrics
+            Db.ReportPageStatsPerCommit(Written.Count, Metrics.PagesReused, Metrics.PagesAllocated, abandoned,
+                Metrics.RegisteredToReuseAfterWritingThisBatch);
+
+            Db.ReportReads(Metrics.Reads);
+            Db.ReportWrites(Metrics.Writes);
+
+#if TRACKING_REUSED_PAGES
+            _db._reusablePages.Set(_db._registeredForReuse.Count);
+#endif
+
+            await Db._manager.WritePages(Written, options);
+
+            var newRootPage = Db.SetNewRoot(Root);
+
+            // report
+            Db.ReportDbSize(GetRootSizeInMb(Root));
+
+            await Db._manager.WriteRootPage(newRootPage, options);
+
+            lock (Db._batchLock)
+            {
+                Db.CommitNewRoot();
+                Debug.Assert(ReferenceEquals(this, Db._batchCurrent));
+                Db._batchCurrent = null;
+            }
+
+            Db.ReportCommit(watch.Elapsed);
+        }
+
+        public override uint BatchId { get; } = root.Header.BatchId;
+    }
+
+    /// <summary>
+    /// A base class for any <see cref="IBatch"/>-like object.
+    /// </summary>
+    abstract class BatchBase : BatchContextBase, IDataSetter
     {
         protected readonly PagedDb Db;
-        private readonly RootPage _root;
-        private readonly uint _reusePagesOlderThanBatchId;
-        private bool _verify = false;
+        protected abstract RootPage Root { get; }
+
         private bool _disposed;
 
         private readonly Context _ctx;
@@ -603,19 +685,21 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         /// </summary>
         private readonly HashSet<DbAddress> _written;
 
+        protected ICollection<DbAddress> Written => _written;
+
         /// <summary>
         /// Pages that can be reused immediately.
         /// </summary>
         private readonly Stack<DbAddress> _reusedImmediately;
 
-        private readonly BatchMetrics _metrics;
+        protected readonly BatchMetrics Metrics;
 
-        public Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx) : base(
-            root.Header.BatchId)
+        protected abstract uint ReusePagesOlderThanBatchId { get; }
+
+        protected BatchBase(PagedDb db, Context ctx)
         {
             Db = db;
-            _root = root;
-            _reusePagesOlderThanBatchId = reusePagesOlderThanBatchId;
+
             _ctx = ctx;
             _abandoned = ctx.Abandoned;
             _written = ctx.Written;
@@ -623,10 +707,10 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
             IdCache = ctx.IdCache;
 
-            _metrics = new BatchMetrics();
+            Metrics = new BatchMetrics();
         }
 
-        public Metadata Metadata => _root.Data.Metadata;
+        public Metadata Metadata => Root.Data.Metadata;
 
         public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
         {
@@ -635,9 +719,9 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
                 ThrowDisposed();
             }
 
-            _metrics.Reads++;
+            Metrics.Reads++;
 
-            return _root.TryGet(key, this, out result);
+            return Root.TryGet(key, this, out result);
 
             [DoesNotReturn]
             [StackTraceHidden]
@@ -647,31 +731,29 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             }
         }
 
-        public void VerifyNoPagesMissing() => MissingPagesVisitor.VerifyNoPagesMissing(_root, Db, this);
-
         public void SetMetadata(uint blockNumber, in Keccak blockHash)
         {
-            _root.Data.Metadata = new Metadata(blockNumber, blockHash);
+            Root.Data.Metadata = new Metadata(blockNumber, blockHash);
         }
 
         public void SetRaw(in Key key, ReadOnlySpan<byte> rawData)
         {
-            _metrics.Writes++;
-            _root.SetRaw(key, this, rawData);
+            Metrics.Writes++;
+            Root.SetRaw(key, this, rawData);
         }
 
         public void Destroy(in NibblePath account)
         {
-            _metrics.Writes++;
-            _root.Destroy(this, account);
+            Metrics.Writes++;
+            Root.Destroy(this, account);
         }
 
         public void DeleteByPrefix(in Key prefix)
         {
-            _root.DeleteByPrefix(in prefix, this);
+            Root.DeleteByPrefix(in prefix, this);
         }
 
-        private void CheckDisposed()
+        protected void CheckDisposed()
         {
             if (_disposed)
             {
@@ -686,88 +768,36 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             }
         }
 
-
-        public async ValueTask Commit(CommitOptions options)
-        {
-            var watch = Stopwatch.StartNew();
-
-            CheckDisposed();
-
-            // memoize the abandoned so that it's preserved for future uses
-            MemoizeAbandoned();
-
-            if (_verify)
-            {
-                VerifyNoPagesMissing();
-            }
-
-            // report metrics
-            Db.ReportPageStatsPerCommit(_written.Count, _metrics.PagesReused, _metrics.PagesAllocated,
-                _abandoned.Count, _metrics.RegisteredToReuseAfterWritingThisBatch);
-
-            Db.ReportReads(_metrics.Reads);
-            Db.ReportWrites(_metrics.Writes);
-
-#if TRACKING_REUSED_PAGES
-            _db._reusablePages.Set(_db._registeredForReuse.Count);
-#endif
-
-            await Db._manager.WritePages(_written, options);
-
-            var newRootPage = Db.SetNewRoot(_root);
-
-            // report
-            Db.ReportDbSize(GetRootSizeInMb(_root));
-
-            await Db._manager.WriteRootPage(newRootPage, options);
-
-            lock (Db._batchLock)
-            {
-                Db.CommitNewRoot();
-                Debug.Assert(ReferenceEquals(this, Db._batchCurrent));
-                Db._batchCurrent = null;
-            }
-
-            Db.ReportCommit(watch.Elapsed);
-        }
-
-        public void VerifyDbPagesOnCommit()
-        {
-            _verify = true;
-        }
-
         [DebuggerStepThrough]
         public sealed override Page GetAt(DbAddress address)
         {
             // Getting a page beyond root!
-            var nextFree = _root.Data.NextFreePage;
+            var nextFree = Root.Data.NextFreePage;
             Debug.Assert(address < nextFree, $"Breached the next free page, NextFree: {nextFree}, retrieved {address}");
 
             return GetAtImpl(address, false);
         }
 
-        protected virtual Page GetAtImpl(DbAddress addr, bool write) => Db.GetAt(addr);
+        protected abstract Page GetAtImpl(DbAddress addr, bool write);
 
         public override void Prefetch(DbAddress addr) => Db.Prefetch(addr);
-
-        public override DbAddress GetAddress(Page page) => Db.GetAddress(page);
 
         public override Page GetNewPage(out DbAddress addr, bool clear)
         {
             if (_reusedImmediately.TryPop(out addr))
             {
-                _metrics.PagesReused++;
+                Metrics.PagesReused++;
             }
             else if (TryGetNoLongerUsedPage(out addr))
             {
-                _metrics.PagesReused++;
+                Metrics.PagesReused++;
             }
             else
             {
-                _metrics.PagesAllocated++;
+                Metrics.PagesAllocated++;
 
                 // on failure to reuse a page, default to allocating a new one.
-                addr = _root.Data.GetNextFreePage();
+                addr = Root.Data.GetNextFreePage();
             }
 
             var page = GetAtImpl(addr, true);
@@ -793,7 +823,10 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             return page;
         }
 
-        private void MemoizeAbandoned()
+        /// <summary>
+        /// Stores the abandoned in the root.
+        /// </summary>
+        protected int MemoizeAbandoned()
         {
             if (_reusedImmediately.Count > 0)
             {
@@ -804,15 +837,17 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             if (_abandoned.Count == 0)
             {
                 // nothing to memoize
-                return;
+                return 0;
             }
 
-            _root.Data.AbandonedList.Register(_abandoned, this);
+            Root.Data.AbandonedList.Register(_abandoned, this);
+
+            return _abandoned.Count;
         }
 
         private bool TryGetNoLongerUsedPage(out DbAddress found)
         {
-            var claimed = _root.Data.AbandonedList.TryGet(out found, _reusePagesOlderThanBatchId, this);
+            var claimed = Root.Data.AbandonedList.TryGet(out found, ReusePagesOlderThanBatchId, this);
 
 #if TRACKING_REUSED_PAGES
             if (claimed)
@@ -858,7 +893,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
                     return;
                 }
 
-                _metrics.RegisteredToReuseAfterWritingThisBatch++;
+                Metrics.RegisteredToReuseAfterWritingThisBatch++;
             }
 
             RegisterForFutureReuse(addr);

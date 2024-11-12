@@ -146,7 +146,7 @@ public sealed class MemoryMappedPageManager : PointerPageManager
         _writeTime.Record((int)writes.ElapsedMilliseconds);
     }
 
-    public override Page GetAtForWriting(DbAddress address, bool reused) => GetAt(address);
+    public Page GetAtForWriting(DbAddress address, bool reused) => GetAt(address);
 
     public override async ValueTask WriteRootPage(DbAddress root, CommitOptions options)
     {

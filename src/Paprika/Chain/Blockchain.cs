@@ -1411,7 +1411,7 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-        public void Apply(IBatch batch)
+        public void Apply(IDataSetter batch)
         {
             if (_destroyed is { Count: > 0 })
             {
@@ -1424,7 +1424,7 @@ public class Blockchain : IAsyncDisposable
             Apply(batch, _committed);
         }
 
-        private void Apply(IBatch batch, PooledSpanDictionary dict)
+        private void Apply(IDataSetter batch, PooledSpanDictionary dict)
         {
             var preCommit = _blockchain._preCommit;
 
