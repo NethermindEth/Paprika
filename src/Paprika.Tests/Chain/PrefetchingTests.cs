@@ -70,6 +70,67 @@ public class PrefetchingTests
         }
     }
 
+    [Test]
+    public async Task Makes_all_decompression_on_prefetch()
+    {
+        using var db = PagedDb.NativeMemoryDb(8 * 1024 * 1024, 2);
+        var merkle = new ComputeMerkleBehavior(ComputeMerkleBehavior.ParallelismNone);
+        await using var blockchain = new Blockchain(db, merkle);
+
+        // Create one block with some values, commit it and finalize
+        var hash = Keccak.EmptyTreeHash;
+
+        hash = BuildBlock(blockchain, hash, 1);
+        blockchain.Finalize(hash);
+        await blockchain.WaitTillFlush(hash);
+
+        hash = BuildBlock(blockchain, hash, 2);
+
+        return;
+
+        static Keccak BuildBlock(Blockchain blockchain, Keccak parent, uint number)
+        {
+            var isFirst = number == 1;
+
+            byte[] value = isFirst ? [17] : [23];
+
+            const int seed = 13;
+            const int contracts = 10;
+            const int slots = 10;
+
+            using var block = blockchain.StartNew(parent);
+            var random = new Random(seed);
+
+            // Open prefetcher on blocks beyond first
+            var prefetcher = isFirst == false ? block.OpenPrefetcher() : null;
+
+            for (var i = 0; i < contracts; i++)
+            {
+                var contract = random.NextKeccak();
+                prefetcher?.PrefetchAccount(contract);
+
+                if (isFirst)
+                {
+                    block.SetAccount(contract, new Account(1, 1, Keccak.Zero, Keccak.Zero));
+                }
+
+                for (var j = 0; j < slots; j++)
+                {
+                    var storage = random.NextKeccak();
+                    prefetcher?.PrefetchStorage(contract, storage);
+                    block.SetStorage(contract, storage, value);
+                }
+            }
+
+            prefetcher?.SpinTillPrefetchDone();
+
+            using (RlpMemo.NoDecompression())
+            {
+                return block.Commit(number);
+            }
+        }
+    }
+
     private static void Set(Keccak[] accounts, uint account, IWorldState start, UInt256 bigNonce)
     {
         ref var k = ref accounts[account];
