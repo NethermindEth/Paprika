@@ -27,6 +27,11 @@ public interface IPreCommitPrefetcher
     /// <param name="account">The account to be prefetched.</param>
     /// <param name="storage">The storage slot</param>
     void PrefetchStorage(in Keccak account, in Keccak storage);
+
+    /// <summary>
+    /// <see cref="SpinWait.SpinUntil(System.Func{bool})"/> the prefetch is done.
+    /// </summary>
+    void SpinTillPrefetchDone();
 }
 
 /// <summary>
@@ -38,10 +43,13 @@ public interface IPrefetcherContext
 
     /// <summary>
     /// Tries to retrieve the result stored under the given key.
-    /// If it fails to get it from the current state, it will fetch it from the ancestors and store it accordingly to the
-    /// <paramref name="entryMapping"/>.
+    /// If it fails to get it from the current state,
+    /// it will fetch it from the ancestors and store it after transforming it with <paramref name="transform"/>.
     /// </summary>
-    public ReadOnlySpanOwner<byte> Get(scoped in Key key, SpanFunc<EntryType> entryMapping);
+    public ReadOnlySpanOwner<byte> Get(scoped in Key key, TransformPrefetchedData transform);
 }
 
-public delegate TResult SpanFunc<TResult>(in ReadOnlySpan<byte> data);
+/// <summary>
+/// Transforms incoming <paramref name="data"/> to the result, providing the type of the entry as well.
+/// </summary>
+public delegate ReadOnlySpan<byte> TransformPrefetchedData(in ReadOnlySpan<byte> data, in Span<byte> workspace, out EntryType type);

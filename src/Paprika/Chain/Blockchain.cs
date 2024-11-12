@@ -100,7 +100,7 @@ public class Blockchain : IAsyncDisposable
         _cacheUsagePreCommit = _meter.CreateHistogram<int>("PreCommit transient cache usage per commit", "%",
             "How much used was the transient cache");
         _prefetchCount = _meter.CreateHistogram<int>("Prefetch count",
-            "Number of prefetches performed by the prefetcher", "count");
+            "Key count", "Keys prefetched in the background by the prefetcher");
 
         // pool
         _pool = new(1024, true, _meter);
@@ -739,7 +739,7 @@ public class Blockchain : IAsyncDisposable
 
         private class PreCommitPrefetcher : IDisposable, IPreCommitPrefetcher, IPrefetcherContext, IThreadPoolWorkItem
         {
-            private bool _prefetchPossible = true;
+            private volatile bool _prefetchPossible = true;
 
             private readonly ConcurrentQueue<(Keccak, Keccak)> _items = new();
             private readonly BitFilter _prefetched;
@@ -750,6 +750,7 @@ public class Blockchain : IAsyncDisposable
             private const int Working = 1;
             private const int NotWorking = 0;
             private volatile int _working = NotWorking;
+            private readonly Page _workspace;
 
             private static readonly Keccak JustAccount = Keccak.Zero;
 
@@ -759,9 +760,10 @@ public class Blockchain : IAsyncDisposable
                 _parent = parent;
                 _pool = pool;
                 _prefetched = _parent._blockchain.CreateBitFilter();
+                _workspace = pool.Rent(false);
             }
 
-            public bool CanPrefetchFurther => Volatile.Read(ref _prefetchPossible);
+            public bool CanPrefetchFurther => _prefetchPossible;
 
             public void PrefetchAccount(in Keccak account)
             {
@@ -788,6 +790,11 @@ public class Blockchain : IAsyncDisposable
                         ThreadPool.UnsafeQueueUserWorkItem(this, false);
                     }
                 }
+            }
+
+            public void SpinTillPrefetchDone()
+            {
+                SpinWait.SpinUntil(() => _working == NotWorking);
             }
 
             private bool ShouldPrefetch(ulong hash) => _prefetched.AddAtomic(hash);
@@ -822,15 +829,25 @@ public class Blockchain : IAsyncDisposable
 
             void IThreadPoolWorkItem.Execute()
             {
-                while (CanPrefetchFurther && _items.TryDequeue(out (Keccak account, Keccak storage) item))
+                while (_items.TryDequeue(out (Keccak account, Keccak storage) item))
                 {
-                    if (item.storage.Equals(JustAccount))
+                    lock (_cache)
                     {
-                        PreCommit.Prefetch(item.account, this);
-                    }
-                    else
-                    {
-                        PreCommit.Prefetch(item.account, item.storage, this);
+                        if (_prefetchPossible == false)
+                        {
+                            // We leave _working set to Working so that next Prefetch operations
+                            // never ensure that a task is running.
+                            return;
+                        }
+
+                        if (item.storage.Equals(JustAccount))
+                        {
+                            PreCommit.Prefetch(item.account, this);
+                        }
+                        else
+                        {
+                            PreCommit.Prefetch(item.account, item.storage, this);
+                        }
                     }
                 }
 
@@ -843,15 +860,17 @@ public class Blockchain : IAsyncDisposable
 
             public void BlockFurtherPrefetching()
             {
-                // Mark as not possible to prefetch
-                Volatile.Write(ref _prefetchPossible, false);
-
-                // Spin until worker is done
-                SpinWait.SpinUntil(() => _working == NotWorking);
+                lock (_cache)
+                {
+                    // Just set the prefetch possible to false and return.
+                    // As every operation in IThreadPoolWorkItem.Execute takes this lock, it's safe.
+                    // This has one additional benefit. There's no need to worry about whether a worker runs or not atm.
+                    _prefetchPossible = false;
+                }
             }
 
             [SkipLocalsInit]
-            public ReadOnlySpanOwner<byte> Get(scoped in Key key, SpanFunc<EntryType> entryMapping)
+            public ReadOnlySpanOwner<byte> Get(scoped in Key key, TransformPrefetchedData transform)
             {
                 if (CanPrefetchFurther == false)
                 {
@@ -877,7 +896,13 @@ public class Blockchain : IAsyncDisposable
                 var ancestor = _parent.TryGetAncestors(key, keyWritten, hash);
 
                 var span = ancestor.Span;
-                _cache.Set(keyWritten, hash, span, (byte)entryMapping(span));
+
+                // Transform data before storing them in the cache. This is done so that Decompress for example is run on
+                // this thread, no on the one that marks paths as dirty.
+                var transformed = transform(span, _workspace.Span, out var entryType);
+
+                // Store the transformed so that, if a buffer reuse occurs in the transform it can be done before the next one is called.
+                _cache.Set(keyWritten, hash, transformed, (byte)entryType);
                 _parent._filter.AddAtomic(hash);
                 PrefetchCount++;
 
@@ -895,6 +920,7 @@ public class Blockchain : IAsyncDisposable
 
             public void Dispose()
             {
+                _pool.Return(_workspace);
                 _prefetched.Return(_pool);
             }
         }

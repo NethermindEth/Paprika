@@ -757,7 +757,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
             public IChildCommit GetChild() => new ChildCommit(parent, commit.GetChild());
 
-            public bool Owns(object? actualSpanOwner) => ReferenceEquals(actualSpanOwner, commit);
+            public bool Owns(object? actualSpanOwner) => ReferenceEquals(actualSpanOwner, parent);
 
             public IReadOnlyDictionary<Keccak, int> Stats =>
                 throw new NotImplementedException("No stats for the child commit");
@@ -1438,8 +1438,39 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         PrefetchImpl(account, storage, context);
     }
 
+    private static ReadOnlySpan<byte> Transform(in ReadOnlySpan<byte> data, in Span<byte> workspace, out EntryType type)
+    {
+        if (data.IsEmpty || Node.Header.GetTypeFrom(data) != Node.Type.Branch)
+        {
+            type = EntryType.UseOnce;
+            return data;
+        }
+
+        Debug.Assert(Node.Header.GetTypeFrom(data) == Node.Type.Branch);
+
+        // Branch should be always persistent, already copied and ready to work with.
+        type = EntryType.Persistent;
+
+        var leftoverLength = Node.Branch.ReadFrom(data, out var branch).Length;
+        if (leftoverLength == RlpMemo.Size)
+        {
+            // Rlp memo is decompressed, good to be stored as is.
+            return data;
+        }
+
+        // RlpMemo not decompressed.
+
+        // Write branch first
+        var leftover = branch.WriteToWithLeftover(workspace);
+
+        // Decompress to the leftover
+        RlpMemo.Decompress(leftover, branch.Children, leftover);
+
+        return workspace[..(workspace.Length - leftover.Length + RlpMemo.Size)];
+    }
+
     [SkipLocalsInit]
-    private static void PrefetchImpl(in Keccak account, in Keccak storage, IPrefetcherContext context)
+    private void PrefetchImpl(in Keccak account, in Keccak storage, IPrefetcherContext context)
     {
         var isAccountPrefetch = Unsafe.IsNullRef(in storage);
         var accountPath = NibblePath.FromKey(account);
@@ -1461,7 +1492,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             var leftoverPath = path.SliceFrom(i);
 
             // Query for the node
-            using var owner = context.Get(key, GetEntryType);
+            using var owner = context.Get(key, Transform);
 
             if (owner.IsEmpty)
             {
