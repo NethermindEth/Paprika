@@ -512,50 +512,45 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     }
 
     /// <summary>
-    /// A linked batch allows for an arbitrary depth nesting of transactions and committing them bottom up.
+    /// Represents a batch that is currently considered a head of a list of promised batches.
     /// </summary>
     /// <remarks>
-    /// As the mapping are stored in the page table, the linked batch allows to query the data with
-    /// one dictionary lookup and a fallback to the database.
-    /// 
-    /// Additionally, it can be built with other linked batches as dependencies and copy from their page tables.
-    /// The crux here is that only the previous one requires visiting as it has the copies of the page mapping
-    /// from the previous one. As the pages are overwritten when needed, the dictionary should not be too big. 
+    /// The head batch stores all the written pages in a <see cref="_pageTable"/>, a dictionary mapping an address to a page.
+    /// This is a squashed version of all the promised batches and the pages that were written in this batch.
+    ///
+    /// To check whether it's a historical read-only page or a written one, the header can be checked.
+    ///
+    /// When committing, filter the page table to find pages that have the same batch id as this one. 
     /// </remarks>
-    private class LinkedBatch : Batch
+    private class HeadBatch : Batch
     {
-        private static readonly UIntPtr WriteMarker = new(1UL << (UIntPtr.Size == 4 ? 31 : 63));
-        private static readonly UIntPtr AddressMask = ~WriteMarker;
+        private readonly BufferPool _pool;
+        private readonly Dictionary<DbAddress, Page> _pageTable = new();
 
-        private readonly Dictionary<DbAddress, UIntPtr> _pageTable = new();
-
-        public LinkedBatch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx)
+        public HeadBatch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx, BufferPool pool)
             : base(db, root, reusePagesOlderThanBatchId, ctx)
         {
+            _pool = pool;
         }
 
         public override void Prefetch(DbAddress addr) { }
 
-        protected override unsafe Page GetAtImpl(DbAddress addr, bool write)
+        protected override Page GetAtImpl(DbAddress addr, bool write)
         {
-            ref var slot = ref CollectionsMarshal.GetValueRefOrNullRef(_pageTable, addr);
+            ref var page = ref CollectionsMarshal.GetValueRefOrNullRef(_pageTable, addr);
 
-            if (Unsafe.IsNullRef(ref slot) == false)
+            if (Unsafe.IsNullRef(ref page) == false)
             {
                 // The value exists
-
-                var writtenThisBatch = (slot & WriteMarker) == WriteMarker;
-
-                var ptr = (byte*)(slot & AddressMask).ToPointer();
-                var source = new Page(ptr);
+                var writtenThisBatch = page.Header.BatchId == BatchId;
 
                 if (!write || writtenThisBatch)
                 {
-                    return source;
+                    return page;
                 }
 
                 // Not written this batch, allocate and copy.
-                return MakeCopy(source, out slot);
+                return MakeCopy(page, out page);
             }
 
             // Does not exist, fetch from db
@@ -568,18 +563,16 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             }
 
             // The entry did not exist before, create one
-            var copy = MakeCopy(fromDb, out slot);
-            _pageTable[addr] = slot;
+            var copy = MakeCopy(fromDb, out page);
+            _pageTable[addr] = page;
             return copy;
         }
 
-        private static Page MakeCopy(Page source, out UIntPtr slot)
+        private Page MakeCopy(Page source, out Page slot)
         {
-            throw new Exception("Use pool, get a page and map to it");
-            Page copy = default;
-            source.CopyTo(copy);
-            slot = copy.Raw | WriteMarker;
-            return copy;
+            slot = _pool.Rent(false);
+            source.CopyTo(slot);
+            return slot;
         }
     }
 
