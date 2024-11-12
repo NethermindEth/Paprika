@@ -513,6 +513,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
     /// <summary>
     /// Represents a batch that is currently considered a head of a list of promised batches.
+    /// This is constantly updated so that there's never a moment when the page table needs a full rebuild.
     /// </summary>
     /// <remarks>
     /// The head batch stores all the written pages in a <see cref="_pageTable"/>, a dictionary mapping an address to a page.
@@ -522,15 +523,14 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     ///
     /// When committing, filter the page table to find pages that have the same batch id as this one. 
     /// </remarks>
-    private class HeadBatch : Batch
+    private class HeadTrackingBatch : Batch
     {
         private readonly BufferPool _pool;
-
 
         private readonly Dictionary<DbAddress, Page> _pageTable = new();
         private readonly Dictionary<Page, DbAddress> _pageTableReversed = new();
 
-        public HeadBatch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx, BufferPool pool)
+        public HeadTrackingBatch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx, BufferPool pool)
             : base(db, root, reusePagesOlderThanBatchId, ctx)
         {
             _pool = pool;
@@ -552,8 +552,9 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
                     return page;
                 }
 
-                // Not written this batch, allocate and copy.
-                return MakeCopy(page, out page);
+                // Not written this batch, allocate and copy. Memoize in the slot
+                page = MakeCopy(addr, page);
+                return page;
             }
 
             // Does not exist, fetch from db
@@ -566,15 +567,18 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             }
 
             // The entry did not exist before, create one
-            var copy = MakeCopy(fromDb, out page);
+            var copy = MakeCopy(addr, fromDb);
             _pageTable[addr] = page;
             return copy;
         }
 
-        private Page MakeCopy(Page source, out Page slot)
+        private Page MakeCopy(DbAddress at, Page source)
         {
-            slot = _pool.Rent(false);
+            var slot = _pool.Rent(false);
             source.CopyTo(slot);
+
+            // Remember reversed mapping
+            _pageTableReversed[source] = at;
             return slot;
         }
     }
