@@ -7,7 +7,7 @@ namespace Paprika.Tests.Store;
 /// <summary>
 /// Tests for clearable components. Whether they are properly cleared.
 /// </summary>
-[Parallelizable(ParallelScope.None)]
+[Parallelizable(ParallelScope.Self)]
 public unsafe class ClearableTests : IDisposable
 {
     [Test]

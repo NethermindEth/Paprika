@@ -9,10 +9,12 @@ namespace Paprika.Data;
 /// </summary>
 public static class PageExtensions
 {
+    [SkipLocalsInit]
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public static unsafe void OrWith(this Page @this, Page other)
     {
         const int bitsPerByte = 8;
+        const int unroll = 2;
 
         ref var a = ref Unsafe.AsRef<byte>(@this.Raw.ToPointer());
         ref var b = ref Unsafe.AsRef<byte>(other.Raw.ToPointer());
@@ -21,39 +23,57 @@ public static class PageExtensions
         {
             const int size = 512 / bitsPerByte;
 
-            for (UIntPtr i = 0; i < Page.PageSize; i += size)
+            for (UIntPtr i = 0; i < Page.PageSize; i += size * unroll)
             {
-                var va = Vector512.LoadUnsafe(ref a, i);
-                var vb = Vector512.LoadUnsafe(ref b, i);
-                var vc = Vector512.BitwiseOr(va, vb);
+                var va1 = Vector512.LoadUnsafe(ref a, i);
+                var vb1 = Vector512.LoadUnsafe(ref b, i);
+                var vc1 = Vector512.BitwiseOr(va1, vb1);
 
-                vc.StoreUnsafe(ref a, i);
+                vc1.StoreUnsafe(ref a, i);
+
+                var va2 = Vector512.LoadUnsafe(ref a, i + size);
+                var vb2 = Vector512.LoadUnsafe(ref b, i + size);
+                var vc2 = Vector512.BitwiseOr(va2, vb2);
+
+                vc2.StoreUnsafe(ref a, i + size);
             }
         }
         else if (Vector256.IsHardwareAccelerated)
         {
             const int size = 256 / bitsPerByte;
 
-            for (UIntPtr i = 0; i < Page.PageSize; i += size)
+            for (UIntPtr i = 0; i < Page.PageSize; i += size * unroll)
             {
-                var va = Vector256.LoadUnsafe(ref a, i);
-                var vb = Vector256.LoadUnsafe(ref b, i);
-                var vc = Vector256.BitwiseOr(va, vb);
+                var va1 = Vector256.LoadUnsafe(ref a, i);
+                var vb1 = Vector256.LoadUnsafe(ref b, i);
+                var vc1 = Vector256.BitwiseOr(va1, vb1);
 
-                vc.StoreUnsafe(ref a, i);
+                vc1.StoreUnsafe(ref a, i);
+
+                var va2 = Vector256.LoadUnsafe(ref a, i + size);
+                var vb2 = Vector256.LoadUnsafe(ref b, i + size);
+                var vc2 = Vector256.BitwiseOr(va2, vb2);
+
+                vc2.StoreUnsafe(ref a, i + size);
             }
         }
         else if (Vector128.IsHardwareAccelerated)
         {
             const int size = 128 / bitsPerByte;
 
-            for (UIntPtr i = 0; i < Page.PageSize; i += size)
+            for (UIntPtr i = 0; i < Page.PageSize; i += size * unroll)
             {
-                var va = Vector128.LoadUnsafe(ref a, i);
-                var vb = Vector128.LoadUnsafe(ref b, i);
-                var vc = Vector128.BitwiseOr(va, vb);
+                var va1 = Vector128.LoadUnsafe(ref a, i);
+                var vb1 = Vector128.LoadUnsafe(ref b, i);
+                var vc1 = Vector128.BitwiseOr(va1, vb1);
 
-                vc.StoreUnsafe(ref a, i);
+                vc1.StoreUnsafe(ref a, i);
+
+                var va2 = Vector128.LoadUnsafe(ref a, i + size);
+                var vb2 = Vector128.LoadUnsafe(ref b, i + size);
+                var vc2 = Vector128.BitwiseOr(va2, vb2);
+
+                vc2.StoreUnsafe(ref a, i + size);
             }
         }
         else

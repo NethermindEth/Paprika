@@ -161,10 +161,7 @@ public static partial class Node
             return source.Slice(Size);
         }
 
-        public static Type GetTypeFrom(ReadOnlySpan<byte> source)
-        {
-            return new Header(source[0]).NodeType;
-        }
+        public static Type GetTypeFrom(ReadOnlySpan<byte> source) => new Header(source[0]).NodeType;
 
         public static Header Peek(ReadOnlySpan<byte> source) => new(source[0]);
 

@@ -48,10 +48,10 @@ public class RootHashFuzzyTests
         AssertRoot(generator.RootHash, commit);
     }
 
-    [TestCase(nameof(Accounts_100_Storage_1), int.MaxValue)]
-    [TestCase(nameof(Accounts_1_Storage_100), 11)]
-    [TestCase(nameof(Accounts_1000_Storage_1000), int.MaxValue, Category = Categories.LongRunning)]
-    public async Task In_memory_run(string test, int commitEvery)
+    [TestCase(nameof(Accounts_100_Storage_1), int.MaxValue, 4)]
+    [TestCase(nameof(Accounts_1_Storage_100), 11, 8)]
+    [TestCase(nameof(Accounts_1000_Storage_1000), int.MaxValue, 752, Category = Categories.LongRunning)]
+    public async Task In_memory_run(string test, int commitEvery, int blockchainPoolSizeMB)
     {
         var generator = Build(test);
 
@@ -61,6 +61,14 @@ public class RootHashFuzzyTests
 
         var rootHash = generator.Run(blockchain, commitEvery);
         AssertRootHash(rootHash, generator);
+
+        AssertBlockchainMaxPoolSize(blockchain, blockchainPoolSizeMB);
+    }
+
+    private static void AssertBlockchainMaxPoolSize(Blockchain blockchain, int expected)
+    {
+        blockchain.PoolAllocatedMB.Should().BeLessOrEqualTo(expected,
+            "Upper boundary set by running this test. Bigger number means too much memory allocated.");
     }
 
     [Test]
@@ -116,9 +124,9 @@ public class RootHashFuzzyTests
         //AnsiConsole.Write(visitor.Tree);
     }
 
-    [TestCase(nameof(Accounts_10_000), 256 * 1024 * 1024L)]
-    [TestCase(nameof(Accounts_1_000_000), 2 * 1024 * 1024 * 1024L, Category = Categories.LongRunning)]
-    public async Task CalculateThenDelete(string test, long size)
+    [TestCase(nameof(Accounts_10_000), 256 * 1024 * 1024L, 8)]
+    [TestCase(nameof(Accounts_1_000_000), 2 * 1024 * 1024 * 1024L, 28, Category = Categories.LongRunning)]
+    public async Task CalculateThenDelete(string test, long size, int blockchainPoolSizeMB)
     {
         var generator = Build(test);
 
@@ -136,6 +144,8 @@ public class RootHashFuzzyTests
         var rootHash = generator.Run(blockchain, 1001, true, true);
 
         rootHash.Should().BeOneOf(Keccak.EmptyTreeHash, Keccak.Zero);
+
+        AssertBlockchainMaxPoolSize(blockchain, blockchainPoolSizeMB);
     }
 
     private static void AssertRootHash(Keccak rootHash, CaseGenerator generator)

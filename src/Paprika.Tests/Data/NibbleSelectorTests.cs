@@ -4,7 +4,7 @@ using static Paprika.Data.NibbleSelector;
 
 namespace Paprika.Tests.Data;
 
-[Parallelizable(ParallelScope.None)]
+[Parallelizable(ParallelScope.Self)]
 public class NibbleSelectorTests
 {
     private static readonly Type[] Selectors = typeof(NibbleSelector).GetNestedTypes();

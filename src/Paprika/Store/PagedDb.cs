@@ -58,6 +58,10 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     private readonly Histogram<int> _commitPageAbandoned;
     private readonly Histogram<int> _commitAbandonedSameBatch;
     private readonly MetricsExtensions.IAtomicIntGauge _dbSize;
+    private readonly MetricsExtensions.IAtomicIntGauge _lowestReadTxBatch;
+    private readonly MetricsExtensions.IAtomicIntGauge _lastWriteTxBatch;
+    private const string? BatchIdName = "BatchId";
+
 
     // pooled objects
     private Context? _ctx;

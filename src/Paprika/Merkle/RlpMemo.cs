@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -68,6 +69,11 @@ public readonly ref struct RlpMemo
     public static RlpMemo Decompress(scoped in ReadOnlySpan<byte> leftover, NibbleSet.Readonly children,
         scoped in Span<byte> workingSet)
     {
+        if (_decompressionForbidden)
+        {
+            ThrowDecompressionForbidden();
+        }
+
         var span = workingSet[..Size];
 
         if (leftover.IsEmpty)
@@ -115,6 +121,10 @@ public readonly ref struct RlpMemo
         }
 
         return memo;
+
+        [DoesNotReturn]
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void ThrowDecompressionForbidden() => throw new InvalidOperationException("Decompression is forbidden.");
     }
 
     [SkipLocalsInit]
@@ -167,5 +177,26 @@ public readonly ref struct RlpMemo
 
         // Return only children that were written
         return at * Keccak.Size;
+    }
+
+    /// <summary>
+    /// Test only method to forbid decompression.
+    /// </summary>
+    /// <returns></returns>
+    public static NoDecompressionScope NoDecompression() => new();
+
+    private static volatile bool _decompressionForbidden;
+
+    public readonly struct NoDecompressionScope : IDisposable
+    {
+        public NoDecompressionScope()
+        {
+            _decompressionForbidden = true;
+        }
+
+        public void Dispose()
+        {
+            _decompressionForbidden = false;
+        }
     }
 }

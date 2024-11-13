@@ -14,5 +14,14 @@ public readonly ref struct ReadOnlySpanOwner<T>(ReadOnlySpan<T> span, IDisposabl
     /// </summary>
     public void Dispose() => owner?.Dispose();
 
-    public bool IsOwnedBy(object potentialOwner) => ReferenceEquals(potentialOwner, owner);
+    public bool IsOwnedBy(ISpanOwner potentialSpanOwner) => potentialSpanOwner.Owns(owner);
+}
+
+public interface ISpanOwner
+{
+    /// <summary>
+    /// Checks whether this owner is capable of owning spans
+    /// owned by <paramref name="actualSpanOwner"/>.
+    /// </summary>
+    public bool Owns(object? actualSpanOwner) => ReferenceEquals(actualSpanOwner, this);
 }
