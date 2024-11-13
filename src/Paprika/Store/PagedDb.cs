@@ -415,7 +415,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             }
 
             // prepare root
-            var root = MakeNewRootUsingPool(current);
+            var root = CreateNextRoot(current, _pool);
 
             // metrics
             _lastWriteTxBatch.Set((int)root.Header.BatchId);
@@ -440,9 +440,9 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
-    private RootPage MakeNewRootUsingPool(RootPage current)
+    private static RootPage CreateNextRoot(RootPage current, BufferPool pool)
     {
-        var root = new RootPage(_pool.Rent(false));
+        var root = new RootPage(pool.Rent(false));
         current.CopyTo(root);
         root.Header.BatchId++;
         return root;
@@ -536,6 +536,24 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         public override string ToString() => $"{nameof(ReadOnlyBatch)}, Name: {name}, BatchId: {BatchId}";
     }
 
+    private class HeadTracking
+    {
+        /// <summary>
+        /// Proposes a new batch.
+        /// Additionally, it filters the <paramref name="alreadyProposed"/> selecting these that should be removed as they were applied to the database already.
+        /// </summary>
+        public (uint reusePagesOlderThan, IReadOnlyBatch read, ProposedBatch[] toRemove) Propose(IReadOnlyBatch read, ProposedBatch current, IEnumerable<ProposedBatch> alreadyProposed)
+        {
+            throw new NotImplementedException();
+        }
+    }
+
+    private class ProposedBatch((DbAddress at, Page page)[] changes, RootPage root)
+    {
+        public (DbAddress at, Page page)[] Changes { get; } = changes;
+        public RootPage Root { get; } = root;
+    }
+
     /// <summary>
     /// Represents a batch that is currently considered a head of a list of promised batches.
     /// This is constantly updated so that there's never a moment when the page table needs a full rebuild.
@@ -548,20 +566,69 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     ///
     /// When committing, filter the page table to find pages that have the same batch id as this one. 
     /// </remarks>
-    private class HeadTrackingBatch : BatchBase
+    private sealed class HeadTrackingBatch : BatchBase
     {
         private readonly BufferPool _pool;
+        private readonly HeadTracking _tracking;
 
         private readonly Dictionary<DbAddress, Page> _pageTable = new();
         private readonly Dictionary<Page, DbAddress> _pageTableReversed = new();
-        private readonly uint _reusePagesOlderThanBatchId;
+        private readonly List<(DbAddress at, Page page)> _cowed = new();
 
-        public HeadTrackingBatch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId,
-            BufferPool pool) : base(db)
+        // Linked list is used as it will have a FIFO behavior
+        private readonly LinkedList<ProposedBatch> _proposed = new();
+
+        // Current values, shifted with every commit
+        private RootPage _root;
+        private uint _batchId;
+        private uint _reusePagesOlderThanBatchId;
+        private IReadOnlyBatch _read;
+
+        public HeadTrackingBatch(PagedDb db, HeadTracking tracking, RootPage root,
+            uint reusePagesOlderThanBatchId, IReadOnlyBatch read, BufferPool pool) : base(db)
         {
-            Root = root;
+            _tracking = tracking;
+            _root = root;
+            _batchId = root.Header.BatchId;
+
             _pool = pool;
             _reusePagesOlderThanBatchId = reusePagesOlderThanBatchId;
+            _read = read;
+        }
+
+        public void Commit()
+        {
+            // The root ownership is now moved to the proposed batch
+            var batch = new ProposedBatch(_cowed.ToArray(), Root);
+            _cowed.Clear();
+
+            // Register proposal
+            var (reusePagesOlderThan, read, toRemove) = _tracking.Propose(_read, batch, _proposed);
+
+            // Locally track this proposed
+            _proposed.AddLast(batch);
+
+            // Remove pages to be removed
+            // TODO: potentially make parallel, by gathering first keys to be removed and only then remove
+            foreach (var removed in toRemove)
+            {
+                foreach (var (at, page) in removed.Changes)
+                {
+                    if (_pageTable.TryGetValue(at, out var actual) && page.Equals(actual))
+                    {
+                        _pageTable.Remove(at);
+                        _pageTableReversed.Remove(actual);
+                    }
+                }
+
+                _proposed.Remove(removed);
+            }
+
+            // Amend local state so that it respects new
+            _reusePagesOlderThanBatchId = reusePagesOlderThan;
+            _root = CreateNextRoot(Root, _pool);
+            _batchId = _root.Header.BatchId;
+            _read = read;
         }
 
         public override void Prefetch(DbAddress addr)
@@ -572,9 +639,9 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         {
         }
 
-        public override uint BatchId { get; }
+        public override uint BatchId => _batchId;
 
-        protected override RootPage Root { get; }
+        protected override RootPage Root => _root;
 
         protected override uint ReusePagesOlderThanBatchId => _reusePagesOlderThanBatchId;
 
@@ -617,12 +684,16 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
         private Page MakeCopy(DbAddress at, Page source)
         {
-            var slot = _pool.Rent(false);
-            source.CopyTo(slot);
+            var page = _pool.Rent(false);
+            source.CopyTo(page);
 
             // Remember reversed mapping
             _pageTableReversed[source] = at;
-            return slot;
+
+            // Remember that it's proposed
+            _cowed.Add((at, page));
+
+            return page;
         }
     }
 
@@ -708,7 +779,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     /// <summary>
     /// A base class for any <see cref="IBatch"/>-like object.
     /// </summary>
-    abstract class BatchBase : BatchContextBase, IDataSetter
+    private abstract class BatchBase : BatchContextBase, IDataSetter
     {
         protected readonly PagedDb Db;
         protected abstract RootPage Root { get; }
