@@ -1,13 +1,17 @@
 ﻿using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Chain;
+using Paprika.Crypto;
 
 namespace Paprika.Store;
 
 public sealed partial class PagedDb
 {
-    private class HeadTracking : IHeadTracking
+    private class HeadTracking(PagedDb db) : IHeadTracking
     {
+        private readonly Dictionary<uint, List<ProposedBatch>> _proposedBatchesById = new();
+        private readonly Dictionary<Keccak, ProposedBatch> _proposedBatchesByHash = new();
+
         /// <summary>
         /// Proposes a new batch.
         /// Additionally, it filters the <paramref name="alreadyProposed"/> selecting these that should be removed as they were applied to the database already.
@@ -17,10 +21,37 @@ public sealed partial class PagedDb
         {
             throw new NotImplementedException();
         }
+
+        public IHead Begin(in Keccak stateHash)
+        {
+            lock (db._batchLock)
+            {
+                var hash = stateHash;
+
+                var proposed = new List<ProposedBatch>();
+
+                // The stateHash that is searched is proposed. We need to construct a list of dependencies.
+                while (_proposedBatchesByHash.TryGetValue(hash, out var tail))
+                {
+                    proposed.Add(tail);
+                    hash = proposed.ParentHash;
+                }
+
+                // We want to have the oldest first
+                proposed.Reverse();
+
+                var read = db.BeginReadOnlyBatch(hash);
+
+
+                new HeadTrackingBatch(db, this, )
+
+
+            }
+        }
     }
 
     // TODO: consider replacing the array with unmanaged version based on BufferPool, may allocate 2000 items per block which is ~16kb.
-    private record ProposedBatch((DbAddress at, Page page)[] Changes, RootPage Root);
+    private record ProposedBatch((DbAddress at, Page page)[] Changes, RootPage Root, Keccak ParentHash);
 
     /// <summary>
     /// Represents a batch that is currently considered a head of a list of promised batches.
@@ -53,7 +84,7 @@ public sealed partial class PagedDb
         private IReadOnlyBatch _read;
 
         public HeadTrackingBatch(PagedDb db, HeadTracking tracking, RootPage root,
-            uint reusePagesOlderThanBatchId, IReadOnlyBatch read, BufferPool pool) : base(db)
+            uint reusePagesOlderThanBatchId, IReadOnlyBatch read, IEnumerable<ProposedBatch> proposed, BufferPool pool) : base(db)
         {
             _tracking = tracking;
             _root = root;
@@ -62,6 +93,11 @@ public sealed partial class PagedDb
             _pool = pool;
             _reusePagesOlderThanBatchId = reusePagesOlderThanBatchId;
             _read = read;
+
+            foreach (var batch in proposed)
+            {
+                _proposed.AddLast(batch);
+            }
         }
 
         public void Commit()
@@ -188,4 +224,5 @@ public interface IHead : IDataSetter
 
 public interface IHeadTracking
 {
+    IHead Begin(in Keccak stateHash);
 }

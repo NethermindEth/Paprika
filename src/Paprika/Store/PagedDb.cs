@@ -421,13 +421,7 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
             _lastWriteTxBatch.Set((int)root.Header.BatchId);
 
             // select min batch across the one respecting history and the min of all the read-only batches
-            var rootBatchId = root.Header.BatchId;
-
-            var minBatch = rootBatchId < _historyDepth ? 0 : rootBatchId - _historyDepth;
-            foreach (var batch in _batchesReadOnly)
-            {
-                minBatch = Math.Min(batch.BatchId, minBatch);
-            }
+            var minBatch = CalculateMinBatchId(root);
 
             return _batchCurrent = new Batch(this, root, minBatch);
         }
@@ -438,6 +432,21 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
         {
             throw new Exception("There is another batch active at the moment. Commit the other first");
         }
+    }
+
+    private uint CalculateMinBatchId(RootPage root)
+    {
+        Debug.Assert(Monitor.IsEntered(_batchLock), "Should be called only under lock");
+
+        var rootBatchId = root.Header.BatchId;
+
+        var minBatch = rootBatchId < _historyDepth ? 0 : rootBatchId - _historyDepth;
+        foreach (var batch in _batchesReadOnly)
+        {
+            minBatch = Math.Min(batch.BatchId, minBatch);
+        }
+
+        return minBatch;
     }
 
     private static RootPage CreateNextRoot(RootPage current, BufferPool pool)
