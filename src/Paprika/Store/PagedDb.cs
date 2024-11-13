@@ -62,10 +62,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     private readonly MetricsExtensions.IAtomicIntGauge _lastWriteTxBatch;
     private const string? BatchIdName = "BatchId";
 
-
     // pooled objects
-    private Context? _ctx;
-    private readonly BufferPool _pooledRoots;
+    private readonly BufferPool _pool;
 
 #if TRACKING_REUSED_PAGES
     // reuse tracking
@@ -118,7 +116,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             "The number of pages registered to be reused");
 #endif
         // Pool
-        _pooledRoots = new BufferPool(16, true, _meter);
+        _pool = new BufferPool(16, true, _meter);
     }
 
     public static PagedDb NativeMemoryDb(long size, byte historyDepth = 2) =>
@@ -195,7 +193,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
     public void Dispose()
     {
-        _pooledRoots.Dispose();
+        _pool.Dispose();
         _manager.Dispose();
         _meter.Dispose();
     }
@@ -227,7 +225,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
     private ReadOnlyBatch BeginReadOnlyBatch(string name, in RootPage root)
     {
-        var copy = new RootPage(_pooledRoots.Rent(false));
+        var copy = new RootPage(_pool.Rent(false));
 
         root.CopyTo(copy);
 
@@ -383,11 +381,11 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         lock (_batchLock)
         {
             _batchesReadOnly.Remove(batch);
-            _pooledRoots.Return(batch.Root.AsPage());
+            _pool.Return(batch.Root.AsPage());
         }
     }
 
-    private IBatch BuildFromRoot(RootPage rootPage)
+    private IBatch BuildFromRoot(RootPage current)
     {
         lock (_batchLock)
         {
@@ -396,15 +394,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
                 ThrowOnlyOneBatch();
             }
 
-            var ctx = _ctx ?? new Context();
-            _ctx = null;
-
             // prepare root
-            var root = new RootPage(ctx.Page);
-            rootPage.CopyTo(root);
-
-            // always inc the batchId
-            root.Header.BatchId++;
+            var root = MakeNewRootUsingPool(current);
 
             // select min batch across the one respecting history and the min of all the read-only batches
             var rootBatchId = root.Header.BatchId;
@@ -415,7 +406,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
                 minBatch = Math.Min(batch.BatchId, minBatch);
             }
 
-            return _batchCurrent = new Batch(this, root, minBatch, ctx);
+            return _batchCurrent = new Batch(this, root, minBatch);
         }
 
         [DoesNotReturn]
@@ -424,6 +415,14 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         {
             throw new Exception("There is another batch active at the moment. Commit the other first");
         }
+    }
+
+    private RootPage MakeNewRootUsingPool(RootPage current)
+    {
+        var root = new RootPage(_pool.Rent(false));
+        current.CopyTo(root);
+        root.Header.BatchId++;
+        return root;
     }
 
     private DbAddress GetAddress(in Page page) => _manager.GetAddress(page);
@@ -534,16 +533,19 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         private readonly Dictionary<Page, DbAddress> _pageTableReversed = new();
         private readonly uint _reusePagesOlderThanBatchId;
 
-        public HeadTrackingBatch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx,
-            BufferPool pool) : base(db, ctx)
+        public HeadTrackingBatch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId,
+            BufferPool pool) : base(db)
         {
             Root = root;
-
             _pool = pool;
             _reusePagesOlderThanBatchId = reusePagesOlderThanBatchId;
         }
 
         public override void Prefetch(DbAddress addr)
+        {
+        }
+
+        protected override void DisposeImpl()
         {
         }
 
@@ -601,8 +603,8 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
-    private sealed class Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId, Context ctx)
-        : BatchBase(db, ctx), IBatch
+    private sealed class Batch(PagedDb db, RootPage root, uint reusePagesOlderThanBatchId)
+        : BatchBase(db), IBatch
     {
         private bool _verify;
 
@@ -665,6 +667,19 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         }
 
         public override uint BatchId { get; } = root.Header.BatchId;
+
+        protected override void DisposeImpl()
+        {
+            Db._pool.Return(Root.AsPage());
+
+            lock (Db._batchLock)
+            {
+                if (ReferenceEquals(Db._batchCurrent, this))
+                {
+                    Db._batchCurrent = null;
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -700,16 +715,16 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
         protected abstract uint ReusePagesOlderThanBatchId { get; }
 
-        protected BatchBase(PagedDb db, Context ctx)
+        protected BatchBase(PagedDb db)
         {
             Db = db;
 
-            _ctx = ctx;
-            _abandoned = ctx.Abandoned;
-            _written = ctx.Written;
-            _reusedImmediately = ctx.ReusedImmediately;
+            _ctx = Context.Rent();
+            _abandoned = _ctx.Abandoned;
+            _written = _ctx.Written;
+            _reusedImmediately = _ctx.ReusedImmediately;
 
-            IdCache = ctx.IdCache;
+            IdCache = _ctx.IdCache;
 
             Metrics = new BatchMetrics();
         }
@@ -918,57 +933,56 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
         public void Dispose()
         {
+            CheckDisposed();
             _disposed = true;
+            Context.Return(_ctx);
 
-            lock (Db._batchLock)
+            DisposeImpl();
+        }
+
+        protected abstract void DisposeImpl();
+
+        /// <summary>
+        /// A reusable context for the <see cref="BatchBase"/>.
+        /// </summary>
+        private sealed class Context
+        {
+            private static Context? _shared;
+
+            public static Context Rent() => Interlocked.Exchange(ref _shared, null) ?? new Context();
+
+            public static void Return(Context ctx)
             {
-                if (ReferenceEquals(Db._batchCurrent, this))
-                {
-                    Db._batchCurrent = null;
-                }
+                ctx.Clear();
+                Interlocked.CompareExchange(ref _shared, ctx, null);
+            }
 
-                // clear and return
-                _ctx.Clear();
-                Db._ctx = _ctx;
+            private Context()
+            {
+                Abandoned = new List<DbAddress>();
+                Written = new HashSet<DbAddress>();
+                IdCache = new Dictionary<Keccak, uint>();
+                ReusedImmediately = new Stack<DbAddress>();
+            }
+
+            public Dictionary<Keccak, uint> IdCache { get; }
+
+            public List<DbAddress> Abandoned { get; }
+            public HashSet<DbAddress> Written { get; }
+
+            public Stack<DbAddress> ReusedImmediately { get; }
+
+            public void Clear()
+            {
+                Abandoned.Clear();
+                Written.Clear();
+                IdCache.Clear();
+                Abandoned.Clear();
+                ReusedImmediately.Clear();
             }
         }
     }
 
-    /// <summary>
-    /// A reusable context for the write batch.
-    /// </summary>
-    private sealed class Context
-    {
-        public unsafe Context()
-        {
-            Page = new((byte*)NativeMemory.AlignedAlloc(Page.PageSize, (UIntPtr)UIntPtr.Size));
-            Abandoned = new List<DbAddress>();
-            Written = new HashSet<DbAddress>();
-            IdCache = new Dictionary<Keccak, uint>();
-            ReusedImmediately = new Stack<DbAddress>();
-        }
-
-        public Dictionary<Keccak, uint> IdCache { get; }
-
-        public Page Page { get; }
-
-        public List<DbAddress> Abandoned { get; }
-        public HashSet<DbAddress> Written { get; }
-
-        public Stack<DbAddress> ReusedImmediately { get; }
-
-        public void Clear()
-        {
-            Abandoned.Clear();
-            Written.Clear();
-            IdCache.Clear();
-            Abandoned.Clear();
-            ReusedImmediately.Clear();
-
-            // no need to clear, it's always overwritten
-            //Page.Clear();
-        }
-    }
 
     public void Flush() => _manager.Flush();
 
