@@ -11,6 +11,7 @@ using Paprika.Store;
 
 namespace Paprika.Tests.Chain;
 
+[Parallelizable(ParallelScope.None)]
 public class PrefetchingTests
 {
     [Test]
