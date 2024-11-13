@@ -17,7 +17,7 @@ namespace Paprika.Store;
 /// State: <see cref="Payload.StateRoot"/> 
 /// Storage & Account Ids: <see cref="StorageFanOut.Level0"/>
 /// </remarks>
-public readonly unsafe struct RootPage(Page root) : IPage
+public readonly unsafe struct RootPage(Page root) : IPage, IEquatable<RootPage>
 {
     private const int StorageKeySize = Keccak.Size + Keccak.Size + 1;
 
@@ -231,6 +231,14 @@ public readonly unsafe struct RootPage(Page root) : IPage
         root = batch.GetAddress(updated);
     }
 
+    public bool Equals(RootPage other) => other.AsPage().Equals(this.AsPage());
+
+    public override bool Equals(object? obj)
+    {
+        return obj is RootPage other && Equals(other);
+    }
+
+    public override int GetHashCode() => this.AsPage().GetHashCode();
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
