@@ -229,6 +229,8 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
 
     private ReadOnlyBatch BeginReadOnlyBatch(string name, in RootPage root)
     {
+        Debug.Assert(Monitor.IsEntered(_batchLock));
+
         var copy = new RootPage(_pool.Rent(false));
 
         root.CopyTo(copy);
