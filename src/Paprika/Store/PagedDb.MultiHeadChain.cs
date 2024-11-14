@@ -175,7 +175,8 @@ public sealed partial class PagedDb
             // Copy the state hash
             _hash = Root.Data.Metadata.StateHash;
             _cowed.Clear();
-            Written.Clear();
+
+            Clear();
 
             // Register proposal
             var (reusePagesOlderThan, lastCommittedBatchId, read) = _chain.Propose(_read, batch);

@@ -728,8 +728,6 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
             }
         }
 
-
-
         public override void Prefetch(DbAddress addr) => Db.Prefetch(addr);
 
         public override Page GetNewPage(out DbAddress addr, bool clear)
@@ -869,6 +867,15 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
             Context.Return(_ctx);
 
             DisposeImpl();
+        }
+
+        /// <summary>
+        /// Clears the transient state.
+        /// </summary>
+        protected void Clear()
+        {
+            _ctx.Clear();
+            Metrics.Clear();
         }
 
         protected abstract void DisposeImpl();
