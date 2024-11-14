@@ -19,7 +19,7 @@ public class MultiHeadChainTests
 
         ushort counter = 0;
 
-        using var db = PagedDb.NativeMemoryDb(16 * Mb, 2);
+        using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
 
         var random = new Random(Seed);
 
@@ -84,6 +84,38 @@ public class MultiHeadChainTests
             BinaryPrimitives.WriteUInt16LittleEndian(bytes, counter);
             counter++;
             return bytes;
+        }
+    }
+
+    [Test]
+    public void Multiple_blocks()
+    {
+        const byte blocks = 64;
+
+        using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
+
+        var random = new Random(Seed);
+
+        using var multi = db.OpenMultiHeadChain();
+        using var head = multi.Begin(Keccak.Zero);
+
+        for (byte i = 0; i < blocks; i++)
+        {
+            var keccak = random.NextKeccak();
+            head.SetRaw(Key.Account(keccak), [i]);
+            head.SetMetadata((uint)(i + 1), keccak);
+            head.Commit();
+        }
+
+        // Clear
+        random = new Random(Seed);
+
+        for (byte i = 0; i < blocks; i++)
+        {
+            var keccak = random.NextKeccak();
+            head.TryGet(Key.Account(keccak), out var data)
+                .Should().BeTrue("The account should exist");
+            data.SequenceEqual([i]).Should().BeTrue();
         }
     }
 }

@@ -28,7 +28,7 @@ public sealed partial class PagedDb
             lock (db._batchLock)
             {
                 // Add by hash
-                _proposedBatchesByHash[current.StateHash] = current;
+                _proposedBatchesByHash.Add(current.StateHash, current);
 
                 // Add by number
                 ref var list = ref CollectionsMarshal.GetValueRefOrAddDefault(_proposedBatchesByBatchId,
