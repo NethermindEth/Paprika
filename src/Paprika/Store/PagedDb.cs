@@ -3,7 +3,6 @@
 using NonBlocking;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
-using System.Runtime.InteropServices;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;

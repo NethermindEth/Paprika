@@ -22,7 +22,8 @@ public sealed partial class PagedDb
         /// <summary>
         /// Proposes a new batch.
         /// </summary>
-        public (uint reusePagesOlderThan, uint lastCommittedBatchId, IReadOnlyBatch read) Propose(IReadOnlyBatch read, ProposedBatch current)
+        public (uint reusePagesOlderThan, uint lastCommittedBatchId, IReadOnlyBatch read) Propose(IReadOnlyBatch read,
+            ProposedBatch current)
         {
             lock (db._batchLock)
             {
@@ -30,7 +31,8 @@ public sealed partial class PagedDb
                 _proposedBatchesByHash[current.StateHash] = current;
 
                 // Add by number
-                ref var list = ref CollectionsMarshal.GetValueRefOrAddDefault(_proposedBatchesByBatchId, current.BatchId, out bool exists);
+                ref var list = ref CollectionsMarshal.GetValueRefOrAddDefault(_proposedBatchesByBatchId,
+                    current.BatchId, out bool exists);
 
                 if (exists == false)
                 {
@@ -57,14 +59,13 @@ public sealed partial class PagedDb
 
         private void ScheduleFlush()
         {
-
         }
 
         public IHead Begin(in Keccak stateHash)
         {
             lock (db._batchLock)
             {
-                var hash = stateHash;
+                var hash = Normalize(stateHash);
 
                 var proposed = new List<ProposedBatch>();
 
@@ -84,6 +85,27 @@ public sealed partial class PagedDb
                 var minBatchId = db.CalculateMinBatchId(root);
 
                 return new HeadTrackingBatch(db, this, root, minBatchId, read, proposed.ToArray(), db._pool);
+            }
+        }
+
+        private static Keccak Normalize(in Keccak keccak)
+        {
+            // pages are zeroed before, return zero on empty tree
+            return keccak == Keccak.EmptyTreeHash ? Keccak.Zero : keccak;
+        }
+
+        public void Dispose()
+        {
+            var pool = db._pool;
+
+            foreach (var (_, proposed) in _proposedBatchesByHash)
+            {
+                pool.Return(proposed.Root.AsPage());
+
+                foreach (var (at, page) in proposed.Changes)
+                {
+                    pool.Return(page);
+                }
             }
         }
     }
@@ -127,7 +149,8 @@ public sealed partial class PagedDb
         private Keccak _hash;
 
         public HeadTrackingBatch(PagedDb db, MultiMultiHeadChain chain, RootPage root,
-            uint reusePagesOlderThanBatchId, IReadOnlyBatch read, IEnumerable<ProposedBatch> proposed, BufferPool pool) : base(db)
+            uint reusePagesOlderThanBatchId, IReadOnlyBatch read, IEnumerable<ProposedBatch> proposed,
+            BufferPool pool) : base(db)
         {
             _chain = chain;
             _root = root;
@@ -189,6 +212,16 @@ public sealed partial class PagedDb
 
         protected override void DisposeImpl()
         {
+            var pool = Db._pool;
+
+            pool.Return(_root.AsPage());
+            _read.Dispose();
+
+            // return all copies that were not proposed
+            foreach (var (_, page) in _cowed)
+            {
+                pool.Return(page);
+            }
         }
 
         public override uint BatchId => _batchId;
@@ -232,7 +265,7 @@ public sealed partial class PagedDb
 
             // The entry did not exist before, create one
             var copy = CreateInMemoryOverride(addr, fromDb);
-            _pageTable[addr] = page;
+            _pageTable[addr] = copy;
             return copy;
         }
 
@@ -244,7 +277,7 @@ public sealed partial class PagedDb
             source.CopyTo(page);
 
             // Remember reversed mapping
-            _pageTableReversed[source] = at;
+            _pageTableReversed[page] = at;
 
             // Remember that it's proposed
             _cowed.Add((at, page));
@@ -254,7 +287,7 @@ public sealed partial class PagedDb
     }
 }
 
-public interface IHead : IDataSetter
+public interface IHead : IDataSetter, IDataGetter, IDisposable
 {
     /// <summary>
     /// Commits the changes applied so far, and movest the head tracker to the next one.
@@ -262,17 +295,12 @@ public interface IHead : IDataSetter
     void Commit();
 
     /// <summary>
-    /// The metadata of the last committed root.
-    /// </summary>
-    public ref readonly Metadata Metadata { get; }
-
-    /// <summary>
     /// The batch id.
     /// </summary>
     public uint BatchId { get; }
 }
 
-public interface IMultiHeadChain
+public interface IMultiHeadChain : IDisposable
 {
     IHead Begin(in Keccak stateHash);
 }
