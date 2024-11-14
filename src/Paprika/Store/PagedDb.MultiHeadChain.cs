@@ -81,7 +81,7 @@ public sealed partial class PagedDb
 
                 var read = (ReadOnlyBatch)db.BeginReadOnlyBatch(hash);
 
-                var root = CopyRoot(read.Root, db._pool);
+                var root = CreateNextRoot(read.Root, db._pool);
                 var minBatchId = db.CalculateMinBatchId(root);
 
                 return new HeadTrackingBatch(db, this, root, minBatchId, read, proposed.ToArray(), db._pool);
@@ -175,6 +175,7 @@ public sealed partial class PagedDb
             // Copy the state hash
             _hash = Root.Data.Metadata.StateHash;
             _cowed.Clear();
+            Written.Clear();
 
             // Register proposal
             var (reusePagesOlderThan, lastCommittedBatchId, read) = _chain.Propose(_read, batch);

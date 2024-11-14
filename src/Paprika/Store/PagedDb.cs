@@ -441,15 +441,9 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
 
     private static RootPage CreateNextRoot(RootPage current, BufferPool pool)
     {
-        var root = CopyRoot(current, pool);
-        root.Header.BatchId++;
-        return root;
-    }
-
-    private static RootPage CopyRoot(RootPage current, BufferPool pool)
-    {
         var root = new RootPage(pool.Rent(false));
         current.CopyTo(root);
+        root.Header.BatchId++;
         return root;
     }
 

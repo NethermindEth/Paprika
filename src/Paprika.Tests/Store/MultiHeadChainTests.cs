@@ -46,37 +46,37 @@ public class MultiHeadChainTests
 
         // reset
         counter = 0;
+        random = new Random(Seed);
 
-        // Assert();
-        //
-        // void Assert()
-        // {
-        //
-        //     for (var i = 0; i < accounts; i++)
-        //     {
-        //         var keccak = random.NextKeccak();
-        //
-        //         head.TryGet(Key.Account(keccak), out var value).Should().BeTrue("The account should exist");
-        //         value.SequenceEqual(GetData()).Should().BeTrue("The account should have data right");
-        //
-        //         head.TryGet(Key.StorageCell(NibblePath.FromKey(keccak), keccak), out value).Should()
-        //             .BeTrue("The storage cell should exist");
-        //         value.SequenceEqual(GetData()).Should().BeTrue("The storage cell should have data right");
-        //
-        //         for (var j = 0; j < merkleCount; j++)
-        //         {
-        //             // all the Merkle values
-        //             head.TryGet(Key.Merkle(NibblePath.FromKey(keccak).SliceTo(j)), out value).Should()
-        //                 .BeTrue("The Merkle should exist");
-        //
-        //             var actual = value.ToArray();
-        //             var expected = GetData();
-        //
-        //             actual.SequenceEqual(expected).Should()
-        //                 .BeTrue($"The Merkle @{j} of {i}th account should have data right");
-        //         }
-        //     }
-        // }
+        Assert();
+
+        void Assert()
+        {
+            for (var i = 0; i < accounts; i++)
+            {
+                var keccak = random.NextKeccak();
+
+                head.TryGet(Key.Account(keccak), out var value).Should().BeTrue("The account should exist");
+                value.SequenceEqual(GetData()).Should().BeTrue("The account should have data right");
+
+                head.TryGet(Key.StorageCell(NibblePath.FromKey(keccak), keccak), out value).Should()
+                    .BeTrue("The storage cell should exist");
+                value.SequenceEqual(GetData()).Should().BeTrue("The storage cell should have data right");
+
+                for (var j = 0; j < merkleCount; j++)
+                {
+                    // all the Merkle values
+                    head.TryGet(Key.Merkle(NibblePath.FromKey(keccak).SliceTo(j)), out value).Should()
+                        .BeTrue("The Merkle should exist");
+
+                    var actual = value.ToArray();
+                    var expected = GetData();
+
+                    actual.SequenceEqual(expected).Should()
+                        .BeTrue($"The Merkle @{j} of {i}th account should have data right");
+                }
+            }
+        }
 
         byte[] GetData()
         {
