@@ -247,20 +247,9 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
     {
         lock (_batchLock)
         {
-            for (var back = 0; back < _historyDepth; back++)
+            if (TryFindRoot(stateHash, out var root))
             {
-                if (_lastRoot - back < 0)
-                {
-                    break;
-                }
-
-                var at = (_lastRoot - back) % _historyDepth;
-                ref readonly var root = ref _roots[at];
-
-                if (root.Data.Metadata.StateHash == stateHash)
-                {
-                    return BeginReadOnlyBatch(name, root);
-                }
+                return BeginReadOnlyBatch(name, root);
             }
 
             ThrowNoMatchingPage(stateHash);
@@ -279,20 +268,9 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
     {
         lock (_batchLock)
         {
-            for (var back = 0; back < _historyDepth; back++)
+            if (TryFindRoot(stateHash, out var root))
             {
-                if (_lastRoot - back < 0)
-                {
-                    break;
-                }
-
-                var at = (_lastRoot - back) % _historyDepth;
-                ref readonly var root = ref _roots[at];
-
-                if (root.Data.Metadata.StateHash == stateHash)
-                {
-                    return BeginReadOnlyBatch(name, root);
-                }
+                return BeginReadOnlyBatch(name, root);
             }
 
             return BeginReadOnlyBatch(name, Root);
@@ -325,23 +303,34 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
     {
         lock (_batchLock)
         {
-            for (var back = 0; back < _historyDepth; back++)
+            return TryFindRoot(stateHash, out _);
+        }
+    }
+
+    /// <summary>
+    /// Tries to find the root with the given <paramref name="stateHash"/>
+    /// </summary>
+    private bool TryFindRoot(in Keccak stateHash, out RootPage root)
+    {
+        Debug.Assert(Monitor.IsEntered(_batchLock));
+
+        for (var back = 0; back < _historyDepth; back++)
+        {
+            if (_lastRoot - back < 0)
             {
-                if (_lastRoot - back < 0)
-                {
-                    break;
-                }
+                break;
+            }
 
-                var at = (_lastRoot - back) % _historyDepth;
-                ref readonly var root = ref _roots[at];
+            var at = (_lastRoot - back) % _historyDepth;
 
-                if (root.Data.Metadata.StateHash == stateHash)
-                {
-                    return true;
-                }
+            if (_roots[at].Data.Metadata.StateHash == stateHash)
+            {
+                root = _roots[at];
+                return true;
             }
         }
 
+        root = default;
         return false;
     }
 
@@ -451,9 +440,15 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
 
     private static RootPage CreateNextRoot(RootPage current, BufferPool pool)
     {
+        var root = CopyRoot(current, pool);
+        root.Header.BatchId++;
+        return root;
+    }
+
+    private static RootPage CopyRoot(RootPage current, BufferPool pool)
+    {
         var root = new RootPage(pool.Rent(false));
         current.CopyTo(root);
-        root.Header.BatchId++;
         return root;
     }
 
