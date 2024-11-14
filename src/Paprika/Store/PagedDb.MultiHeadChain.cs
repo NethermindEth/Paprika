@@ -207,6 +207,10 @@ public sealed partial class PagedDb
             _read = read;
         }
 
+        public override Page GetAt(DbAddress address) => GetAtImpl(address, false);
+
+        public override Page GetAtForWriting(DbAddress address) => GetAtImpl(address, true);
+
         public override void Prefetch(DbAddress addr)
         {
         }
@@ -236,7 +240,7 @@ public sealed partial class PagedDb
         public override DbAddress GetAddress(Page page) =>
             _pageTableReversed.TryGetValue(page, out var addr) ? addr : Db.GetAddress(page);
 
-        protected override Page GetAtImpl(DbAddress addr, bool write)
+        private Page GetAtImpl(DbAddress addr, bool write)
         {
             ref var page = ref CollectionsMarshal.GetValueRefOrNullRef(_pageTable, addr);
 

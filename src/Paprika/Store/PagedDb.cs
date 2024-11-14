@@ -543,9 +543,18 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
         protected override RootPage Root { get; } = root;
 
         protected override uint ReusePagesOlderThanBatchId { get; } = reusePagesOlderThanBatchId;
-        protected override Page GetAtImpl(DbAddress addr, bool write) => Db.GetAt(addr);
 
         public override DbAddress GetAddress(Page page) => Db.GetAddress(page);
+
+        [DebuggerStepThrough]
+        public override Page GetAt(DbAddress address)
+        {
+            // Getting a page beyond root!
+            var nextFree = Root.Data.NextFreePage;
+            Debug.Assert(address < nextFree, $"Breached the next free page, NextFree: {nextFree}, retrieved {address}");
+
+            return Db.GetAt(address);
+        }
 
         public void VerifyDbPagesOnCommit()
         {
@@ -719,17 +728,7 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
             }
         }
 
-        [DebuggerStepThrough]
-        public sealed override Page GetAt(DbAddress address)
-        {
-            // Getting a page beyond root!
-            var nextFree = Root.Data.NextFreePage;
-            Debug.Assert(address < nextFree, $"Breached the next free page, NextFree: {nextFree}, retrieved {address}");
 
-            return GetAtImpl(address, false);
-        }
-
-        protected abstract Page GetAtImpl(DbAddress addr, bool write);
 
         public override void Prefetch(DbAddress addr) => Db.Prefetch(addr);
 
@@ -751,7 +750,7 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
                 addr = Root.Data.GetNextFreePage();
             }
 
-            var page = GetAtImpl(addr, true);
+            var page = GetAtForWriting(addr);
 
             // if (reused)
             // {
