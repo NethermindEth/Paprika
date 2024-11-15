@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading.Channels;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Utils;
@@ -16,7 +17,7 @@ public sealed partial class PagedDb
         return new MultiMultiHeadChain(this);
     }
 
-    private class MultiMultiHeadChain : IMultiHeadChain, IThreadPoolWorkItem
+    private class MultiMultiHeadChain : IMultiHeadChain
     {
         private readonly PagedDb _db;
 
@@ -26,7 +27,7 @@ public sealed partial class PagedDb
 
         // Proposed batches that are finalized
         private readonly HashSet<Keccak> _beingFinalized = new();
-        private readonly Queue<(ProposedBatch[] batches, TaskCompletionSource tcs)> _finalizationQueue = new();
+        private readonly Channel<(ProposedBatch[] batches, TaskCompletionSource tcs)> _finalizationQueue = new();
 
         private bool _running;
 
@@ -109,74 +110,63 @@ public sealed partial class PagedDb
                 var batches = toFinalize.ToArray();
 
                 Debug.Assert(batches[0].BatchId >= nextBatchId);
-                _finalizationQueue.Enqueue((batches, tcs));
-
-                if (_running == false)
-                {
-                    _running = true;
-                    ThreadPool.UnsafeQueueUserWorkItem(this, false);
-                }
+                _finalizationQueue.Writer.TryWrite((batches, tcs));
 
                 return tcs.Task;
             }
         }
 
-        void IThreadPoolWorkItem.Execute()
+        private async Task FlusherTask()
         {
-            while (true)
+            var reader = _finalizationQueue.Reader;
+
+            while (await reader.WaitToReadAsync())
             {
-                (ProposedBatch[] batches, TaskCompletionSource tcs) toFinalize;
-                lock (_db._batchLock)
+                while (reader.TryRead(out var toFinalize))
                 {
-                    Debug.Assert(_running);
+                    const CommitOptions options = CommitOptions.FlushDataOnly;
 
-                    if (_finalizationQueue.TryDequeue(out toFinalize) == false)
+                    Debug.Assert(toFinalize.batches[0].BatchId == _lastCommittedBatch + 1);
+
+                    foreach (var batch in toFinalize.batches)
                     {
-                        _running = false;
-                        return;
-                    }
-                }
+                        var watch = Stopwatch.StartNew();
 
-                const CommitOptions options = CommitOptions.FlushDataOnly;
+                        // Data first
+                        await _db._manager.WritePages(batch.Changes, options);
 
-                Debug.Assert(toFinalize.batches[0].BatchId == _lastCommittedBatch + 1);
-                foreach (var batch in toFinalize.batches)
-                {
-                    var watch = Stopwatch.StartNew();
+                        // Set new root
+                        var newRootPage = _db.SetNewRoot(batch.Root);
 
-                    // Data first
-                    await _db._manager.WritePages(batch.Changes, options);
+                        // report
+                        _db.ReportDbSize(GetRootSizeInMb(batch.Root));
 
-                    // Set new root
-                    var newRootPage = _db.SetNewRoot(batch.Root);
+                        await _db._manager.WriteRootPage(newRootPage, options);
 
-                    // report
-                    _db.ReportDbSize(GetRootSizeInMb(batch.Root));
+                        List<ProposedBatch> removed;
 
-                    await _db._manager.WriteRootPage(newRootPage, options);
+                        lock (_db._batchLock)
+                        {
+                            _db.CommitNewRoot();
+                            watch.Stop();
 
-                    List<ProposedBatch> removed;
-                    lock (_db._batchLock)
-                    {
-                        _db.CommitNewRoot();
-                        watch.Stop();
+                            _lastCommittedBatch = batch.BatchId;
 
-                        _lastCommittedBatch = batch.BatchId;
+                            _proposedBatchesByBatchId.Remove(_lastCommittedBatch, out removed);
+                            foreach (var b in removed)
+                            {
+                                _proposedBatchesByHash.Remove(b.StateHash);
+                            }
+                        }
 
-                        _proposedBatchesByBatchId.Remove(_lastCommittedBatch, out removed);
+                        // Dispose outside the lock
                         foreach (var b in removed)
                         {
-                            _proposedBatchesByHash.Remove(b.StateHash);
+                            b.Dispose();
                         }
-                    }
 
-                    // Dispose outside the lock
-                    foreach (var b in removed)
-                    {
-                        b.Dispose();
+                        _db.ReportCommit(watch.Elapsed);
                     }
-
-                    _db.ReportCommit(watch.Elapsed);
                 }
             }
         }
