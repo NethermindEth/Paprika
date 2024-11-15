@@ -42,7 +42,7 @@ public class MultiHeadChainTests
             }
         }
 
-        head.Commit();
+        head.Commit(1, Keccak.EmptyTreeHash);
 
         // reset
         counter = 0;
@@ -103,8 +103,7 @@ public class MultiHeadChainTests
         {
             var keccak = random.NextKeccak();
             head.SetRaw(Key.Account(keccak), [i]);
-            head.SetMetadata((uint)(i + 1), keccak);
-            head.Commit();
+            head.Commit((uint)(i + 1), keccak);
         }
 
         // Clear

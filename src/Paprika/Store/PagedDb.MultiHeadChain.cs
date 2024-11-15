@@ -167,8 +167,10 @@ public sealed partial class PagedDb
             }
         }
 
-        public void Commit()
+        public void Commit(uint blockNumber, in Keccak blockHash)
         {
+            SetMetadata(blockNumber, blockHash);
+
             // The root ownership is now moved to the proposed batch
             var batch = new ProposedBatch(_cowed.ToArray(), Root, _hash);
 
@@ -296,14 +298,9 @@ public sealed partial class PagedDb
 public interface IHead : IDataSetter, IDataGetter, IDisposable
 {
     /// <summary>
-    /// Commits the changes applied so far, and movest the head tracker to the next one.
+    /// Commits the changes applied so far, and moves the head tracker to the next one.
     /// </summary>
-    void Commit();
-
-    /// <summary>
-    /// The batch id.
-    /// </summary>
-    public uint BatchId { get; }
+    void Commit(uint blockNumber, in Keccak blockHash);
 }
 
 public interface IMultiHeadChain : IDisposable

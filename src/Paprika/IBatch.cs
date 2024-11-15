@@ -6,6 +6,11 @@ namespace Paprika;
 public interface IBatch : IDataSetter, IReadOnlyBatch
 {
     /// <summary>
+    /// Sets the metadata of the root of the current batch.
+    /// </summary>
+    void SetMetadata(uint blockNumber, in Keccak blockHash);
+
+    /// <summary>
     /// Commits the block returning its root hash.
     /// </summary>
     /// <param name="options">How to commit.</param>
@@ -23,11 +28,6 @@ public interface IBatch : IDataSetter, IReadOnlyBatch
 /// </summary>
 public interface IDataSetter
 {
-    /// <summary>
-    /// Sets the metadata of the root of the current batch.
-    /// </summary>
-    void SetMetadata(uint blockNumber, in Keccak blockHash);
-
     /// <summary>
     /// Sets data raw.
     /// </summary>
