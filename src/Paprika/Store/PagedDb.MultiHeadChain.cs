@@ -2,6 +2,7 @@
 using System.Runtime.InteropServices;
 using Paprika.Chain;
 using Paprika.Crypto;
+using Paprika.Utils;
 
 namespace Paprika.Store;
 
@@ -23,24 +24,27 @@ public sealed partial class PagedDb
         /// Proposes a new batch.
         /// </summary>
         public (uint reusePagesOlderThan, uint lastCommittedBatchId, IReadOnlyBatch read) Propose(IReadOnlyBatch read,
-            ProposedBatch current)
+            ProposedBatch proposed)
         {
+            // The ownership
+            proposed.AcquireLease();
+
             lock (db._batchLock)
             {
                 // Add by hash
-                _proposedBatchesByHash.Add(current.StateHash, current);
+                _proposedBatchesByHash.Add(proposed.StateHash, proposed);
 
                 // Add by number
                 ref var list = ref CollectionsMarshal.GetValueRefOrAddDefault(_proposedBatchesByBatchId,
-                    current.BatchId, out bool exists);
+                    proposed.BatchId, out bool exists);
 
                 if (exists == false)
                 {
-                    list = [current];
+                    list = [proposed];
                 }
                 else
                 {
-                    list!.Add(current);
+                    list!.Add(proposed);
                 }
 
                 read.Dispose();
@@ -96,25 +100,31 @@ public sealed partial class PagedDb
 
         public void Dispose()
         {
-            var pool = db._pool;
-
             foreach (var (_, proposed) in _proposedBatchesByHash)
             {
-                pool.Return(proposed.Root.AsPage());
-
-                foreach (var (at, page) in proposed.Changes)
-                {
-                    pool.Return(page);
-                }
+                proposed.Dispose();
             }
         }
     }
 
     // TODO: consider replacing the array with unmanaged version based on BufferPool, may allocate 2000 items per block which is ~16kb.
-    private record ProposedBatch((DbAddress at, Page page)[] Changes, RootPage Root, Keccak ParentHash)
+    private sealed class ProposedBatch((DbAddress at, Page page)[] changes, RootPage root, Keccak parentHash, BufferPool pool) : RefCountingDisposable
     {
         public Keccak StateHash => Root.Data.Metadata.StateHash;
         public uint BatchId => Root.Header.BatchId;
+        public (DbAddress at, Page page)[] Changes { get; } = changes;
+        public RootPage Root { get; } = root;
+        public Keccak ParentHash { get; } = parentHash;
+
+        protected override void CleanUp()
+        {
+            pool.Return(Root.AsPage());
+
+            foreach (var (_, page) in Changes)
+            {
+                pool.Return(page);
+            }
+        }
     }
 
     /// <summary>
@@ -139,7 +149,7 @@ public sealed partial class PagedDb
         private readonly List<(DbAddress at, Page page)> _cowed = new();
 
         // Linked list is used as it will have a FIFO behavior
-        private readonly LinkedList<ProposedBatch> _proposed = new();
+        private readonly Queue<ProposedBatch> _proposed = new();
 
         // Current values, shifted with every commit
         private RootPage _root;
@@ -163,7 +173,9 @@ public sealed partial class PagedDb
 
             foreach (var batch in proposed)
             {
-                _proposed.AddLast(batch);
+                // As enqueued, acquire leases
+                batch.AcquireLease();
+                _proposed.Enqueue(batch);
             }
         }
 
@@ -171,27 +183,30 @@ public sealed partial class PagedDb
         {
             SetMetadata(blockNumber, blockHash);
 
-            // The root ownership is now moved to the proposed batch
-            var batch = new ProposedBatch(_cowed.ToArray(), Root, _hash);
-
             // Copy the state hash
             _hash = Root.Data.Metadata.StateHash;
-            _cowed.Clear();
 
+            // The root ownership is now moved to the proposed batch.
+            // The batch is automatically leased by this head. It will be leased by the chain as well. 
+            var batch = new ProposedBatch(_cowed.ToArray(), Root, _hash, Db._pool);
+
+            _cowed.Clear();
             Clear();
+
+            // Create new root before it's proposed.
+            _root = CreateNextRoot(Root, _pool);
 
             // Register proposal
             var (reusePagesOlderThan, lastCommittedBatchId, read) = _chain.Propose(_read, batch);
 
             // Locally track this proposed
-            _proposed.AddLast(batch);
+            _proposed.Enqueue(batch);
 
             // Remove pages to be removed
             // TODO: potentially make parallel, by gathering first keys to be removed and only then remove
-            while (_proposed.First != null && _proposed.First.Value.Root.Header.BatchId <= lastCommittedBatchId)
+            while (_proposed.TryPeek(out var first) && first.Root.Header.BatchId <= lastCommittedBatchId)
             {
-                var removed = _proposed.First.Value;
-                _proposed.RemoveFirst();
+                var removed = _proposed.Dequeue();
 
                 foreach (var (at, page) in removed.Changes)
                 {
@@ -201,6 +216,8 @@ public sealed partial class PagedDb
                         _pageTableReversed.Remove(actual);
                     }
                 }
+
+                removed.Dispose();
             }
 
             // Amend local state so that it respects new
@@ -229,6 +246,12 @@ public sealed partial class PagedDb
             foreach (var (_, page) in _cowed)
             {
                 pool.Return(page);
+            }
+
+            // Dispose all proposed blocks that are still held by this.
+            while (_proposed.TryDequeue(out var proposed))
+            {
+                proposed.Dispose();
             }
         }
 

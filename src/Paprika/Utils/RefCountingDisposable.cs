@@ -53,6 +53,7 @@ public abstract class RefCountingDisposable : IDisposable
                 // Successfully acquired
                 return true;
             }
+
             if (prev == Disposing)
             {
                 // Already disposed
