@@ -47,7 +47,8 @@ public interface IPageManager : IDisposable, IPageResolver
     /// </summary>
     /// <remarks>
     /// This operation should be used only when working with the mem mapped file without issuing
-    /// <see cref="WritePages"/> and <see cref="WriteRootPage"/>, for example in IMPORT scenario.
+    /// <see cref="WritePages(System.Collections.Generic.ICollection{Paprika.Store.DbAddress},Paprika.CommitOptions)"/>
+    /// and <see cref="WriteRootPage"/>, for example in IMPORT scenario.
     /// </remarks>
     void ForceFlush();
 }

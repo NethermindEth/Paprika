@@ -137,13 +137,48 @@ public sealed partial class PagedDb
                     }
                 }
 
+                const CommitOptions options = CommitOptions.FlushDataOnly;
+
                 Debug.Assert(toFinalize.batches[0].BatchId == _lastCommittedBatch + 1);
                 foreach (var batch in toFinalize.batches)
                 {
-                    _db.ReportWrites();
+                    var watch = Stopwatch.StartNew();
+
+                    // Data first
+                    await _db._manager.WritePages(batch.Changes, options);
+
+                    // Set new root
+                    var newRootPage = _db.SetNewRoot(batch.Root);
+
+                    // report
+                    _db.ReportDbSize(GetRootSizeInMb(batch.Root));
+
+                    await _db._manager.WriteRootPage(newRootPage, options);
+
+                    List<ProposedBatch> removed;
+                    lock (_db._batchLock)
+                    {
+                        _db.CommitNewRoot();
+                        watch.Stop();
+
+                        _lastCommittedBatch = batch.BatchId;
+
+                        _proposedBatchesByBatchId.Remove(_lastCommittedBatch, out removed);
+                        foreach (var b in removed)
+                        {
+                            _proposedBatchesByHash.Remove(b.StateHash);
+                        }
+                    }
+
+                    // Dispose outside the lock
+                    foreach (var b in removed)
+                    {
+                        b.Dispose();
+                    }
+
+                    _db.ReportCommit(watch.Elapsed);
                 }
             }
-
         }
 
         private ProposedBatch FindProposed(Keccak keccak)

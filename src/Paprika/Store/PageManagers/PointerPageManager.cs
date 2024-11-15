@@ -51,14 +51,44 @@ public abstract unsafe class PointerPageManager(long size) : IPageManager
     }
 
     public abstract ValueTask WritePages(ICollection<DbAddress> addresses, CommitOptions options);
-    public abstract ValueTask WritePages(IEnumerable<(DbAddress at, Page page)> pages, CommitOptions options);
+
+    public ValueTask WritePages(IEnumerable<(DbAddress at, Page page)> pages, CommitOptions options)
+    {
+        // The memory was copied to a set of pages that are not mapped. Requires copying back to the mapped ones.
+        Parallel.ForEach(pages, (pair, _) =>
+        {
+            var (at, page) = pair;
+            page.CopyTo(GetAt(at));
+        });
+
+        // The memory is now coherent and memory mapped contains what pages passed have.
+        var addresses = Interlocked.Exchange(ref _addresses, null) ?? new();
+        Debug.Assert(addresses.Count == 0);
+
+        try
+        {
+            foreach (var (at, _) in pages)
+            {
+                addresses.Add(at);
+            }
+
+            return WritePages(addresses, options);
+        }
+        finally
+        {
+            // return
+            addresses.Clear();
+            Interlocked.CompareExchange(ref _addresses, addresses, null);
+        }
+    }
+
+    private List<DbAddress>? _addresses = new();
 
     public abstract ValueTask WriteRootPage(DbAddress rootPage, CommitOptions options);
 
     public abstract void Flush();
 
     public abstract void ForceFlush();
-    public abstract bool UsesPersistentPaging { get; }
 
     public abstract void Dispose();
 }
