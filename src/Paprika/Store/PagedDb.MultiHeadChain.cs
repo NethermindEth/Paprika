@@ -222,7 +222,6 @@ public sealed partial class PagedDb
 
             // Amend local state so that it respects new
             _reusePagesOlderThanBatchId = reusePagesOlderThan;
-            _root = CreateNextRoot(Root, _pool);
             _batchId = _root.Header.BatchId;
             _read = read;
         }

@@ -1,3 +1,5 @@
+// #define STACK_TRACE_TRACKING
+
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
@@ -18,6 +20,10 @@ public class BufferPool : IDisposable
     private readonly bool _assertCountOnDispose;
     private readonly ConcurrentQueue<Page> _pool = new();
     private readonly ConcurrentQueue<IntPtr> _slabs = new();
+
+#if STACK_TRACE_TRACKING
+    private readonly ConcurrentDictionary<Page, StackTrace> _traces = new();
+#endif
 
     private readonly MetricsExtensions.IAtomicIntGauge? _allocatedMB;
 
@@ -59,15 +65,33 @@ public class BufferPool : IDisposable
         if (clear)
             pooled.Clear();
 
+#if STACK_TRACE_TRACKING
+        _traces[pooled] = new StackTrace();
+#endif
+
         return pooled;
     }
 
-    public void Return(Page page) => _pool.Enqueue(page);
+    public void Return(Page page)
+    {
+#if STACK_TRACE_TRACKING
+        _traces.TryRemove(page, out _);
+#endif
+
+        _pool.Enqueue(page);
+    }
 
     public void Dispose()
     {
         var expectedCount = _buffersInOneSlab * _slabs.Count;
         var actualCount = _pool.Count;
+
+#if STACK_TRACE_TRACKING
+        foreach (var (_, value) in _traces)
+        {
+            throw new Exception(value.ToString());
+        }
+#endif
 
         if (_assertCountOnDispose)
         {
