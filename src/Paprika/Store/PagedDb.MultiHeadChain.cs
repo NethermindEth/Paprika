@@ -1,4 +1,6 @@
-﻿using System.Runtime.CompilerServices;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Chain;
 using Paprika.Crypto;
@@ -11,14 +13,32 @@ public sealed partial class PagedDb
     public IMultiHeadChain OpenMultiHeadChain()
     {
         // TODO: properly set and mark db as not capable of using batches.
-        return new MultiMultiHeadChain(this, int.MaxValue);
+        return new MultiMultiHeadChain(this);
     }
 
-    private class MultiMultiHeadChain(PagedDb db, int maxDepth) : IMultiHeadChain
+    private class MultiMultiHeadChain : IMultiHeadChain, IThreadPoolWorkItem
     {
+        private readonly PagedDb _db;
+
+        // Batches grouped by id and number
         private readonly Dictionary<uint, List<ProposedBatch>> _proposedBatchesByBatchId = new();
         private readonly Dictionary<Keccak, ProposedBatch> _proposedBatchesByHash = new();
+
+        // Proposed batches that are finalized
+        private readonly HashSet<Keccak> _beingFinalized = new();
+        private readonly Queue<(ProposedBatch[] batches, TaskCompletionSource tcs)> _finalizationQueue = new();
+
+        private bool _running;
+
         private uint _lastCommittedBatch;
+
+        public MultiMultiHeadChain(PagedDb db)
+        {
+            _db = db;
+
+            using var read = _db.BeginReadOnlyBatchOrLatest(Keccak.Zero);
+            _lastCommittedBatch = read.BatchId;
+        }
 
         /// <summary>
         /// Proposes a new batch.
@@ -29,7 +49,7 @@ public sealed partial class PagedDb
             // The ownership
             proposed.AcquireLease();
 
-            lock (db._batchLock)
+            lock (_db._batchLock)
             {
                 // Add by hash
                 _proposedBatchesByHash.Add(proposed.StateHash, proposed);
@@ -49,25 +69,93 @@ public sealed partial class PagedDb
 
                 read.Dispose();
 
-                if (_proposedBatchesByBatchId.Count > maxDepth)
-                {
-                    ScheduleFlush();
-                }
-
-                var next = db.BeginReadOnlyBatch();
-                var minBatchId = db.CalculateMinBatchId(db.Root);
+                var next = _db.BeginReadOnlyBatch();
+                var minBatchId = _db.CalculateMinBatchId(_db.Root);
 
                 return (minBatchId, _lastCommittedBatch, next);
             }
         }
 
-        private void ScheduleFlush()
+        public Task Finalize(Keccak keccak)
         {
+            lock (_db._batchLock)
+            {
+                if (_beingFinalized.Add(keccak) == false)
+                {
+                    // Already registered for finalization, return
+                    return Task.CompletedTask;
+                }
+
+                var proposed = FindProposed(keccak);
+                if (proposed.BatchId <= _lastCommittedBatch)
+                {
+                    // Already committed for finalization, return
+                    return Task.CompletedTask;
+                }
+
+                var toFinalize = new Stack<ProposedBatch>();
+                var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                toFinalize.Push(proposed);
+
+                // While not finalized yet, add parents
+                var nextBatchId = _lastCommittedBatch + 1;
+
+                while (proposed.BatchId > nextBatchId && _beingFinalized.Add(proposed.ParentHash))
+                {
+                    proposed = FindProposed(proposed.ParentHash);
+                    toFinalize.Push(proposed);
+                }
+
+                var batches = toFinalize.ToArray();
+
+                Debug.Assert(batches[0].BatchId >= nextBatchId);
+                _finalizationQueue.Enqueue((batches, tcs));
+
+                if (_running == false)
+                {
+                    _running = true;
+                    ThreadPool.UnsafeQueueUserWorkItem(this, false);
+                }
+
+                return tcs.Task;
+            }
+        }
+
+        void IThreadPoolWorkItem.Execute()
+        {
+            while (true)
+            {
+                (ProposedBatch[] batches, TaskCompletionSource tcs) toFinalize;
+                lock (_db._batchLock)
+                {
+                    Debug.Assert(_running);
+
+                    if (_finalizationQueue.TryDequeue(out toFinalize) == false)
+                    {
+                        _running = false;
+                        return;
+                    }
+                }
+
+                Debug.Assert(toFinalize.batches[0].BatchId == _lastCommittedBatch + 1);
+                foreach (var batch in toFinalize.batches)
+                {
+                    _db.ReportWrites();
+                }
+            }
+
+        }
+
+        private ProposedBatch FindProposed(Keccak keccak)
+        {
+            return _proposedBatchesByHash.TryGetValue(keccak, out var proposed)
+                ? proposed
+                : throw new Exception($"No batch with {keccak} was proposed to this chain.");
         }
 
         public IHead Begin(in Keccak stateHash)
         {
-            lock (db._batchLock)
+            lock (_db._batchLock)
             {
                 var hash = Normalize(stateHash);
 
@@ -83,12 +171,12 @@ public sealed partial class PagedDb
                 // We want to have the oldest first
                 proposed.Reverse();
 
-                var read = (ReadOnlyBatch)db.BeginReadOnlyBatch(hash);
+                var read = (ReadOnlyBatch)_db.BeginReadOnlyBatch(hash);
 
-                var root = CreateNextRoot(read.Root, db._pool);
-                var minBatchId = db.CalculateMinBatchId(root);
+                var root = CreateNextRoot(read.Root, _db._pool);
+                var minBatchId = _db.CalculateMinBatchId(root);
 
-                return new HeadTrackingBatch(db, this, root, minBatchId, read, proposed.ToArray(), db._pool);
+                return new HeadTrackingBatch(_db, this, root, minBatchId, read, proposed.ToArray(), _db._pool);
             }
         }
 
@@ -108,7 +196,11 @@ public sealed partial class PagedDb
     }
 
     // TODO: consider replacing the array with unmanaged version based on BufferPool, may allocate 2000 items per block which is ~16kb.
-    private sealed class ProposedBatch((DbAddress at, Page page)[] changes, RootPage root, Keccak parentHash, BufferPool pool) : RefCountingDisposable
+    private sealed class ProposedBatch(
+        (DbAddress at, Page page)[] changes,
+        RootPage root,
+        Keccak parentHash,
+        BufferPool pool) : RefCountingDisposable
     {
         public Keccak StateHash => Root.Data.Metadata.StateHash;
         public uint BatchId => Root.Header.BatchId;

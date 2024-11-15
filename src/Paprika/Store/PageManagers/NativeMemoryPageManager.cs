@@ -34,5 +34,17 @@ public sealed unsafe class NativeMemoryPageManager : PointerPageManager
     public override ValueTask WritePages(ICollection<DbAddress> addresses, CommitOptions options) =>
         ValueTask.CompletedTask;
 
+    public override ValueTask WritePages(IEnumerable<(DbAddress at, Page page)> pages, CommitOptions options)
+    {
+        // Copy all the pages at specific addresses
+        Parallel.ForEach(pages, (pair, _) =>
+        {
+            var (at, page) = pair;
+            page.CopyTo(this.GetAt(at));
+        });
+
+        return ValueTask.CompletedTask;
+    }
+
     public override ValueTask WriteRootPage(DbAddress rootPage, CommitOptions options) => ValueTask.CompletedTask;
 }

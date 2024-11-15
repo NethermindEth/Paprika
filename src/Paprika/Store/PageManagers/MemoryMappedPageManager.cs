@@ -102,6 +102,23 @@ public sealed class MemoryMappedPageManager : PointerPageManager
         }
     }
 
+    public override ValueTask WritePages(IEnumerable<(DbAddress at, Page page)> pages, CommitOptions options)
+    {
+        if (_options == PersistenceOptions.MMapOnly)
+        {
+            // Perform in memory parallel copy
+            Parallel.ForEach(pages, (pair, _) =>
+            {
+                var (at, page) = pair;
+                page.CopyTo(this.GetAt(at));
+            });
+        }
+        else
+        {
+
+        }
+    }
+
     /// <summary>
     /// The amount of pages that can be combined in a single write.
     /// </summary>

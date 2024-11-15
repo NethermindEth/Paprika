@@ -15,6 +15,16 @@ public interface IPageManager : IDisposable, IPageResolver
     ValueTask WritePages(ICollection<DbAddress> addresses, CommitOptions options);
 
     /// <summary>
+    /// Writes <paramref name="pages"/> provided as pairs of address and a page that should be written to the given address.
+    /// </summary>
+    /// <remarks>
+    /// If <paramref name="options"/> are <see cref="CommitOptions.FlushDataOnly"/> or
+    /// <see cref="CommitOptions.FlushDataAndRoot"/>, the write operations are followed by a <see cref="Flush"/>.
+    /// This ensures ACI in ACID. 
+    /// </remarks>
+    ValueTask WritePages(IEnumerable<(DbAddress at, Page page)> pages, CommitOptions options);
+
+    /// <summary>
     /// Writes the specified <paramref name="rootPage"/> to the underlying storage.
     /// </summary>
     /// <remarks>

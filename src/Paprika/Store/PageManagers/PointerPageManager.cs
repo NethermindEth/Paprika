@@ -51,6 +51,7 @@ public abstract unsafe class PointerPageManager(long size) : IPageManager
     }
 
     public abstract ValueTask WritePages(ICollection<DbAddress> addresses, CommitOptions options);
+    public abstract ValueTask WritePages(IEnumerable<(DbAddress at, Page page)> pages, CommitOptions options);
 
     public abstract ValueTask WriteRootPage(DbAddress rootPage, CommitOptions options);
 

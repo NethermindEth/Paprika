@@ -26,6 +26,8 @@ public class ReadForbiddingDb(IDb db) : IDb
     {
         public Metadata Metadata => batch.Metadata;
 
+        public uint BatchId => batch.BatchId;
+
         public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
         {
             parent.OnTryGet(key, this);
