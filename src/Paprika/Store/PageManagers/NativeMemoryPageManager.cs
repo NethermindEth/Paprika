@@ -4,11 +4,9 @@ namespace Paprika.Store.PageManagers;
 
 public sealed unsafe class NativeMemoryPageManager : PointerPageManager
 {
-    private readonly void* _ptr;
-
     public NativeMemoryPageManager(long size, byte historyDepth) : base(size)
     {
-        _ptr = NativeMemory.AlignedAlloc((UIntPtr)size, (UIntPtr)Page.PageSize);
+        Ptr = NativeMemory.AlignedAlloc((UIntPtr)size, (UIntPtr)Page.PageSize);
 
         // clear first pages to make it clean
         for (var i = 0; i < historyDepth; i++)
@@ -17,7 +15,7 @@ public sealed unsafe class NativeMemoryPageManager : PointerPageManager
         }
     }
 
-    protected override void* Ptr => _ptr;
+    protected override void* Ptr { get; }
 
     public override void Flush()
     {
@@ -27,12 +25,12 @@ public sealed unsafe class NativeMemoryPageManager : PointerPageManager
     {
     }
 
-    public bool UsesPersistentPaging => false;
-
-    public override void Dispose() => NativeMemory.AlignedFree(_ptr);
+    public override void Dispose() => NativeMemory.AlignedFree(Ptr);
 
     public override ValueTask WritePages(ICollection<DbAddress> addresses, CommitOptions options) =>
         ValueTask.CompletedTask;
+
+    protected override void ReportCopyTime(TimeSpan elapsed) { }
 
     public override ValueTask WriteRootPage(DbAddress rootPage, CommitOptions options) => ValueTask.CompletedTask;
 }

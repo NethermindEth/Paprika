@@ -54,12 +54,16 @@ public abstract unsafe class PointerPageManager(long size) : IPageManager
 
     public ValueTask WritePages(IEnumerable<(DbAddress at, Page page)> pages, CommitOptions options)
     {
+        var copyTime = Stopwatch.StartNew();
+
         // The memory was copied to a set of pages that are not mapped. Requires copying back to the mapped ones.
         Parallel.ForEach(pages, (pair, _) =>
         {
             var (at, page) = pair;
             page.CopyTo(GetAt(at));
         });
+
+        ReportCopyTime(copyTime.Elapsed);
 
         // The memory is now coherent and memory mapped contains what pages passed have.
         var addresses = Interlocked.Exchange(ref _addresses, null) ?? new();
@@ -81,6 +85,8 @@ public abstract unsafe class PointerPageManager(long size) : IPageManager
             Interlocked.CompareExchange(ref _addresses, addresses, null);
         }
     }
+
+    protected abstract void ReportCopyTime(TimeSpan elapsed);
 
     private List<DbAddress>? _addresses = new();
 
