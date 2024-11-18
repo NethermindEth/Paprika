@@ -12,7 +12,7 @@ public class MultiHeadChainTests
     private const int Seed = 17;
 
     [Test]
-    public void SimpleTest()
+    public async Task SimpleTest()
     {
         const int accounts = 1;
         const int merkleCount = 31;
@@ -23,7 +23,7 @@ public class MultiHeadChainTests
 
         var random = new Random(Seed);
 
-        using var multi = db.OpenMultiHeadChain();
+        await using var multi = db.OpenMultiHeadChain();
 
         using var head = multi.Begin(Keccak.Zero);
 
@@ -88,7 +88,7 @@ public class MultiHeadChainTests
     }
 
     [Test]
-    public void Multiple_blocks()
+    public async Task Multiple_blocks()
     {
         const byte blocks = 64;
 
@@ -96,7 +96,7 @@ public class MultiHeadChainTests
 
         var random = new Random(Seed);
 
-        using var multi = db.OpenMultiHeadChain();
+        await using var multi = db.OpenMultiHeadChain();
         using var head = multi.Begin(Keccak.Zero);
 
         for (byte i = 0; i < blocks; i++)
@@ -106,15 +106,20 @@ public class MultiHeadChainTests
             head.Commit((uint)(i + 1), keccak);
         }
 
-        // Clear
-        random = new Random(Seed);
+        Assert();
 
-        for (byte i = 0; i < blocks; i++)
+        void Assert()
         {
-            var keccak = random.NextKeccak();
-            head.TryGet(Key.Account(keccak), out var data)
-                .Should().BeTrue("The account should exist");
-            data.SequenceEqual([i]).Should().BeTrue();
+            // Clear
+            random = new Random(Seed);
+
+            for (byte i = 0; i < blocks; i++)
+            {
+                var keccak = random.NextKeccak();
+                head.TryGet(Key.Account(keccak), out var data)
+                    .Should().BeTrue("The account should exist");
+                data.SequenceEqual([i]).Should().BeTrue();
+            }
         }
     }
 }

@@ -27,9 +27,16 @@ public sealed partial class PagedDb
 
         // Proposed batches that are finalized
         private readonly HashSet<Keccak> _beingFinalized = new();
-        private readonly Channel<(ProposedBatch[] batches, TaskCompletionSource tcs)> _finalizationQueue = new();
+        private readonly Channel<(ProposedBatch[] batches, TaskCompletionSource tcs)> _finalizationQueue =
+            Channel.CreateUnbounded<(ProposedBatch[] batches, TaskCompletionSource tcs)>(new UnboundedChannelOptions
+            {
+                SingleReader = true,
+                SingleWriter = false,
+                AllowSynchronousContinuations = false
+            });
 
-        private bool _running;
+        // Flusher
+        private readonly Task _flusher;
 
         private uint _lastCommittedBatch;
 
@@ -39,6 +46,8 @@ public sealed partial class PagedDb
 
             using var read = _db.BeginReadOnlyBatchOrLatest(Keccak.Zero);
             _lastCommittedBatch = read.BatchId;
+
+            _flusher = FlusherTask();
         }
 
         /// <summary>
@@ -124,48 +133,59 @@ public sealed partial class PagedDb
             {
                 while (reader.TryRead(out var toFinalize))
                 {
-                    const CommitOptions options = CommitOptions.FlushDataOnly;
-
-                    Debug.Assert(toFinalize.batches[0].BatchId == _lastCommittedBatch + 1);
-
-                    foreach (var batch in toFinalize.batches)
+                    try
                     {
-                        var watch = Stopwatch.StartNew();
+                        const CommitOptions options = CommitOptions.FlushDataOnly;
 
-                        // Data first
-                        await _db._manager.WritePages(batch.Changes, options);
+                        Debug.Assert(toFinalize.batches[0].BatchId == _lastCommittedBatch + 1);
 
-                        // Set new root
-                        var newRootPage = _db.SetNewRoot(batch.Root);
-
-                        // report
-                        _db.ReportDbSize(GetRootSizeInMb(batch.Root));
-
-                        await _db._manager.WriteRootPage(newRootPage, options);
-
-                        List<ProposedBatch> removed;
-
-                        lock (_db._batchLock)
+                        foreach (var batch in toFinalize.batches)
                         {
-                            _db.CommitNewRoot();
-                            watch.Stop();
+                            var watch = Stopwatch.StartNew();
 
-                            _lastCommittedBatch = batch.BatchId;
+                            // Data first
+                            await _db._manager.WritePages(batch.Changes, options);
 
-                            _proposedBatchesByBatchId.Remove(_lastCommittedBatch, out removed);
+                            // Set new root
+                            var newRootPage = _db.SetNewRoot(batch.Root);
+
+                            // report
+                            _db.ReportDbSize(GetRootSizeInMb(batch.Root));
+
+                            await _db._manager.WriteRootPage(newRootPage, options);
+
+                            List<ProposedBatch> removed;
+
+                            lock (_db._batchLock)
+                            {
+                                _db.CommitNewRoot();
+                                watch.Stop();
+
+                                _lastCommittedBatch = batch.BatchId;
+
+                                _proposedBatchesByBatchId.Remove(_lastCommittedBatch, out removed);
+                                foreach (var b in removed)
+                                {
+                                    var hash = b.StateHash;
+                                    _proposedBatchesByHash.Remove(hash);
+                                    _beingFinalized.Remove(hash);
+                                }
+                            }
+
+                            // Dispose outside the lock
                             foreach (var b in removed)
                             {
-                                _proposedBatchesByHash.Remove(b.StateHash);
+                                b.Dispose();
                             }
+
+                            _db.ReportCommit(watch.Elapsed);
                         }
 
-                        // Dispose outside the lock
-                        foreach (var b in removed)
-                        {
-                            b.Dispose();
-                        }
-
-                        _db.ReportCommit(watch.Elapsed);
+                        toFinalize.tcs.SetResult();
+                    }
+                    catch (Exception e)
+                    {
+                        toFinalize.tcs.SetException(e);
                     }
                 }
             }
@@ -211,8 +231,10 @@ public sealed partial class PagedDb
             return keccak == Keccak.EmptyTreeHash ? Keccak.Zero : keccak;
         }
 
-        public void Dispose()
+        public async ValueTask DisposeAsync()
         {
+            _finalizationQueue.Writer.Complete();
+            await _flusher;
             foreach (var (_, proposed) in _proposedBatchesByHash)
             {
                 proposed.Dispose();
@@ -442,7 +464,7 @@ public interface IHead : IDataSetter, IDataGetter, IDisposable
     void Commit(uint blockNumber, in Keccak blockHash);
 }
 
-public interface IMultiHeadChain : IDisposable
+public interface IMultiHeadChain : IAsyncDisposable
 {
     IHead Begin(in Keccak stateHash);
 }
