@@ -88,7 +88,7 @@ public class MultiHeadChainTests
     }
 
     [Test]
-    public async Task Multiple_blocks()
+    public async Task Multiple_blocks_read_not_finalized()
     {
         const byte blocks = 64;
 
@@ -117,6 +117,49 @@ public class MultiHeadChainTests
             {
                 var keccak = random.NextKeccak();
                 head.TryGet(Key.Account(keccak), out var data)
+                    .Should().BeTrue("The account should exist");
+                data.SequenceEqual([i]).Should().BeTrue();
+            }
+        }
+    }
+
+    [Test]
+    public async Task Multiple_blocks_finalization()
+    {
+        const byte blocks = 64;
+
+        using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
+
+        var random = new Random(Seed);
+
+        await using var multi = db.OpenMultiHeadChain();
+        using var head = multi.Begin(Keccak.Zero);
+
+        Keccak root = default;
+        for (byte i = 0; i < blocks; i++)
+        {
+            root = random.NextKeccak();
+
+            head.SetRaw(Key.Account(root), [i]);
+            head.Commit((uint)(i + 1), root);
+        }
+
+        // Finalize the last root only
+        await multi.Finalize(root);
+
+        using var read = multi.Begin(root);
+
+        Assert();
+
+        void Assert()
+        {
+            // Clear
+            random = new Random(Seed);
+
+            for (byte i = 0; i < blocks; i++)
+            {
+                var keccak = random.NextKeccak();
+                read.TryGet(Key.Account(keccak), out var data)
                     .Should().BeTrue("The account should exist");
                 data.SequenceEqual([i]).Should().BeTrue();
             }

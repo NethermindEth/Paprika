@@ -43,7 +43,7 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
     // batches
     private readonly object _batchLock = new();
     private readonly List<ReadOnlyBatch> _batchesReadOnly = new();
-    private Batch? _batchCurrent;
+    private object? _batchCurrent;
 
     // metrics
     private readonly Meter _meter;
@@ -413,14 +413,31 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
             // select min batch across the one respecting history and the min of all the read-only batches
             var minBatch = CalculateMinBatchId(root);
 
-            return _batchCurrent = new Batch(this, root, minBatch);
+            var batch = new Batch(this, root, minBatch);
+            _batchCurrent = batch;
+            return batch;
         }
+    }
 
-        [DoesNotReturn]
-        [StackTraceHidden]
-        static void ThrowOnlyOneBatch()
+    [DoesNotReturn]
+    [StackTraceHidden]
+    private static void ThrowOnlyOneBatch()
+    {
+        throw new Exception("There is another batch active at the moment. Commit the other first");
+    }
+
+    private void RemoveBatch(object batchToRemove)
+    {
+        lock (_batchLock)
         {
-            throw new Exception("There is another batch active at the moment. Commit the other first");
+            if (ReferenceEquals(_batchCurrent, batchToRemove))
+            {
+                _batchCurrent = null;
+            }
+            else
+            {
+                ThrowOnlyOneBatch();
+            }
         }
     }
 
@@ -612,14 +629,7 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
         protected override void DisposeImpl()
         {
             Db._pool.Return(Root.AsPage());
-
-            lock (Db._batchLock)
-            {
-                if (ReferenceEquals(Db._batchCurrent, this))
-                {
-                    Db._batchCurrent = null;
-                }
-            }
+            Db.RemoveBatch(this);
         }
     }
 

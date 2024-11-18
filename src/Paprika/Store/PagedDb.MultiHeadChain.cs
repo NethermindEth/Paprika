@@ -13,8 +13,18 @@ public sealed partial class PagedDb
 {
     public IMultiHeadChain OpenMultiHeadChain()
     {
-        // TODO: properly set and mark db as not capable of using batches.
-        return new MultiMultiHeadChain(this);
+        lock (_batchLock)
+        {
+            if (_batchCurrent != null)
+            {
+                ThrowOnlyOneBatch();
+            }
+
+            var chain = new MultiMultiHeadChain(this);
+            _batchCurrent = chain;
+
+            return chain;
+        }
     }
 
     private class MultiMultiHeadChain : IMultiHeadChain
@@ -239,6 +249,8 @@ public sealed partial class PagedDb
             {
                 proposed.Dispose();
             }
+
+            _db.RemoveBatch(this);
         }
     }
 
@@ -295,7 +307,7 @@ public sealed partial class PagedDb
         private uint _batchId;
         private uint _reusePagesOlderThanBatchId;
         private IReadOnlyBatch _read;
-        private Keccak _hash;
+        private Keccak _parentHash;
 
         public HeadTrackingBatch(PagedDb db, MultiMultiHeadChain chain, RootPage root,
             uint reusePagesOlderThanBatchId, IReadOnlyBatch read, IEnumerable<ProposedBatch> proposed,
@@ -304,7 +316,7 @@ public sealed partial class PagedDb
             _chain = chain;
             _root = root;
             _batchId = root.Header.BatchId;
-            _hash = root.Data.Metadata.StateHash;
+            _parentHash = root.Data.Metadata.StateHash;
 
             _pool = pool;
             _reusePagesOlderThanBatchId = reusePagesOlderThanBatchId;
@@ -320,14 +332,14 @@ public sealed partial class PagedDb
 
         public void Commit(uint blockNumber, in Keccak blockHash)
         {
-            SetMetadata(blockNumber, blockHash);
-
             // Copy the state hash
-            _hash = Root.Data.Metadata.StateHash;
+            _parentHash = Root.Data.Metadata.StateHash;
+
+            SetMetadata(blockNumber, blockHash);
 
             // The root ownership is now moved to the proposed batch.
             // The batch is automatically leased by this head. It will be leased by the chain as well. 
-            var batch = new ProposedBatch(_cowed.ToArray(), Root, _hash, Db._pool);
+            var batch = new ProposedBatch(_cowed.ToArray(), Root, _parentHash, Db._pool);
 
             _cowed.Clear();
             Clear();
@@ -454,6 +466,8 @@ public sealed partial class PagedDb
             return page;
         }
     }
+
+
 }
 
 public interface IHead : IDataSetter, IDataGetter, IDisposable
@@ -467,4 +481,9 @@ public interface IHead : IDataSetter, IDataGetter, IDisposable
 public interface IMultiHeadChain : IAsyncDisposable
 {
     IHead Begin(in Keccak stateHash);
+
+    /// <summary>
+    /// Finalizes the given block and all the blocks before it.
+    /// </summary>
+    Task Finalize(Keccak keccak);
 }
