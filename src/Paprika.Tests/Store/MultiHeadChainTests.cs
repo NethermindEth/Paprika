@@ -123,8 +123,9 @@ public class MultiHeadChainTests
         }
     }
 
-    [Test]
-    public async Task Multiple_blocks_finalization()
+    [TestCase(true, TestName = "Finalize before read")]
+    [TestCase(false, TestName = "Read from proposed")]
+    public async Task Multiple_blocks(bool finalize)
     {
         const byte blocks = 64;
 
@@ -144,8 +145,13 @@ public class MultiHeadChainTests
             head.Commit((uint)(i + 1), root);
         }
 
-        // Finalize the last root only
-        await multi.Finalize(root);
+        // Finalization should not impact the reads.
+        // If it's finalized, we read from the recent root.
+        // If it's not, from blocks in memory.
+        if (finalize)
+        {
+            await multi.Finalize(root);
+        }
 
         using var read = multi.Begin(root);
 

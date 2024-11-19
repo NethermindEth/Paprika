@@ -226,9 +226,11 @@ public sealed partial class PagedDb
                 // We want to have the oldest first
                 proposed.Reverse();
 
+                // Take the read by the hash of the last one's parent
                 var read = (ReadOnlyBatch)_db.BeginReadOnlyBatch(hash);
 
-                var root = CreateNextRoot(read.Root, _db._pool);
+                // Select the root by either, selecting the last proposed root or getting the read root if there's no proposed.
+                var root = CreateNextRoot(proposed.Count > 0 ? proposed.Last().Root : read.Root, _db._pool);
                 var minBatchId = _db.CalculateMinBatchId(root);
 
                 return new HeadTrackingBatch(_db, this, root, minBatchId, read, proposed.ToArray(), _db._pool);
@@ -327,6 +329,34 @@ public sealed partial class PagedDb
                 // As enqueued, acquire leases
                 batch.AcquireLease();
                 _proposed.Enqueue(batch);
+
+                // TODO: this application could be done in parallel if the dictionaries were concurrent
+                // potential optimization ahead
+                foreach (var (at, page) in batch.Changes)
+                {
+                    ref var slot =
+                        ref CollectionsMarshal.GetValueRefOrAddDefault(_pageTable, at, out var exists);
+
+                    if (exists == false)
+                    {
+                        // Does not exist, set and set the reverse mapping.
+                        slot = page;
+                        _pageTableReversed[page] = at;
+                    }
+                    else
+                    {
+                        // exists, swap only if the batch id is higher
+                        if (slot.Header.BatchId > page.Header.BatchId)
+                        {
+                            // Remove previous reverse mapping
+                            _pageTableReversed.Remove(slot);
+
+                            // Override slot and set the reverse mapping
+                            slot = page;
+                            _pageTableReversed[page] = at;
+                        }
+                    }
+                }
             }
         }
 
@@ -466,8 +496,6 @@ public sealed partial class PagedDb
             return page;
         }
     }
-
-
 }
 
 public interface IHead : IDataSetter, IDataGetter, IDisposable
