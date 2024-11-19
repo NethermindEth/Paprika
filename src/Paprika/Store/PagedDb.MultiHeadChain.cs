@@ -63,7 +63,7 @@ public sealed partial class PagedDb
             foreach (var batch in _db.SnapshotAll())
             {
                 _lastCommittedBatch = Math.Max(batch.BatchId, _lastCommittedBatch);
-                RegisterReader(new HeadReader(_db, CreateNextRoot(batch.Root, pool), batch, [], pool));
+                RegisterReader(new HeadReader(_db, CreateNextRoot([], (ReadOnlyBatch)batch), batch, [], pool));
             }
 
             _flusher = FlusherTask();
@@ -71,7 +71,8 @@ public sealed partial class PagedDb
 
         private void RegisterReader(HeadReader reader)
         {
-            reader.AcquireLease();
+            // Acquiring lease not needed. It's automatically created at 1.
+            //reader.AcquireLease();
             _readers[reader.Metadata.StateHash] = reader;
         }
 
@@ -245,12 +246,15 @@ public sealed partial class PagedDb
                 var read = (ReadOnlyBatch)_db.BeginReadOnlyBatch(hash);
 
                 // Select the root by either, selecting the last proposed root or getting the read root if there's no proposed.
-                var root = CreateNextRoot(proposed.Count > 0 ? proposed.Last().Root : read.Root, _db._pool);
+                var root = CreateNextRoot(CollectionsMarshal.AsSpan(proposed), read);
                 var minBatchId = _db.CalculateMinBatchId(root);
 
                 return new HeadTrackingBatch(_db, this, root, minBatchId, read, proposed.ToArray(), _db._pool);
             }
         }
+
+        private RootPage CreateNextRoot(ReadOnlySpan<ProposedBatch> proposed, ReadOnlyBatch read) =>
+            PagedDb.CreateNextRoot(proposed.Length > 0 ? proposed[^1].Root : read.Root, _db._pool);
 
         private static Keccak Normalize(in Keccak keccak)
         {
