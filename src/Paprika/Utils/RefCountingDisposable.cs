@@ -7,7 +7,7 @@ namespace Paprika.Utils;
 /// <summary>
 /// Provides a component that can be disposed multiple times and runs <see cref="CleanUp"/> only on the last dispose. 
 /// </summary>
-public abstract class RefCountingDisposable : IDisposable
+public abstract class RefCountingDisposable : IRefCountingDisposable
 {
     private const int Single = 1;
     private const int NoAccessors = 0;
@@ -135,4 +135,9 @@ public abstract class RefCountingDisposable : IDisposable
         [FieldOffset(64)]
         public long Value;
     }
+}
+
+public interface IRefCountingDisposable : IDisposable
+{
+    void AcquireLease();
 }
