@@ -574,8 +574,9 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
     {
         private bool _verify;
 
-        protected override RootPage Root { get; } = root;
+        RootPage IReadOnlyBatch.Root { get; } = root;
 
+        protected override RootPage Root { get; } = root;
         protected override uint ReusePagesOlderThanBatchId { get; } = reusePagesOlderThanBatchId;
 
         public override DbAddress GetAddress(Page page) => Db.GetAddress(page);

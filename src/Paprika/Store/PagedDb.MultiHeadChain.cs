@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
@@ -35,6 +36,8 @@ public sealed partial class PagedDb
         private readonly Dictionary<uint, List<ProposedBatch>> _proposedBatchesByBatchId = new();
         private readonly Dictionary<Keccak, ProposedBatch> _proposedBatchesByHash = new();
 
+        private readonly ConcurrentDictionary<Keccak, HeadReader> _readers = new();
+
         // Proposed batches that are finalized
         private readonly HashSet<Keccak> _beingFinalized = new();
 
@@ -55,10 +58,21 @@ public sealed partial class PagedDb
         {
             _db = db;
 
-            using var read = _db.BeginReadOnlyBatchOrLatest(Keccak.Zero);
-            _lastCommittedBatch = read.BatchId;
+            var pool = _db._pool;
+
+            foreach (var batch in _db.SnapshotAll())
+            {
+                _lastCommittedBatch = Math.Max(batch.BatchId, _lastCommittedBatch);
+                RegisterReader(new HeadReader(_db, CreateNextRoot(batch.Root, pool), batch, [], pool));
+            }
 
             _flusher = FlusherTask();
+        }
+
+        private void RegisterReader(HeadReader reader)
+        {
+            reader.AcquireLease();
+            _readers[reader.Metadata.StateHash] = reader;
         }
 
         /// <summary>
@@ -248,6 +262,13 @@ public sealed partial class PagedDb
         {
             _finalizationQueue.Writer.Complete();
             await _flusher;
+
+            foreach (var (_, reader) in _readers)
+            {
+                reader.Dispose();
+            }
+            _readers.Clear();
+
             foreach (var (_, proposed) in _proposedBatchesByHash)
             {
                 proposed.Dispose();

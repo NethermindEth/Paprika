@@ -28,6 +28,8 @@ public class ReadForbiddingDb(IDb db) : IDb
     {
         public Metadata Metadata => batch.Metadata;
 
+        public RootPage Root => batch.Root;
+
         public uint BatchId => batch.BatchId;
 
         public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)

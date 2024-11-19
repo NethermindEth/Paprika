@@ -5,6 +5,8 @@ namespace Paprika;
 
 public interface IReadOnlyBatch : IDataGetter, IDisposable
 {
+    public RootPage Root { get; }
+
     public uint BatchId { get; }
 
     public void VerifyNoPagesMissing();
@@ -40,6 +42,8 @@ public class EmptyReadOnlyBatch : IReadOnlyBatch
         result = default;
         return false;
     }
+
+    public RootPage Root => throw new NotImplementedException();
 
     public uint BatchId => throw new NotImplementedException();
 

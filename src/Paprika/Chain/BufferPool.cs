@@ -1,4 +1,4 @@
-// #define STACK_TRACE_TRACKING
+#define STACK_TRACE_TRACKING
 
 using System.Collections.Concurrent;
 using System.Diagnostics;
