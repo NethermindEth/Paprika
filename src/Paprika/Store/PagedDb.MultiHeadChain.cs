@@ -496,7 +496,7 @@ public sealed partial class PagedDb
         }
     }
 
-    private sealed class HeadReader : RefCountingDisposable, IReadOnlyBatchContext, IHeadReader
+    private sealed class HeadReader : RefCountingDisposable, IReadOnlyBatchContext, IHeadReader, IThreadPoolWorkItem
     {
         private readonly BufferPool _pool;
         private readonly PagedDb _db;
@@ -506,6 +506,7 @@ public sealed partial class PagedDb
         private readonly RootPage _root;
         private readonly IReadOnlyBatch _read;
         private readonly ProposedBatch[] _proposed;
+        private volatile bool _ready;
 
         public HeadReader(PagedDb db, RootPage root, IReadOnlyBatch read, ProposedBatch[] proposed, BufferPool pool)
         {
@@ -523,7 +524,79 @@ public sealed partial class PagedDb
             {
                 // As enqueued, acquire leases
                 batch.AcquireLease();
+            }
 
+            if (proposed.Length == 0)
+            {
+                _ready = true;
+                return;
+            }
+
+            if (proposed.Length == 1)
+            {
+                // Don't run on thread with a single proposed
+                foreach (var (at, page) in proposed[0].Changes)
+                {
+                    _pageTable[at] = page;
+                }
+
+                _ready = true;
+                return;
+            }
+
+            // More than 1 proposed o scan, queue it.
+            _ready = false;
+            ThreadPool.UnsafeQueueUserWorkItem(this, false);
+        }
+
+        public Metadata Metadata => _root.Data.Metadata;
+
+        public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
+        {
+            EnsureReady();
+            return _root.TryGet(key, this, out result);
+        }
+
+        private void EnsureReady()
+        {
+            if (_ready == false)
+            {
+                SpinWait.SpinUntil(() => _ready);
+            }
+        }
+
+        public Page GetAt(DbAddress address)
+        {
+            EnsureReady();
+            return _pageTable.TryGetValue(address, out var page) ? page : _db.GetAt(address);
+        }
+
+        public void Prefetch(DbAddress addr)
+        {
+        }
+
+        public uint BatchId { get; }
+
+        public IDictionary<Keccak, uint> IdCache { get; }
+
+        protected override void CleanUp()
+        {
+            EnsureReady();
+
+            _pool.Return(_root.AsPage());
+            _read.Dispose();
+
+            // Dispose all proposed blocks that are still held by this.
+            foreach (var batch in _proposed)
+            {
+                batch.Dispose();
+            }
+        }
+
+        void IThreadPoolWorkItem.Execute()
+        {
+            foreach (var batch in _proposed)
+            {
                 // TODO: this application could be done in parallel if the dictionaries were concurrent
                 // potential optimization ahead
                 foreach (var (at, page) in batch.Changes)
@@ -547,33 +620,8 @@ public sealed partial class PagedDb
                     }
                 }
             }
-        }
 
-        public Metadata Metadata => _root.Data.Metadata;
-
-        public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result) => _root.TryGet(key, this, out result);
-
-        public Page GetAt(DbAddress address) =>
-            _pageTable.TryGetValue(address, out var page) ? page : _db.GetAt(address);
-
-        public void Prefetch(DbAddress addr)
-        {
-        }
-
-        public uint BatchId { get; }
-
-        public IDictionary<Keccak, uint> IdCache { get; }
-
-        protected override void CleanUp()
-        {
-            _pool.Return(_root.AsPage());
-            _read.Dispose();
-
-            // Dispose all proposed blocks that are still held by this.
-            foreach (var batch in _proposed)
-            {
-                batch.Dispose();
-            }
+            _ready = true;
         }
     }
 }
