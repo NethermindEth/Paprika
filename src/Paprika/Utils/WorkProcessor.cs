@@ -46,7 +46,18 @@ public class WorkProcessor : IThreadPoolWorkItem
         Func<TLocal> init,
         Func<int, TLocal, TLocal> action,
         Action<TLocal> @finally)
-        => InitProcessor<TLocal>.For(fromInclusive, toExclusive, parallelOptions, init, action, @finally);
+        => InitProcessor<TLocal>.For(fromInclusive, toExclusive, parallelOptions, init, default, action, @finally);
+
+    public static void For<TLocal>(int fromInclusive, int toExclusive, TLocal state, Func<int, TLocal, TLocal> action)
+        => For(fromInclusive, toExclusive, s_parallelOptions, state, action);
+
+    public static void For<TLocal>(
+        int fromInclusive,
+        int toExclusive,
+        ParallelOptions parallelOptions,
+        TLocal state,
+        Func<int, TLocal, TLocal> action)
+        => InitProcessor<TLocal>.For(fromInclusive, toExclusive, parallelOptions, null, state, action);
 
     private WorkProcessor(Data data)
     {
@@ -102,13 +113,14 @@ public class WorkProcessor : IThreadPoolWorkItem
             int fromInclusive,
             int toExclusive,
             ParallelOptions parallelOptions,
-            Func<TLocal> init,
+            Func<TLocal>? init,
+            TLocal? initValue,
             Func<int, TLocal, TLocal> action,
-            Action<TLocal> @finally)
+            Action<TLocal>? @finally = null)
         {
             var threads = parallelOptions.MaxDegreeOfParallelism > 0 ? parallelOptions.MaxDegreeOfParallelism : Environment.ProcessorCount;
 
-            var data = new Data<TLocal>(threads, fromInclusive, toExclusive, init, action, @finally);
+            var data = new Data<TLocal>(threads, fromInclusive, toExclusive, action, init, initValue, @finally);
 
             for (int i = 0; i < threads - 1; i++)
             {
@@ -150,16 +162,25 @@ public class WorkProcessor : IThreadPoolWorkItem
             _data.MarkThreadCompleted();
         }
 
-        private class Data<TValue>(int threads, int fromInclusive, int toExclusive, Func<TValue> init,
+        private class Data<TValue>(int threads,
+            int fromInclusive,
+            int toExclusive,
             Func<int, TLocal, TLocal> action,
-            Action<TValue> @finally)
+            Func<TValue>? init = null,
+            TValue? initValue = default,
+            Action<TValue>? @finally = null)
         {
             public SharedCounter Index { get; } = new SharedCounter(fromInclusive);
             public int ToExclusive => toExclusive;
-            public Func<TValue> Init => init;
             public Func<int, TLocal, TLocal> Action => action;
-            public Action<TValue> Finally => @finally;
             public int ActiveThreads => threads;
+
+            public TValue Init() => initValue ?? (init is not null ? init.Invoke() : default);
+
+            public void Finally(TValue value)
+            {
+                @finally?.Invoke(value);
+            }
 
             public int MarkThreadCompleted()
             {
