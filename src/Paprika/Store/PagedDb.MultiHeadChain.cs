@@ -1,10 +1,10 @@
-﻿using System.Collections.Concurrent;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Paprika.Chain;
 using Paprika.Crypto;
+using Paprika.Data;
 using Paprika.Utils;
 
 namespace Paprika.Store;
@@ -37,6 +37,7 @@ public sealed partial class PagedDb
 
         // Proposed batches that are finalized
         private readonly HashSet<Keccak> _beingFinalized = new();
+
         private readonly Channel<(ProposedBatch[] batches, TaskCompletionSource tcs)> _finalizationQueue =
             Channel.CreateUnbounded<(ProposedBatch[] batches, TaskCompletionSource tcs)>(new UnboundedChannelOptions
             {
@@ -417,15 +418,13 @@ public sealed partial class PagedDb
 
         protected override void DisposeImpl()
         {
-            var pool = Db._pool;
-
-            pool.Return(_root.AsPage());
+            _pool.Return(_root.AsPage());
             _read.Dispose();
 
             // return all copies that were not proposed
             foreach (var (_, page) in _cowed)
             {
-                pool.Return(page);
+                _pool.Return(page);
             }
 
             // Dispose all proposed blocks that are still held by this.
@@ -496,6 +495,87 @@ public sealed partial class PagedDb
             return page;
         }
     }
+
+    private sealed class HeadReader : RefCountingDisposable, IReadOnlyBatchContext, IHeadReader
+    {
+        private readonly BufferPool _pool;
+        private readonly PagedDb _db;
+        private readonly Dictionary<DbAddress, Page> _pageTable = new();
+
+        // Current values, shifted with every commit
+        private readonly RootPage _root;
+        private readonly IReadOnlyBatch _read;
+        private readonly ProposedBatch[] _proposed;
+
+        public HeadReader(PagedDb db, RootPage root, IReadOnlyBatch read, ProposedBatch[] proposed, BufferPool pool)
+        {
+            _db = db;
+            _root = root;
+            BatchId = root.Header.BatchId;
+
+            _pool = pool;
+            _read = read;
+            _proposed = proposed;
+
+            IdCache = new Dictionary<Keccak, uint>();
+
+            foreach (var batch in proposed)
+            {
+                // As enqueued, acquire leases
+                batch.AcquireLease();
+
+                // TODO: this application could be done in parallel if the dictionaries were concurrent
+                // potential optimization ahead
+                foreach (var (at, page) in batch.Changes)
+                {
+                    ref var slot =
+                        ref CollectionsMarshal.GetValueRefOrAddDefault(_pageTable, at, out var exists);
+
+                    if (exists == false)
+                    {
+                        // Does not exist, set and set the reverse mapping.
+                        slot = page;
+                    }
+                    else
+                    {
+                        // exists, swap only if the batch id is higher
+                        if (slot.Header.BatchId > page.Header.BatchId)
+                        {
+                            // Override slot and set the reverse mapping
+                            slot = page;
+                        }
+                    }
+                }
+            }
+        }
+
+        public Metadata Metadata => _root.Data.Metadata;
+
+        public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result) => _root.TryGet(key, this, out result);
+
+        public Page GetAt(DbAddress address) =>
+            _pageTable.TryGetValue(address, out var page) ? page : _db.GetAt(address);
+
+        public void Prefetch(DbAddress addr)
+        {
+        }
+
+        public uint BatchId { get; }
+
+        public IDictionary<Keccak, uint> IdCache { get; }
+
+        protected override void CleanUp()
+        {
+            _pool.Return(_root.AsPage());
+            _read.Dispose();
+
+            // Dispose all proposed blocks that are still held by this.
+            foreach (var batch in _proposed)
+            {
+                batch.Dispose();
+            }
+        }
+    }
 }
 
 public interface IHead : IDataSetter, IDataGetter, IDisposable
@@ -504,6 +584,13 @@ public interface IHead : IDataSetter, IDataGetter, IDisposable
     /// Commits the changes applied so far, and moves the head tracker to the next one.
     /// </summary>
     void Commit(uint blockNumber, in Keccak blockHash);
+}
+
+/// <summary>
+/// Provides accessor to get data from the head as well as <see cref="IRefCountingDisposable"/> management.
+/// </summary>
+public interface IHeadReader : IDataGetter, IRefCountingDisposable
+{
 }
 
 public interface IMultiHeadChain : IAsyncDisposable
