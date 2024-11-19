@@ -87,7 +87,7 @@ public class WorkProcessor : IThreadPoolWorkItem
         public SharedCounter Index { get; } = new SharedCounter(fromInclusive);
         public int ToExclusive => toExclusive;
         public Action<int> Action => action;
-        public int ActiveThreads => threads;
+        public int ActiveThreads => Volatile.Read(ref threads);
 
         public int MarkThreadCompleted()
         {
