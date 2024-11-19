@@ -421,15 +421,24 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
 
     [DoesNotReturn]
     [StackTraceHidden]
-    private static void ThrowOnlyOneBatch()
-    {
-        throw new Exception("There is another batch active at the moment. Commit the other first");
-    }
+    private static void ThrowOnlyOneBatch() => throw new Exception("There is another batch active at the moment. Commit the other first");
 
-    private void RemoveBatch(object batchToRemove)
+    [DoesNotReturn]
+    [StackTraceHidden]
+    private static void ThrowNoBatch() => throw new Exception("There is no active batch at the moment.");
+
+    private void RemoveBatch(object batchToRemove, bool notThrowOnMissing = false)
     {
         lock (_batchLock)
         {
+            if (ReferenceEquals(_batchCurrent, null))
+            {
+                if (notThrowOnMissing)
+                    return;
+
+                ThrowNoBatch();
+            }
+
             if (ReferenceEquals(_batchCurrent, batchToRemove))
             {
                 _batchCurrent = null;
@@ -438,6 +447,14 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
             {
                 ThrowOnlyOneBatch();
             }
+        }
+    }
+
+    private bool IsBatchActive(object batch)
+    {
+        lock (_batchLock)
+        {
+            return ReferenceEquals(_batchCurrent, batch);
         }
     }
 
@@ -582,6 +599,11 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
 
         public async ValueTask Commit(CommitOptions options)
         {
+            if (db.IsBatchActive(this) == false)
+            {
+                throw new Exception("This batch is not active");
+            }
+
             var watch = Stopwatch.StartNew();
 
             CheckDisposed();
@@ -617,8 +639,7 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
             lock (Db._batchLock)
             {
                 Db.CommitNewRoot();
-                Debug.Assert(ReferenceEquals(this, Db._batchCurrent));
-                Db._batchCurrent = null;
+                Db.RemoveBatch(this, true);
             }
 
             Db.ReportCommit(watch.Elapsed);
@@ -629,7 +650,7 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
         protected override void DisposeImpl()
         {
             Db._pool.Return(Root.AsPage());
-            Db.RemoveBatch(this);
+            Db.RemoveBatch(this, true);
         }
     }
 

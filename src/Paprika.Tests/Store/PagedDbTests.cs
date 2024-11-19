@@ -108,19 +108,21 @@ public class PagedDbTests
         prefix.BytesAsSpan[^1] = 0x00;
 
         // Set data
-        using var batch = db.BeginNextBatch();
 
-        var v = new byte[] { 1 };
-        batch.SetRaw(Key.Account(keccak0), v);
-        batch.SetRaw(Key.Account(keccak1), v);
-        batch.SetRaw(Key.Account(keccak2), v);
-        batch.SetRaw(Key.Account(keccak3), v);
+        using (var batch = db.BeginNextBatch())
+        {
+            var v = new byte[] { 1 };
+            batch.SetRaw(Key.Account(keccak0), v);
+            batch.SetRaw(Key.Account(keccak1), v);
+            batch.SetRaw(Key.Account(keccak2), v);
+            batch.SetRaw(Key.Account(keccak3), v);
 
-        await batch.Commit(CommitOptions.FlushDataAndRoot);
+            await batch.Commit(CommitOptions.FlushDataAndRoot);
+        }
 
         // Delete by prefix
         using var batch2 = db.BeginNextBatch();
-        batch.DeleteByPrefix(Key.Merkle(NibblePath.FromKey(prefix).SliceTo(NibblePath.KeccakNibbleCount - 1)));
+        batch2.DeleteByPrefix(Key.Merkle(NibblePath.FromKey(prefix).SliceTo(NibblePath.KeccakNibbleCount - 1)));
         await batch2.Commit(CommitOptions.FlushDataAndRoot);
 
         using var read = db.BeginReadOnlyBatch();
@@ -163,7 +165,7 @@ public class PagedDbTests
 
         // Delete by prefix
         using var batch2 = db.BeginNextBatch();
-        batch.DeleteByPrefix(Key.Raw(NibblePath.FromKey(account), DataType.Merkle,
+        batch2.DeleteByPrefix(Key.Raw(NibblePath.FromKey(account), DataType.Merkle,
             NibblePath.FromKey(prefix).SliceTo(NibblePath.KeccakNibbleCount - 1)));
         await batch2.Commit(CommitOptions.FlushDataAndRoot);
 

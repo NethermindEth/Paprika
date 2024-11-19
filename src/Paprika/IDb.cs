@@ -44,4 +44,10 @@ public interface IDb
     int HistoryDepth { get; }
 
     void ForceFlush();
+
+    /// <summary>
+    /// Opens the multi head chain.
+    /// </summary>
+    /// <returns></returns>
+    IMultiHeadChain OpenMultiHeadChain();
 }

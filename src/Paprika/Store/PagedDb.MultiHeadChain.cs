@@ -20,14 +20,14 @@ public sealed partial class PagedDb
                 ThrowOnlyOneBatch();
             }
 
-            var chain = new MultiMultiHeadChain(this);
+            var chain = new MultiHeadChain(this);
             _batchCurrent = chain;
 
             return chain;
         }
     }
 
-    private class MultiMultiHeadChain : IMultiHeadChain
+    private class MultiHeadChain : IMultiHeadChain
     {
         private readonly PagedDb _db;
 
@@ -50,7 +50,7 @@ public sealed partial class PagedDb
 
         private uint _lastCommittedBatch;
 
-        public MultiMultiHeadChain(PagedDb db)
+        public MultiHeadChain(PagedDb db)
         {
             _db = db;
 
@@ -293,7 +293,7 @@ public sealed partial class PagedDb
     private sealed class HeadTrackingBatch : BatchBase, IHead
     {
         private readonly BufferPool _pool;
-        private readonly MultiMultiHeadChain _chain;
+        private readonly MultiHeadChain _chain;
 
         private readonly Dictionary<DbAddress, Page> _pageTable = new();
         private readonly Dictionary<Page, DbAddress> _pageTableReversed = new();
@@ -309,7 +309,7 @@ public sealed partial class PagedDb
         private IReadOnlyBatch _read;
         private Keccak _parentHash;
 
-        public HeadTrackingBatch(PagedDb db, MultiMultiHeadChain chain, RootPage root,
+        public HeadTrackingBatch(PagedDb db, MultiHeadChain chain, RootPage root,
             uint reusePagesOlderThanBatchId, IReadOnlyBatch read, IEnumerable<ProposedBatch> proposed,
             BufferPool pool) : base(db)
         {
