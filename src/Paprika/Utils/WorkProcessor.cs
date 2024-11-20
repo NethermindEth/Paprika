@@ -82,11 +82,10 @@ public class WorkProcessor : IThreadPoolWorkItem
         public int GetNext() => Interlocked.Increment(ref _index) - 1;
     }
 
-    private class Data(int threads, int fromInclusive, int toExclusive, Action<int> action)
+    private class BaseData(int threads, int fromInclusive, int toExclusive)
     {
         public SharedCounter Index { get; } = new SharedCounter(fromInclusive);
         public int ToExclusive => toExclusive;
-        public Action<int> Action => action;
         public int ActiveThreads => Volatile.Read(ref threads);
 
         public int MarkThreadCompleted()
@@ -103,6 +102,12 @@ public class WorkProcessor : IThreadPoolWorkItem
 
             return remaining;
         }
+    }
+
+    private class Data(int threads, int fromInclusive, int toExclusive, Action<int> action) :
+        BaseData(threads, fromInclusive, toExclusive)
+    {
+        public Action<int> Action => action;
     }
 
     private class InitProcessor<TLocal> : IThreadPoolWorkItem
@@ -168,33 +173,15 @@ public class WorkProcessor : IThreadPoolWorkItem
             Func<int, TLocal, TLocal> action,
             Func<TValue>? init = null,
             TValue? initValue = default,
-            Action<TValue>? @finally = null)
+            Action<TValue>? @finally = null) : BaseData(threads, fromInclusive, toExclusive)
         {
-            public SharedCounter Index { get; } = new SharedCounter(fromInclusive);
-            public int ToExclusive => toExclusive;
             public Func<int, TLocal, TLocal> Action => action;
-            public int ActiveThreads => threads;
 
-            public TValue Init() => initValue ?? (init is not null ? init.Invoke() : default);
+            public TValue Init() => initValue ?? (init is not null ? init.Invoke() : default)!;
 
             public void Finally(TValue value)
             {
                 @finally?.Invoke(value);
-            }
-
-            public int MarkThreadCompleted()
-            {
-                var remaining = Interlocked.Decrement(ref threads);
-
-                if (remaining == 0)
-                {
-                    lock (this)
-                    {
-                        Monitor.Pulse(this);
-                    }
-                }
-
-                return remaining;
             }
         }
     }
