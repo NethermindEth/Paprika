@@ -5,6 +5,7 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 using Paprika.Crypto;
 using Paprika.Utils;
 
@@ -31,7 +32,7 @@ public readonly ref struct SlottedArray /*: IClearable */
     private static readonly int VectorSize =
         Vector256.IsHardwareAccelerated ? Vector256<byte>.Count : Vector128<byte>.Count;
 
-    private static readonly int UShortsPerVector = VectorSize / 2;
+    private static readonly int UShortsPerVector = VectorSize / sizeof(ushort);
 
     /// <summary>
     /// How many vectors are used to create a batch of slots.
@@ -39,6 +40,9 @@ public readonly ref struct SlottedArray /*: IClearable */
     private const int VectorsByBatch = 2;
 
     private static readonly int DoubleVectorSize = VectorSize * VectorsByBatch;
+    
+    private static readonly int HashesPerVector = VectorSize / sizeof(ushort);
+    private static readonly int SlotsPerVector = VectorSize / Slot.TotalSize;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int AlignToDoubleVectorSize(int count) => (count + (DoubleVectorSize - 1)) & -DoubleVectorSize;
@@ -903,8 +907,8 @@ public readonly ref struct SlottedArray /*: IClearable */
         ref var hash = ref GetHashRef(index);
         hash = (ushort)~hash;
     }
-
-    private void Defragment()
+    
+    private void OldDefragment()
     {
         // As data were fitting before, the will fit after so all the checks can be skipped
         var count = _header.Low / Slot.TotalSize;
@@ -978,6 +982,202 @@ public readonly ref struct SlottedArray /*: IClearable */
         _header.Low = (ushort)(alive * Slot.TotalSize);
         _header.High = (ushort)(_data.Length - writtenTo);
         _header.Deleted = 0;
+    }
+
+    private void Defragment()
+    {
+        // As data were fitting before, it will fit after so all the checks can be skipped
+        var count = _header.Low / Slot.TotalSize;
+
+        if (count == 0 || _header.Deleted == 0)
+            return;
+
+        if (Vector256.IsHardwareAccelerated)
+        {
+            VectorizedDefragment256();
+        }
+        else if (Vector128.IsHardwareAccelerated)
+        {
+            VectorizedDefragment128();
+        }
+        else
+        {
+            ThrowNoVectorSupport();
+        }
+    }
+
+     private void VectorizedDefragment256()
+     {
+         var count = _header.Low / Slot.TotalSize;
+         var jump = DoubleVectorSize / sizeof(ushort);
+         var aligned = AlignToDoubleVectorSize(_header.Low) / sizeof(ushort);
+
+         // Start from the first slot vector
+         var writeTo = HashesPerVector;
+
+         var preambleMask = Slot.GetKeyPreambleMaskAsVector256();
+         var deletedMask = Slot.GetKeyPreambleDeleteAsVector256();
+
+         ref var d = ref Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(_data));
+         var i = writeTo;
+
+         while (i < aligned)
+         {
+             if (i + jump < aligned)
+             {
+                 var slotData = Vector256.LoadUnsafe(ref d, (UIntPtr)i);
+
+                 // Ignore all the even entries from the vector as the preamble data is contained within
+                 // the first 2 bytes (ushort) out of the 4 bytes slot.
+                 slotData = Avx2.BlendVariable(slotData, Vector256<ushort>.Zero, Vector256.Create((ushort)0b_1010_1010_1010_1010));
+                 
+                 var preambleData = Vector256.BitwiseAnd(slotData, preambleMask);
+                 
+                 if (Vector256.EqualsAny(preambleData, deletedMask))
+                 {
+                     // Some slots are deleted in this batch, process individually
+                     for (var j = 0; j < SlotsPerVector; j++)
+                     {
+                         var currentSlot = Unsafe.Add(ref Unsafe.As<byte, Slot>(ref MemoryMarshal.GetReference(_data)), i + j);
+                         if (!currentSlot.IsDeleted)
+                         {
+                             if (i != writeTo)
+                             {
+                                 CopySlot(i, writeTo);
+                             }
+
+                             writeTo += Slot.TotalSize;
+                         }
+
+                         i += Slot.TotalSize;
+                     }
+                 }
+                 else
+                 {
+                     // No deleted slots in this batch, copy the whole batch
+                     if (i != writeTo)
+                     {
+                         CopyBatch(i, writeTo);
+                     }
+
+                     writeTo += jump;
+                     i += jump;
+                 }
+             }
+             else
+             {
+                 // Copy remaining individual slots
+                 var toCopy = aligned / VectorsByBatch - count;
+                 
+                 for (var j = 0; j < toCopy; j++)
+                 {
+                     var currentSlot = Unsafe.Add(ref Unsafe.As<byte, Slot>(ref MemoryMarshal.GetReference(_data)), i + j);
+
+                     if (!currentSlot.IsDeleted)
+                     {
+                         if (i != writeTo)
+                         {
+                             CopySlot(i, writeTo);
+                         }
+
+                         writeTo += Slot.TotalSize;
+                     }
+
+                     i += Slot.TotalSize;
+                 }
+             }
+         }
+
+         // Adjust header values
+         _header.Low = (ushort)(writeTo * Slot.TotalSize);
+         _header.Deleted = 0;
+         RecalculateHigh();
+     }
+
+     // Helper function to copy a batch of slots
+     private void CopyBatch(int readFrom, int writeTo)
+     {
+         // Copy payload data
+         var sourcePrevSlot = GetSlotRef((readFrom - UShortsPerVector) / UShortsPerVector - 1);
+         var sourceLastSlot = GetSlotRef((readFrom + UShortsPerVector) / UShortsPerVector - 1);
+         var destLastSlot = GetSlotRef((writeTo + UShortsPerVector) / UShortsPerVector);
+         
+         var length = sourcePrevSlot.ItemAddress - sourceLastSlot.ItemAddress;
+         var sourceData = _data.Slice(sourceLastSlot.ItemAddress, length);
+
+         var destData = _data.Slice(destLastSlot.ItemAddress, sourceData.Length);
+
+         sourceData.CopyTo(destData);
+
+         // Copy the remaining data (hashes and slots)
+         // Both source and dest hashes are stored before the slots
+         var sourceStart = readFrom - UShortsPerVector;
+         var destStart = writeTo - UShortsPerVector;
+         
+         ref var d = ref Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(_data));
+         
+         var sourceHashes = Vector256.LoadUnsafe(ref d, (UIntPtr)sourceStart);
+         sourceHashes.StoreUnsafe(ref d, (UIntPtr)destStart);
+
+         var sourceSlots = Vector256.LoadUnsafe(ref d, (UIntPtr)(sourceStart + UShortsPerVector));
+         sourceSlots.StoreUnsafe(ref d, (UIntPtr)(destStart + UShortsPerVector));
+
+         // Update item addresses for slots in the destination batch
+         // todo: can this be re-written as a vector operation?
+         for (var i = 1; i < SlotsPerVector; i++)
+         {
+             var prevDestSlot = GetSlotRef(writeTo / UShortsPerVector + i - 1);
+             ref var nextDestSlot = ref GetSlotRef(writeTo / UShortsPerVector + i);
+             var offset = GetSlotRef(readFrom / UShortsPerVector + i - 1).ItemAddress - GetSlotRef(readFrom / UShortsPerVector + i).ItemAddress;
+             nextDestSlot.ItemAddress = (ushort)(prevDestSlot.ItemAddress - offset);
+         }
+     }
+
+     // Helper function to copy individual slot
+     private void CopySlot(int readFrom, int writeTo)
+     {
+         var sourceIndex = (readFrom - UShortsPerVector) / UShortsPerVector + readFrom % UShortsPerVector;
+         var destIndex = (writeTo - UShortsPerVector) / UShortsPerVector + writeTo % UShortsPerVector;
+
+         var slot = GetSlotRef(sourceIndex);
+         var addr = slot.ItemAddress;
+
+         var length = GetSlotRef(sourceIndex - 1).ItemAddress - addr;
+
+         if (length > 0)
+         {
+             var source = _data.Slice(addr, length);
+             var destination = _data.Slice(writeTo, length);
+             source.CopyTo(destination);
+         }
+
+         // Copy hash
+         GetHashRef(destIndex) = GetHashRef(sourceIndex);
+
+         // Copy everything, just overwrite the address
+         ref var destinationSlot = ref GetSlotRef(destIndex);
+         destinationSlot.KeyPreamble = slot.KeyPreamble;
+         destinationSlot.ItemAddress = (ushort)writeTo;
+     }
+
+     // Helper function to recalculate _header.High after defragmentation
+     private void RecalculateHigh()
+     {
+         if (_header.Low > 0)
+         {
+             var lastSlot = GetSlotRef(_header.Low / Slot.TotalSize - 1);
+             var lastItemLength = GetSlotPayload(_header.Low / Slot.TotalSize - 1, lastSlot).Length;
+             _header.High = (ushort)(_data.Length - (lastSlot.ItemAddress + lastItemLength));
+         }
+         else
+         {
+             _header.High = (ushort)_data.Length;
+         }
+     }
+
+    private void VectorizedDefragment128()
+    {
+        // Not implemented.
     }
 
     /// <summary>
@@ -1122,13 +1322,13 @@ public readonly ref struct SlottedArray /*: IClearable */
 
         data = default;
         return NotFound;
-
-        [MethodImpl(MethodImplOptions.NoInlining)]
-        void ThrowNoVectorSupport()
-        {
-            throw new NotSupportedException(
-                $"This platform does not support {nameof(Vector256)} nor {nameof(Vector128)}");
-        }
+    }
+    
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void ThrowNoVectorSupport()
+    {
+        throw new NotSupportedException(
+            $"This platform does not support {nameof(Vector256)} nor {nameof(Vector128)}");
     }
 
     private int TryFind(int at, uint matches, in NibblePath key, byte preamble, out Span<byte> data)
@@ -1523,6 +1723,26 @@ public readonly ref struct SlottedArray /*: IClearable */
             Debug.Assert(shift == (odd == 0 ? EvenLengthShift : OddLengthShift));
             var extract = NibblePath.NibbleMask << shift;
             return (hash & extract) >> shift;
+        }
+        
+        public static Vector256<ushort> GetKeyPreambleMaskAsVector256()
+        {
+            return Vector256.Create((ushort)Slot.KeyPreambleMask);
+        }
+        
+        public static Vector128<ushort> GetKeyPreambleMaskAsVector128()
+        {
+            return Vector128.Create((ushort)Slot.KeyPreambleMask);
+        }
+
+        public static Vector256<ushort> GetKeyPreambleDeleteAsVector256()
+        {
+            return Vector256.Create((ushort)Slot.KeyPreambleDelete);
+        }
+        
+        public static Vector128<ushort> GetKeyPreambleDeleteAsVector128()
+        {
+            return Vector128.Create((ushort)Slot.KeyPreambleDelete);
         }
     }
 
