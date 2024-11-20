@@ -142,7 +142,7 @@ public class ParallelUnbalancedWork : IThreadPoolWorkItem
         /// Gets the shared counter for indices.
         /// </summary>
         public SharedCounter Index { get; } = new SharedCounter(fromInclusive);
-        public ManualResetEventSlim Event { get; } = new();
+        public SemaphoreSlim Event { get; } = new(initialCount: 0);
 
         /// <summary>
         /// Gets the exclusive upper bound of the range.
@@ -164,7 +164,7 @@ public class ParallelUnbalancedWork : IThreadPoolWorkItem
 
             if (remaining == 0)
             {
-                Event.Set();
+                Event.Release();
             }
 
             return remaining;
