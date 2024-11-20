@@ -37,15 +37,12 @@ public sealed partial class PagedDb
         private readonly Dictionary<uint, List<ProposedBatch>> _proposedBatchesByBatchId = new();
         private readonly Dictionary<Keccak, ProposedBatch> _proposedBatchesByHash = new();
 
-
         // Readers
-        private readonly Dictionary<Keccak, HeadReader> _readers = new();
+        private readonly Dictionary<Keccak, Reader> _readers = new();
         private readonly ReaderWriterLockSlim _readerLock = new();
-
 
         // Proposed batches that are finalized
         private readonly HashSet<Keccak> _beingFinalized = new();
-
 
         private readonly Channel<(ProposedBatch[] batches, TaskCompletionSource tcs)> _finalizationQueue =
             Channel.CreateUnbounded<(ProposedBatch[] batches, TaskCompletionSource tcs)>(new UnboundedChannelOptions
@@ -69,7 +66,7 @@ public sealed partial class PagedDb
             foreach (var batch in _db.SnapshotAll())
             {
                 _lastCommittedBatch = Math.Max(batch.BatchId, _lastCommittedBatch);
-                var reader = new HeadReader(_db, CreateNextRoot([], (ReadOnlyBatch)batch), batch, [], _pool);
+                var reader = new Reader(_db, CreateNextRoot([], (ReadOnlyBatch)batch), batch, [], _pool);
                 RegisterReader(reader);
             }
 
@@ -78,21 +75,21 @@ public sealed partial class PagedDb
 
         private void BuildAndRegisterReader(Keccak stateRootHash)
         {
-            HeadReader reader;
+            Reader reader;
 
             // Dependencies and creation must be done under the batch lock
             lock (_db._batchLock)
             {
                 var read = BuildDependencies(stateRootHash, out var root, out _, out var proposed);
-                reader = new HeadReader(_db, root, read, proposed, _pool);
+                reader = new Reader(_db, root, read, proposed, _pool);
             }
 
             RegisterReader(reader);
         }
 
-        private void RegisterReader(HeadReader reader)
+        private void RegisterReader(Reader reader)
         {
-            HeadReader? previous = null;
+            Reader? previous = null;
 
             _readerLock.EnterWriteLock();
             try
@@ -147,6 +144,25 @@ public sealed partial class PagedDb
                 var minBatchId = _db.CalculateMinBatchId(_db.Root);
 
                 return (minBatchId, _lastCommittedBatch, next);
+            }
+        }
+
+        public IHeadReader OpenReader(in Keccak stateHash)
+        {
+            _readerLock.EnterReadLock();
+            try
+            {
+                if (_readers.TryGetValue(stateHash, out var reader))
+                {
+                    reader.AcquireLease();
+                    return reader;
+                }
+
+                throw new KeyNotFoundException($"There is no registered reader for the key {stateHash}");
+            }
+            finally
+            {
+                _readerLock.ExitReadLock();
             }
         }
 
@@ -211,7 +227,7 @@ public sealed partial class PagedDb
                             await _db._manager.WritePages(batch.Changes, options);
 
                             // Set new root
-                            var newRootPage = _db.SetNewRoot(batch.Root);
+                            var (previousRootStateHash, newRootPage) = _db.SetNewRoot(batch.Root);
 
                             // report
                             _db.ReportDbSize(GetRootSizeInMb(batch.Root));
@@ -220,7 +236,7 @@ public sealed partial class PagedDb
 
                             List<ProposedBatch> removed;
 
-                            HeadReader newHeadReader;
+                            Reader newIReader;
                             lock (_db._batchLock)
                             {
                                 _db.CommitNewRoot();
@@ -238,29 +254,10 @@ public sealed partial class PagedDb
 
                                 var read = BuildDependencies(batch.Root.Data.Metadata.StateHash, out var root, out _,
                                     out var proposed);
-                                newHeadReader = new HeadReader(_db, root, read, proposed, _pool);
+                                newIReader = new Reader(_db, root, read, proposed, _pool);
                             }
 
-                            // Update readers
-                            _readerLock.EnterWriteLock();
-                            try
-                            {
-                                // Remove the previous
-                                foreach (var b in removed)
-                                {
-                                    if (_readers.Remove(b.StateHash, out var headReader))
-                                    {
-                                        headReader.Dispose();
-                                    }
-                                }
-
-                                // Register the new one
-                                _readers[newHeadReader.Metadata.StateHash] = newHeadReader;
-                            }
-                            finally
-                            {
-                                _readerLock.ExitWriteLock();
-                            }
+                            RegisterNewReaderAfterFinalization(removed, newIReader, previousRootStateHash);
 
                             // Only now dispose the removed as they had their data used above.
                             foreach (var b in removed)
@@ -278,6 +275,46 @@ public sealed partial class PagedDb
                         toFinalize.tcs.SetException(e);
                     }
                 }
+            }
+        }
+
+        private void RegisterNewReaderAfterFinalization(List<ProposedBatch> removed, Reader newReader, Keccak previousRootStateHash)
+        {
+            var toDispose = new List<Reader>();
+
+            // Update readers
+            _readerLock.EnterWriteLock();
+            try
+            {
+                Reader? headReader;
+
+                // Remove the previous
+                foreach (var b in removed)
+                {
+                    if (_readers.Remove(b.StateHash, out headReader))
+                    {
+                        toDispose.Add(headReader);
+                    }
+                }
+
+                // Register the new one
+                _readers[newReader.Metadata.StateHash] = newReader;
+
+                // Remove the previous state root if exists
+                if (_readers.Remove(previousRootStateHash, out headReader))
+                {
+                    toDispose.Add(headReader);
+                }
+            }
+            finally
+            {
+                _readerLock.ExitWriteLock();
+            }
+
+            // Dispose outside the lock as they were removed from the readers.
+            foreach (var reader in toDispose)
+            {
+                reader.Dispose();
             }
         }
 
@@ -593,7 +630,7 @@ public sealed partial class PagedDb
         }
     }
 
-    private sealed class HeadReader : RefCountingDisposable, IReadOnlyBatchContext, IHeadReader, IThreadPoolWorkItem
+    private sealed class Reader : RefCountingDisposable, IReadOnlyBatchContext, IHeadReader, IThreadPoolWorkItem
     {
         private readonly BufferPool _pool;
         private readonly PagedDb _db;
@@ -605,7 +642,7 @@ public sealed partial class PagedDb
         private readonly ProposedBatch[] _proposed;
         private volatile bool _ready;
 
-        public HeadReader(PagedDb db, RootPage root, IReadOnlyBatch read, ProposedBatch[] proposed, BufferPool pool)
+        public Reader(PagedDb db, RootPage root, IReadOnlyBatch read, ProposedBatch[] proposed, BufferPool pool)
         {
             _db = db;
             _root = root;
@@ -741,6 +778,8 @@ public interface IHeadReader : IDataGetter, IRefCountingDisposable
 public interface IMultiHeadChain : IAsyncDisposable
 {
     IHead Begin(in Keccak stateHash);
+
+    IHeadReader OpenReader(in Keccak stateHash);
 
     /// <summary>
     /// Finalizes the given block and all the blocks before it.

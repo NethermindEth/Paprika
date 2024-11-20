@@ -488,12 +488,15 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
     /// <summary>
     /// Sets the new root but does not bump the _lastRoot that should be done in a lock.
     /// </summary>
-    private DbAddress SetNewRoot(RootPage root)
+    private (Keccak previousRootStateHash, DbAddress newRootPage) SetNewRoot(RootPage root)
     {
         var pageAddress = (_lastRoot + 1) % _historyDepth;
+        var destination = _roots[pageAddress];
 
-        root.CopyTo(_roots[pageAddress]);
-        return DbAddress.Page((uint)pageAddress);
+        var previousStateHash = destination.Data.Metadata.StateHash;
+
+        root.CopyTo(destination);
+        return (previousStateHash, DbAddress.Page((uint)pageAddress));
     }
 
     private void CommitNewRoot() => _lastRoot += 1;
@@ -630,7 +633,7 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
 
             await Db._manager.WritePages(Written, options);
 
-            var newRootPage = Db.SetNewRoot(Root);
+            var (_, newRootPage) = Db.SetNewRoot(Root);
 
             // report
             Db.ReportDbSize(GetRootSizeInMb(Root));
