@@ -74,7 +74,27 @@ public readonly unsafe struct StateRootPage(Page page) : IPage
             return new StateRootPage(writable).DeleteByPrefix(prefix, batch);
         }
 
-        Debug.Assert(prefix.Length > ConsumedNibbles, "Removing prefix at the root? Something went wrong.");
+        if (prefix.Length < ConsumedNibbles)
+        {
+            if (prefix.Length == 1)
+            {
+                var idx = prefix.Nibble0 << NibblePath.NibbleShift;
+                for (int i = 0; i < 16; i++)
+                {
+                    ref var addrShort = ref DeleteAll(Data.Buckets, idx + i);
+                }
+            }
+            else if (prefix.IsEmpty)
+            {
+                //can all pages be freed here?
+                for (int i = 0; i < BucketCount; i++)
+                {
+                    ref var addrShort = ref DeleteAll(Data.Buckets, i);
+                }
+            }
+
+            return page;
+        }
 
         var index = GetIndex(prefix);
         var sliced = prefix.SliceFrom(ConsumedNibbles);
@@ -86,6 +106,18 @@ public readonly unsafe struct StateRootPage(Page page) : IPage
         }
 
         return page;
+
+        ref DbAddress DeleteAll(Span<DbAddress> buckets, int addrIndex)
+        {
+            ref var addrShort = ref buckets[addrIndex];
+
+            if (!addrShort.IsNull)
+            {
+                addrShort = batch.GetAddress(new DataPage(batch.GetAt(addrShort)).DeleteByPrefix(NibblePath.Empty, batch));
+            }
+
+            return ref addrShort;
+        }
     }
 
     /// <summary>

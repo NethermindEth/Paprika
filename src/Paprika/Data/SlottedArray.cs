@@ -126,7 +126,7 @@ public readonly ref struct SlottedArray /*: IClearable */
     {
         if (prefix.Length == 0)
         {
-            Delete(prefix);
+            Clear();
         }
         else if (prefix.Length == 1)
         {
