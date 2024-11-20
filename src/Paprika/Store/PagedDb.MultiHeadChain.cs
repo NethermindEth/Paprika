@@ -31,15 +31,21 @@ public sealed partial class PagedDb
     private class MultiHeadChain : IMultiHeadChain
     {
         private readonly PagedDb _db;
+        private readonly BufferPool _pool;
 
         // Batches grouped by id and number
         private readonly Dictionary<uint, List<ProposedBatch>> _proposedBatchesByBatchId = new();
         private readonly Dictionary<Keccak, ProposedBatch> _proposedBatchesByHash = new();
 
-        private readonly ConcurrentDictionary<Keccak, HeadReader> _readers = new();
+
+        // Readers
+        private readonly Dictionary<Keccak, HeadReader> _readers = new();
+        private readonly ReaderWriterLockSlim _readerLock = new();
+
 
         // Proposed batches that are finalized
         private readonly HashSet<Keccak> _beingFinalized = new();
+
 
         private readonly Channel<(ProposedBatch[] batches, TaskCompletionSource tcs)> _finalizationQueue =
             Channel.CreateUnbounded<(ProposedBatch[] batches, TaskCompletionSource tcs)>(new UnboundedChannelOptions
@@ -58,22 +64,52 @@ public sealed partial class PagedDb
         {
             _db = db;
 
-            var pool = _db._pool;
+            _pool = _db._pool;
 
             foreach (var batch in _db.SnapshotAll())
             {
                 _lastCommittedBatch = Math.Max(batch.BatchId, _lastCommittedBatch);
-                RegisterReader(new HeadReader(_db, CreateNextRoot([], (ReadOnlyBatch)batch), batch, [], pool));
+                var reader = new HeadReader(_db, CreateNextRoot([], (ReadOnlyBatch)batch), batch, [], _pool);
+                RegisterReader(reader);
             }
 
             _flusher = FlusherTask();
         }
 
+        private void BuildAndRegisterReader(Keccak stateRootHash)
+        {
+            HeadReader reader;
+
+            // Dependencies and creation must be done under the batch lock
+            lock (_db._batchLock)
+            {
+                var read = BuildDependencies(stateRootHash, out var root, out _, out var proposed);
+                reader = new HeadReader(_db, root, read, proposed, _pool);
+            }
+
+            RegisterReader(reader);
+        }
+
         private void RegisterReader(HeadReader reader)
         {
-            // Acquiring lease not needed. It's automatically created at 1.
-            //reader.AcquireLease();
-            _readers[reader.Metadata.StateHash] = reader;
+            HeadReader? previous = null;
+
+            _readerLock.EnterWriteLock();
+            try
+            {
+                ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_readers, reader.Metadata.StateHash, out var exists);
+                if (exists)
+                {
+                    previous = slot;
+                }
+
+                slot = reader;
+            }
+            finally
+            {
+                previous?.Dispose();
+                _readerLock.ExitWriteLock();
+            }
         }
 
         /// <summary>
@@ -104,6 +140,8 @@ public sealed partial class PagedDb
                 }
 
                 read.Dispose();
+
+                BuildAndRegisterReader(proposed.StateHash);
 
                 var next = _db.BeginReadOnlyBatch();
                 var minBatchId = _db.CalculateMinBatchId(_db.Root);
@@ -182,6 +220,7 @@ public sealed partial class PagedDb
 
                             List<ProposedBatch> removed;
 
+                            HeadReader newHeadReader;
                             lock (_db._batchLock)
                             {
                                 _db.CommitNewRoot();
@@ -196,9 +235,34 @@ public sealed partial class PagedDb
                                     _proposedBatchesByHash.Remove(hash);
                                     _beingFinalized.Remove(hash);
                                 }
+
+                                var read = BuildDependencies(batch.Root.Data.Metadata.StateHash, out var root, out _,
+                                    out var proposed);
+                                newHeadReader = new HeadReader(_db, root, read, proposed, _pool);
                             }
 
-                            // Dispose outside the lock
+                            // Update readers
+                            _readerLock.EnterWriteLock();
+                            try
+                            {
+                                // Remove the previous
+                                foreach (var b in removed)
+                                {
+                                    if (_readers.Remove(b.StateHash, out var headReader))
+                                    {
+                                        headReader.Dispose();
+                                    }
+                                }
+
+                                // Register the new one
+                                _readers[newHeadReader.Metadata.StateHash] = newHeadReader;
+                            }
+                            finally
+                            {
+                                _readerLock.ExitWriteLock();
+                            }
+
+                            // Only now dispose the removed as they had their data used above.
                             foreach (var b in removed)
                             {
                                 b.Dispose();
@@ -228,33 +292,41 @@ public sealed partial class PagedDb
         {
             lock (_db._batchLock)
             {
-                var hash = Normalize(stateHash);
-
-                var proposed = new List<ProposedBatch>();
-
-                // The stateHash that is searched is proposed. We need to construct a list of dependencies.
-                while (_proposedBatchesByHash.TryGetValue(hash, out var tail))
-                {
-                    proposed.Add(tail);
-                    hash = tail.ParentHash;
-                }
-
-                // We want to have the oldest first
-                proposed.Reverse();
-
-                // Take the read by the hash of the last one's parent
-                var read = (ReadOnlyBatch)_db.BeginReadOnlyBatch(hash);
-
-                // Select the root by either, selecting the last proposed root or getting the read root if there's no proposed.
-                var root = CreateNextRoot(CollectionsMarshal.AsSpan(proposed), read);
-                var minBatchId = _db.CalculateMinBatchId(root);
-
-                return new HeadTrackingBatch(_db, this, root, minBatchId, read, proposed.ToArray(), _db._pool);
+                var read = BuildDependencies(stateHash, out var root, out var minBatchId, out var proposed);
+                return new HeadTrackingBatch(_db, this, root, minBatchId, read, proposed, _db._pool);
             }
         }
 
+        private ReadOnlyBatch BuildDependencies(Keccak stateHash, out RootPage root, out uint minBatchId,
+            out ProposedBatch[] proposed)
+        {
+            Debug.Assert(Monitor.IsEntered(_db._batchLock));
+
+            var hash = Normalize(stateHash);
+            var list = new List<ProposedBatch>();
+
+            // The stateHash that is searched is proposed. We need to construct a list of dependencies.
+            while (_proposedBatchesByHash.TryGetValue(hash, out var tail))
+            {
+                list.Add(tail);
+                hash = tail.ParentHash;
+            }
+
+            // We want to have the oldest first
+            list.Reverse();
+
+            // Take the read by the hash of the last one's parent
+            var read = (ReadOnlyBatch)_db.BeginReadOnlyBatch(hash);
+
+            // Select the root by either, selecting the last proposed root or getting the read root if there's no proposed.
+            root = CreateNextRoot(CollectionsMarshal.AsSpan(list), read);
+            minBatchId = _db.CalculateMinBatchId(root);
+            proposed = list.ToArray();
+            return read;
+        }
+
         private RootPage CreateNextRoot(ReadOnlySpan<ProposedBatch> proposed, ReadOnlyBatch read) =>
-            PagedDb.CreateNextRoot(proposed.Length > 0 ? proposed[^1].Root : read.Root, _db._pool);
+            PagedDb.CreateNextRoot(proposed.Length > 0 ? proposed[^1].Root : read.Root, _pool);
 
         private static Keccak Normalize(in Keccak keccak)
         {
