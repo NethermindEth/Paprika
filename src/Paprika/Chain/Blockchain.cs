@@ -97,17 +97,16 @@ public class Blockchain : IAsyncDisposable
 
     public IReadOnlyWorldState StartReadOnly(Keccak keccak)
     {
-        var (batch, ancestors) = BuildBlockDataDependencies(keccak);
-        var filter = CreateAncestorsFilter(ancestors);
+        if (_chain.TryGetReader(keccak, out var reader))
+        {
+            return new ReadOnlyState(reader);
+        }
 
-        return new ReadOnlyState(keccak, new ReadOnlyBatchCountingRefs(batch), ancestors, filter, _pool);
+        throw new KeyNotFoundException($"Not found state with {keccak}");
     }
 
-    public static IReadOnlyWorldState StartReadOnlyLatestFromDb(IDb db)
-    {
-        var batch = db.BeginReadOnlyBatch($"Blockchain dependency LATEST");
-        return new ReadOnlyState(batch.Metadata.StateHash, new ReadOnlyBatchCountingRefs(batch), []);
-    }
+    public static IReadOnlyWorldState StartReadOnlyLatestFromDb(IDb db) =>
+        throw new NotImplementedException("Not implemented");
 
     public void Finalize(Keccak keccak) => _chain.Finalize(keccak);
 
@@ -280,7 +279,7 @@ public class Blockchain : IAsyncDisposable
             _head.Commit(blockNumber, hash);
 
             // Cleanup
-            Reset();
+            _filter.Clear();
             _destroyed.Clear();
             CreateDictionaries();
 
@@ -326,7 +325,6 @@ public class Blockchain : IAsyncDisposable
             _hash = ParentHash;
             _filter.Clear();
             _destroyed.Clear();
-
             CreateDictionaries();
         }
 
@@ -1275,7 +1273,7 @@ public class Blockchain : IAsyncDisposable
 
     public IReadOnlyWorldStateAccessor BuildReadOnlyAccessor()
     {
-        return _accessor = new ReadOnlyWorldStateAccessor(this._chain);
+        return _accessor = new ReadOnlyWorldStateAccessor(_chain);
     }
 
     private class ReadOnlyWorldStateAccessor(IMultiHeadChain chain) : IReadOnlyWorldStateAccessor
