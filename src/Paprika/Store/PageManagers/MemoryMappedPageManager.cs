@@ -36,6 +36,7 @@ public sealed class MemoryMappedPageManager : PointerPageManager
     private readonly Histogram<int> _fileWrites;
     private readonly Histogram<int> _writeTime;
     private readonly Histogram<int> _copyTime;
+    private readonly Histogram<int> _fsyncTime;
 
     public unsafe MemoryMappedPageManager(long size, byte historyDepth, string dir,
         PersistenceOptions options = PersistenceOptions.FlushFile) : base(size)
@@ -79,6 +80,7 @@ public sealed class MemoryMappedPageManager : PointerPageManager
         _fileWrites = _meter.CreateHistogram<int>("File writes", "Syscall", "Actual numbers of file writes issued");
         _writeTime = _meter.CreateHistogram<int>("Write time", "ms", "Time spent on writing");
         _copyTime = _meter.CreateHistogram<int>("Copy time", "ms", "Time of copying data from memory to mmaped pages");
+        _fsyncTime = _meter.CreateHistogram<int>("FSYNC time", "ms", "Time spent in FSYNC");
     }
 
     public static string GetPaprikaFilePath(string dir) => System.IO.Path.Combine(dir, PaprikaFileName);
@@ -167,7 +169,7 @@ public sealed class MemoryMappedPageManager : PointerPageManager
 
         if (options == CommitOptions.FlushDataAndRoot)
         {
-            RandomAccess.FlushToDisk(_file);
+            Fsync();
         }
     }
 
@@ -176,16 +178,21 @@ public sealed class MemoryMappedPageManager : PointerPageManager
         if (_options == PersistenceOptions.MMapOnly)
             return;
 
+        Fsync();
+    }
+
+    private void Fsync()
+    {
+        var watch = Stopwatch.StartNew();
         RandomAccess.FlushToDisk(_file);
+        _fsyncTime.Record((int)watch.ElapsedMilliseconds);
     }
 
     public override void ForceFlush()
     {
         _whole.Flush();
-        RandomAccess.FlushToDisk(_file);
+        Fsync();
     }
-
-    public bool UsesPersistentPaging => _options == PersistenceOptions.FlushFile;
 
     public override void Dispose()
     {

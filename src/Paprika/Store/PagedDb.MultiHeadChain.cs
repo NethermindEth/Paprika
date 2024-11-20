@@ -47,8 +47,6 @@ public sealed partial class PagedDb
         private readonly Channel<(ProposedBatch[] batches, TaskCompletionSource tcs)> _finalizationQueue =
             Channel.CreateUnbounded<(ProposedBatch[] batches, TaskCompletionSource tcs)>(new UnboundedChannelOptions
             {
-                SingleReader = true,
-                SingleWriter = false,
                 AllowSynchronousContinuations = false
             });
 
@@ -57,9 +55,15 @@ public sealed partial class PagedDb
 
         private uint _lastCommittedBatch;
 
+        // Metrics
+        private readonly MetricsExtensions.IAtomicIntGauge _flusherQueueCount;
+
         public MultiHeadChain(PagedDb db)
         {
             _db = db;
+
+            _flusherQueueCount = _db._meter.CreateAtomicObservableGauge("Flusher queue size", "Blocks",
+                "The number of the blocks in the flush queue");
 
             _pool = _db._pool;
 
@@ -94,7 +98,8 @@ public sealed partial class PagedDb
             _readerLock.EnterWriteLock();
             try
             {
-                ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_readers, reader.Metadata.StateHash, out var exists);
+                ref var slot =
+                    ref CollectionsMarshal.GetValueRefOrAddDefault(_readers, reader.Metadata.StateHash, out var exists);
                 if (exists)
                 {
                     previous = slot;
@@ -147,18 +152,22 @@ public sealed partial class PagedDb
             }
         }
 
-        public IHeadReader OpenReader(in Keccak stateHash)
+        public bool TryGetReader(in Keccak stateHash, out IHeadReader reader)
         {
             _readerLock.EnterReadLock();
             try
             {
-                if (_readers.TryGetValue(stateHash, out var reader))
+                if (!_readers.TryGetValue(stateHash, out var r))
                 {
-                    reader.AcquireLease();
-                    return reader;
+                    reader = default;
+                    return false;
                 }
 
-                throw new KeyNotFoundException($"There is no registered reader for the key {stateHash}");
+                reader = r;
+                reader.AcquireLease();
+
+                return true;
+
             }
             finally
             {
@@ -202,6 +211,19 @@ public sealed partial class PagedDb
                 _finalizationQueue.Writer.TryWrite((batches, tcs));
 
                 return tcs.Task;
+            }
+        }
+
+        public bool HasState(in Keccak keccak)
+        {
+            _readerLock.EnterReadLock();
+            try
+            {
+                return _readers.ContainsKey(keccak);
+            }
+            finally
+            {
+                _readerLock.ExitReadLock();
             }
         }
 
@@ -266,6 +288,7 @@ public sealed partial class PagedDb
                             }
 
                             _db.ReportCommit(watch.Elapsed);
+                            _flusherQueueCount.Set(reader.Count);
                         }
 
                         toFinalize.tcs.SetResult();
@@ -278,7 +301,8 @@ public sealed partial class PagedDb
             }
         }
 
-        private void RegisterNewReaderAfterFinalization(List<ProposedBatch> removed, Reader newReader, Keccak previousRootStateHash)
+        private void RegisterNewReaderAfterFinalization(List<ProposedBatch> removed, Reader newReader,
+            Keccak previousRootStateHash)
         {
             var toDispose = new List<Reader>();
 
@@ -380,6 +404,7 @@ public sealed partial class PagedDb
             {
                 reader.Dispose();
             }
+
             _readers.Clear();
 
             foreach (var (_, proposed) in _proposedBatchesByHash)
@@ -779,10 +804,12 @@ public interface IMultiHeadChain : IAsyncDisposable
 {
     IHead Begin(in Keccak stateHash);
 
-    IHeadReader OpenReader(in Keccak stateHash);
+    bool TryGetReader(in Keccak stateHash, out IHeadReader leasedReader);
 
     /// <summary>
     /// Finalizes the given block and all the blocks before it.
     /// </summary>
     Task Finalize(Keccak keccak);
+
+    bool HasState(in Keccak keccak);
 }

@@ -150,10 +150,7 @@ public static class BitMapFilter
 
         public void Clear()
         {
-            foreach (var page in _pages)
-            {
-                page.Clear();
-            }
+            Parallel.ForEach(_pages, page => page.Clear());
         }
 
         public void Return(BufferPool pool)

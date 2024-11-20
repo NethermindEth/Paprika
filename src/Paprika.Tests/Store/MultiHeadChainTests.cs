@@ -153,7 +153,7 @@ public class MultiHeadChainTests
             await multi.Finalize(root);
         }
 
-        using var read = multi.OpenReader(root);
+        using var read = multi.GetReader(root);
 
         Assert();
 
