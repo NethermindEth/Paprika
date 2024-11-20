@@ -185,7 +185,7 @@ public static class BitMapFilter
         {
             State state = new State(others, _pages);
 
-            WorkProcessor.For(0, PageCount, state, static (i, s) =>
+            ParallelUnbalancedWork.For(0, PageCount, state, static (i, s) =>
             {
                 var page = s.Pages[i];
                 var length = s.Others.Length;

@@ -261,7 +261,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
 
         var children = new ConcurrentQueue<IChildCommit>();
-        WorkProcessor.For(0, workItems.Length, s_parallelOptions,
+        ParallelUnbalancedWork.For(0, workItems.Length, s_parallelOptions,
             commit.GetChild,
             (i, child) =>
             {
@@ -605,7 +605,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             var budget = ctx.Budget;
 
             // parallel calculation
-            WorkProcessor.For(0, NibbleSet.NibbleCount, s_parallelOptions, nibble =>
+            ParallelUnbalancedWork.For(0, NibbleSet.NibbleCount, s_parallelOptions, nibble =>
             {
                 var childPath = NibblePath.Single((byte)nibble, 0);
 
