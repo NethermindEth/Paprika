@@ -121,12 +121,12 @@ public class Blockchain : IAsyncDisposable
         /// </summary>
         private readonly BitFilter _filter;
 
-        private readonly Dictionary<Keccak, int>? _stats;
+        private readonly Dictionary<Keccak, int> _stats = new();
 
         /// <summary>
         /// Stores information about contracts that should have their previous incarnations destroyed.
         /// </summary>
-        private HashSet<Keccak> _destroyed = new();
+        private readonly HashSet<Keccak> _destroyed = new();
 
         private readonly IHead _head;
         private readonly Blockchain _blockchain;
@@ -164,7 +164,6 @@ public class Blockchain : IAsyncDisposable
             _blockchain = blockchain;
 
             _filter = _blockchain.CreateBitFilter();
-            _stats = new Dictionary<Keccak, int>();
 
             _hash = ParentHash;
 
@@ -325,6 +324,7 @@ public class Blockchain : IAsyncDisposable
         {
             _filter.Clear();
             _destroyed.Clear();
+            _stats.Clear();
 
             _cacheBudgetStorageAndStage = _blockchain._cacheBudgetStateAndStorage.Build();
             _cacheBudgetPreCommit = _blockchain._cacheBudgetPreCommit.Build();
@@ -652,7 +652,7 @@ public class Blockchain : IAsyncDisposable
                 _blockchain._preCommit.OnNewAccountCreated(address, this);
             }
 
-            _stats!.RegisterSetAccount(address);
+            _stats.RegisterSetAccount(address);
         }
 
         public void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value)
@@ -662,7 +662,7 @@ public class Blockchain : IAsyncDisposable
 
             SetImpl(key, value, EntryType.Persistent, _storage);
 
-            _stats!.RegisterSetStorageAccount(address);
+            _stats.RegisterSetStorageAccount(address);
         }
 
         [SkipLocalsInit]
