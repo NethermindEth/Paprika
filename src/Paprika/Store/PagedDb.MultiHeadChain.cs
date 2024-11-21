@@ -152,7 +152,7 @@ public sealed partial class PagedDb
             }
         }
 
-        public bool TryGetReader(in Keccak stateHash, out IHeadReader reader)
+        public bool TryLeaseReader(in Keccak stateHash, out IHeadReader reader)
         {
             _readerLock.EnterReadLock();
             try
@@ -469,7 +469,7 @@ public sealed partial class PagedDb
         private uint _batchId;
         private uint _reusePagesOlderThanBatchId;
         private IReadOnlyBatch _read;
-        private Keccak _parentHash;
+        public Keccak ParentHash { get; private set; }
 
         public HeadTrackingBatch(PagedDb db, MultiHeadChain chain, RootPage root,
             uint reusePagesOlderThanBatchId, IReadOnlyBatch read, IEnumerable<ProposedBatch> proposed,
@@ -478,7 +478,7 @@ public sealed partial class PagedDb
             _chain = chain;
             _root = root;
             _batchId = root.Header.BatchId;
-            _parentHash = root.Data.Metadata.StateHash;
+            ParentHash = root.Data.Metadata.StateHash;
 
             _pool = pool;
             _reusePagesOlderThanBatchId = reusePagesOlderThanBatchId;
@@ -523,13 +523,13 @@ public sealed partial class PagedDb
         public void Commit(uint blockNumber, in Keccak blockHash)
         {
             // Copy the state hash
-            _parentHash = Root.Data.Metadata.StateHash;
+            ParentHash = Root.Data.Metadata.StateHash;
 
             SetMetadata(blockNumber, blockHash);
 
             // The root ownership is now moved to the proposed batch.
             // The batch is automatically leased by this head. It will be leased by the chain as well. 
-            var batch = new ProposedBatch(_cowed.ToArray(), Root, _parentHash, Db._pool);
+            var batch = new ProposedBatch(_cowed.ToArray(), Root, ParentHash, Db._pool);
 
             _cowed.Clear();
             Clear();
@@ -788,6 +788,11 @@ public sealed partial class PagedDb
 public interface IHead : IDataSetter, IDataGetter, IDisposable
 {
     /// <summary>
+    /// Gets the hash of the previous block. Will be set to a new value when <see cref="Commit"/> is called.
+    /// </summary>
+    public Keccak ParentHash { get; }
+
+    /// <summary>
     /// Commits the changes applied so far, and moves the head tracker to the next one.
     /// </summary>
     void Commit(uint blockNumber, in Keccak blockHash);
@@ -804,7 +809,7 @@ public interface IMultiHeadChain : IAsyncDisposable
 {
     IHead Begin(in Keccak stateHash);
 
-    bool TryGetReader(in Keccak stateHash, out IHeadReader leasedReader);
+    bool TryLeaseReader(in Keccak stateHash, out IHeadReader leasedReader);
 
     /// <summary>
     /// Finalizes the given block and all the blocks before it.
