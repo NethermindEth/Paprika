@@ -251,9 +251,8 @@ public class BlockchainTests
         using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
         await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
 
-        using var block1 = blockchain.StartNew(Keccak.EmptyTreeHash);
-
-        var before = block1.Hash;
+        var before = Keccak.EmptyTreeHash;
+        using var block1 = blockchain.StartNew(before);
 
         block1.SetAccount(Key0, new Account(1, 1));
         block1.SetStorage(Key0, Key1, stackalloc byte[1] { 1 });
@@ -379,7 +378,7 @@ public class BlockchainTests
 
         using var read = db.BeginReadOnlyBatch();
 
-        read.Metadata.BlockNumber.Should().Be(2);
+        read.Metadata.BlockNumber.Should().Be(3);
 
         read.AssertNoAccount(Key0);
         read.AssertNoStorageAt(Key0, Key1);

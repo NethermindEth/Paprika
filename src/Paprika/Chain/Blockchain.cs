@@ -199,7 +199,7 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-        public Keccak ParentHash => _head.ParentHash;
+        public Keccak ParentHash => _head.Metadata.StateHash;
 
         /// <summary>
         /// Commits the block to the blockchain.
