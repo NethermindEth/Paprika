@@ -120,30 +120,43 @@ public sealed partial class PagedDb
         public (uint reusePagesOlderThan, uint lastCommittedBatchId, IReadOnlyBatch read) Propose(IReadOnlyBatch read,
             ProposedBatch proposed)
         {
-            // The ownership
-            proposed.AcquireLease();
+            var hash = proposed.StateHash;
 
             lock (_db._batchLock)
             {
-                // Add by hash
-                _proposedBatchesByHash.Add(proposed.StateHash, proposed);
-
-                // Add by number
-                ref var list = ref CollectionsMarshal.GetValueRefOrAddDefault(_proposedBatchesByBatchId,
-                    proposed.BatchId, out bool exists);
-
-                if (exists == false)
+                if (_proposedBatchesByHash.TryAdd(hash, proposed))
                 {
-                    list = [proposed];
+                    // The ownership
+                    proposed.AcquireLease();
+
+                    // Add by number
+                    ref var list = ref CollectionsMarshal.GetValueRefOrAddDefault(_proposedBatchesByBatchId,
+                        proposed.BatchId, out bool exists);
+
+                    if (exists == false)
+                    {
+                        list = [proposed];
+                    }
+                    else
+                    {
+                        list!.Add(proposed);
+                    }
                 }
                 else
                 {
-                    list!.Add(proposed);
+                    if (_proposedBatchesByHash[hash].BatchId != proposed.BatchId)
+                    {
+                        throw new Exception(
+                            $"There is a proposed batch with the same state hash {hash} but with a different batch id");
+                    }
                 }
+
+                // Handle both reregistration of the same hash/batchid and the addition by disposing the read
+                // and moving forward with the creation of the next reader. 
 
                 read.Dispose();
 
-                BuildAndRegisterReader(proposed.StateHash);
+                BuildAndRegisterReader(hash);
 
                 var next = _db.BeginReadOnlyBatch();
                 var minBatchId = _db.CalculateMinBatchId(_db.Root);

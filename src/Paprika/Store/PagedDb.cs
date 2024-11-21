@@ -769,10 +769,12 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
         {
             if (_reusedImmediately.TryPop(out addr))
             {
+                Debug.Assert(Db._manager.IsValidAddress(addr));
                 Metrics.PagesReused++;
             }
             else if (TryGetNoLongerUsedPage(out addr))
             {
+                Debug.Assert(Db._manager.IsValidAddress(addr));
                 Metrics.PagesReused++;
             }
             else
@@ -781,6 +783,7 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
 
                 // on failure to reuse a page, default to allocating a new one.
                 addr = Root.Data.GetNextFreePage();
+                Debug.Assert(Db._manager.IsValidAddress(addr), $"The address of the next free page {addr} breaches the size of the database.");
             }
 
             var page = GetAtForWriting(addr);
@@ -866,7 +869,7 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
 
         public override void RegisterForFutureReuse(Page page, bool possibleImmediateReuse = false)
         {
-            var addr = Db.GetAddress(page);
+            var addr = GetAddress(page);
 
             if (page.Header.BatchId == BatchId)
             {

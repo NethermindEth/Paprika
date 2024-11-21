@@ -36,8 +36,7 @@ public class AdditionalTests
         const int number = 1;
         var hash = block1.Commit(number);
 
-        blockchain.Finalize(hash);
-        await blockchain.WaitTillFlush(number);
+        await blockchain.Finalize(hash);
 
         using var read = blockchain.StartReadOnly(hash);
         var account = read.GetAccount(Key0);

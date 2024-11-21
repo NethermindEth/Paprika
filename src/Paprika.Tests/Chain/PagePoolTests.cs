@@ -51,7 +51,7 @@ public class PagePoolTests
     }
 
     [Test]
-    public void Big_pool()
+    public unsafe void Big_pool()
     {
         const int pageCount = 1024;
         using var pool = new BufferPool(pageCount, assertCountOnDispose: false);
@@ -64,5 +64,10 @@ public class PagePoolTests
         }
 
         set.Count.Should().Be(pageCount);
+
+        foreach (var page in set)
+        {
+            pool.Return(new Page((byte*)page.ToPointer()));
+        }
     }
 }

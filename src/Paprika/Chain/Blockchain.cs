@@ -43,12 +43,12 @@ public class Blockchain : IAsyncDisposable
     private readonly Action? _beforeMetricsDisposed;
     private bool _verify;
 
-    public Blockchain(IMultiHeadChain chain, IPreCommitBehavior preCommit, TimeSpan? minFlushDelay = null,
+    public Blockchain(IDb db, IPreCommitBehavior preCommit, TimeSpan? minFlushDelay = null,
         CacheBudget.Options cacheBudgetStateAndStorage = default,
         CacheBudget.Options cacheBudgetPreCommit = default,
         int? finalizationQueueLimit = null, Action? beforeMetricsDisposed = null)
     {
-        _chain = chain;
+        _chain = db.OpenMultiHeadChain();
         _preCommit = preCommit;
         _cacheBudgetStateAndStorage = cacheBudgetStateAndStorage;
         _cacheBudgetPreCommit = cacheBudgetPreCommit;
@@ -107,7 +107,7 @@ public class Blockchain : IAsyncDisposable
     public static IReadOnlyWorldState StartReadOnlyLatestFromDb(IDb db) =>
         throw new NotImplementedException("Not implemented");
 
-    public void Finalize(Keccak keccak) => _chain.Finalize(keccak);
+    public Task Finalize(Keccak keccak) => _chain.Finalize(keccak);
 
     private BitFilter CreateBitFilter() => BitMapFilter.CreateOfN<BitMapFilter.OfNSize128>(_pool);
 
@@ -276,7 +276,7 @@ public class Blockchain : IAsyncDisposable
             _head.Commit(blockNumber, hash);
 
             // Cleanup
-            Reset();
+            ResetAllButHash();
 
             [DoesNotReturn]
             [StackTraceHidden]
@@ -318,6 +318,11 @@ public class Blockchain : IAsyncDisposable
         public void Reset()
         {
             _hash = ParentHash;
+            ResetAllButHash();
+        }
+
+        private void ResetAllButHash()
+        {
             _filter.Clear();
             _destroyed.Clear();
 
@@ -571,7 +576,6 @@ public class Blockchain : IAsyncDisposable
 
             _stats![address] = 0;
 
-            _destroyed ??= new HashSet<Keccak>();
             _destroyed.Add(address);
 
             _blockchain._preCommit.OnAccountDestroyed(address, this);
@@ -970,6 +974,8 @@ public class Blockchain : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        await _chain.DisposeAsync();
+
         _accessor?.Dispose();
 
         // once the flushing is done and blocks are disposed, dispose the pool

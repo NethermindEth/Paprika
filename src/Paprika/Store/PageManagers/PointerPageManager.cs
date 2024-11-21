@@ -34,20 +34,24 @@ public abstract unsafe class PointerPageManager(long size) : IPageManager
         }
 
         return new Page((byte*)Ptr + address.FileOffset);
-
-        [DoesNotReturn]
-        [StackTraceHidden]
-        void ThrowInvalidPage(uint raw)
-        {
-            throw new IndexOutOfRangeException($"The database breached its size! Requested page {raw} from max {MaxPage}. The returned page is invalid");
-        }
     }
+
+    public bool IsValidAddress(DbAddress address) => address.Raw < MaxPage;
+
+    [DoesNotReturn]
+    [StackTraceHidden]
+    private void ThrowInvalidPage(uint raw) => throw new IndexOutOfRangeException(
+        $"The database breached its size! Requested page {raw} from max {MaxPage}. The returned page is invalid");
 
     public DbAddress GetAddress(in Page page)
     {
-        return DbAddress.Page((uint)(Unsafe
+        var addr = DbAddress.Page((uint)(Unsafe
             .ByteOffset(ref Unsafe.AsRef<byte>(Ptr), ref Unsafe.AsRef<byte>(page.Raw.ToPointer()))
             .ToInt64() / Page.PageSize));
+
+        Debug.Assert(IsValidAddress(addr));
+
+        return addr;
     }
 
     public abstract ValueTask WritePages(ICollection<DbAddress> addresses, CommitOptions options);

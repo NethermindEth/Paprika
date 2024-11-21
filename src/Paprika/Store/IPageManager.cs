@@ -2,6 +2,11 @@ namespace Paprika.Store;
 
 public interface IPageManager : IDisposable, IPageResolver
 {
+    /// <summary>
+    /// Whether the address does not breach the provided address space.
+    /// </summary>
+    bool IsValidAddress(DbAddress address);
+
     DbAddress GetAddress(in Page page);
 
     /// <summary>
