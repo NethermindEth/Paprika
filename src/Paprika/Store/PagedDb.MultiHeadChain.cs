@@ -692,7 +692,7 @@ public sealed partial class PagedDb
             _read = read;
             _proposed = proposed;
 
-            IdCache = new Dictionary<Keccak, uint>();
+            IdCache = new ConcurrentDictionary<Keccak, uint>();
 
             foreach (var batch in proposed)
             {

@@ -896,7 +896,7 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
 #endif
         }
 
-        public override Dictionary<Keccak, uint> IdCache { get; }
+        public override IDictionary<Keccak, uint> IdCache { get; }
 
         public void Dispose()
         {

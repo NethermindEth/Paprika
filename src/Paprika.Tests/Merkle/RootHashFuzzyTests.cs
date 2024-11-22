@@ -136,10 +136,10 @@ public class RootHashFuzzyTests
         // blockchain.VerifyDbIntegrityOnCommit();
 
         // set
-        generator.Run(blockchain, 513, false, true);
+        await generator.Run(blockchain, 513, false, true);
 
         // delete
-        var rootHash = generator.Run(blockchain, 1001, true, true);
+        var rootHash = await generator.Run(blockchain, 1001, true, true);
 
         rootHash.Should().BeOneOf(Keccak.EmptyTreeHash, Keccak.Zero);
 
