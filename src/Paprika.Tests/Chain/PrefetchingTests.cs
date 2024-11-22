@@ -82,8 +82,7 @@ public class PrefetchingTests
         var hash = Keccak.EmptyTreeHash;
 
         hash = BuildBlock(blockchain, hash, 1);
-        blockchain.Finalize(hash);
-        await blockchain.WaitTillFlush(hash);
+        await blockchain.Finalize(hash);
 
         hash = BuildBlock(blockchain, hash, 2);
 
@@ -169,8 +168,7 @@ public class PrefetchingTests
         using var first = blockchain.StartNew(parent);
         SetAccounts(new ReadOnlyMemory<Keccak>(keccaks), first, startBlockNumber, storage);
         parent = first.Commit(startBlockNumber);
-        blockchain.Finalize(parent);
-        await blockchain.WaitTillFlush(startBlockNumber);
+        await blockchain.Finalize(parent);
 
         // Run commits now with a prefetching
         await RunBlocksWithPrefetching(blockchain, keccaks, parent, prefetch, storage);

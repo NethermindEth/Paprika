@@ -90,8 +90,7 @@ public class PageStructurePrintingTests
         }
 
         var commit = block.Commit(1);
-        blockchain.Finalize(commit);
-        await blockchain.WaitTillFlush(1);
+        await blockchain.Finalize(commit);
 
         // Assert
         using var read = db.BeginReadOnlyBatch();

@@ -2,7 +2,6 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using FluentAssertions;
 using NUnit.Framework;
-using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store;
@@ -175,35 +174,4 @@ public static class TestExtensions
     }
 
     public static byte NextByte(this Random random) => (byte)random.Next(0, byte.MaxValue);
-
-    public static Task WaitTillFlush(this Blockchain chain, uint blockNumber)
-    {
-        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        chain.Flushed += (_, block) =>
-        {
-            if (block.blockNumber >= blockNumber)
-                tcs.TrySetResult();
-        };
-
-        chain.FlusherFailure += (_, ex) =>
-        {
-            tcs.TrySetException(ex);
-        };
-
-        return tcs.Task;
-    }
-
-    public static Task WaitTillFlush(this Blockchain chain, Keccak hash)
-    {
-        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        chain.Flushed += (_, block) =>
-        {
-            if (block.blockHash == hash)
-                tcs.SetResult();
-        };
-
-        return tcs.Task;
-    }
 }

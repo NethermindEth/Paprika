@@ -535,6 +535,8 @@ public sealed partial class PagedDb
 
         public void Commit(uint blockNumber, in Keccak blockHash)
         {
+            MemoizeAbandoned();
+
             // Copy the state hash
             ParentHash = Root.Data.Metadata.StateHash;
 
