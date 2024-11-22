@@ -235,13 +235,13 @@ public class BlockchainTests
 
             if (finality.Count > 64)
             {
-                blockchain.Finalize(finality.Dequeue());
+                await blockchain.Finalize(finality.Dequeue());
             }
         }
 
         while (finality.TryDequeue(out var finalized))
         {
-            blockchain.Finalize(finalized);
+            await blockchain.Finalize(finalized);
         }
     }
 
