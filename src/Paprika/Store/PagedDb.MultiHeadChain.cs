@@ -158,8 +158,9 @@ public sealed partial class PagedDb
 
                 BuildAndRegisterReader(hash);
 
-                var next = _db.BeginReadOnlyBatch();
-                var minBatchId = _db.CalculateMinBatchId(_db.Root);
+                var next = _db.BeginReadOnlyBatch($"{nameof(MultiHeadChain)} {nameof(Propose)} dependency");
+
+                var minBatchId = GetMinBatchId(proposed.Root);
 
                 return (minBatchId, _lastCommittedBatch, next);
             }
@@ -394,9 +395,17 @@ public sealed partial class PagedDb
 
             // Select the root by either, selecting the last proposed root or getting the read root if there's no proposed.
             root = CreateNextRoot(CollectionsMarshal.AsSpan(list), read);
-            minBatchId = _db.CalculateMinBatchId(root);
+            minBatchId = GetMinBatchId(root);
             proposed = list.ToArray();
             return read;
+        }
+
+        private uint GetMinBatchId(RootPage currentRoot)
+        {
+            // Omit readonly transactions from the min batch calculation.
+            // As MultiHead copies all the modified pages it's safe as they will overwritten only in the memory.
+            // Also, use the proposed.Root as this is the root to analyze.
+            return _db.CalculateMinBatchId(currentRoot, true);
         }
 
         private RootPage CreateNextRoot(ReadOnlySpan<ProposedBatch> proposed, ReadOnlyBatch read) =>
@@ -785,8 +794,8 @@ public sealed partial class PagedDb
                     }
                     else
                     {
-                        // exists, swap only if the batch id is higher
-                        if (slot.Header.BatchId > page.Header.BatchId)
+                        // The slot exists, overwrite it if the new page batchid is higher
+                        if (page.Header.BatchId > slot.Header.BatchId)
                         {
                             // Override slot and set the reverse mapping
                             slot = page;

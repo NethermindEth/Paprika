@@ -458,17 +458,29 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
-    private uint CalculateMinBatchId(RootPage root)
+    /// <summary>
+    /// Calculates the minimal batch id that abandoned pages from can be reused.
+    /// </summary>
+    /// <param name="root">The root page that is the current one.</param>
+    /// <param name="omitReadOnlyTransactions">Whether the scan should omit live read only transactions.
+    /// Should not be set to true unless <see cref="IMultiHeadChain"/> uses it.</param>
+    /// <returns>The batch id defining the boundary of the reuse.</returns>
+    private uint CalculateMinBatchId(RootPage root, bool omitReadOnlyTransactions = false)
     {
         Debug.Assert(Monitor.IsEntered(_batchLock), "Should be called only under lock");
 
         var rootBatchId = root.Header.BatchId;
 
         var minBatch = rootBatchId < _historyDepth ? 0 : rootBatchId - _historyDepth;
-        foreach (var batch in _batchesReadOnly)
+
+        if (omitReadOnlyTransactions == false)
         {
-            minBatch = Math.Min(batch.BatchId, minBatch);
+            foreach (var batch in _batchesReadOnly)
+            {
+                minBatch = Math.Min(batch.BatchId, minBatch);
+            }
         }
+
 
         return minBatch;
     }
@@ -953,7 +965,6 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
                 Abandoned.Clear();
                 Written.Clear();
                 IdCache.Clear();
-                Abandoned.Clear();
                 ReusedImmediately.Clear();
             }
         }

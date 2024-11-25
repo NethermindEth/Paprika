@@ -88,7 +88,7 @@ public class RootHashFuzzyTests
 
         await using var blockchain = new Blockchain(db, merkle);
 
-        var rootHash = await generator.Run(blockchain, commitEvery);
+        var rootHash = await generator.Run(blockchain, commitEvery, false);
 
         await blockchain.Finalize(rootHash);
 
