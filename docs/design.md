@@ -46,7 +46,7 @@ blockchain.Finalize(Block2A);
 
 ### PagedDb
 
-The `PagedDb` component is responsible for storing the left-fold of the blocks that are beyond the cut-off point. This database uses [memory-mapped files](https://en.wikipedia.org/wiki/Memory-mapped_file) to provide storing capabilities. To handle concurrency, [Copy on Write](https://en.wikipedia.org/wiki/Copy-on-write) is used. This allows multiple concurrent readers to cooperate in a full lock-free manner and a single writer that runs the current transaction. In that manner, it's heavily inspired by [LMBD](https://github.com/LMDB/lmdb).
+The `PagedDb` component is responsible for storing the left-fold of the blocks that are beyond the cut-off point. This database uses [memory-mapped files](https://en.wikipedia.org/wiki/Memory-mapped_file) to provide storing capabilities. To handle concurrency, [Copy on Write](https://en.wikipedia.org/wiki/Copy-on-write) is used. This allows multiple concurrent readers to cooperate in a full lock-free manner and a single writer that runs the current transaction. In that manner, it's heavily inspired by [LMDB](https://github.com/LMDB/lmdb).
 
 It's worth to mention that due to the design of the `Blockchain` component, having a single writer available is sufficient. At the same time, having multiple readers allow to create readonly transactions that are later used by blocks from `Blockchain`.
 
@@ -365,6 +365,6 @@ A few remarks:
 1. Database Storage lectures by Andy Pavlo from CMU Intro to Database Systems / Fall 2022:
    1. Database Storage, pt. 1 https://www.youtube.com/watch?v=df-l2PxUidI
    1. Database Storage, pt. 2 https://www.youtube.com/watch?v=2HtfGdsrwqA
-1. LMBD
+1. LMDB
    1. Howard Chu - LMDB [The Databaseology Lectures - CMU Fall 2015](https://www.youtube.com/watch?v=tEa5sAh-kVk)
    1. The main file of LMDB [mdb.c](https://github.com/LMDB/lmdb/blob/mdb.master/libraries/liblmdb/mdb.c)
