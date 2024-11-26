@@ -644,6 +644,7 @@ public sealed partial class PagedDb
 
                 // Not written this batch, allocate and copy. Memoize in the slot
                 page = CreateInMemoryOverride(addr, page);
+
                 return page;
             }
 
@@ -659,6 +660,7 @@ public sealed partial class PagedDb
             // The entry did not exist before, create one
             var copy = CreateInMemoryOverride(addr, fromDb);
             _pageTable[addr] = copy;
+
             return copy;
         }
 
@@ -668,6 +670,9 @@ public sealed partial class PagedDb
 
             // TODO: is this needed? Maybe not copy as it's for writes and will be overwritten?
             source.CopyTo(page);
+
+            // Remove the previous reverse mapping mapping if it exists
+            _pageTableReversed.Remove(source);
 
             // Remember reversed mapping
             _pageTableReversed[page] = at;
