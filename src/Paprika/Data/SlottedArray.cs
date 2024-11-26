@@ -41,6 +41,7 @@ public readonly ref struct SlottedArray /*: IClearable */
     private static readonly int DoubleVectorSize = VectorSize * VectorsByBatch;
     
     private static readonly int HashesPerVector = VectorSize / sizeof(ushort);
+
     private static readonly int SlotsPerVector = VectorSize / Slot.Size;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1043,21 +1044,24 @@ public readonly ref struct SlottedArray /*: IClearable */
     /// </summary>
     private void CopyDataInternal(int start, int end, int writeAt)
     {
-        // Copy payload data
-        var startAddress = GetSlotRef(start).ItemAddress;
+        // Copy the payload data. For reference the layout is as follows:
+        // |...|end||end - 1|...|start||start - 1|...|writeAt|...|
         var endAddress = GetSlotRef(end).ItemAddress;
         
-        var previousSlotAddress = (start != 0) ? GetSlotRef(start - 1).ItemAddress : startAddress;
-        var length = previousSlotAddress - endAddress;
+        Debug.Assert(start != 0 && writeAt < start && start < end);
 
+        // Form slice of the source data
+        var previousSlotAddress = GetSlotRef(start - 1).ItemAddress;
+        var length = previousSlotAddress - endAddress;
         var sourceData = _data.Slice(endAddress, length);
-        // todo: fix this
-        var destData = _data.Slice(GetSlotRef(writeAt).ItemAddress, length);
+
+        // Form slice of the destination data
+        var writeAtAddress = GetSlotRef(writeAt).ItemAddress;
+        var writeAtPreviousSlotAddress = (writeAt != 0) ? GetSlotRef(writeAt - 1).ItemAddress : _data.Length;
+        var overwrite = writeAtPreviousSlotAddress - writeAtAddress;
+        var destData = _data.Slice(endAddress + overwrite, length);
 
         sourceData.CopyTo(destData);
-
-        // Calculate the offset for updating item address for all the modified slots
-        var offset = GetSlotRef(writeAt).ItemAddress - GetSlotRef(start).ItemAddress;
 
         // Copy the remaining data (hashes and slots)
         for (var i = start; i <= end; i++)
@@ -1070,7 +1074,7 @@ public readonly ref struct SlottedArray /*: IClearable */
             // Copy everything, just overwrite the address
             ref var destinationSlot = ref GetSlotRef(writeAt);
             destinationSlot.KeyPreamble = slot.KeyPreamble;
-            destinationSlot.ItemAddress = (ushort)(slot.ItemAddress + offset);
+            destinationSlot.ItemAddress = (ushort)(slot.ItemAddress + overwrite);
 
             writeAt++;
         }
