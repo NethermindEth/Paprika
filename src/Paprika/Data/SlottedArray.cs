@@ -946,9 +946,9 @@ public readonly ref struct SlottedArray /*: IClearable */
         ref var d = ref Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(_data));
         
         // The data will be moved from index [start..end] to [writeAt..] where writeAt < start < end.
-        var start = NotFound;
-        var end = NotFound;
-        var writeAt = NotFound;
+        var startIndex = NotFound;
+        var endIndex = NotFound;
+        var writeAtIndex = NotFound;
         
         var preambleMask = Slot.GetKeyPreambleMaskAsVector256();
         var preambleDeleteMask = Slot.GetKeyPreambleDeleteAsVector256();
@@ -981,14 +981,14 @@ public readonly ref struct SlottedArray /*: IClearable */
             deletedMask ^= 1U << setBitIndex;
             alive--;
 
-            if (start == NotFound)
+            if (startIndex == NotFound)
             {
-                if (writeAt == NotFound)
+                if (writeAtIndex == NotFound)
                 {
-                    writeAt = setBitIndex + (i - HashesPerVector) / VectorsByBatch;
+                    writeAtIndex = setBitIndex + (i - HashesPerVector) / VectorsByBatch;
                 }
 
-                start = setBitIndex + (i - HashesPerVector) / VectorsByBatch + 1;
+                startIndex = setBitIndex + (i - HashesPerVector) / VectorsByBatch + 1;
 
                 if (deletedMask == 0)
                 {
@@ -1001,99 +1001,91 @@ public readonly ref struct SlottedArray /*: IClearable */
                 alive--;
             }
 
-            end = setBitIndex + (i - HashesPerVector) / VectorsByBatch - 1;
+            endIndex = setBitIndex + (i - HashesPerVector) / VectorsByBatch - 1;
 
             // In case of consecutive deleted slots, find the next non-consecutive set bit.
-            while (start == end + 1 && deletedMask != 0)
+            while (startIndex == endIndex + 1 && deletedMask != 0)
             {
                 setBitIndex = BitOperations.TrailingZeroCount(deletedMask);
                 deletedMask ^= 1U << setBitIndex;
                 alive--;
-                start += 2;
-                end = setBitIndex + (i - HashesPerVector) / VectorsByBatch - 1;
+                startIndex += 2;
+                endIndex = setBitIndex + (i - HashesPerVector) / VectorsByBatch - 1;
             }
 
-            if (start == end + 1)
+            if (startIndex == endIndex + 1)
             {
                 // Could not find any non-consecutive set bits, move on to the next vector to find the new start and end.
-                start = end = NotFound;
+                startIndex = endIndex = NotFound;
                 continue;
             }
 
-            CopyDataInternal(start, end, writeAt);
+            CopyDataInternal(startIndex, endIndex, writeAtIndex);
 
             // Reset all the indices after the move.
-            start = end = writeAt = NotFound;
+            startIndex = endIndex = writeAtIndex = NotFound;
         }
         
         // If there was no valid end found for a corresponding start, move all the remaining slot.
-        if (start != NotFound)
+        if (startIndex != NotFound)
         {
-            end = count - 1;
-            CopyDataInternal(start, end, writeAt);
+            endIndex = count - 1;
+            CopyDataInternal(startIndex, endIndex, writeAtIndex);
         }
         
         // Adjust header values
         _header.Low = (ushort)(alive * Slot.TotalSize);
         _header.Deleted = 0;
-        RecalculateHigh();
+        
+        if (_header.Low > 0)
+        {
+            var lastSlot = GetSlotRef(_header.Low / Slot.TotalSize - 1);
+            _header.High = (ushort)(_data.Length - lastSlot.ItemAddress);
+        }
+        else
+        {
+            _header.High = (ushort)_data.Length;
+        }
     }
 
     /// <summary>
     /// Helper function to copy data from index [start..end] to [writeAt..].
     /// </summary>
-    private void CopyDataInternal(int start, int end, int writeAt)
+    private void CopyDataInternal(int startIndex, int endIndex, int writeAtIndex)
     {
         // Copy the payload data. For reference the layout is as follows:
-        // |...|end||end - 1|...|start||start - 1|...|writeAt|...|
-        var endAddress = GetSlotRef(end).ItemAddress;
+        // |...|endIndex||endIndex - 1|...|startIndex||startIndex - 1|...|writeAtIndex|...|
+        var endAddress = GetSlotRef(endIndex).ItemAddress;
         
-        Debug.Assert(start != 0 && writeAt < start && start < end);
+        Debug.Assert(startIndex != 0 && writeAtIndex < startIndex && startIndex < endIndex);
 
         // Form slice of the source data
-        var previousSlotAddress = GetSlotRef(start - 1).ItemAddress;
+        var previousSlotAddress = GetSlotRef(startIndex - 1).ItemAddress;
         var length = previousSlotAddress - endAddress;
         var sourceData = _data.Slice(endAddress, length);
 
         // Form slice of the destination data
-        var writeAtAddress = GetSlotRef(writeAt).ItemAddress;
-        var writeAtPreviousSlotAddress = (writeAt != 0) ? GetSlotRef(writeAt - 1).ItemAddress : _data.Length;
+        var writeAtAddress = GetSlotRef(writeAtIndex).ItemAddress;
+        var writeAtPreviousSlotAddress = (writeAtIndex != 0) ? GetSlotRef(writeAtIndex - 1).ItemAddress : _data.Length;
         var overwrite = writeAtPreviousSlotAddress - writeAtAddress;
         var destData = _data.Slice(endAddress + overwrite, length);
-
+        
         sourceData.CopyTo(destData);
 
         // Copy the remaining data (hashes and slots)
-        for (var i = start; i <= end; i++)
+        for (var i = startIndex; i <= endIndex; i++)
         {
             var slot = GetSlotRef(i);
 
             // Copy hash
-            GetHashRef(writeAt) = GetHashRef(i);
+            GetHashRef(writeAtIndex) = GetHashRef(i);
 
             // Copy everything, just overwrite the address
-            ref var destinationSlot = ref GetSlotRef(writeAt);
+            ref var destinationSlot = ref GetSlotRef(writeAtIndex);
             destinationSlot.KeyPreamble = slot.KeyPreamble;
             destinationSlot.ItemAddress = (ushort)(slot.ItemAddress + overwrite);
 
-            writeAt++;
-        }
-    }
-
-    /// <summary>
-    /// Helper function to recalculate _header.High after defragmentation.
-    /// </summary>
-    private void RecalculateHigh()
-    {
-        if (_header.Low > 0)
-        {
-            var lastSlot = GetSlotRef(_header.Low / Slot.TotalSize - 1);
-            var lastItemLength = GetSlotPayload(_header.Low / Slot.TotalSize - 1, lastSlot).Length;
-            _header.High = (ushort)(_data.Length - (lastSlot.ItemAddress + lastItemLength));
-        }
-        else
-        {
-            _header.High = (ushort)_data.Length;
+            writeAtIndex++;
         }
     }
 
