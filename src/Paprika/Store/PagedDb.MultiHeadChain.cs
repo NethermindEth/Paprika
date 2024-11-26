@@ -525,18 +525,14 @@ public sealed partial class PagedDb
                         slot = page;
                         _pageTableReversed[page] = at;
                     }
-                    else
+                    else if (ShouldOverwrite(page, slot))
                     {
-                        // exists, swap only if the batch id is higher
-                        if (slot.Header.BatchId > page.Header.BatchId)
-                        {
-                            // Remove previous reverse mapping
-                            _pageTableReversed.Remove(slot);
+                        // Remove previous reverse mapping
+                        _pageTableReversed.Remove(slot);
 
-                            // Override slot and set the reverse mapping
-                            slot = page;
-                            _pageTableReversed[page] = at;
-                        }
+                        // Override slot and set the reverse mapping
+                        slot = page;
+                        _pageTableReversed[page] = at;
                     }
                 }
             }
@@ -671,7 +667,7 @@ public sealed partial class PagedDb
             // TODO: is this needed? Maybe not copy as it's for writes and will be overwritten?
             source.CopyTo(page);
 
-            // Remove the previous reverse mapping mapping if it exists
+            // Remove the previous reverse mapping if it exists
             _pageTableReversed.Remove(source);
 
             // Remember reversed mapping
@@ -792,19 +788,9 @@ public sealed partial class PagedDb
                     ref var slot =
                         ref CollectionsMarshal.GetValueRefOrAddDefault(_pageTable, at, out var exists);
 
-                    if (exists == false)
+                    if (exists == false || ShouldOverwrite(page, slot))
                     {
-                        // Does not exist, set and set the reverse mapping.
                         slot = page;
-                    }
-                    else
-                    {
-                        // The slot exists, overwrite it if the new page batchid is higher
-                        if (page.Header.BatchId > slot.Header.BatchId)
-                        {
-                            // Override slot and set the reverse mapping
-                            slot = page;
-                        }
                     }
                 }
             }
@@ -812,6 +798,14 @@ public sealed partial class PagedDb
             _ready = true;
         }
     }
+
+    /// <summary>
+    /// Decides whether the new page should overwrite the one in the mapping for the given <see cref="DbAddress"/>.
+    /// </summary>
+    /// <param name="new">The new page that can be applied.</param>
+    /// <param name="existing">The existing page.</param>
+    /// <returns>Whether the existing should be overwritten.</returns>
+    private static bool ShouldOverwrite(Page @new, Page existing) => @new.Header.BatchId > existing.Header.BatchId;
 }
 
 public interface IHead : IDataSetter, IDataGetter, IDisposable
