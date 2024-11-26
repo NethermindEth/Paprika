@@ -223,7 +223,7 @@ As pages may differ by how they use 4kb of provided memory, they need to share s
 1. differentiate the type of the page
 2. memoize the last time when the page was written to
 
-The 1st point, the type differentiation, can be addressed either by storying the page type or reasoning about the page place where the page is used. For example, if a page is one of the N pages that support reorganizations, it must be a `RootPage`. Whenever the information can be reasoned out of the context, the type won't be stored to save some memory.
+The 1st point, the type differentiation, can be addressed either by storing the page type or reasoning about the page place where the page is used. For example, if a page is one of the N pages that support reorganizations, it must be a `RootPage`. Whenever the information can be reasoned out of the context, the type won't be stored to save some memory.
 
 The 2nd point that covers storing important information is stored at the shared page header. The shared `PageHeader` is an amount of memory that is coherent across all the pages. Again, the memory size is const and C\# `const` constructs are leveraged to have it calculated by the compiler and not to deal with them in the runtime.
 
@@ -243,7 +243,7 @@ public struct PageHeader
     public uint BatchId;
 
     [FieldOffset(4)]
-    public uint Reserved; // for not it's just alignment
+    public uint Reserved; // for now it's just alignment
 }
 ```
 
