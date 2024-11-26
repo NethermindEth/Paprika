@@ -917,30 +917,43 @@ public readonly ref struct SlottedArray /*: IClearable */
 
         if (count == 0 || _header.Deleted == 0)
             return;
-        
-        Span<byte> isDeleted = stackalloc byte[count];
-        CreateDeletedMask(isDeleted);
 
+        VectorizedDefragment256();
+    }
+    
+    /// <summary>
+    /// Creates an isDeleted bitmask indicating whether each slot is deleted (1) or not (0).
+    /// </summary>
+    private void VectorizedDefragment256()
+    {
+        var count = _header.Low / Slot.TotalSize;
+        var alive = (ushort)count;
+        var jump = DoubleVectorSize / sizeof(ushort);
+        var aligned = AlignToDoubleVectorSize(_header.Low) / sizeof(ushort);
+        ref var d = ref Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(_data));
+        
         // The data will be moved from index [start..end] to [writeAt..] where writeAt < start < end.
         var start = NotFound;
         var end = NotFound;
         var writeAt = NotFound;
+        
+        var preambleMask = Slot.GetKeyPreambleMaskAsVector256();
+        var preambleDeleteMask = Slot.GetKeyPreambleDeleteAsVector256();
 
-        var jump = VectorSize;
-        var alive = (ushort)count;
-
-        for (var i = 0; i <= count / VectorSize; i += jump)
+        for (var i = HashesPerVector; i < aligned; i += jump)
         {
-            // Bulk load portion of isDeleted mask into a vector. 
-            var deletedMask = Vector256.IsHardwareAccelerated
-                ? Vector256.LoadUnsafe(ref MemoryMarshal.GetReference(isDeleted), (UIntPtr)i).ExtractMostSignificantBits()
-                : Vector128.LoadUnsafe(ref MemoryMarshal.GetReference(isDeleted), (UIntPtr)i).ExtractMostSignificantBits();
+            // Extract the preamble data from the underlying slots. 
+            var slotData = Vector256.LoadUnsafe(ref d, (UIntPtr)i);
+            var preambleData = Vector256.BitwiseAnd(slotData, preambleMask);
 
-            if (i + jump >= count / VectorSize)
+            var deletedMask = Vector256.Equals(preambleData, preambleDeleteMask).ExtractMostSignificantBits();
+
+            if (deletedMask != 0 && i + jump >= aligned)
             {
                 // Clear the bits beyond the last valid slot.
-                var toClear = i + jump - count;
-                var mask = ~((1U << toClear) - 1);
+                var alignedCount = aligned / VectorsByBatch;
+                var toClear = alignedCount - count;
+                var mask = (1U << SlotsPerVector - toClear) - 1;
                 deletedMask &= mask;
             }
 
@@ -959,10 +972,10 @@ public readonly ref struct SlottedArray /*: IClearable */
             {
                 if (writeAt == NotFound)
                 {
-                    writeAt = setBitIndex + i;
+                    writeAt = setBitIndex + (i - HashesPerVector) / VectorsByBatch;
                 }
 
-                start = setBitIndex + i + 1;
+                start = setBitIndex + (i - HashesPerVector) / VectorsByBatch + 1;
 
                 if (deletedMask == 0)
                 {
@@ -975,7 +988,7 @@ public readonly ref struct SlottedArray /*: IClearable */
                 alive--;
             }
 
-            end = setBitIndex + i - 1;
+            end = setBitIndex + (i - HashesPerVector) / VectorsByBatch - 1;
 
             // In case of consecutive deleted slots, find the next non-consecutive set bit.
             while (start == end + 1 && deletedMask != 0)
@@ -984,7 +997,7 @@ public readonly ref struct SlottedArray /*: IClearable */
                 deletedMask ^= 1U << setBitIndex;
                 alive--;
                 start += 2;
-                end = setBitIndex - 1 + i;
+                end = setBitIndex + (i - HashesPerVector) / VectorsByBatch - 1;
             }
 
             if (start == end + 1)
@@ -994,19 +1007,19 @@ public readonly ref struct SlottedArray /*: IClearable */
                 continue;
             }
 
-            CopySlotData(start, end, writeAt);
+            CopyDataInternal(start, end, writeAt);
 
             // Reset all the indices after the move.
             start = end = writeAt = NotFound;
         }
-
+        
         // If there was no valid end found for a corresponding start, move all the remaining slot.
         if (start != NotFound)
         {
             end = count - 1;
-            CopySlotData(start, end, writeAt);
+            CopyDataInternal(start, end, writeAt);
         }
-
+        
         // Adjust header values
         _header.Low = (ushort)(alive * Slot.TotalSize);
         _header.Deleted = 0;
@@ -1014,95 +1027,25 @@ public readonly ref struct SlottedArray /*: IClearable */
     }
 
     /// <summary>
-    /// Creates an isDeleted bitmask indicating whether each slot is deleted (1) or not (0).
+    /// Helper function to copy data from index [start..end] to [writeAt..].
     /// </summary>
-    private void CreateDeletedMask(Span<byte> isDeleted)
-    {
-        var count = _header.Low / Slot.TotalSize;
-        var jump = DoubleVectorSize / sizeof(ushort);
-        var aligned = AlignToDoubleVectorSize(_header.Low) / sizeof(ushort);
-        var writeTo = 0;
-        ref var d = ref Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(_data));
-
-        if (Vector256.IsHardwareAccelerated)
-        {
-            var preambleMask = Slot.GetKeyPreambleMaskAsVector256();
-            var deletedMask = Slot.GetKeyPreambleDeleteAsVector256();
-
-            for (var i = HashesPerVector; i < aligned; i += jump)
-            {
-                // Extract the preamble data from the underlying slots. 
-                var slotData = Vector256.LoadUnsafe(ref d, (UIntPtr)i);
-                var preambleData = Vector256.BitwiseAnd(slotData, preambleMask);
-
-                var matches = Vector256.Equals(preambleData, deletedMask).ExtractMostSignificantBits();
-
-                if (i + jump >= aligned)
-                {
-                    // Clear the bits beyond the last valid slot.
-                    var alignedCount = aligned / VectorsByBatch;
-                    var toClear = alignedCount - count;
-                    var mask = (1U << SlotsPerVector - toClear) - 1;
-                    matches &= mask;
-                }
-
-                MemoryMarshal.Write(isDeleted.Slice(writeTo), matches);
-                writeTo += sizeof(uint);
-            }
-        }
-        else if (Vector128.IsHardwareAccelerated)
-        {
-            var preambleMask = Slot.GetKeyPreambleMaskAsVector128();
-            var deletedMask = Slot.GetKeyPreambleDeleteAsVector128();
-
-            for (var i = HashesPerVector; i < aligned; i += jump)
-            {
-                // Extract the preamble data from the underlying slots. 
-                var slotData = Vector128.LoadUnsafe(ref d, (UIntPtr)i);
-                var preambleData = Vector128.BitwiseAnd(slotData, preambleMask);
-
-                var matches = Vector128.Equals(preambleData, deletedMask).ExtractMostSignificantBits();
-
-                if (i + jump >= aligned)
-                {
-                    // Clear the bits beyond the last valid slot.
-                    var alignedCount = aligned / VectorsByBatch;
-                    var toClear = alignedCount - count;
-                    var mask = (1U << SlotsPerVector - toClear) - 1;
-                    matches &= mask;
-                }
-
-                MemoryMarshal.Write(isDeleted.Slice(writeTo), matches);
-                writeTo += sizeof(uint);
-            }
-        }
-        else
-        {
-            ThrowNoVectorSupport();
-        }
-    }
-
-    /// <summary>
-    /// Helper function to copy data from [start..end] to [writeAt..].
-    /// </summary>
-    private void CopySlotData(int start, int end, int writeAt)
+    private void CopyDataInternal(int start, int end, int writeAt)
     {
         // Copy payload data
         var startAddress = GetSlotRef(start).ItemAddress;
-        var endAddress = GetSlotRef(end + 1).ItemAddress;
+        var endAddress = GetSlotRef(end).ItemAddress;
+        
+        var previousSlotAddress = (start != 0) ? GetSlotRef(start - 1).ItemAddress : startAddress;
+        var length = previousSlotAddress - endAddress;
 
-        var sourceData = _data.Slice(startAddress, startAddress - endAddress);
-        var destData = _data.Slice(GetSlotRef(writeAt).ItemAddress, startAddress - endAddress);
+        var sourceData = _data.Slice(endAddress, length);
+        // todo: fix this
+        var destData = _data.Slice(GetSlotRef(writeAt).ItemAddress, length);
 
         sourceData.CopyTo(destData);
 
-        // Update item addresses for the modified slots
+        // Calculate the offset for updating item address for all the modified slots
         var offset = GetSlotRef(writeAt).ItemAddress - GetSlotRef(start).ItemAddress;
-
-        for (var j = start; j <= end; j++)
-        {
-            GetSlotRef(j).ItemAddress = (ushort)(GetSlotRef(j).ItemAddress + offset);
-        }
 
         // Copy the remaining data (hashes and slots)
         for (var i = start; i <= end; i++)
@@ -1115,7 +1058,7 @@ public readonly ref struct SlottedArray /*: IClearable */
             // Copy everything, just overwrite the address
             ref var destinationSlot = ref GetSlotRef(writeAt);
             destinationSlot.KeyPreamble = slot.KeyPreamble;
-            destinationSlot.ItemAddress = slot.ItemAddress;
+            destinationSlot.ItemAddress = (ushort)(slot.ItemAddress + offset);
 
             writeAt++;
         }
