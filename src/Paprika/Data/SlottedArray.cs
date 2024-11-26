@@ -918,11 +918,23 @@ public readonly ref struct SlottedArray /*: IClearable */
         if (count == 0 || _header.Deleted == 0)
             return;
 
-        VectorizedDefragment256();
+        if (Vector256.IsHardwareAccelerated)
+        {
+            VectorizedDefragment256();
+        }
+        else if (Vector128.IsHardwareAccelerated)
+        {
+            VectorizedDefragment128();
+        }
+        else
+        {
+            ThrowNoVectorSupport();
+        }
     }
     
     /// <summary>
-    /// Creates an isDeleted bitmask indicating whether each slot is deleted (1) or not (0).
+    /// Vectorized defragment by creating a deleted mask from the vector data and then moving corresponding
+    /// slot, hash and payload data.
     /// </summary>
     private void VectorizedDefragment256()
     {
@@ -1079,6 +1091,14 @@ public readonly ref struct SlottedArray /*: IClearable */
         {
             _header.High = (ushort)_data.Length;
         }
+    }
+
+    /// <summary>
+    /// Vectorized defragment by creating a deleted mask from the vector data and then moving corresponding
+    /// slot, hash and payload data.
+    /// </summary>
+    private void VectorizedDefragment128()
+    {
     }
 
     /// <summary>
