@@ -109,8 +109,8 @@ public sealed partial class PagedDb
             }
             finally
             {
-                previous?.Dispose();
                 _readerLock.ExitWriteLock();
+                previous?.Dispose();
             }
         }
 
@@ -377,7 +377,7 @@ public sealed partial class PagedDb
         {
             Debug.Assert(Monitor.IsEntered(_db._batchLock));
 
-            var hash = Normalize(stateHash);
+            var hash = stateHash;
             var list = new List<ProposedBatch>();
 
             // The stateHash that is searched is proposed. We need to construct a list of dependencies.
@@ -410,12 +410,6 @@ public sealed partial class PagedDb
 
         private RootPage CreateNextRoot(ReadOnlySpan<ProposedBatch> proposed, ReadOnlyBatch read) =>
             PagedDb.CreateNextRoot(proposed.Length > 0 ? proposed[^1].Root : read.Root, _pool);
-
-        private static Keccak Normalize(in Keccak keccak)
-        {
-            // pages are zeroed before, return zero on empty tree
-            return keccak == Keccak.EmptyTreeHash ? Keccak.Zero : keccak;
-        }
 
         public async ValueTask DisposeAsync()
         {

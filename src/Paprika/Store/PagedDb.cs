@@ -162,10 +162,14 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
             _roots[i] = new RootPage(_manager.GetAt(DbAddress.Page(i)));
         }
 
-        if (_roots[0].Data.NextFreePage < _historyDepth)
+        var start = _roots[0];
+        if (start.Data.NextFreePage < _historyDepth)
         {
-            // the 0th page will have the properly number set to first free page
-            _roots[0].Data.NextFreePage = DbAddress.Page(_historyDepth);
+            // The start root must have the properly number set to first free page
+            start.Data.NextFreePage = DbAddress.Page(_historyDepth);
+
+            // The start root should be empty tree hash.
+            start.Data.Metadata = new Metadata(0, Keccak.EmptyTreeHash);
         }
 
         _lastRoot = 0;
