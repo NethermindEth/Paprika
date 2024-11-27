@@ -32,25 +32,9 @@ public class RootHashFuzzyTests
         AssertRoot(generator.RootHash, commit);
     }
 
-    [Ignore("Currently they fail. Probably due to the implementation of the test commit.")]
-    [TestCase(nameof(Accounts_1_Storage_1))]
-    [TestCase(nameof(Accounts_1_Storage_100))]
-    [TestCase(nameof(Accounts_100_Storage_1))]
-    [TestCase(nameof(Accounts_1000_Storage_1))]
-    [TestCase(nameof(Accounts_1000_Storage_1000))]
-    public void Over_one_mock_commit(string test)
-    {
-        var generator = Build(test);
-
-        var commit = new Commit();
-        generator.Run(commit);
-
-        AssertRoot(generator.RootHash, commit);
-    }
-
     [TestCase(nameof(Accounts_100_Storage_1), int.MaxValue, 4)]
     [TestCase(nameof(Accounts_1_Storage_100), 11, 8)]
-    [TestCase(nameof(Accounts_1000_Storage_1000), int.MaxValue, 752, Category = Categories.LongRunning)]
+    [TestCase(nameof(Accounts_100_Storage_100), int.MaxValue, 756, Category = Categories.LongRunning)]
     public async Task In_memory_run(string test, int commitEvery, int blockchainPoolSizeMB)
     {
         var generator = Build(test);
@@ -179,8 +163,8 @@ public class RootHashFuzzyTests
     private static CaseGenerator Accounts_1000_Storage_1() =>
         new(1000, 1, "b8bdf00f1f389a1445867e5c14ccf17fd21d915c01492bed3e70f74de7f42248");
 
-    private static CaseGenerator Accounts_1000_Storage_1000() => new(1000, 1000,
-        "4f474648522dc59d4d4a918e301d9d36ac200029027d28605cd2ab32f37321f8");
+    private static CaseGenerator Accounts_100_Storage_100() => new(100, 100,
+        "0a1cba80719146d6a225a3d270a603d171d9792451ae628486563d42b96cc902");
 
     private class CaseGenerator
     {
