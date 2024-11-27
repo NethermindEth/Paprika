@@ -654,12 +654,18 @@ public sealed partial class PagedDb
             return copy;
         }
 
+        /// <summary>
+        /// Creates an override of a given address by getting a page from the pull and storing it in the map.
+        /// </summary>
+        /// <param name="at">The address that requires to provide an override.</param>
+        /// <param name="source">The source page.</param>
+        /// <returns></returns>
+        /// <remarks>
+        /// The source page <paramref name="source"/> requires no copying as the page will be used as a new or overwritten in COW process.
+        /// </remarks>
         private Page CreateInMemoryOverride(DbAddress at, Page source)
         {
             var page = _pool.Rent(false);
-
-            // TODO: is this needed? Maybe not copy as it's for writes and will be overwritten?
-            source.CopyTo(page);
 
             // Remove the previous reverse mapping if it exists
             _pageTableReversed.Remove(source);
