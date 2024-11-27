@@ -25,10 +25,12 @@ public static class BitMapFilter
         var pages = new Page[TSize.Count];
         for (var i = 0; i < TSize.Count; i++)
         {
-            pages[i] = pool.Rent(true);
+            pages[i] = pool.Rent(false);
         }
 
-        return new BitMapFilter<OfN<TSize>>(new OfN<TSize>(pages));
+        var accessor = new OfN<TSize>(pages);
+        accessor.Clear();
+        return new BitMapFilter<OfN<TSize>>(accessor);
     }
 
     public interface IAccessor<TAccessor>
@@ -150,7 +152,10 @@ public static class BitMapFilter
 
         public void Clear()
         {
-            Parallel.ForEach(_pages, page => page.Clear());
+            foreach (var page in _pages)
+            {
+                page.Clear();
+            }
         }
 
         public void Return(BufferPool pool)
