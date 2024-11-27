@@ -916,7 +916,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         // As data were fitting before, it will fit after so all the checks can be skipped
         var count = _header.Low / Slot.TotalSize;
 
-        if (count == 0 || _header.Deleted == 0)
+        if (count == 0 || _header.Deleted == 0 || count == _header.Deleted)
             return;
 
         if (Vector256.IsHardwareAccelerated)
@@ -945,7 +945,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         var aligned = AlignToDoubleVectorSize(_header.Low) / sizeof(ushort);
         ref var d = ref Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(_data));
         
-        // The data will be moved from index [start..end] to [writeAt..] where writeAt < start < end.
+        // The data will be moved from index [start..end] to [writeAt..] where writeAt < start <= end.
         var startIndex = NotFound;
         var endIndex = NotFound;
         var writeAtIndex = NotFound;
@@ -970,104 +970,110 @@ public readonly ref struct SlottedArray /*: IClearable */
                 deletedMask &= mask;
             }
 
-            if (deletedMask == 0)
+            while (deletedMask != 0)
             {
-                // No deleted slots present, move on to the next vector.
-                continue;
-            }
-
-            // Consume the first set bit.
-            var setBitIndex = BitOperations.TrailingZeroCount(deletedMask);
-            deletedMask ^= 1U << setBitIndex;
-            alive--;
-
-            if (startIndex == NotFound)
-            {
-                if (writeAtIndex == NotFound)
-                {
-                    writeAtIndex = setBitIndex + (i - HashesPerVector) / VectorsByBatch;
-                }
-
-                startIndex = setBitIndex + (i - HashesPerVector) / VectorsByBatch + 1;
-
-                if (deletedMask == 0)
-                {
-                    // No more deleted slots, move on to the next vector to find the end.
-                    continue;
-                }
-
-                setBitIndex = BitOperations.TrailingZeroCount(deletedMask);
+                // Consume the first set bit.
+                var setBitIndex = BitOperations.TrailingZeroCount(deletedMask);
                 deletedMask ^= 1U << setBitIndex;
                 alive--;
-            }
 
-            endIndex = setBitIndex + (i - HashesPerVector) / VectorsByBatch - 1;
+                if (startIndex == NotFound)
+                {
+                    startIndex = setBitIndex + (i - HashesPerVector) / VectorsByBatch + 1;
+                    
+                    if (writeAtIndex == NotFound)
+                    {
+                        writeAtIndex = startIndex - 1;
+                    }
 
-            // In case of consecutive deleted slots, find the next non-consecutive set bit.
-            while (startIndex == endIndex + 1 && deletedMask != 0)
-            {
-                setBitIndex = BitOperations.TrailingZeroCount(deletedMask);
-                deletedMask ^= 1U << setBitIndex;
-                alive--;
-                startIndex += 2;
+                    if (deletedMask == 0)
+                    {
+                        // No more deleted slots, move on to the next vector to find the end.
+                        break;
+                    }
+
+                    setBitIndex = BitOperations.TrailingZeroCount(deletedMask);
+                    deletedMask ^= 1U << setBitIndex;
+                    alive--;
+                }
+
                 endIndex = setBitIndex + (i - HashesPerVector) / VectorsByBatch - 1;
+
+                // In case of consecutive deleted slots, find the next non-consecutive set bit.
+                while (startIndex == endIndex + 1 && deletedMask != 0)
+                {
+                    setBitIndex = BitOperations.TrailingZeroCount(deletedMask);
+                    deletedMask ^= 1U << setBitIndex;
+                    alive--;
+                    startIndex++;
+                    endIndex = setBitIndex + (i - HashesPerVector) / VectorsByBatch - 1;
+                }
+
+                if (startIndex == endIndex + 1)
+                {
+                    Debug.Assert(deletedMask == 0, "Did not consume all the set bits");
+
+                    // Could not find any non-consecutive set bits, progress start to the next non deleted slot.
+                    startIndex++;
+                    // Move on to the next vector to find the new end.
+                    break;
+                }
+
+                writeAtIndex = CopyDataInternal(startIndex, endIndex, writeAtIndex);
+                startIndex = endIndex + 2;
             }
-
-            if (startIndex == endIndex + 1)
-            {
-                // Could not find any non-consecutive set bits, move on to the next vector to find the new start and end.
-                startIndex = endIndex = NotFound;
-                continue;
-            }
-
-            CopyDataInternal(startIndex, endIndex, writeAtIndex);
-
-            // Reset all the indices after the move.
-            startIndex = endIndex = writeAtIndex = NotFound;
         }
         
         // If there was no valid end found for a corresponding start, move all the remaining slot.
-        if (startIndex != NotFound)
+        if (startIndex != NotFound && startIndex < count)
         {
+            while (GetSlotRef(startIndex).IsDeleted && startIndex < count)
+            {
+                startIndex++;
+            }
+            
             endIndex = count - 1;
-            CopyDataInternal(startIndex, endIndex, writeAtIndex);
+
+            if (startIndex <= endIndex)
+            {
+                writeAtIndex = CopyDataInternal(startIndex, endIndex, writeAtIndex);
+            }
         }
+        
+        Debug.Assert(_header.Deleted == Count - alive, "All the deleted items were not discovered");
+        Debug.Assert(writeAtIndex != NotFound, "No defragmentation was done");
         
         // Adjust header values
         _header.Low = (ushort)(alive * Slot.TotalSize);
         _header.Deleted = 0;
-        
-        if (_header.Low > 0)
-        {
-            var lastSlot = GetSlotRef(_header.Low / Slot.TotalSize - 1);
-            _header.High = (ushort)(_data.Length - lastSlot.ItemAddress);
-        }
-        else
-        {
-            _header.High = (ushort)_data.Length;
-        }
+        _header.High = (ushort)((writeAtIndex == 0)
+            ? _data.Length
+            : _data.Length - GetSlotRef(writeAtIndex - 1).ItemAddress);
     }
 
     /// <summary>
     /// Helper function to copy data from index [start..end] to [writeAt..].
     /// </summary>
-    private void CopyDataInternal(int startIndex, int endIndex, int writeAtIndex)
+    private int CopyDataInternal(int startIndex, int endIndex, int writeAtIndex)
     {
         // Copy the payload data. For reference the layout is as follows:
         // |...|endIndex||endIndex - 1|...|startIndex||startIndex - 1|...|writeAtIndex|...|
         var endAddress = GetSlotRef(endIndex).ItemAddress;
         
-        Debug.Assert(startIndex != 0 && writeAtIndex < startIndex && startIndex < endIndex);
+        Debug.Assert(startIndex != 0 && writeAtIndex < startIndex && startIndex <= endIndex);
 
         // Form slice of the source data
         var previousSlotAddress = GetSlotRef(startIndex - 1).ItemAddress;
         var length = previousSlotAddress - endAddress;
+        
+        Debug.Assert(length >= 0 && endAddress + length <= _data.Length, "The length of the source data is invalid");
         var sourceData = _data.Slice(endAddress, length);
 
         // Form slice of the destination data
-        var writeAtAddress = GetSlotRef(writeAtIndex).ItemAddress;
         var writeAtPreviousSlotAddress = (writeAtIndex != 0) ? GetSlotRef(writeAtIndex - 1).ItemAddress : _data.Length;
-        var overwrite = writeAtPreviousSlotAddress - writeAtAddress;
+        var overwrite = writeAtPreviousSlotAddress - previousSlotAddress;
+        
+        Debug.Assert(overwrite >= 0 && endAddress + overwrite <= _data.Length, "The length of the dest data is invalid");
         var destData = _data.Slice(endAddress + overwrite, length);
         
         sourceData.CopyTo(destData);
@@ -1087,6 +1093,8 @@ public readonly ref struct SlottedArray /*: IClearable */
 
             writeAtIndex++;
         }
+
+        return writeAtIndex;
     }
 
     /// <summary>
