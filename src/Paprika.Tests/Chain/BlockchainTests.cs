@@ -399,7 +399,7 @@ public class BlockchainTests
 
         await using (var blockchain = new Blockchain(db, behavior))
         {
-            var hash = Keccak.Zero;
+            var hash = Keccak.EmptyTreeHash;
 
             for (uint i = 1; i < blockCount + 1; i++)
             {
