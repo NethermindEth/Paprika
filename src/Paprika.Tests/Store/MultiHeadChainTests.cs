@@ -25,7 +25,7 @@ public class MultiHeadChainTests
 
         await using var multi = db.OpenMultiHeadChain();
 
-        using var head = multi.Begin(Keccak.Zero);
+        using var head = multi.Begin(Keccak.EmptyTreeHash);
 
         for (var i = 0; i < accounts; i++)
         {
@@ -42,7 +42,8 @@ public class MultiHeadChainTests
             }
         }
 
-        head.Commit(1, Keccak.EmptyTreeHash);
+        var someOtherKeccak = Keccak.OfAnEmptyString;
+        head.Commit(1, someOtherKeccak);
 
         // reset
         counter = 0;
@@ -97,7 +98,7 @@ public class MultiHeadChainTests
         var random = new Random(Seed);
 
         await using var multi = db.OpenMultiHeadChain();
-        using var head = multi.Begin(Keccak.Zero);
+        using var head = multi.Begin(Keccak.EmptyTreeHash);
 
         for (byte i = 0; i < blocks; i++)
         {
@@ -134,7 +135,7 @@ public class MultiHeadChainTests
         var random = new Random(Seed);
 
         await using var multi = db.OpenMultiHeadChain();
-        using var head = multi.Begin(Keccak.Zero);
+        using var head = multi.Begin(Keccak.EmptyTreeHash);
 
         Keccak root = default;
         for (byte i = 0; i < blocks; i++)
