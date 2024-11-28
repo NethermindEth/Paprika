@@ -282,13 +282,15 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
         }
     }
 
-    public IReadOnlyBatch[] SnapshotAll()
+    public IReadOnlyBatch[] SnapshotAll(bool withoutOldest = false)
     {
         var batches = new List<IReadOnlyBatch>();
 
+        var limit = withoutOldest ? _historyDepth - 1 : _historyDepth;
+
         lock (_batchLock)
         {
-            for (var back = 0; back < _historyDepth; back++)
+            for (var back = 0; back < limit; back++)
             {
                 if (_lastRoot - back < 0)
                 {
@@ -395,7 +397,6 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
             {
                 _lowestReadTxBatch.Set((int)_batchesReadOnly.Min(b => b.BatchId));
             }
-
         }
     }
 
@@ -425,7 +426,8 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
 
     [DoesNotReturn]
     [StackTraceHidden]
-    private static void ThrowOnlyOneBatch() => throw new Exception("There is another batch active at the moment. Commit the other first");
+    private static void ThrowOnlyOneBatch() =>
+        throw new Exception("There is another batch active at the moment. Commit the other first");
 
     [DoesNotReturn]
     [StackTraceHidden]
@@ -504,19 +506,16 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
     /// <summary>
     /// Sets the new root but does not bump the _lastRoot that should be done in a lock.
     /// </summary>
-    private (Keccak previousRootStateHash, DbAddress newRootPage) SetNewRoot(RootPage root)
+    private DbAddress SetNewRoot(RootPage root)
     {
         var pageAddress = (_lastRoot + 1) % _historyDepth;
         var destination = _roots[pageAddress];
-
-        var previousStateHash = destination.Data.Metadata.StateHash;
-
         root.CopyTo(destination);
-        return (previousStateHash, DbAddress.Page((uint)pageAddress));
+
+        return DbAddress.Page((uint)pageAddress);
     }
 
     private void CommitNewRoot() => _lastRoot += 1;
-
 
     private sealed class ReadOnlyBatch(PagedDb db, RootPage root, string name)
         : IVisitableReadOnlyBatch, IReadOnlyBatchContext
@@ -649,7 +648,7 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
 
             await Db._manager.WritePages(Written, options);
 
-            var (_, newRootPage) = Db.SetNewRoot(Root);
+            var newRootPage = Db.SetNewRoot(Root);
 
             // report
             Db.ReportDbSize(GetRootSizeInMb(Root));
@@ -799,7 +798,8 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
 
                 // on failure to reuse a page, default to allocating a new one.
                 addr = Root.Data.GetNextFreePage();
-                Debug.Assert(Db._manager.IsValidAddress(addr), $"The address of the next free page {addr} breaches the size of the database.");
+                Debug.Assert(Db._manager.IsValidAddress(addr),
+                    $"The address of the next free page {addr} breaches the size of the database.");
             }
 
             var page = GetAtForWriting(addr);

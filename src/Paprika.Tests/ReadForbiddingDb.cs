@@ -16,7 +16,7 @@ public class ReadForbiddingDb(IDb db) : IDb
     public IReadOnlyBatch BeginReadOnlyBatchOrLatest(in Keccak stateHash, string name = "") =>
         new ReadOnlyBatch(db.BeginReadOnlyBatchOrLatest(in stateHash, name), this);
 
-    public IReadOnlyBatch[] SnapshotAll() => db.SnapshotAll();
+    public IReadOnlyBatch[] SnapshotAll(bool withoutOldest = false) => db.SnapshotAll(withoutOldest);
 
     public bool HasState(in Keccak keccak) => db.HasState(in keccak);
     public int HistoryDepth => db.HistoryDepth;

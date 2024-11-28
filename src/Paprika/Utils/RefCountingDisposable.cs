@@ -13,6 +13,14 @@ public abstract class RefCountingDisposable : IRefCountingDisposable
     private const int NoAccessors = 0;
     private const int Disposing = -1;
 
+    // Always run continuations asynchronously.
+    private readonly TaskCompletionSource _tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// A task that is completed once this is cleaned up using <see cref="CleanUp"/>.
+    /// </summary>
+    public Task CleanedUp => _tcs.Task;
+
     private PaddedValue _leases;
 
     protected RefCountingDisposable(int initialCount = Single)
@@ -111,6 +119,7 @@ public abstract class RefCountingDisposable : IRefCountingDisposable
         {
             // set to disposed by this Release
             CleanUp();
+            _tcs.SetResult();
         }
 
         [DoesNotReturn]
@@ -140,4 +149,9 @@ public abstract class RefCountingDisposable : IRefCountingDisposable
 public interface IRefCountingDisposable : IDisposable
 {
     void AcquireLease();
+
+    /// <summary>
+    /// A task that is completed once this is cleaned up.
+    /// </summary>
+    public Task CleanedUp { get; }
 }

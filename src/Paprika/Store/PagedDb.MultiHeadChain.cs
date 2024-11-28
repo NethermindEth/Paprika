@@ -39,6 +39,7 @@ public sealed partial class PagedDb
 
         // Readers
         private readonly Dictionary<Keccak, Reader> _readers = new();
+        private readonly Queue<Reader> _readersDisposalQueue = new();
         private readonly ReaderWriterLockSlim _readerLock = new();
 
         // Proposed batches that are finalized
@@ -67,11 +68,19 @@ public sealed partial class PagedDb
 
             _pool = _db._pool;
 
-            foreach (var batch in _db.SnapshotAll())
+            // Snapshot all without the oldest, we want to keep only N-1 readers
+            var allWithoutTheOldest = _db.SnapshotAll(withoutOldest: true);
+
+            // Sort from oldest to youngest
+            Array.Sort(allWithoutTheOldest, (a, b) => a.BatchId.CompareTo(b.BatchId));
+
+            foreach (var batch in allWithoutTheOldest)
             {
                 _lastCommittedBatch = Math.Max(batch.BatchId, _lastCommittedBatch);
                 var reader = new Reader(_db, CreateNextRoot([], (ReadOnlyBatch)batch), batch, [], _pool);
                 RegisterReader(reader);
+
+                _readersDisposalQueue.Enqueue(reader);
             }
 
             _flusher = FlusherTask();
@@ -263,7 +272,7 @@ public sealed partial class PagedDb
                             await _db._manager.WritePages(batch.Changes, options);
 
                             // Set new root
-                            var (previousRootStateHash, newRootPage) = _db.SetNewRoot(batch.Root);
+                            var newRootPage = _db.SetNewRoot(batch.Root);
 
                             // report
                             _db.ReportDbSize(GetRootSizeInMb(batch.Root));
@@ -272,7 +281,7 @@ public sealed partial class PagedDb
 
                             List<ProposedBatch> removed;
 
-                            Reader newIReader;
+                            Reader newReader;
                             lock (_db._batchLock)
                             {
                                 _db.CommitNewRoot();
@@ -290,10 +299,11 @@ public sealed partial class PagedDb
 
                                 var read = BuildDependencies(batch.Root.Data.Metadata.StateHash, out var root, out _,
                                     out var proposed);
-                                newIReader = new Reader(_db, root, read, proposed, _pool);
+                                newReader = new Reader(_db, root, read, proposed, _pool);
                             }
 
-                            RegisterNewReaderAfterFinalization(removed, newIReader, previousRootStateHash);
+                            // Register the new reader and await the disposal of the oldest one.
+                            await RegisterNewReaderAfterFinalization(removed, newReader);
 
                             // Only now dispose the removed as they had their data used above.
                             foreach (var b in removed)
@@ -315,33 +325,34 @@ public sealed partial class PagedDb
             }
         }
 
-        private void RegisterNewReaderAfterFinalization(List<ProposedBatch> removed, Reader newReader,
-            Keccak previousRootStateHash)
+        private Task RegisterNewReaderAfterFinalization(List<ProposedBatch> removed, Reader newReader)
         {
             var toDispose = new List<Reader>();
+            Reader? oldest = null;
 
             // Update readers
             _readerLock.EnterWriteLock();
             try
             {
-                Reader? headReader;
-
                 // Remove the previous
                 foreach (var b in removed)
                 {
-                    if (_readers.Remove(b.StateHash, out headReader))
+                    if (_readers.Remove(b.StateHash, out var headReader))
                     {
                         toDispose.Add(headReader);
                     }
                 }
 
-                // Register the new one
+                // Register the new one in the dictionary and in the disposal queue
                 _readers[newReader.Metadata.StateHash] = newReader;
 
-                // Remove the previous state root if exists
-                if (_readers.Remove(previousRootStateHash, out headReader))
+                _readersDisposalQueue.Enqueue(newReader);
+
+                if (_readersDisposalQueue.Count == _db._historyDepth)
                 {
-                    toDispose.Add(headReader);
+                    // Ensure that we keep only N-1 readers for the history, so that the next spin can copy over to the root.
+                    oldest = _readersDisposalQueue.Dequeue();
+                    _readers.Remove(oldest.Metadata.StateHash);
                 }
             }
             finally
@@ -354,6 +365,12 @@ public sealed partial class PagedDb
             {
                 reader.Dispose();
             }
+
+            if (oldest == null)
+                return Task.CompletedTask;
+
+            oldest.Dispose();
+            return oldest.CleanedUp;
         }
 
         private ProposedBatch FindProposed(Keccak keccak)

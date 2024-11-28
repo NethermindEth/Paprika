@@ -173,4 +173,79 @@ public class MultiHeadChainTests
             }
         }
     }
+
+    [Test]
+    public async Task Old_reader_kept_alive_keeps_finalization_from_processing()
+    {
+        const byte blocks = 64;
+
+        using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
+
+        var random = new Random(Seed);
+
+        await using var multi = db.OpenMultiHeadChain();
+
+        using var head = multi.Begin(Keccak.EmptyTreeHash);
+
+        var finalized = new List<Task>();
+
+        var account = Keccak.OfAnEmptySequenceRlp;
+
+        byte[] expectedReaderValue = [];
+        byte[] lastWrittenValue = [];
+        Keccak lastWrittenKeccak = default;
+
+        IHeadReader? reader = null;
+        for (byte i = 0; i < blocks; i++)
+        {
+            lastWrittenKeccak = random.NextKeccak();
+
+            lastWrittenValue = [i];
+            head.SetRaw(Key.Account(account), lastWrittenValue);
+            head.Commit((uint)(i + 1), lastWrittenKeccak);
+
+            if (i == 0)
+            {
+                expectedReaderValue = lastWrittenValue;
+
+                // the first block should be set and finalized
+                await multi.Finalize(lastWrittenKeccak);
+                multi.TryLeaseReader(lastWrittenKeccak, out reader).Should().BeTrue();
+            }
+            else
+            {
+                // Just register finalization, it won't be finalized as the reader will keep it from going on 
+                finalized.Add(multi.Finalize(lastWrittenKeccak));
+            }
+        }
+
+        AssertReader(reader, account, expectedReaderValue);
+
+        finalized.Should().AllSatisfy(t => t.Status.Should().Be(TaskStatus.WaitingForActivation));
+
+        reader!.Dispose();
+        await reader.CleanedUp;
+        await Task.WhenAll(finalized);
+
+        // Everything is finalized and written, try read the last value now
+        AssertLastWrittenValue(multi, lastWrittenKeccak, account, lastWrittenValue);
+
+        return;
+
+        static void AssertReader(IHeadReader? reader, Keccak account, byte[] expectedReaderValue)
+        {
+            reader.Should().NotBeNull();
+
+            reader!.TryGet(Key.Account(account), out var actualReaderValue).Should().BeTrue();
+            actualReaderValue.SequenceEqual(expectedReaderValue).Should().BeTrue();
+        }
+
+        static void AssertLastWrittenValue(IMultiHeadChain multi, Keccak stateHash, Keccak account, byte[] lastWrittenValue)
+        {
+            multi.TryLeaseReader(stateHash, out var lastReader).Should().BeTrue();
+            lastReader.TryGet(Key.Account(account), out var actualLastWrittenValue).Should().BeTrue();
+            actualLastWrittenValue.SequenceEqual(lastWrittenValue).Should().BeTrue();
+            lastReader.Dispose();
+        }
+    }
 }
