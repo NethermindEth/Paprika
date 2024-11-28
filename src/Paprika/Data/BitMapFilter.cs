@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics.X86;
 using Paprika.Chain;
 using Paprika.Store;
+using Paprika.Utils;
 
 namespace Paprika.Data;
 
@@ -152,10 +153,11 @@ public static class BitMapFilter
 
         public void Clear()
         {
-            foreach (var page in _pages)
+            ParallelUnbalancedWork.For(0, PageCount, _pages, static (i, state) =>
             {
-                page.Clear();
-            }
+                state[i].Clear();
+                return state;
+            });
         }
 
         public void Return(BufferPool pool)
@@ -184,12 +186,12 @@ public static class BitMapFilter
         [Pure]
         public void OrWith(OfN<TSize>[] others)
         {
-            var pages = _pages;
+            State state = new State(others, _pages);
 
-            Parallel.For(0, PageCount, i =>
+            ParallelUnbalancedWork.For(0, PageCount, state, static (i, s) =>
             {
-                var page = pages[i];
-                var length = others.Length;
+                var page = s.Pages[i];
+                var length = s.Others.Length;
 
                 for (var j = 0; j < length - 1; j++)
                 {
@@ -198,16 +200,20 @@ public static class BitMapFilter
                         // prefetch next
                         unsafe
                         {
-                            Sse.Prefetch2(others[j + 1]._pages[i].Payload);
+                            Sse.Prefetch2(s.Others[j + 1]._pages[i].Payload);
                         }
                     }
 
-                    page.OrWith(others[j]._pages[i]);
+                    page.OrWith(s.Others[j]._pages[i]);
                 }
 
-                page.OrWith(others[length - 1]._pages[i]);
+                page.OrWith(s.Others[length - 1]._pages[i]);
+
+                return s;
             });
         }
+
+        private readonly record struct State(OfN<TSize>[] Others, Page[] Pages);
 
         public int BucketCount => Page.PageSize * BitsPerByte * PageCount;
 
