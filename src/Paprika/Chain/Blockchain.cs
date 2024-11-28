@@ -2165,7 +2165,7 @@ public class Blockchain : IAsyncDisposable
             //commit without hash recalc - useful for storage ranges in snap sync
             if (ensureHash)
                 Hash = _current.Hash;
-           
+
             using var batch = _db.BeginNextBatch();
 
             DeleteByPrefixes(batch);
