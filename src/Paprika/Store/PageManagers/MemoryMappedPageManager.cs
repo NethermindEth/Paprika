@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using Paprika.Utils;
 
 namespace Paprika.Store.PageManagers;
@@ -13,13 +14,13 @@ public sealed class MemoryMappedPageManager : PointerPageManager
 
     /// <summary>
     /// The only option is random access. As Paprika jumps over the file, any prefetching is futile.
-    /// Also, the file cannot be async to use some of the mmap features. So here it is, random access file. 
+    /// Also, the file cannot be async to use some of the mmap features. So here it is, random access file.
     /// </summary>
     private const FileOptions PaprikaFileOptions = FileOptions.RandomAccess | FileOptions.Asynchronous;
 
     private const string PaprikaFileName = "paprika.db";
 
-    private readonly FileStream _file;
+    private readonly SafeFileHandle _file;
     private readonly MemoryMappedFile _mapped;
     private readonly MemoryMappedViewAccessor _whole;
     private readonly unsafe byte* _ptr;
@@ -30,6 +31,7 @@ public sealed class MemoryMappedPageManager : PointerPageManager
     private readonly List<Task> _pendingWrites = new();
     private DbAddress[] _toWrite = new DbAddress[1];
 
+    // Metrics
     private readonly Meter _meter;
     private readonly Histogram<int> _fileWrites;
     private readonly Histogram<int> _writeTime;
@@ -41,25 +43,28 @@ public sealed class MemoryMappedPageManager : PointerPageManager
 
         if (!File.Exists(Path))
         {
-            _file = new FileStream(Path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.ReadWrite, 4096,
-                PaprikaFileOptions);
+            var directory = System.IO.Path.GetDirectoryName(Path);
+            if (!Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+            _file = File.OpenHandle(Path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.ReadWrite, PaprikaFileOptions);
 
             // set length
-            _file.SetLength(size);
+            RandomAccess.SetLength(_file, size);
 
             // clear first pages to make it clean
             var page = new byte[Page.PageSize];
             for (var i = 0; i < historyDepth; i++)
             {
-                _file.Write(page);
+                RandomAccess.Write(_file, page, i * Page.PageSize);
             }
 
-            _file.Flush(true);
+            RandomAccess.FlushToDisk(_file);
         }
         else
         {
-            _file = new FileStream(Path, FileMode.Open, FileAccess.ReadWrite, FileShare.None, 4096,
-                PaprikaFileOptions);
+            _file = File.OpenHandle(Path, FileMode.Open, FileAccess.ReadWrite, FileShare.None, PaprikaFileOptions);
         }
 
         _mapped = MemoryMappedFile.CreateFromFile(_file, null, (long)size, MemoryMappedFileAccess.ReadWrite,
@@ -93,7 +98,7 @@ public sealed class MemoryMappedPageManager : PointerPageManager
 
         if (options != CommitOptions.DangerNoFlush && options != CommitOptions.DangerNoWrite)
         {
-            _file.Flush(true);
+            RandomAccess.FlushToDisk(_file);
         }
     }
 
@@ -132,7 +137,7 @@ public sealed class MemoryMappedPageManager : PointerPageManager
     private ValueTask WriteAt(DbAddress addr, uint count = 1)
     {
         var page = GetAt(addr);
-        return RandomAccess.WriteAsync(_file.SafeFileHandle, Own(page, count).Memory, addr.FileOffset);
+        return RandomAccess.WriteAsync(_file, Own(page, count).Memory, addr.FileOffset);
     }
 
     private async Task AwaitWrites()
@@ -160,7 +165,7 @@ public sealed class MemoryMappedPageManager : PointerPageManager
 
         if (options == CommitOptions.FlushDataAndRoot)
         {
-            _file.Flush(true);
+            RandomAccess.FlushToDisk(_file);
         }
     }
 
@@ -169,13 +174,13 @@ public sealed class MemoryMappedPageManager : PointerPageManager
         if (_options == PersistenceOptions.MMapOnly)
             return;
 
-        _file.Flush(true);
+        RandomAccess.FlushToDisk(_file);
     }
 
     public override void ForceFlush()
     {
         _whole.Flush();
-        _file.Flush(true);
+        RandomAccess.FlushToDisk(_file);
     }
 
     public override bool UsesPersistentPaging => _options == PersistenceOptions.FlushFile;

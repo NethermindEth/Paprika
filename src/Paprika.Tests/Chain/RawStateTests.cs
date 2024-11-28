@@ -126,7 +126,6 @@ public class RawStateTests
     }
 
     [Test]
-    [Ignore("Deletion by prefixes of length <= 2 is not supported")]
     public async Task DeleteByShortPrefix()
     {
         var account1 = new Keccak(new byte[]
@@ -135,7 +134,7 @@ public class RawStateTests
         var account2 = new Keccak(new byte[]
             { 18, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
 
-        using var db = PagedDb.NativeMemoryDb(256 * 1024, 2);
+        using var db = PagedDb.NativeMemoryDb(64 * 1024, 2);
         var merkle = new ComputeMerkleBehavior();
 
         await using var blockchain = new Blockchain(db, merkle);
@@ -144,16 +143,33 @@ public class RawStateTests
 
         raw.SetAccount(account1, new Account(1, 1));
         raw.SetAccount(account2, new Account(2, 2));
-        raw.Commit(keepOpened: true);
+        raw.Commit();
 
-        raw.RegisterDeleteByPrefix(Key.Account(NibblePath.FromKey(account2).SliceTo(2)));
-        raw.Commit(keepOpened: true);
+        raw.RegisterDeleteByPrefix(Key.Account(NibblePath.FromKey(account2).SliceTo(1)));
+        raw.Commit();
 
         raw.Finalize(1);
 
+        //check account 1 is still present and account 2 is deleted
         using var read = db.BeginReadOnlyBatch();
         read.TryGet(Key.Account(account1), out _).Should().BeTrue();
         read.TryGet(Key.Account(account2), out _).Should().BeFalse();
+
+        //let's re-add 2nd account and delete using empty prefix
+        using var raw2 = blockchain.StartRaw();
+
+        raw2.SetAccount(account2, new Account(2, 2));
+        raw2.Commit();
+
+        raw2.RegisterDeleteByPrefix(Key.Account(NibblePath.Empty));
+        raw2.Commit();
+
+        raw2.Finalize(2);
+
+        //no accounts should be present
+        using var read2 = db.BeginReadOnlyBatch();
+        read2.TryGet(Key.Account(account1), out _).Should().BeFalse();
+        read2.TryGet(Key.Account(account2), out _).Should().BeFalse();
     }
 
     [Test]
@@ -170,13 +186,13 @@ public class RawStateTests
 
         raw.SetAccount(account, new Account(1, 1));
         raw.SetStorage(account, Values.Key2, new byte[] { 1, 2, 3, 4, 5 });
-        raw.Commit(keepOpened: true);
+        raw.Commit();
 
         using var read = db.BeginReadOnlyBatch();
         read.TryGet(Key.StorageCell(NibblePath.FromKey(account), Values.Key2), out _).Should().BeTrue();
 
         raw.RegisterDeleteByPrefix(Key.StorageCell(NibblePath.FromKey(account), NibblePath.Empty));
-        raw.Commit(keepOpened: true);
+        raw.Commit();
 
         raw.Finalize(1);
 

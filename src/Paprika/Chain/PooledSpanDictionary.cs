@@ -244,7 +244,6 @@ public class PooledSpanDictionary : IDisposable
     public void Set(scoped ReadOnlySpan<byte> key, ulong hash, ReadOnlySpan<byte> data0, ReadOnlySpan<byte> data1,
         byte metadata) => SetImpl(key, Mix(hash), data0, data1, metadata);
 
-
     private void SetImpl(scoped ReadOnlySpan<byte> key, uint mixed, ReadOnlySpan<byte> data0, ReadOnlySpan<byte> data1,
         byte metadata, bool append = false)
     {

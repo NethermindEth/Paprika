@@ -5,12 +5,8 @@ namespace Paprika.Chain;
 /// <summary>
 /// Represents the world state of Ethereum at a given block.
 /// </summary>
-public interface IWorldState : IDisposable
+public interface IWorldState : IStateStorageAccessor, IDisposable
 {
-    Account GetAccount(in Keccak address);
-
-    Span<byte> GetStorage(in Keccak address, in Keccak storage, Span<byte> destination);
-
     /// <summary>
     /// Gets the current hash of the world state.
     /// </summary>
@@ -46,16 +42,23 @@ public interface IWorldState : IDisposable
     public IPreCommitPrefetcher? OpenPrefetcher();
 }
 
-public interface IReadOnlyWorldState : IReadOnlyCommit, IDisposable
+public interface IReadOnlyWorldState : IStateStorageAccessor, IReadOnlyCommit, IDisposable
 {
-    Account GetAccount(in Keccak address);
-
-    Span<byte> GetStorage(in Keccak address, in Keccak storage, Span<byte> destination);
-
     /// <summary>
     /// Gets the current hash of the world state.
     /// </summary>
     Keccak Hash { get; }
+}
+
+/// <summary>
+/// A shared interface between <see cref="IReadOnlyWorldState"/>
+/// and <see cref="IWorldState"/>.
+/// </summary>
+public interface IStateStorageAccessor
+{
+    Account GetAccount(in Keccak address);
+
+    Span<byte> GetStorage(in Keccak address, in Keccak storage, Span<byte> destination);
 }
 
 /// <summary>

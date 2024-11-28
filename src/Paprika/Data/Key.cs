@@ -46,9 +46,6 @@ public readonly ref partial struct Key
     public static Key StorageCell(NibblePath path, in Keccak keccak) =>
         new(path, DataType.StorageCell, NibblePath.FromKey(keccak));
 
-    public static Key StorageCell(NibblePath path, NibblePath storagePath) =>
-        new(path, DataType.StorageCell, storagePath);
-
     /// <summary>
     /// Builds the key for <see cref="DataType.StorageCell"/>.
     /// </summary>
@@ -57,6 +54,9 @@ public readonly ref partial struct Key
     /// </remarks>
     public static Key StorageCell(NibblePath path, ReadOnlySpan<byte> keccak) =>
         new(path, DataType.StorageCell, NibblePath.FromKey(keccak));
+
+    public static Key StorageCell(NibblePath path, NibblePath storagePath) =>
+        new(path, DataType.StorageCell, storagePath);
 
     [DebuggerStepThrough]
     public Key SliceFrom(int nibbles) => new(Path.SliceFrom(nibbles), Type, StoragePath);
