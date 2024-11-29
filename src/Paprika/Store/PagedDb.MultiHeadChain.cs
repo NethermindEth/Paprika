@@ -60,6 +60,16 @@ public sealed partial class PagedDb
         // Metrics
         private readonly MetricsExtensions.IAtomicIntGauge _flusherQueueCount;
 
+        /// <summary>
+        /// Announces the last block number that was flushed to disk.
+        /// </summary>
+        public event EventHandler<(uint blockNumber, Keccak blockHash)> Flushed;
+
+        /// <summary>
+        /// The flusher failed.
+        /// </summary>
+        public event EventHandler<Exception> FlusherFailure;
+
         public MultiHeadChain(PagedDb db)
         {
             _db = db;
@@ -277,7 +287,8 @@ public sealed partial class PagedDb
                 {
                     try
                     {
-                        const CommitOptions options = CommitOptions.FlushDataOnly;
+                        // No flushing for batches atm.
+                        const CommitOptions options = CommitOptions.DangerNoFlush;
 
                         Debug.Assert(toFinalize.batches[0].BatchId == _lastCommittedBatch + 1);
 
@@ -332,14 +343,26 @@ public sealed partial class PagedDb
                             _flusherQueueCount.Set(reader.Count);
                         }
 
+                        if (reader.TryPeek(out _) == false)
+                        {
+                            // For now, perform sync only if there is no other coming.
+                            // TODO: This should take into consideration the actual number of blocks written so far 
+                            _db.Flush();
+                        }
+
+                        Flushed?.Invoke(this, new ValueTuple<uint, Keccak>());
                         toFinalize.tcs.SetResult();
                     }
                     catch (Exception e)
                     {
                         toFinalize.tcs.SetException(e);
+                        FlusherFailure?.Invoke(this, e);
                     }
                 }
             }
+
+            // Sync before closing
+            _db.Flush();
         }
 
         private Task RegisterNewReaderAfterFinalization(List<ProposedBatch> removed, Reader newReader)
@@ -876,4 +899,14 @@ public interface IMultiHeadChain : IAsyncDisposable
     Task Finalize(Keccak keccak);
 
     bool HasState(in Keccak keccak);
+
+    /// <summary>
+    /// Announces the last block number that was flushed to disk.
+    /// </summary>
+    event EventHandler<(uint blockNumber, Keccak blockHash)> Flushed;
+
+    /// <summary>
+    /// The flusher failed.
+    /// </summary>
+    event EventHandler<Exception> FlusherFailure;
 }

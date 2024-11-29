@@ -80,12 +80,20 @@ public class Blockchain : IAsyncDisposable
     /// <summary>
     /// Announces the last block number that was flushed to disk.
     /// </summary>
-    public event EventHandler<(uint blockNumber, Keccak blockHash)> Flushed;
+    public event EventHandler<(uint blockNumber, Keccak blockHash)> Flushed
+    {
+        add => _chain.Flushed += value;
+        remove => _chain.Flushed -= value;
+    }
 
     /// <summary>
     /// The flusher failed.
     /// </summary>
-    public event EventHandler<Exception> FlusherFailure;
+    public event EventHandler<Exception> FlusherFailure
+    {
+        add => _chain.FlusherFailure += value;
+        remove => _chain.FlusherFailure -= value;
+    }
 
     public IWorldState StartNew(Keccak parentKeccak) => new BlockState(_chain.Begin(parentKeccak), this);
 
