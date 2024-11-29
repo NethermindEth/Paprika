@@ -95,7 +95,12 @@ public class Blockchain : IAsyncDisposable
         remove => _chain.FlusherFailure -= value;
     }
 
-    public IWorldState StartNew(Keccak parentKeccak) => new BlockState(_chain.Begin(parentKeccak), this);
+    public IWorldState StartNew(Keccak parentKeccak) =>
+        new BlockState(
+            parentKeccak == Keccak.EmptyTreeHash
+                ? _chain.BeginNonCommittable(parentKeccak)
+                : _chain.Begin(parentKeccak),
+            this);
 
     // public IRawState StartRaw()
     // {

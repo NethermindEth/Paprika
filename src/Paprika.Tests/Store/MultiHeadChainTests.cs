@@ -1,7 +1,9 @@
 using System.Buffers.Binary;
 using FluentAssertions;
+using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Merkle;
 using Paprika.Store;
 
 namespace Paprika.Tests.Store;
@@ -282,5 +284,26 @@ public class MultiHeadChainTests
             reader.TryGet(Key.Account(keccak), out var actual).Should().BeTrue();
             actual.SequenceEqual(expected).Should().BeTrue();
         }
+    }
+
+    [Test]
+    public async Task EmptyTreeHash_creates_non_committable_head_chain()
+    {
+        using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
+
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
+
+        using var block = blockchain.StartNew(Keccak.EmptyTreeHash);
+
+        // Assert setting and getting
+        var keccak = Keccak.OfAnEmptySequenceRlp;
+
+        var expected = new Account(17, 13);
+
+        block.SetAccount(keccak, expected);
+        var actual = block.GetAccount(keccak);
+        actual.Should().Be(expected);
+
+        Assert.Throws<Exception>(() => block.Commit(1));
     }
 }

@@ -54,7 +54,6 @@ public sealed partial class PagedDb
 
         // Flusher
         private readonly Task _flusher;
-
         private uint _lastCommittedBatch;
 
         // Metrics
@@ -185,6 +184,14 @@ public sealed partial class PagedDb
 
                 return (minBatchId, _lastCommittedBatch, next);
             }
+        }
+
+        public IHead BeginNonCommittable(in Keccak stateHash)
+        {
+            var emptyRoot = new RootPage(_pool.Rent(true));
+            emptyRoot.Data.Metadata = new Metadata(1, stateHash);
+
+            return new HeadTrackingBatch(_db, null, emptyRoot, 0, EmptyReadOnlyBatch.Instance, [], _pool);
         }
 
         public bool TryLeaseReader(in Keccak stateHash, out IHeadReader reader)
@@ -528,7 +535,7 @@ public sealed partial class PagedDb
     private sealed class HeadTrackingBatch : BatchBase, IHead
     {
         private readonly BufferPool _pool;
-        private readonly MultiHeadChain _chain;
+        private readonly MultiHeadChain? _chain;
 
         private readonly Dictionary<DbAddress, Page> _pageTable = new();
         private readonly Dictionary<Page, DbAddress> _pageTableReversed = new();
@@ -544,7 +551,7 @@ public sealed partial class PagedDb
         private IReadOnlyBatch _read;
         public Keccak ParentHash { get; private set; }
 
-        public HeadTrackingBatch(PagedDb db, MultiHeadChain chain, RootPage root,
+        public HeadTrackingBatch(PagedDb db, MultiHeadChain? chain, RootPage root,
             uint reusePagesOlderThanBatchId, IReadOnlyBatch read, IEnumerable<ProposedBatch> proposed,
             BufferPool pool) : base(db)
         {
@@ -591,6 +598,14 @@ public sealed partial class PagedDb
 
         public void Commit(uint blockNumber, in Keccak blockHash)
         {
+            if (_chain == null)
+            {
+                throw new Exception(
+                    $"This head cannot be committed. " +
+                    $"It was created based on the empty root {Keccak.EmptyTreeHash} " +
+                    $"and should not be committed.");
+            }
+
             MemoizeAbandoned();
 
             // Copy the state hash
@@ -888,6 +903,8 @@ public interface IHeadReader : IDataGetter, IRefCountingDisposable
 public interface IMultiHeadChain : IAsyncDisposable
 {
     IHead Begin(in Keccak stateHash);
+
+    IHead BeginNonCommittable(in Keccak stateHash);
 
     bool TryLeaseReader(in Keccak stateHash, out IHeadReader leasedReader);
 
