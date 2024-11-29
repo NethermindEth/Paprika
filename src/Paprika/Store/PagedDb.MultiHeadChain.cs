@@ -40,6 +40,7 @@ public sealed partial class PagedDb
         // Readers
         private readonly Dictionary<Keccak, Reader> _readers = new();
         private readonly Queue<Reader> _readersDisposalQueue = new();
+        private Reader _lastFinalized;
         private readonly ReaderWriterLockSlim _readerLock = new();
 
         // Proposed batches that are finalized
@@ -81,6 +82,7 @@ public sealed partial class PagedDb
                 RegisterReader(reader);
 
                 _readersDisposalQueue.Enqueue(reader);
+                _lastFinalized = reader;
             }
 
             _flusher = FlusherTask();
@@ -161,7 +163,7 @@ public sealed partial class PagedDb
                 }
 
                 // Handle both reregistration of the same hash/batchid and the addition by disposing the read
-                // and moving forward with the creation of the next reader. 
+                // and moving forward with the creation of the next reader.
 
                 read.Dispose();
 
@@ -191,6 +193,21 @@ public sealed partial class PagedDb
 
                 return true;
 
+            }
+            finally
+            {
+                _readerLock.ExitReadLock();
+            }
+        }
+
+        public IHeadReader LeaseLatestFinalized()
+        {
+            _readerLock.EnterReadLock();
+            try
+            {
+                Reader reader = _lastFinalized;
+                reader.AcquireLease();
+                return reader;
             }
             finally
             {
@@ -345,9 +362,9 @@ public sealed partial class PagedDb
 
                 // Register the new one in the dictionary and in the disposal queue
                 _readers[newReader.Metadata.StateHash] = newReader;
+                _lastFinalized = newReader;
 
                 _readersDisposalQueue.Enqueue(newReader);
-
                 if (_readersDisposalQueue.Count == _db._historyDepth)
                 {
                     // Ensure that we keep only N-1 readers for the history, so that the next spin can copy over to the root.
@@ -483,7 +500,7 @@ public sealed partial class PagedDb
     ///
     /// To check whether it's a historical read-only page or a written one, the header can be checked.
     ///
-    /// When committing, filter the page table to find pages that have the same batch id as this one. 
+    /// When committing, filter the page table to find pages that have the same batch id as this one.
     /// </remarks>
     private sealed class HeadTrackingBatch : BatchBase, IHead
     {
@@ -559,7 +576,7 @@ public sealed partial class PagedDb
             SetMetadata(blockNumber, blockHash);
 
             // The root ownership is now moved to the proposed batch.
-            // The batch is automatically leased by this head. It will be leased by the chain as well. 
+            // The batch is automatically leased by this head. It will be leased by the chain as well.
             var batch = new ProposedBatch(_cowed.ToArray(), Root, ParentHash, Db._pool);
 
             _cowed.Clear();
@@ -850,6 +867,8 @@ public interface IMultiHeadChain : IAsyncDisposable
     IHead Begin(in Keccak stateHash);
 
     bool TryLeaseReader(in Keccak stateHash, out IHeadReader leasedReader);
+
+    IHeadReader LeaseLatestFinalized();
 
     /// <summary>
     /// Finalizes the given block and all the blocks before it.

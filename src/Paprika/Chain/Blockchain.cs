@@ -104,8 +104,7 @@ public class Blockchain : IAsyncDisposable
         throw new KeyNotFoundException($"Not found state with {keccak}");
     }
 
-    public static IReadOnlyWorldState StartReadOnlyLatestFromDb(IDb db) =>
-        throw new NotImplementedException("Not implemented");
+    public IReadOnlyWorldState StartReadOnlyLatestFinalized() => new ReadOnlyState(_chain.LeaseLatestFinalized());
 
     public Task Finalize(Keccak keccak) => _chain.Finalize(keccak);
 
