@@ -75,7 +75,10 @@ public class BufferPool : IDisposable
     public void Return(Page page)
     {
 #if STACK_TRACE_TRACKING
-        _traces.TryRemove(page, out _);
+        if (_traces.TryRemove(page, out _) == false)
+        {
+            throw new KeyNotFoundException("The page was not found in the pool.");
+        }
 #endif
 
         _pool.Enqueue(page);
