@@ -248,4 +248,39 @@ public class MultiHeadChainTests
             lastReader.Dispose();
         }
     }
+
+    [Test]
+    public async Task Last_finalized_can_be_leased_with_LeaseLatest()
+    {
+        const byte blocks = 128;
+
+        using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
+
+        var random = new Random(Seed);
+
+        await using var multi = db.OpenMultiHeadChain();
+        using var head = multi.Begin(Keccak.EmptyTreeHash);
+
+        for (byte i = 0; i < blocks; i++)
+        {
+            var keccak = random.NextKeccak();
+            byte[] expected = [i];
+            head.SetRaw(Key.Account(keccak), expected);
+            head.Commit((uint)(i + 1), keccak);
+
+            await multi.Finalize(keccak);
+
+            AssertLatest(multi, keccak, expected);
+        }
+
+        return;
+
+        static void AssertLatest(IMultiHeadChain multi, Keccak keccak, byte[] expected)
+        {
+            using var reader = multi.LeaseLatestFinalized();
+            reader.Metadata.StateHash.Should().Be(keccak, "Because it should lease the latest");
+            reader.TryGet(Key.Account(keccak), out var actual).Should().BeTrue();
+            actual.SequenceEqual(expected).Should().BeTrue();
+        }
+    }
 }
