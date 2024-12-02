@@ -39,7 +39,7 @@ public readonly ref struct SlottedArray /*: IClearable */
     private const int VectorsByBatch = 2;
 
     private static readonly int DoubleVectorSize = VectorSize * VectorsByBatch;
-    
+
     private static readonly int HashesPerVector = VectorSize / sizeof(ushort);
 
     private static readonly int SlotsPerVector = VectorSize / Slot.Size;
@@ -909,57 +909,31 @@ public readonly ref struct SlottedArray /*: IClearable */
     }
 
     /// <summary>
-    /// Defragments the underlying slotted array by overwriting the deleted slots.
+    /// Defragments the underlying slotted array by overwriting the deleted slots. Performs vectorized defragmentation
+    /// by creating a deleted mask from the slot data and then moving only the alive slots, hashes and the corresponding
+    /// payload data.
     /// </summary>
     private void Defragment()
     {
         // As data were fitting before, it will fit after so all the checks can be skipped
         var count = _header.Low / Slot.TotalSize;
 
-        if (count == 0 || _header.Deleted == 0 || count == _header.Deleted)
+        if (count == 0 || _header.Deleted == 0)
             return;
 
-        if (Vector256.IsHardwareAccelerated)
-        {
-            VectorizedDefragment256();
-        }
-        else if (Vector128.IsHardwareAccelerated)
-        {
-            VectorizedDefragment128();
-        }
-        else
-        {
-            ThrowNoVectorSupport();
-        }
-    }
-    
-    /// <summary>
-    /// Vectorized defragment by creating a deleted mask from the vector data and then moving corresponding
-    /// slot, hash and payload data.
-    /// </summary>
-    private void VectorizedDefragment256()
-    {
-        var count = _header.Low / Slot.TotalSize;
         var alive = (ushort)count;
         var jump = DoubleVectorSize / sizeof(ushort);
         var aligned = AlignToDoubleVectorSize(_header.Low) / sizeof(ushort);
         ref var d = ref Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(_data));
-        
+
         // The data will be moved from index [start..end] to [writeAt..] where writeAt < start <= end.
         var startIndex = NotFound;
         var endIndex = NotFound;
         var writeAtIndex = NotFound;
-        
-        var preambleMask = Slot.GetKeyPreambleMaskAsVector256();
-        var preambleDeleteMask = Slot.GetKeyPreambleDeleteAsVector256();
 
         for (var i = HashesPerVector; i < aligned; i += jump)
         {
-            // Extract the preamble data from the underlying slots. 
-            var slotData = Vector256.LoadUnsafe(ref d, (UIntPtr)i);
-            var preambleData = Vector256.BitwiseAnd(slotData, preambleMask);
-
-            var deletedMask = Vector256.Equals(preambleData, preambleDeleteMask).ExtractMostSignificantBits();
+            var deletedMask = CreateDeletedBitmask(ref d, i);
 
             if (deletedMask != 0 && i + jump >= aligned)
             {
@@ -972,7 +946,7 @@ public readonly ref struct SlottedArray /*: IClearable */
 
             while (deletedMask != 0)
             {
-                // Consume the first set bit.
+                // Consume the next set bit.
                 var setBitIndex = BitOperations.TrailingZeroCount(deletedMask);
                 deletedMask ^= 1U << setBitIndex;
                 alive--;
@@ -980,7 +954,7 @@ public readonly ref struct SlottedArray /*: IClearable */
                 if (startIndex == NotFound)
                 {
                     startIndex = setBitIndex + (i - HashesPerVector) / VectorsByBatch + 1;
-                    
+
                     if (writeAtIndex == NotFound)
                     {
                         writeAtIndex = startIndex - 1;
@@ -1015,6 +989,7 @@ public readonly ref struct SlottedArray /*: IClearable */
 
                     // Could not find any non-consecutive set bits, progress start to the next non deleted slot.
                     startIndex++;
+
                     // Move on to the next vector to find the new end.
                     break;
                 }
@@ -1023,7 +998,7 @@ public readonly ref struct SlottedArray /*: IClearable */
                 startIndex = endIndex + 2;
             }
         }
-        
+
         // If there was no valid end found for a corresponding start, move all the remaining slot.
         if (startIndex != NotFound && startIndex < count)
         {
@@ -1031,7 +1006,7 @@ public readonly ref struct SlottedArray /*: IClearable */
             {
                 startIndex++;
             }
-            
+
             endIndex = count - 1;
 
             if (startIndex <= endIndex)
@@ -1039,16 +1014,47 @@ public readonly ref struct SlottedArray /*: IClearable */
                 writeAtIndex = CopyDataInternal(startIndex, endIndex, writeAtIndex);
             }
         }
-        
+
         Debug.Assert(_header.Deleted == Count - alive, "All the deleted items were not discovered");
-        Debug.Assert(writeAtIndex != NotFound, "No defragmentation was done");
-        
+        Debug.Assert(writeAtIndex != NotFound, "No deleted slot was found");
+
         // Adjust header values
         _header.Low = (ushort)(alive * Slot.TotalSize);
         _header.Deleted = 0;
         _header.High = (ushort)((writeAtIndex == 0)
-            ? _data.Length
+            ? 0
             : _data.Length - GetSlotRef(writeAtIndex - 1).ItemAddress);
+    }
+
+    /// <summary>
+    /// Helper function to create a deleted bitmask from the underlying data where each bit is
+    /// either 1 (deleted) or 0 (alive) for the corresponding slot index.
+    /// </summary>
+    private uint CreateDeletedBitmask(ref ushort d, int offset)
+    {
+        uint deletedMask = 0;
+
+        // Extract the preamble data from the underlying slots and compare it with the preamble delete mask.
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var slotData = Vector256.LoadUnsafe(ref d, (UIntPtr)offset);
+            var preambleData = Vector256.BitwiseAnd(slotData, Slot.GetKeyPreambleMaskAsVector256());
+
+            deletedMask = Vector256.Equals(preambleData, Slot.GetKeyPreambleDeleteAsVector256()).ExtractMostSignificantBits();
+        }
+        else if (Vector128.IsHardwareAccelerated)
+        {
+            var slotData = Vector128.LoadUnsafe(ref d, (UIntPtr)offset);
+            var preambleData = Vector128.BitwiseAnd(slotData, Slot.GetKeyPreambleMaskAsVector128());
+
+            deletedMask = Vector128.Equals(preambleData, Slot.GetKeyPreambleDeleteAsVector128()).ExtractMostSignificantBits();
+        }
+        else
+        {
+            ThrowNoVectorSupport();
+        }
+
+        return deletedMask;
     }
 
     /// <summary>
@@ -1059,23 +1065,23 @@ public readonly ref struct SlottedArray /*: IClearable */
         // Copy the payload data. For reference the layout is as follows:
         // |...|endIndex||endIndex - 1|...|startIndex||startIndex - 1|...|writeAtIndex|...|
         var endAddress = GetSlotRef(endIndex).ItemAddress;
-        
+
         Debug.Assert(startIndex != 0 && writeAtIndex < startIndex && startIndex <= endIndex);
 
         // Form slice of the source data
         var previousSlotAddress = GetSlotRef(startIndex - 1).ItemAddress;
         var length = previousSlotAddress - endAddress;
-        
+
         Debug.Assert(length >= 0 && endAddress + length <= _data.Length, "The length of the source data is invalid");
         var sourceData = _data.Slice(endAddress, length);
 
         // Form slice of the destination data
         var writeAtPreviousSlotAddress = (writeAtIndex != 0) ? GetSlotRef(writeAtIndex - 1).ItemAddress : _data.Length;
         var overwrite = writeAtPreviousSlotAddress - previousSlotAddress;
-        
+
         Debug.Assert(overwrite >= 0 && endAddress + overwrite <= _data.Length, "The length of the dest data is invalid");
         var destData = _data.Slice(endAddress + overwrite, length);
-        
+
         sourceData.CopyTo(destData);
 
         // Copy the remaining data (hashes and slots)
@@ -1095,14 +1101,6 @@ public readonly ref struct SlottedArray /*: IClearable */
         }
 
         return writeAtIndex;
-    }
-
-    /// <summary>
-    /// Vectorized defragment by creating a deleted mask from the vector data and then moving corresponding
-    /// slot, hash and payload data.
-    /// </summary>
-    private void VectorizedDefragment128()
-    {
     }
 
     /// <summary>
@@ -1248,7 +1246,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         data = default;
         return NotFound;
     }
-    
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void ThrowNoVectorSupport()
     {
@@ -1649,12 +1647,12 @@ public readonly ref struct SlottedArray /*: IClearable */
             var extract = NibblePath.NibbleMask << shift;
             return (hash & extract) >> shift;
         }
-        
+
         public static Vector256<ushort> GetKeyPreambleMaskAsVector256()
         {
             return Vector256.Create(KeyPreambleMask);
         }
-        
+
         public static Vector128<ushort> GetKeyPreambleMaskAsVector128()
         {
             return Vector128.Create(KeyPreambleMask);
@@ -1664,7 +1662,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         {
             return Vector256.Create((ushort)(KeyPreambleDelete << KeyPreambleShift));
         }
-        
+
         public static Vector128<ushort> GetKeyPreambleDeleteAsVector128()
         {
             return Vector128.Create((ushort)(KeyPreambleDelete << KeyPreambleShift));
