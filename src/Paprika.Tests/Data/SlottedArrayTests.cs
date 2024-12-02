@@ -366,7 +366,6 @@ public class SlottedArrayTests
         map.TrySet(NibblePath.FromKey(additionalKey), additionalData).Should()
             .BeFalse("There should be no space in the map to make the defragmentation test work");
 
-        // Randomly select keys to be deleted.
         if (deleteCount < 0)
         {
             deleteCount = keyCount;
@@ -375,6 +374,7 @@ public class SlottedArrayTests
         deleteCount.Should()
             .BeLessThanOrEqualTo(keyCount, "Number of slots to be deleted should be less than max slots");
 
+        // Randomly select keys to be deleted.
         HashSet<int> deletedKeys = new HashSet<int>(deleteCount);
 
         for (var i = 0; i < deleteCount; i++)
