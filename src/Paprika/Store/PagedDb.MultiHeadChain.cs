@@ -543,6 +543,7 @@ public sealed partial class PagedDb
         private readonly List<(DbAddress at, Page page)> _cowed = new();
 
         // The page table cache is used to speed up lookups against _pageTable.
+        // With 8k entries and 12 bytes used per entry we're at ~96kb for this structure.
         private const int PageTableCacheSize = 8192;
         private const int PageTableCacheSizeMask = PageTableCacheSize - 1;
         private readonly (DbAddress addr, Page page)[] _pageTableCache = new (DbAddress, Page)[PageTableCacheSize];
@@ -646,13 +647,12 @@ public sealed partial class PagedDb
                     {
                         _pageTable.Remove(at);
                         _pageTableReversed.Remove(actual);
+                        GetPageTableCacheSlot(at) = default;
                     }
                 }
 
                 removed.Dispose();
             }
-
-            Array.Clear(_pageTableCache);
 
             // Amend local state so that it respects new
             _reusePagesOlderThanBatchId = reusePagesOlderThan;
@@ -699,7 +699,7 @@ public sealed partial class PagedDb
 
         private Page GetAtImpl(DbAddress addr, bool write)
         {
-            ref var cached = ref _pageTableCache[addr.Raw & PageTableCacheSizeMask];
+            ref var cached = ref GetPageTableCacheSlot(addr);
 
             if (cached.addr == addr)
             {
@@ -758,6 +758,10 @@ public sealed partial class PagedDb
 
             return copy;
         }
+
+        private ref (DbAddress addr, Page page) GetPageTableCacheSlot(DbAddress addr) =>
+            ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_pageTableCache),
+                addr.Raw & PageTableCacheSizeMask);
 
         /// <summary>
         /// Creates an override of a given address by getting a page from the pull and storing it in the map.
