@@ -338,7 +338,7 @@ public class SlottedArrayTests
 
         var rand = new Random(13);
 
-        // Fill as much elements as possible within the slotted array.
+        // Fill as many elements as possible within the slotted array.
         var maxKeyCount = 200;
         var keyCount = 0;
         var keys = new Keccak[maxKeyCount];

@@ -275,7 +275,7 @@ public unsafe class SlottedArrayBenchmarks
         // Delete random keys
         for (var i = 0; i < count; i++)
         {
-            map.Delete(GetRandomKey((byte)i, false));
+            map.Delete(GetRandomDefragKey((byte)i, false));
         }
 
         // Insert additional key to trigger defragmentation
@@ -316,7 +316,7 @@ public unsafe class SlottedArrayBenchmarks
         return NibblePath.FromKey(slice, 0, BytesPerKeyHashColliding * NibblePath.NibblePerByte);
     }
 
-    private NibblePath GetRandomKey(byte i, bool odd)
+    private NibblePath GetRandomDefragKey(byte i, bool odd)
     {
         var span = new Span<byte>(_randomKeysIndex, KeyCount - 1);
         return GetDefragKey(span[i], odd);
