@@ -190,6 +190,7 @@ public sealed partial class PagedDb
         {
             var emptyRoot = new RootPage(_pool.Rent(true));
             emptyRoot.Data.Metadata = new Metadata(1, stateHash);
+            emptyRoot.Data.NextFreePage = new DbAddress((uint)_db.HistoryDepth);
 
             return new HeadTrackingBatch(_db, null, emptyRoot, 0, EmptyReadOnlyBatch.Instance, [], _pool);
         }
@@ -541,7 +542,11 @@ public sealed partial class PagedDb
         private readonly Dictionary<Page, DbAddress> _pageTableReversed = new();
         private readonly List<(DbAddress at, Page page)> _cowed = new();
 
-        // Linked list is used as it will have a FIFO behavior
+        // The page table cache is used to speed up lookups against _pageTable.
+        private const int PageTableCacheSize = 8192;
+        private const int PageTableCacheSizeMask = PageTableCacheSize - 1;
+        private readonly (DbAddress addr, Page page)[] _pageTableCache = new (DbAddress, Page)[PageTableCacheSize];
+
         private readonly Queue<ProposedBatch> _proposed = new();
 
         // Current values, shifted with every commit
@@ -647,6 +652,8 @@ public sealed partial class PagedDb
                 removed.Dispose();
             }
 
+            Array.Clear(_pageTableCache);
+
             // Amend local state so that it respects new
             _reusePagesOlderThanBatchId = reusePagesOlderThan;
             _batchId = _root.Header.BatchId;
@@ -692,6 +699,23 @@ public sealed partial class PagedDb
 
         private Page GetAtImpl(DbAddress addr, bool write)
         {
+            ref var cached = ref _pageTableCache[addr.Raw & PageTableCacheSizeMask];
+
+            if (cached.addr == addr)
+            {
+                // cached, means it must be in the _pageTable
+                // The value exists
+                var writtenThisBatch = cached.page.Header.BatchId == BatchId;
+
+                if (!write || writtenThisBatch)
+                {
+                    return cached.page;
+                }
+            }
+
+            // Overwrite the key
+            cached.addr = addr;
+
             ref var page = ref CollectionsMarshal.GetValueRefOrNullRef(_pageTable, addr);
 
             if (Unsafe.IsNullRef(ref page) == false)
@@ -701,12 +725,16 @@ public sealed partial class PagedDb
 
                 if (!write || writtenThisBatch)
                 {
+                    // Overwrite the cache
+                    cached.page = page;
                     return page;
                 }
 
                 // Not written this batch, allocate and copy. Memoize in the slot
                 page = CreateInMemoryOverride(addr, page);
 
+                // Overwrite the cache
+                cached.page = page;
                 return page;
             }
 
@@ -716,12 +744,17 @@ public sealed partial class PagedDb
             // Make copy on write, while return raw from db if a read.
             if (!write)
             {
+                // Overwrite the cache
+                cached.page = fromDb;
                 return fromDb;
             }
 
             // The entry did not exist before, create one
             var copy = CreateInMemoryOverride(addr, fromDb);
             _pageTable[addr] = copy;
+
+            // Overwrite the cache
+            cached.page = copy;
 
             return copy;
         }

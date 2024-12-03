@@ -1,5 +1,3 @@
-using System.Diagnostics;
-using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
@@ -19,8 +17,6 @@ namespace Paprika.Store;
 /// </remarks>
 public readonly unsafe struct RootPage(Page root) : IPage, IEquatable<RootPage>
 {
-    private const int StorageKeySize = Keccak.Size + Keccak.Size + 1;
-
     public ref PageHeader Header => ref root.Header;
 
     public ref Payload Data => ref Unsafe.AsRef<Payload>(root.Payload);
