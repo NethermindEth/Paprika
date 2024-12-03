@@ -121,7 +121,8 @@ public unsafe class SlottedArrayBenchmarks
 
         // Randomly shuffle the indices.
         var rand = new Random(13);
-        rand.Shuffle(randomKeysIndexSpan);
+        var randomKeysSlice = randomKeysIndexSpan.Slice(0, KeyCount - 1);
+        rand.Shuffle(randomKeysSlice);
     }
 
     [Benchmark(OperationsPerInvoke = 4)]
