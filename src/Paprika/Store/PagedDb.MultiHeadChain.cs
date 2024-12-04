@@ -587,6 +587,8 @@ public sealed partial class PagedDb
                     {
                         // Does not exist, set and set the reverse mapping.
                         slot = page;
+                        SetPageTableCache(at, page);
+
                         _pageTableReversed[page] = at;
                     }
                     else if (ShouldOverwrite(page, slot))
@@ -596,6 +598,7 @@ public sealed partial class PagedDb
 
                         // Override slot and set the reverse mapping
                         slot = page;
+                        SetPageTableCache(at, page);
                         _pageTableReversed[page] = at;
                     }
                 }
@@ -647,7 +650,12 @@ public sealed partial class PagedDb
                     {
                         _pageTable.Remove(at);
                         _pageTableReversed.Remove(actual);
-                        GetPageTableCacheSlot(at) = default;
+
+                        ref var cached = ref GetPageTableCacheSlot(at);
+                        if (cached.addr == at && cached.page.Equals(actual))
+                        {
+                            cached = default;
+                        }
                     }
                 }
 
@@ -713,9 +721,6 @@ public sealed partial class PagedDb
                 }
             }
 
-            // Overwrite the key
-            cached.addr = addr;
-
             ref var page = ref CollectionsMarshal.GetValueRefOrNullRef(_pageTable, addr);
 
             if (Unsafe.IsNullRef(ref page) == false)
@@ -725,16 +730,11 @@ public sealed partial class PagedDb
 
                 if (!write || writtenThisBatch)
                 {
-                    // Overwrite the cache
-                    cached.page = page;
                     return page;
                 }
 
                 // Not written this batch, allocate and copy. Memoize in the slot
                 page = CreateInMemoryOverride(addr, page);
-
-                // Overwrite the cache
-                cached.page = page;
                 return page;
             }
 
@@ -744,8 +744,6 @@ public sealed partial class PagedDb
             // Make copy on write, while return raw from db if a read.
             if (!write)
             {
-                // Overwrite the cache
-                cached.page = fromDb;
                 return fromDb;
             }
 
@@ -753,10 +751,15 @@ public sealed partial class PagedDb
             var copy = CreateInMemoryOverride(addr, fromDb);
             _pageTable[addr] = copy;
 
-            // Overwrite the cache
-            cached.page = copy;
-
             return copy;
+        }
+
+        private void SetPageTableCache(DbAddress addr, Page page)
+        {
+            ref var cached = ref GetPageTableCacheSlot(addr);
+
+            cached.page = page;
+            cached.addr = addr;
         }
 
         private ref (DbAddress addr, Page page) GetPageTableCacheSlot(DbAddress addr) =>
@@ -784,6 +787,11 @@ public sealed partial class PagedDb
 
             // Remember that it's proposed
             _cowed.Add((at, page));
+
+            // Only set cache on overrides and during creation
+            ref var cached = ref GetPageTableCacheSlot(at);
+            cached.addr = at;
+            cached.page = page;
 
             return page;
         }
