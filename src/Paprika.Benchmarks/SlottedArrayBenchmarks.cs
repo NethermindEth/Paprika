@@ -267,7 +267,7 @@ public unsafe class SlottedArrayBenchmarks
     [Arguments(1)]
     [Arguments(25)]
     [Arguments(50)]
-    [Arguments(96)]
+    [Arguments(DefragmentationKeyCount - 1)]
     public bool Defragmentation_Large(int count)
     {
         var map = CreateMapForDefragmentation();

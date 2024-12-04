@@ -326,21 +326,12 @@ public class SlottedArrayTests
         map.GetAssert(additionalKey.Span, additionalData);
     }
 
-    [TestCase(1, TestName = "Defragmentation with 1 delete")]
-    [TestCase(25, TestName = "Defragmentation with 25 deletes")]
-    [TestCase(50, TestName = "Defragmentation with 50 deletes")]
-    [TestCase(75, TestName = "Defragmentation with 75 deletes")]
-    [TestCase(-1, TestName = "Defragmentation with maximum deletes")]
-    public void DefragmentationLarge(int deleteCount)
+    [TestCase]
+    public void DefragmentationLarge()
     {
-        Span<byte> span = stackalloc byte[8000];
-        var map = new SlottedArray(span);
-
-        var rand = new Random(13);
-
-        // Fill as many elements as possible within the slotted array.
+        // Create random data to insert in the slotted array.
         var maxKeyCount = 200;
-        var keyCount = 0;
+        var rand = new Random(13);
         var keys = new Keccak[maxKeyCount];
         var data = new byte[maxKeyCount][];
 
@@ -349,59 +340,74 @@ public class SlottedArrayTests
             rand.NextBytes(keys[i].BytesAsSpan);
             data[i] = new byte[i]; // make them vary by length
             rand.NextBytes(data[i]);
-
-            if (map.TrySet(NibblePath.FromKey(keys[i]), data[i]) == false)
-            {
-                keyCount = i;
-                break;
-            }
         }
 
-        // Additional data
+        // Additional data to trigger defragmentation.
         var additionalKey = Keccak.Zero;
         rand.NextBytes(additionalKey.BytesAsSpan);
         byte[] additionalData = [rand.NextByte()];
 
-        // Ensure that one needs to be deleted
-        map.TrySet(NibblePath.FromKey(additionalKey), additionalData).Should()
-            .BeFalse("There should be no space in the map to make the defragmentation test work");
-
-        if (deleteCount < 0)
+        // Try all possible deleteCount values and ensure that the defragmentation works fine.
+        for (var deleteCount = 1; deleteCount < maxKeyCount; deleteCount++)
         {
-            deleteCount = keyCount;
-        }
+            Span<byte> span = new byte[8000];
+            var map = new SlottedArray(span);
 
-        deleteCount.Should()
-            .BeLessThanOrEqualTo(keyCount, "Number of slots to be deleted should be less than max slots");
+            // Fill as many elements as possible within the slotted array.
+            var keyCount = 0;
 
-        // Randomly select keys to be deleted.
-        HashSet<int> deletedKeys = new HashSet<int>(deleteCount);
-
-        for (var i = 0; i < deleteCount; i++)
-        {
-            var keyIndex = rand.Next(keyCount);
-
-            while (deletedKeys.Contains(keyIndex))
+            for (var i = 0; i < maxKeyCount; i++)
             {
-                keyIndex = rand.Next(keyCount);
+                if (map.TrySet(NibblePath.FromKey(keys[i]), data[i]) == false)
+                {
+                    keyCount = i;
+                    break;
+                }
             }
 
-            deletedKeys.Add(keyIndex);
-            map.Delete(NibblePath.FromKey(keys[keyIndex])).Should().BeTrue("The key should have existed before");
-        }
+            // Estimated number of keyCount based on the buffer length.
+            keyCount.Should().BeGreaterOrEqualTo(96, "Unexpected number of keys");
 
-        // Now insertion should be possible
-        map.TrySet(NibblePath.FromKey(additionalKey), additionalData).Should().BeTrue();
-
-        for (var i = 0; i < keyCount; i++)
-        {
-            if (!deletedKeys.Contains(i))
+            if (deleteCount > keyCount)
             {
-                map.GetAssert(keys[i].Span, data[i]);
+                // Exhausted all the valid deleteCount values.
+                break;
             }
-        }
 
-        map.GetAssert(additionalKey.Span, additionalData);
+            // Ensure that one needs to be deleted
+            map.TrySet(NibblePath.FromKey(additionalKey), additionalData)
+                .Should()
+                .BeFalse("There should be no space in the map to make the defragmentation test work");
+
+            // Randomly select keys to be deleted.
+            HashSet<int> deletedKeys = new HashSet<int>(deleteCount);
+
+            for (var i = 0; i < deleteCount; i++)
+            {
+                var keyIndex = rand.Next(keyCount);
+
+                while (deletedKeys.Contains(keyIndex))
+                {
+                    keyIndex = rand.Next(keyCount);
+                }
+
+                deletedKeys.Add(keyIndex);
+                map.Delete(NibblePath.FromKey(keys[keyIndex])).Should().BeTrue("The key should have existed before");
+            }
+
+            // Now insertion should be possible
+            map.TrySet(NibblePath.FromKey(additionalKey), additionalData).Should().BeTrue();
+
+            for (var i = 0; i < keyCount; i++)
+            {
+                if (!deletedKeys.Contains(i))
+                {
+                    map.GetAssert(keys[i].Span, data[i]);
+                }
+            }
+
+            map.GetAssert(additionalKey.Span, additionalData);
+        }
     }
 
     [Test]
