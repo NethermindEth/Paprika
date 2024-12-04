@@ -747,8 +747,8 @@ public sealed partial class PagedDb
                 return fromDb;
             }
 
-            // The entry did not exist before, create one
-            var copy = CreateInMemoryOverride(addr, fromDb);
+            // The entry did not exist before, create one.
+            var copy = CreateInMemoryOverride(addr, default);
             _pageTable[addr] = copy;
 
             return copy;
@@ -770,17 +770,20 @@ public sealed partial class PagedDb
         /// Creates an override of a given address by getting a page from the pull and storing it in the map.
         /// </summary>
         /// <param name="at">The address that requires to provide an override.</param>
-        /// <param name="source">The source page.</param>
+        /// <param name="toRemove">The source page to be removed from the reverse mapping.</param>
         /// <returns></returns>
         /// <remarks>
-        /// The source page <paramref name="source"/> requires no copying as the page will be used as a new or overwritten in COW process.
+        /// The source page <paramref name="toRemove"/> is used only for removal from the dictionary.
         /// </remarks>
-        private Page CreateInMemoryOverride(DbAddress at, Page source)
+        private Page CreateInMemoryOverride(DbAddress at, Page toRemove)
         {
             var page = _pool.Rent(false);
 
             // Remove the previous reverse mapping if it exists
-            _pageTableReversed.Remove(source);
+            if (toRemove.Raw != UIntPtr.Zero)
+            {
+                _pageTableReversed.Remove(toRemove);
+            }
 
             // Remember reversed mapping
             _pageTableReversed[page] = at;
