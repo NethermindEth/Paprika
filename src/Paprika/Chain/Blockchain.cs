@@ -252,6 +252,9 @@ public class Blockchain : IAsyncDisposable
             {
                 _prefetcher.BlockFurtherPrefetching();
                 _blockchain._prefetchCount.Record(_prefetcher.PrefetchCount);
+
+                // nullify so that it can be created again
+                _prefetcher = null;
             }
 
             EnsureHash();
