@@ -913,6 +913,7 @@ public readonly ref struct SlottedArray /*: IClearable */
     /// by creating a deleted mask from the slot data and then moving only the alive slots, hashes and the corresponding
     /// payload data.
     /// </summary>
+    [SkipLocalsInit]
     private void Defragment()
     {
         // As data were fitting before, it will fit after so all the checks can be skipped
@@ -974,24 +975,28 @@ public readonly ref struct SlottedArray /*: IClearable */
                 endIndex = setBitIndex + (i - HashesPerVector) / VectorsByBatch - 1;
 
                 // In case of consecutive deleted slots, find the next non-consecutive set bit.
-                while (startIndex == endIndex + 1 && deletedMask != 0)
-                {
-                    setBitIndex = BitOperations.TrailingZeroCount(deletedMask);
-                    deletedMask ^= 1U << setBitIndex;
-                    alive--;
-                    startIndex++;
-                    endIndex = setBitIndex + (i - HashesPerVector) / VectorsByBatch - 1;
-                }
-
                 if (startIndex == endIndex + 1)
                 {
-                    Debug.Assert(deletedMask == 0, "Did not consume all the set bits");
+                    if (deletedMask == 0)
+                    {
+                        // Could not find any non-consecutive set bits, progress start to the next non-deleted slot.
+                        startIndex++;
 
-                    // Could not find any non-consecutive set bits, progress start to the next non deleted slot.
-                    startIndex++;
+                        // Move on to the next vector to find the new end.
+                        break;
+                    }
 
-                    // Move on to the next vector to find the new end.
-                    break;
+                    // Find the new start. Look for the first unset bit beyond the last observed set bit. 
+                    var shifted = deletedMask >> (setBitIndex + 1);
+                    var unSetBitIndex = BitOperations.TrailingZeroCount(~shifted);
+
+                    startIndex = unSetBitIndex + setBitIndex + (i - HashesPerVector) / VectorsByBatch + 1;
+
+                    // Clear all the consumed set bits and update the alive count.
+                    var mask = (1U << (unSetBitIndex + setBitIndex + 1)) - 1;
+                    alive -= (ushort)BitOperations.PopCount(deletedMask & mask);
+                    deletedMask &= ~mask;
+                    continue;
                 }
 
                 writeAtIndex = CopyDataInternal(startIndex, endIndex, writeAtIndex);
@@ -1038,6 +1043,12 @@ public readonly ref struct SlottedArray /*: IClearable */
         if (Vector256.IsHardwareAccelerated)
         {
             var slotData = Vector256.LoadUnsafe(ref d, (UIntPtr)offset);
+
+            if (slotData == Vector256<ushort>.Zero)
+            {
+                return 0;
+            }
+
             var preambleData = Vector256.BitwiseAnd(slotData, Slot.GetKeyPreambleMaskAsVector256());
 
             deletedMask = Vector256.Equals(preambleData, Slot.GetKeyPreambleDeleteAsVector256()).ExtractMostSignificantBits();
@@ -1045,6 +1056,12 @@ public readonly ref struct SlottedArray /*: IClearable */
         else if (Vector128.IsHardwareAccelerated)
         {
             var slotData = Vector128.LoadUnsafe(ref d, (UIntPtr)offset);
+
+            if (slotData == Vector128<ushort>.Zero)
+            {
+                return 0;
+            }
+
             var preambleData = Vector128.BitwiseAnd(slotData, Slot.GetKeyPreambleMaskAsVector128());
 
             deletedMask = Vector128.Equals(preambleData, Slot.GetKeyPreambleDeleteAsVector128()).ExtractMostSignificantBits();

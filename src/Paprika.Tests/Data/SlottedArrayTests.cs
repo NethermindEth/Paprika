@@ -326,7 +326,7 @@ public class SlottedArrayTests
         map.GetAssert(additionalKey.Span, additionalData);
     }
 
-    [TestCase]
+    [Test]
     public void DefragmentationLarge()
     {
         // Create random data to insert in the slotted array.
@@ -386,12 +386,11 @@ public class SlottedArrayTests
             {
                 var keyIndex = rand.Next(keyCount);
 
-                while (deletedKeys.Contains(keyIndex))
+                while (deletedKeys.Add(keyIndex) == false)
                 {
                     keyIndex = rand.Next(keyCount);
                 }
 
-                deletedKeys.Add(keyIndex);
                 map.Delete(NibblePath.FromKey(keys[keyIndex])).Should().BeTrue("The key should have existed before");
             }
 
