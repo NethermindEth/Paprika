@@ -19,10 +19,12 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+
       - name: Check out repository
         uses: actions/checkout@v4
         with:
           submodules: true
+
       - name: Format
         run: |
           dotnet format whitespace src/Paprika.sln --verify-no-changes
