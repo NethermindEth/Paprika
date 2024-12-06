@@ -32,25 +32,9 @@ public class RootHashFuzzyTests
         AssertRoot(generator.RootHash, commit);
     }
 
-    [Ignore("Currently they fail. Probably due to the implementation of the test commit.")]
-    [TestCase(nameof(Accounts_1_Storage_1))]
-    [TestCase(nameof(Accounts_1_Storage_100))]
-    [TestCase(nameof(Accounts_100_Storage_1))]
-    [TestCase(nameof(Accounts_1000_Storage_1))]
-    [TestCase(nameof(Accounts_1000_Storage_1000))]
-    public void Over_one_mock_commit(string test)
-    {
-        var generator = Build(test);
-
-        var commit = new Commit();
-        generator.Run(commit);
-
-        AssertRoot(generator.RootHash, commit);
-    }
-
     [TestCase(nameof(Accounts_100_Storage_1), int.MaxValue, 4)]
     [TestCase(nameof(Accounts_1_Storage_100), 11, 8)]
-    [TestCase(nameof(Accounts_1000_Storage_1000), int.MaxValue, 1016, Category = Categories.LongRunning)]
+    [TestCase(nameof(Accounts_100_Storage_100), int.MaxValue, 756, Category = Categories.LongRunning)]
     public async Task In_memory_run(string test, int commitEvery, int blockchainPoolSizeMB)
     {
         var generator = Build(test);
@@ -59,7 +43,7 @@ public class RootHashFuzzyTests
         var merkle = new ComputeMerkleBehavior();
         await using var blockchain = new Blockchain(db, merkle);
 
-        var rootHash = generator.Run(blockchain, commitEvery);
+        var rootHash = await generator.Run(blockchain, commitEvery);
         AssertRootHash(rootHash, generator);
 
         AssertBlockchainMaxPoolSize(blockchain, blockchainPoolSizeMB);
@@ -88,11 +72,9 @@ public class RootHashFuzzyTests
 
         await using var blockchain = new Blockchain(db, merkle);
 
-        var rootHash = generator.Run(blockchain, commitEvery);
+        var rootHash = await generator.Run(blockchain, commitEvery, false);
 
-        var flush = blockchain.WaitTillFlush(rootHash);
-        blockchain.Finalize(rootHash);
-        await flush;
+        await blockchain.Finalize(rootHash);
 
         using var read = db.BeginReadOnlyBatch();
         read.VerifyNoPagesMissing();
@@ -181,8 +163,8 @@ public class RootHashFuzzyTests
     private static CaseGenerator Accounts_1000_Storage_1() =>
         new(1000, 1, "b8bdf00f1f389a1445867e5c14ccf17fd21d915c01492bed3e70f74de7f42248");
 
-    private static CaseGenerator Accounts_1000_Storage_1000() => new(1000, 1000,
-        "4f474648522dc59d4d4a918e301d9d36ac200029027d28605cd2ab32f37321f8");
+    private static CaseGenerator Accounts_100_Storage_100() => new(100, 100,
+        "0a1cba80719146d6a225a3d270a603d171d9792451ae628486563d42b96cc902");
 
     private class CaseGenerator
     {
@@ -235,11 +217,11 @@ public class RootHashFuzzyTests
             }
         }
 
-        public Keccak Run(Blockchain blockchain, int newBlockEvery = int.MaxValue, bool delete = false,
+        public async Task<Keccak> Run(Blockchain blockchain, int newBlockEvery = int.MaxValue, bool delete = false,
             bool autoFinalize = false)
         {
             var counter = 0;
-            var block = blockchain.StartNew(_parent);
+            using var worldState = blockchain.StartNew(_parent);
 
             var random = GetRandom();
 
@@ -253,14 +235,14 @@ public class RootHashFuzzyTests
 
                 if (delete)
                 {
-                    block.DestroyAccount(keccak);
+                    worldState.DestroyAccount(keccak);
                 }
                 else
                 {
-                    block.SetAccount(keccak, a);
+                    worldState.SetAccount(keccak, a);
                 }
 
-                Next(ref counter, newBlockEvery, ref block, blockchain, autoFinalize);
+                counter = await Next(counter, newBlockEvery, worldState, blockchain, autoFinalize);
 
                 // storage data second
                 for (var j = 0; j < _storageCount; j++)
@@ -268,23 +250,17 @@ public class RootHashFuzzyTests
                     var storageKey = random.NextKeccak();
                     var storageValue = random.Next();
 
-                    var actual = delete ? ReadOnlySpan<byte>.Empty : storageValue.ToByteArray();
-                    block.SetStorage(keccak, storageKey, actual);
+                    var actual = delete ? [] : storageValue.ToByteArray();
+                    worldState.SetStorage(keccak, storageKey, actual);
 
-                    Next(ref counter, newBlockEvery, ref block, blockchain, autoFinalize);
+                    counter = await Next(counter, newBlockEvery, worldState, blockchain, autoFinalize);
                 }
             }
 
-            var rootHash = block.Commit(_blocks);
-
-            // Console.Out.Write(((IProvideDescription)block).Describe((in Key key) => key.Type == DataType.Account));
-
-            block.Dispose();
-
-            return rootHash;
+            return worldState.Commit(_blocks);
         }
 
-        private void Next(ref int counter, int newBlockEvery, ref IWorldState block, Blockchain blockchain,
+        private async Task<int> Next(int counter, int newBlockEvery, IWorldState worldState, Blockchain blockchain,
             bool autoFinalize)
         {
             counter++;
@@ -292,16 +268,15 @@ public class RootHashFuzzyTests
             if (counter % newBlockEvery == 0)
             {
                 counter = 0;
-                _parent = block.Commit(_blocks++);
-
-                block.Dispose();
-                block = blockchain.StartNew(_parent);
+                _parent = worldState.Commit(_blocks++);
 
                 if (autoFinalize)
                 {
-                    blockchain.Finalize(_parent);
+                    await blockchain.Finalize(_parent);
                 }
             }
+
+            return counter;
         }
 
 

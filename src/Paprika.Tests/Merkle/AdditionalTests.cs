@@ -36,8 +36,7 @@ public class AdditionalTests
         const int number = 1;
         var hash = block1.Commit(number);
 
-        blockchain.Finalize(hash);
-        await blockchain.WaitTillFlush(number);
+        await blockchain.Finalize(hash);
 
         using var read = blockchain.StartReadOnly(hash);
         var account = read.GetAccount(Key0);
@@ -75,9 +74,7 @@ public class AdditionalTests
         }
 
         parent = block1.Commit(parentNumber);
-        blockchain.Finalize(parent);
-
-        await blockchain.WaitTillFlush(parent);
+        await blockchain.Finalize(parent);
 
         var b = blockchain.StartNew(parent);
 
@@ -106,9 +103,7 @@ public class AdditionalTests
         // commit final
         parent = b.Commit(parentNumber + 1);
         b.Dispose();
-        blockchain.Finalize(parent);
-
-        await blockchain.WaitTillFlush(parent);
+        await blockchain.Finalize(parent);
     }
 
     [Explicit]
@@ -143,9 +138,7 @@ public class AdditionalTests
         parent = block1.Commit(parentNumber);
         parentNumber++;
 
-        blockchain.Finalize(parent);
-
-        await blockchain.WaitTillFlush(parent);
+        await blockchain.Finalize(parent);
 
         // destroy all but one
         for (uint spin = 0; spin < spins; spin++)
@@ -166,9 +159,7 @@ public class AdditionalTests
             parent = block.Commit(parentNumber);
             parentNumber++;
 
-            blockchain.Finalize(parent);
+            await blockchain.Finalize(parent);
         }
-
-        await blockchain.WaitTillFlush(parent);
     }
 }

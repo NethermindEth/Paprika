@@ -14,7 +14,7 @@ public abstract class BasePageTests
         return new Page(memory);
     }
 
-    internal class TestBatchContext(uint batchId, Stack<DbAddress>? reusable = null) : BatchContextBase(batchId)
+    internal class TestBatchContext(uint batchId, Stack<DbAddress>? reusable = null) : BatchContextBase
     {
         private readonly Dictionary<DbAddress, Page> _address2Page = new();
         private readonly Dictionary<UIntPtr, DbAddress> _page2Address = new();
@@ -25,9 +25,11 @@ public abstract class BasePageTests
         // 0-N is take by metadata pages
         private uint _pageCount = 1U;
 
+        public override uint BatchId { get; } = batchId;
+
         public override Page GetAt(DbAddress address) => _address2Page[address];
 
-        public override void Prefetch(DbAddress address)
+        public override void Prefetch(DbAddress addr)
         { }
 
         public override DbAddress GetAddress(Page page) => _page2Address[page.Raw];

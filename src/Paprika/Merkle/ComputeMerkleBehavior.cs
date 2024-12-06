@@ -83,7 +83,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     /// <summary>
     /// Calculates state root hash, passing through all the account and storage tries and building a new value
-    /// that is not based on any earlier calculation. It's time consuming.
+    /// that is not based on any earlier calculation. It's time-consuming.
     /// </summary>
     public Keccak CalculateStateRootHash(IReadOnlyCommit commit)
     {

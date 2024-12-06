@@ -105,7 +105,7 @@ public struct AbandonedList
                 }
 
                 // If current has a child, we can use the child and COW to it
-                var dest = batch.GetAt(newAt);
+                var dest = batch.GetAtForWriting(newAt);
                 batch.NoticeAbandonedPageReused(dest);
                 current.CopyTo(dest);
                 batch.AssignBatchId(dest);

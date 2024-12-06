@@ -3,7 +3,16 @@ using Paprika.Store;
 
 namespace Paprika;
 
-public interface IReadOnlyBatch : IDisposable
+public interface IReadOnlyBatch : IDataGetter, IDisposable
+{
+    public RootPage Root { get; }
+
+    public uint BatchId { get; }
+
+    public void VerifyNoPagesMissing();
+}
+
+public interface IDataGetter
 {
     Metadata Metadata { get; }
 
@@ -14,8 +23,6 @@ public interface IReadOnlyBatch : IDisposable
     /// <param name="result"></param>
     /// <returns></returns>
     bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result);
-
-    public void VerifyNoPagesMissing();
 }
 
 public class EmptyReadOnlyBatch : IReadOnlyBatch
@@ -35,6 +42,10 @@ public class EmptyReadOnlyBatch : IReadOnlyBatch
         result = default;
         return false;
     }
+
+    public RootPage Root => throw new NotImplementedException();
+
+    public uint BatchId => throw new NotImplementedException();
 
     public void VerifyNoPagesMissing() { }
 
