@@ -11,8 +11,7 @@ on:
 
 env:
   BUILD_CONFIG: release
-  DOTNET_VERSION: 8
-  DOTNET_INSTALL_DIR: "~/.dotnet"
+  DOTNET_VERSION: 9
 
 jobs:
   tests:
@@ -26,28 +25,15 @@ jobs:
       matrix:
         os: [linux, win]
     steps:
-      - name: Cache dotnet
-        id: cache-dotnet
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.DOTNET_INSTALL_DIR }}
-          key: ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}
-          restore-keys: ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}
       - name: Set up .NET
-        if: ${{ steps.cache-dotnet.outputs.cache-hit != 'true' }}
-        uses: actions/setup-dotnet@v3
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
-      - uses: actions/checkout@v4
+
+      - name: Check out repository
+        uses: actions/checkout@v4
         with:
           submodules: true
-      - name: Cache nuget
-        uses: actions/cache@v4
-        with:
-          path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
-          restore-keys: |
-            ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
 
       - name: Test
         run: dotnet test src/Paprika.Tests -c ${{ env.BUILD_CONFIG }} --filter TestCategory\!~LongRunning
