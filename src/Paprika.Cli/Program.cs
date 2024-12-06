@@ -9,7 +9,7 @@ app.Configure(cfg =>
     cfg.AddCommand<StorageVisitSettings.Command>("storage");
     cfg.AddCommand<VerifyWholeTreeSettings.Command>("verify");
 
-    cfg.SetExceptionHandler(ex =>
+    cfg.SetExceptionHandler((ex, _) =>
     {
         AnsiConsole.WriteException(ex, ExceptionFormats.ShortenEverything);
         return -99;

@@ -120,10 +120,10 @@ public class RootHashFuzzyTests
         // blockchain.VerifyDbIntegrityOnCommit();
 
         // set
-        await generator.Run(blockchain, 513, false, true);
+        generator.Run(blockchain, 513, false, true);
 
         // delete
-        var rootHash = await generator.Run(blockchain, 1001, true, true);
+        var rootHash = generator.Run(blockchain, 1001, true, true);
 
         rootHash.Should().BeOneOf(Keccak.EmptyTreeHash, Keccak.Zero);
 
@@ -283,7 +283,7 @@ public class RootHashFuzzyTests
         private static Random GetRandom() => new(13);
     }
 
-    private static void AssertRoot(string hex, ICommit commit)
+    private static void AssertRoot(string hex, ICommitWithStats commit)
     {
         using var merkle = new ComputeMerkleBehavior();
 

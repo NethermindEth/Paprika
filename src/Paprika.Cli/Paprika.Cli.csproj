@@ -2,13 +2,10 @@
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
-        <TargetFramework>net8.0</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
     </PropertyGroup>
 
     <ItemGroup>
-      <PackageReference Include="Spectre.Console.Cli" Version="0.48.1-preview.0.5" />
+      <PackageReference Include="Spectre.Console.Cli" Version="0.49.1" />
     </ItemGroup>
 
     <ItemGroup>
