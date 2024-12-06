@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -126,14 +127,16 @@ public class Blockchain : IAsyncDisposable
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload.
     /// </summary>
-    private class BlockState : RefCountingDisposable, IWorldState, ICommit, IProvideDescription, IStateStats
+    private class BlockState : RefCountingDisposable, IWorldState, ICommitWithStats, IProvideDescription, IStateStats
     {
         /// <summary>
         /// A simple set filter to assert whether the given key was set in a given block, used to speed up getting the keys.
         /// </summary>
         private readonly BitFilter _filter;
 
-        private readonly Dictionary<Keccak, int> _stats = new();
+        // stats
+        private readonly HashSet<Keccak> _touchedAccounts = new();
+        private readonly Dictionary<Keccak, (List<Keccak> set, List<Keccak> deleted)> _storageSlots = new();
 
         /// <summary>
         /// Stores information about contracts that should have their previous incarnations destroyed.
@@ -339,7 +342,8 @@ public class Blockchain : IAsyncDisposable
         {
             _filter.Clear();
             _destroyed.Clear();
-            _stats.Clear();
+            _touchedAccounts.Clear();
+            _storageSlots.Clear();
 
             _cacheBudgetStorageAndStage = _blockchain._cacheBudgetStateAndStorage.Build();
             _cacheBudgetPreCommit = _blockchain._cacheBudgetPreCommit.Build();
@@ -589,7 +593,7 @@ public class Blockchain : IAsyncDisposable
             Destroy(searched, _storage);
             Destroy(searched, _preCommit);
 
-            _stats![address] = 0;
+            _storageSlots.Remove(address);
 
             _destroyed.Add(address);
 
@@ -667,7 +671,7 @@ public class Blockchain : IAsyncDisposable
                 _blockchain._preCommit.OnNewAccountCreated(address, this);
             }
 
-            _stats.RegisterSetAccount(address);
+            _touchedAccounts.Add(address);
         }
 
         public void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value)
@@ -677,7 +681,14 @@ public class Blockchain : IAsyncDisposable
 
             SetImpl(key, value, EntryType.Persistent, _storage);
 
-            _stats.RegisterSetStorageAccount(address);
+            _touchedAccounts.Add(address);
+            ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_storageSlots, address, out var exists);
+            if (exists == false)
+            {
+                slot = (new List<Keccak>(), new List<Keccak>());
+            }
+
+            (value.IsEmpty ? slot.deleted : slot.set).Add(storage);
         }
 
         [SkipLocalsInit]
@@ -755,7 +766,9 @@ public class Blockchain : IAsyncDisposable
 
         IChildCommit ICommit.GetChild() => new ChildCommit(Pool, this);
 
-        public IReadOnlyDictionary<Keccak, int> Stats => _stats!;
+        public IReadOnlySet<Keccak> TouchedAccounts => _touchedAccounts;
+
+        public IReadOnlyDictionary<Keccak, (List<Keccak> set, List<Keccak> deleted)> TouchedStorageSlots => _storageSlots;
 
         class ChildCommit(BufferPool pool, ICommit parent) : RefCountingDisposable, IChildCommit
         {

@@ -276,7 +276,7 @@ public class RootHashTests(bool parallel)
         return File.ReadLines(Path.Combine(Path.GetDirectoryName(path)!, file));
     }
 
-    private void AssertRoot(string hex, ICommit commit)
+    private void AssertRoot(string hex, ICommitWithStats commit)
     {
         using var merkle = new ComputeMerkleBehavior(Parallelism);
 

@@ -17,7 +17,7 @@ public interface IPreCommitBehavior
     /// <param name="commit">The object representing the commit.</param>
     /// <param name="budget">The budget for caching capabilities.</param>
     /// <returns>The result of the before commit.</returns>
-    Keccak BeforeCommit(ICommit commit, CacheBudget budget);
+    Keccak BeforeCommit(ICommitWithStats commit, CacheBudget budget);
 
     /// <summary>
     /// Inspects the data allowing it to overwrite them if needed, before the commit is applied to the database.
@@ -63,12 +63,26 @@ public interface IPreCommitBehavior
 }
 
 /// <summary>
+/// The commit implementation that provides direct dictionaries to assess keys that were touched during this commit.
+/// </summary>
+public interface ICommitWithStats : ICommit
+{
+    /// <summary>
+    /// The accounts that were touched during this commit.
+    /// </summary>
+    IReadOnlySet<Keccak> TouchedAccounts { get; }
+
+    /// <summary>
+    /// Provides a collection of stats for storages.
+    /// For each contract a set of sets and deletes. 
+    /// </summary>
+    IReadOnlyDictionary<Keccak, (List<Keccak> set, List<Keccak> deleted)> TouchedStorageSlots { get; }
+}
+
+/// <summary>
 /// Provides the set of changes applied onto <see cref="IWorldState"/>,
 /// allowing for additional modifications of the data just before the commit.
 /// </summary>
-/// <remarks>
-/// Use <see cref="Visit"/> to access all the keys.
-/// </remarks>
 public interface ICommit : ISpanOwner
 {
     /// <summary>
@@ -99,13 +113,6 @@ public interface ICommit : ISpanOwner
     /// </summary>
     /// <returns>A child commit.</returns>
     IChildCommit GetChild();
-
-    /// <summary>
-    /// Gets the statistics of sets in the given commit.
-    /// Account writes make just key appear.
-    /// Storage writes increase it by 1.
-    /// </summary>
-    IReadOnlyDictionary<Keccak, int> Stats { get; }
 }
 
 public interface IReadOnlyCommit

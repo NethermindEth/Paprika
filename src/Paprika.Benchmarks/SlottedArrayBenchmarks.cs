@@ -14,6 +14,7 @@ public unsafe class SlottedArrayBenchmarks
         BytesPerKey =
             3; // 3 repeated bytes allow to cut off the first nibble and still have a unique key. Also, allow storing some key leftover
 
+
     private readonly void* _keys;
     private readonly void* _map;
 
@@ -25,8 +26,17 @@ public unsafe class SlottedArrayBenchmarks
     private readonly void* _hashCollidingKeys;
     private readonly void* _hashCollidingMap;
 
+    // Defragmentation
+    private const int DefragmentationKeyCount = 86;
+    private readonly void* _defragKeys;
+    private readonly void* _defragmentMap;
+    private readonly void* _randomKeysIndex;
+    private readonly void* _defragmentMapCopy;
+
     public SlottedArrayBenchmarks()
     {
+        var rand = new Random(13);
+
         // Create keys
         _keys = Allocator.AllocAlignedPage();
 
@@ -82,6 +92,51 @@ public unsafe class SlottedArrayBenchmarks
                 throw new Exception("Not enough memory");
             }
         }
+
+        // Defragmentation
+        _defragmentMap = Allocator.AllocAlignedPage();
+        _defragmentMapCopy = Allocator.AllocAlignedPage();
+        _defragKeys = Allocator.AllocAlignedPage();
+
+        var keysSpan = new Span<byte>(_defragKeys, Page.PageSize);
+        for (byte i = 0; i < DefragmentationKeyCount; i++)
+        {
+            for (var j = 0; j < BytesPerKey; j++)
+            {
+                keysSpan[i * BytesPerKey + j] = i;
+            }
+        }
+
+        var defragmentMap = new SlottedArray(new Span<byte>(_defragmentMap, Page.PageSize));
+
+        for (byte i = 0; i < DefragmentationKeyCount; i++)
+        {
+            Span<byte> data = new byte[i]; // make them vary by length
+            rand.NextBytes(data);
+
+            if (defragmentMap.TrySet(GetDefragKey(i, false), data) == false)
+            {
+                throw new Exception("Not enough memory");
+            }
+        }
+
+        // Delete the first key.
+        defragmentMap.Delete(GetDefragKey(0, false));
+
+        // Create randomly ordered keys index
+        _randomKeysIndex = Allocator.AllocAlignedPage();
+        var randomKeysIndexSpan = new Span<byte>(_randomKeysIndex, Page.PageSize);
+
+        // Form a list of all key indices which can be deleted, excluding the first one
+        // since it is already deleted.
+        for (byte i = 1; i < DefragmentationKeyCount; i++)
+        {
+            randomKeysIndexSpan[i - 1] = i;
+        }
+
+        // Randomly shuffle the indices.
+        var randomKeysSlice = randomKeysIndexSpan.Slice(0, DefragmentationKeyCount - 1);
+        rand.Shuffle(randomKeysSlice);
     }
 
     [Benchmark(OperationsPerInvoke = 4)]
@@ -191,6 +246,59 @@ public unsafe class SlottedArrayBenchmarks
         return length;
     }
 
+    [Benchmark]
+    public bool Defragmentation()
+    {
+        var map = CreateMapForDefragmentation();
+
+        // Insert additional key to trigger defragmentation
+        var additionalKey = Keccak.Zero;
+        Span<byte> value = stackalloc byte[32];
+
+        for (byte i = 0; i < 32; i++)
+        {
+            value[i] = i;
+        }
+
+        return map.TrySet(NibblePath.FromKey(additionalKey), value);
+    }
+
+    [Benchmark]
+    [Arguments(1)]
+    [Arguments(25)]
+    [Arguments(50)]
+    [Arguments(DefragmentationKeyCount - 1)]
+    public bool Defragmentation_Large(int count)
+    {
+        var map = CreateMapForDefragmentation();
+
+        // Delete random keys
+        for (var i = 0; i < count; i++)
+        {
+            map.Delete(GetRandomDefragKey((byte)i, false));
+        }
+
+        // Insert additional key to trigger defragmentation
+        var additionalKey = Keccak.Zero;
+        Span<byte> value = stackalloc byte[32];
+
+        for (byte i = 0; i < 32; i++)
+        {
+            value[i] = i;
+        }
+
+        return map.TrySet(NibblePath.FromKey(additionalKey), value);
+    }
+
+    private SlottedArray CreateMapForDefragmentation()
+    {
+        var source = new Span<byte>(_defragmentMap, Page.PageSize);
+        var destination = new Span<byte>(_defragmentMapCopy, Page.PageSize);
+        source.CopyTo(destination);
+
+        return new SlottedArray(destination);
+    }
+
     private NibblePath GetKey(byte i, bool odd)
     {
         var span = new Span<byte>(_keys, BytesPerKey * KeyCount);
@@ -206,5 +314,19 @@ public unsafe class SlottedArrayBenchmarks
 
         // Use full key
         return NibblePath.FromKey(slice, 0, BytesPerKeyHashColliding * NibblePath.NibblePerByte);
+    }
+
+    private NibblePath GetRandomDefragKey(byte i, bool odd)
+    {
+        var span = new Span<byte>(_randomKeysIndex, KeyCount - 1);
+        return GetDefragKey(span[i], odd);
+    }
+
+    private NibblePath GetDefragKey(byte i, bool odd)
+    {
+        var span = new Span<byte>(_defragKeys, BytesPerKey * DefragmentationKeyCount);
+        var slice = span.Slice(i * BytesPerKey, BytesPerKey);
+
+        return NibblePath.FromKey(slice, odd ? 1 : 0, 4);
     }
 }
