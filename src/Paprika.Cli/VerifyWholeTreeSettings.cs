@@ -11,16 +11,16 @@ public class VerifyWholeTreeSettings : BasePaprikaSettings
     {
         public override int Execute(CommandContext context, VerifyWholeTreeSettings settings)
         {
-            using var db = settings.BuildDb();
-
-            using var read = db.BeginReadOnlyBatch();
-            using var latest = Blockchain.StartReadOnlyLatestFromDb(db);
-
-            AnsiConsole.WriteLine("Checking whole tree...");
-
-            var keccak = new ComputeMerkleBehavior().CalculateStateRootHash(latest);
-
-            AnsiConsole.WriteLine($"Keccak {keccak.ToString()}");
+            // using var db = settings.BuildDb();
+            //
+            // using var read = db.BeginReadOnlyBatch();
+            // using var latest = Blockchain.StartReadOnlyLatestFromDb(db);
+            //
+            // AnsiConsole.WriteLine("Checking whole tree...");
+            //
+            // var keccak = new ComputeMerkleBehavior().CalculateStateRootHash(read);
+            //
+            // AnsiConsole.WriteLine($"Keccak {keccak.ToString()}");
 
 
             return 0;
