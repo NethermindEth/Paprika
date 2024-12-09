@@ -465,7 +465,7 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
     }
 
     /// <summary>
-    /// Calculates the minimal batch id that abandoned pages from can be reused.
+    /// Calculates the minimal batch id prior to which abandoned pages can be reused.
     /// </summary>
     /// <param name="root">The root page that is the current one.</param>
     /// <param name="omitReadOnlyTransactions">Whether the scan should omit live read only transactions.
