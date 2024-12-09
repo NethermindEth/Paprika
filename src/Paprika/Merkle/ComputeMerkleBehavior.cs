@@ -139,9 +139,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         public IChildCommit GetChild() =>
             _allowChildCommits ? this : throw new NotImplementedException("Should not be called");
 
-        public IReadOnlyDictionary<Keccak, int> Stats =>
-            throw new NotImplementedException("Child commit provides no stats");
-
         void IDisposable.Dispose()
         {
         }

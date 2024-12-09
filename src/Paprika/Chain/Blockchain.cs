@@ -97,11 +97,10 @@ public class Blockchain : IAsyncDisposable
     }
 
     public IWorldState StartNew(Keccak parentKeccak) =>
-        new BlockState(
-            parentKeccak == Keccak.EmptyTreeHash
-                ? _chain.BeginNonCommittable(parentKeccak)
-                : _chain.Begin(parentKeccak),
-            this);
+        new BlockState(_chain.Begin(parentKeccak), this);
+
+    public IWorldState StartNewNonCommittable(Keccak parentKeccak) =>
+        new BlockState(_chain.BeginNonCommittable(parentKeccak), this);
 
     // public IRawState StartRaw()
     // {
@@ -255,6 +254,8 @@ public class Blockchain : IAsyncDisposable
             {
                 _prefetcher.BlockFurtherPrefetching();
                 _blockchain._prefetchCount.Record(_prefetcher.PrefetchCount);
+
+                _prefetcher.Dispose();
 
                 // nullify so that it can be created again
                 _prefetcher = null;
@@ -428,7 +429,14 @@ public class Blockchain : IAsyncDisposable
                 SpinWait.SpinUntil(() => _working == NotWorking);
             }
 
-            private bool ShouldPrefetch(ulong hash) => _prefetched.AddAtomic(hash);
+            private bool ShouldPrefetch(ulong hash)
+            {
+                // Is this a potential race condition? If disposed but the prefetching flag is still visible as true?
+                if (CanPrefetchFurther == false)
+                    return false;
+
+                return _prefetched.AddAtomic(hash);
+            }
 
             public void PrefetchStorage(in Keccak account, in Keccak storage)
             {
@@ -824,9 +832,6 @@ public class Blockchain : IAsyncDisposable
             }
 
             public IChildCommit GetChild() => new ChildCommit(pool, this);
-
-            public IReadOnlyDictionary<Keccak, int> Stats =>
-                throw new NotImplementedException("Child commits provide no stats");
 
             protected override void CleanUp()
             {

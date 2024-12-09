@@ -293,7 +293,7 @@ public class MultiHeadChainTests
 
         await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
 
-        using var block = blockchain.StartNew(Keccak.EmptyTreeHash);
+        using var block = blockchain.StartNewNonCommittable(Keccak.EmptyTreeHash);
 
         // Assert setting and getting
         var keccak = Keccak.OfAnEmptySequenceRlp;
