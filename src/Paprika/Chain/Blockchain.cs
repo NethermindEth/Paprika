@@ -587,6 +587,7 @@ public class Blockchain : IAsyncDisposable
 
         public Keccak ParentHash { get; }
 
+
         /// <summary>
         /// Commits the block to the blockchain.
         /// </summary>
@@ -1057,11 +1058,22 @@ public class Blockchain : IAsyncDisposable
 
         public void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value)
         {
+            SetStorageImpl(address, storage, value, EnsureStorageStats(address));
+        }
+
+        private void SetStorageImpl(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value,
+            (List<Keccak> set, List<Keccak> deleted) stats)
+        {
             var path = NibblePath.FromKey(address);
             var key = Key.StorageCell(path, storage);
 
             SetImpl(key, value, EntryType.Persistent, _storage);
 
+            (value.IsEmpty ? stats.deleted : stats.set).Add(storage);
+        }
+
+        private (List<Keccak> set, List<Keccak> deleted) EnsureStorageStats(Keccak address)
+        {
             _touchedAccounts.Add(address);
             ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_storageSlots, address, out var exists);
             if (exists == false)
@@ -1069,8 +1081,21 @@ public class Blockchain : IAsyncDisposable
                 slot = (new List<Keccak>(), new List<Keccak>());
             }
 
-            (value.IsEmpty ? slot.deleted : slot.set).Add(storage);
+            return slot;
         }
+
+        public IStorageSetter GetStorageSetter(in Keccak address) =>
+            new StorageSetter(this, address, EnsureStorageStats(address));
+
+        private sealed class StorageSetter(
+            BlockState state,
+            Keccak address,
+            (List<Keccak> set, List<Keccak> deleted) stats) : IStorageSetter
+        {
+            public void SetStorage(in Keccak storage, ReadOnlySpan<byte> value) =>
+                state.SetStorageImpl(address, storage, value, stats);
+        }
+
 
         [SkipLocalsInit]
         private void SetImpl(in Key key, in ReadOnlySpan<byte> payload, EntryType type, PooledSpanDictionary dict)
@@ -1149,7 +1174,8 @@ public class Blockchain : IAsyncDisposable
 
         public IReadOnlySet<Keccak> TouchedAccounts => _touchedAccounts;
 
-        public IReadOnlyDictionary<Keccak, (List<Keccak> set, List<Keccak> deleted)> TouchedStorageSlots => _storageSlots;
+        public IReadOnlyDictionary<Keccak, (List<Keccak> set, List<Keccak> deleted)> TouchedStorageSlots =>
+            _storageSlots;
 
         class ChildCommit(BufferPool pool, ICommit parent) : RefCountingDisposable, IChildCommit
         {
