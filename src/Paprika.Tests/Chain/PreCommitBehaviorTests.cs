@@ -58,7 +58,19 @@ public class PreCommitBehaviorTests
 
             _keccaks.SetEquals(_found).Should().BeTrue();
 
-            return Keccak.Zero;
+            return _found.Aggregate((keccak1, keccak2) =>
+            {
+                var result = default(Keccak);
+
+                var span = result.BytesAsSpan;
+
+                for (int i = 0; i < Keccak.Size; i++)
+                {
+                    span[i] = (byte)(keccak1.Span[i] ^ keccak2.Span[i] ^ i);
+                }
+
+                return result;
+            });
         }
 
         private void OnKey(in Key key, ReadOnlySpan<byte> value)

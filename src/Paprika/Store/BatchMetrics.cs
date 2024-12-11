@@ -23,4 +23,12 @@ class BatchMetrics
     /// The page was written this batch and is <see cref="IBatchContext.RegisterForFutureReuse"/>
     /// </summary>
     public int RegisteredToReuseAfterWritingThisBatch { get; set; }
+
+    public void Clear()
+    {
+        PagesReused = 0;
+        PagesAllocated = 0;
+        Writes = 0;
+        Reads = 0;
+    }
 }
