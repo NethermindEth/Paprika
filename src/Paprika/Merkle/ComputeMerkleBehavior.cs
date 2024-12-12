@@ -1284,54 +1284,43 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
     }
 
-    private sealed class BuildStorageTriesItem
+    private sealed class BuildStorageTriesItem(
+        ComputeMerkleBehavior behavior,
+        ICommitWithStats parent,
+        Keccak account,
+        CacheBudget budget,
+        BufferPool pool)
     {
-        private readonly ComputeMerkleBehavior _behavior;
-        private readonly ICommitWithStats _parent;
-        private readonly Keccak _account;
-        private readonly CacheBudget _budget;
-        private readonly BufferPool _pool;
-        private Page _page;
-
-        public BuildStorageTriesItem(ComputeMerkleBehavior behavior, ICommitWithStats parent, Keccak account,
-            CacheBudget budget, BufferPool pool)
-        {
-            _behavior = behavior;
-            _parent = parent;
-            _account = account;
-            _budget = budget;
-            _pool = pool;
-            _page = pool.Rent(false);
-        }
-
         public void DoWork(ICommit commit)
         {
+            Page page = default;
             try
             {
+                page = pool.Rent(false);
+
                 var prefixed = new PrefixingCommit(commit);
-                prefixed.SetPrefix(_account);
+                prefixed.SetPrefix(account);
 
                 // Process all the keys that were updated
-                var (set, deleted) = _parent.TouchedStorageSlots[_account];
+                var (set, deleted) = parent.TouchedStorageSlots[account];
 
                 // Sets first
                 foreach (var key in set)
                 {
-                    MarkPathDirty(NibblePath.FromKey(key), _page.Span, prefixed, _budget);
+                    MarkPathDirty(NibblePath.FromKey(key), page.Span, prefixed, budget);
                 }
 
                 // Then deletes
                 foreach (var key in deleted)
                 {
-                    Delete(NibblePath.FromKey(key), 0, prefixed, _budget);
+                    Delete(NibblePath.FromKey(key), 0, prefixed, budget);
                 }
 
-                CalculateStorageRoot(_account, _behavior, _budget, prefixed, commit);
+                CalculateStorageRoot(account, behavior, budget, prefixed, commit);
             }
             finally
             {
-                _pool.Return(_page);
-                _page = default;
+                pool.Return(page);
             }
         }
 
