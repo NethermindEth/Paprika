@@ -1235,15 +1235,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             _pool = pool;
             _toTouch = [.. toTouch];
             _commit = commit;
-
             _page = _pool.Rent(false);
         }
 
         public void DoWork()
         {
-            _commit.Visit(OnState, TrieType.State);
-
-            // dirty the leftovers
+            // Visit every account that was touched.
             foreach (var keccak in _toTouch)
             {
                 // Requires checking whether exists or not. There are cases where Storage Tries are
@@ -1264,23 +1261,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
             _pool.Return(_page);
             _page = default;
-        }
-
-        private void OnState(in Key key, ReadOnlySpan<byte> value)
-        {
-            Debug.Assert(key.Type == DataType.Account);
-
-            if (value.IsEmpty)
-            {
-                Delete(in key.Path, 0, _commit!, _budget);
-            }
-            else
-            {
-                MarkPathDirty(in key.Path, _page.Span, _commit!, _budget);
-            }
-
-            // mark as touched already
-            _toTouch.Remove(key.Path.UnsafeAsKeccak);
         }
     }
 
