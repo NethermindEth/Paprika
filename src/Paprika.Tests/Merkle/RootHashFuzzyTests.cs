@@ -207,11 +207,11 @@ public class RootHashFuzzyTests
 
         public void Run(Commit commit)
         {
-            Run((ICommit)commit);
+            RunImpl(commit);
             commit.MergeAfterToBefore();
         }
 
-        public void Run(ICommit commit)
+        public void RunImpl(Commit commit)
         {
             var random = GetRandom();
             Span<byte> account = stackalloc byte[Account.MaxByteCount];
