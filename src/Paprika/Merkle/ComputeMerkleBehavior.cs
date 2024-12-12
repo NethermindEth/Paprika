@@ -1271,6 +1271,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         CacheBudget budget,
         BufferPool pool)
     {
+        public Keccak AccountKeccak => account;
+        public Account Written { get; private set; }
+
         public void DoWork(ICommit commit)
         {
             Page page = default;
@@ -1296,7 +1299,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     Delete(NibblePath.FromKey(key), 0, prefixed, budget);
                 }
 
-                CalculateStorageRoot(account, behavior, budget, prefixed, commit);
+                Written = CalculateStorageRoot(account, behavior, budget, prefixed, commit);
             }
             finally
             {
@@ -1304,7 +1307,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             }
         }
 
-        public static void CalculateStorageRoot(in Keccak keccak, ComputeMerkleBehavior behavior, CacheBudget budget,
+        private static Account CalculateStorageRoot(in Keccak keccak, ComputeMerkleBehavior behavior, CacheBudget budget,
             PrefixingCommit prefixed, ICommit commit)
         {
             // Don't parallelize this work as it would be counter-productive to have parallel over parallel.
@@ -1328,16 +1331,19 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                 // set it in
                 using var pooled = ctx.Rent();
-                commit.Set(key, account.WriteTo(pooled.Span));
+                var written = account.WriteTo(pooled.Span);
+                commit.Set(key, written);
+
+                return account;
             }
-            else
-            {
-                //see: https://sepolia.etherscan.io/tx/0xb3790025b59b7e31d6d8249e8962234217e0b5b02e47ecb2942b8c4d0f4a3cfe
-                // Contract is created and destroyed, then its values are destroyed
-                // The storage root should be empty, otherwise, it's wrong
-                Debug.Assert(keccakOrRlp.Keccak == Keccak.EmptyTreeHash,
-                    $"Non-existent account with hash of {keccak.ToString()} should have the storage root empty");
-            }
+
+            //see: https://sepolia.etherscan.io/tx/0xb3790025b59b7e31d6d8249e8962234217e0b5b02e47ecb2942b8c4d0f4a3cfe
+            // Contract is created and destroyed, then its values are destroyed
+            // The storage root should be empty, otherwise, it's wrong
+            Debug.Assert(keccakOrRlp.Keccak == Keccak.EmptyTreeHash,
+                $"Non-existent account with hash of {keccak.ToString()} should have the storage root empty");
+
+            return new Account(0, 0);
         }
     }
 
