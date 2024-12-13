@@ -121,7 +121,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             "The number of pages registered to be reused");
 #endif
         // Pool
-        _pooledRoots = new BufferPool(16, true, _meter);
+        _pooledRoots = new BufferPool(16, BufferPool.PageTracking.AssertCount, _meter);
     }
 
     public static PagedDb NativeMemoryDb(long size, byte historyDepth = 2) =>

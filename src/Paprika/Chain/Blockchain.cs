@@ -103,7 +103,7 @@ public class Blockchain : IAsyncDisposable
             "Key count", "Keys prefetched in the background by the prefetcher");
 
         // pool
-        _pool = new(1024, true, _meter);
+        _pool = new(1024, BufferPool.PageTracking.AssertCount, _meter);
 
         using var batch = _db.BeginReadOnlyBatch();
         _lastFinalized = batch.Metadata.BlockNumber;
