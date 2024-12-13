@@ -33,11 +33,15 @@ public class Commit(bool skipMemoizedRlpCheck = false) : ICommitWithStats
         _before[GetKey(key)] = value.ToArray();
         //to enable storage root calculation for tests
 
+        if (key.Path.Length == NibblePath.KeccakNibbleCount)
+        {
+            _touchedAccounts.Add(key.Path.UnsafeAsKeccak);
+        }
+
         if (!key.IsState)
         {
             var keccak = key.Path.UnsafeAsKeccak;
 
-            _touchedAccounts.Add(keccak);
             if (key.StoragePath.Length == NibblePath.KeccakNibbleCount)
             {
                 ref var stats = ref CollectionsMarshal.GetValueRefOrAddDefault(_storageSlots, keccak, out var exists);

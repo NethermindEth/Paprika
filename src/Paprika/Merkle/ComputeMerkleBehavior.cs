@@ -1235,15 +1235,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             _pool = pool;
             _toTouch = [.. toTouch];
             _commit = commit;
-
             _page = _pool.Rent(false);
         }
 
         public void DoWork()
         {
-            _commit.Visit(OnState, TrieType.State);
-
-            // dirty the leftovers
+            // Visit every account that was touched.
             foreach (var keccak in _toTouch)
             {
                 // Requires checking whether exists or not. There are cases where Storage Tries are
@@ -1265,77 +1262,52 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             _pool.Return(_page);
             _page = default;
         }
-
-        private void OnState(in Key key, ReadOnlySpan<byte> value)
-        {
-            Debug.Assert(key.Type == DataType.Account);
-
-            if (value.IsEmpty)
-            {
-                Delete(in key.Path, 0, _commit!, _budget);
-            }
-            else
-            {
-                MarkPathDirty(in key.Path, _page.Span, _commit!, _budget);
-            }
-
-            // mark as touched already
-            _toTouch.Remove(key.Path.UnsafeAsKeccak);
-        }
     }
 
-    private sealed class BuildStorageTriesItem
+    private sealed class BuildStorageTriesItem(
+        ComputeMerkleBehavior behavior,
+        ICommitWithStats parent,
+        Keccak account,
+        CacheBudget budget,
+        BufferPool pool)
     {
-        private readonly ComputeMerkleBehavior _behavior;
-        private readonly ICommitWithStats _parent;
-        private readonly Keccak _account;
-        private readonly CacheBudget _budget;
-        private readonly BufferPool _pool;
-        private Page _page;
-
-        public BuildStorageTriesItem(ComputeMerkleBehavior behavior, ICommitWithStats parent, Keccak account,
-            CacheBudget budget, BufferPool pool)
-        {
-            _behavior = behavior;
-            _parent = parent;
-            _account = account;
-            _budget = budget;
-            _pool = pool;
-            _page = pool.Rent(false);
-        }
+        public Keccak AccountKeccak => account;
+        public Account Written { get; private set; }
 
         public void DoWork(ICommit commit)
         {
+            Page page = default;
             try
             {
+                page = pool.Rent(false);
+
                 var prefixed = new PrefixingCommit(commit);
-                prefixed.SetPrefix(_account);
+                prefixed.SetPrefix(account);
 
                 // Process all the keys that were updated
-                var (set, deleted) = _parent.TouchedStorageSlots[_account];
+                var (set, deleted) = parent.TouchedStorageSlots[account];
 
                 // Sets first
                 foreach (var key in set)
                 {
-                    MarkPathDirty(NibblePath.FromKey(key), _page.Span, prefixed, _budget);
+                    MarkPathDirty(NibblePath.FromKey(key), page.Span, prefixed, budget);
                 }
 
                 // Then deletes
                 foreach (var key in deleted)
                 {
-                    Delete(NibblePath.FromKey(key), 0, prefixed, _budget);
+                    Delete(NibblePath.FromKey(key), 0, prefixed, budget);
                 }
 
-                CalculateStorageRoot(_account, _behavior, _budget, prefixed, commit);
+                Written = CalculateStorageRoot(account, behavior, budget, prefixed, commit);
             }
             finally
             {
-                _pool.Return(_page);
-                _page = default;
+                pool.Return(page);
             }
         }
 
-        public static void CalculateStorageRoot(in Keccak keccak, ComputeMerkleBehavior behavior, CacheBudget budget,
+        private static Account CalculateStorageRoot(in Keccak keccak, ComputeMerkleBehavior behavior, CacheBudget budget,
             PrefixingCommit prefixed, ICommit commit)
         {
             // Don't parallelize this work as it would be counter-productive to have parallel over parallel.
@@ -1359,17 +1331,22 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                 // set it in
                 using var pooled = ctx.Rent();
-                commit.Set(key, account.WriteTo(pooled.Span));
+                var written = account.WriteTo(pooled.Span);
+                commit.Set(key, written);
+
+                return account;
             }
-            else
-            {
-                //see: https://sepolia.etherscan.io/tx/0xb3790025b59b7e31d6d8249e8962234217e0b5b02e47ecb2942b8c4d0f4a3cfe
-                // Contract is created and destroyed, then its values are destroyed
-                // The storage root should be empty, otherwise, it's wrong
-                Debug.Assert(keccakOrRlp.Keccak == Keccak.EmptyTreeHash,
-                    $"Non-existent account with hash of {keccak.ToString()} should have the storage root empty");
-            }
+
+            //see: https://sepolia.etherscan.io/tx/0xb3790025b59b7e31d6d8249e8962234217e0b5b02e47ecb2942b8c4d0f4a3cfe
+            // Contract is created and destroyed, then its values are destroyed
+            // The storage root should be empty, otherwise, it's wrong
+            Debug.Assert(keccakOrRlp.Keccak == Keccak.EmptyTreeHash,
+                $"Non-existent account with hash of {keccak.ToString()} should have the storage root empty");
+
+            return new Account(0, 0);
         }
+
+        public override string ToString() => $"{AccountKeccak}: {Written}";
     }
 
 

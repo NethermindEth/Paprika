@@ -25,7 +25,7 @@ public static class CommitExtensions
             return;
         }
 
-        var leaf = new Node.Leaf(leafPath);
+        var leaf = new Leaf(leafPath);
         commit.Set(key, leaf.WriteTo(stackalloc byte[Leaf.MaxByteLength]), type);
     }
 
@@ -33,7 +33,7 @@ public static class CommitExtensions
     public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children,
         EntryType type = EntryType.Persistent)
     {
-        var branch = new Node.Branch(children);
+        var branch = new Branch(children);
         commit.Set(key, branch.WriteTo(stackalloc byte[Branch.MaxByteLength]), RlpMemo.Empty, type);
     }
 
@@ -41,7 +41,7 @@ public static class CommitExtensions
     public static void SetBranch(this ICommit commit, in Key key, NibbleSet.Readonly children, ReadOnlySpan<byte> rlp,
         EntryType type = EntryType.Persistent)
     {
-        var branch = new Node.Branch(children);
+        var branch = new Branch(children);
         commit.Set(key, branch.WriteTo(stackalloc byte[Branch.MaxByteLength]), rlp, type);
     }
 

@@ -952,6 +952,8 @@ public class Blockchain : IAsyncDisposable
         {
             _hash = null;
 
+            _touchedAccounts.Add(address);
+
             var searched = NibblePath.FromKey(address);
 
             var account = Key.Account(address);
