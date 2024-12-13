@@ -8,7 +8,7 @@ namespace Paprika.Benchmarks;
 [DisassemblyDiagnoser]
 public class PooledSpanDictionaryBenchmarks
 {
-    private readonly BufferPool _pool = new(1, false);
+    private readonly BufferPool _pool = new(1, BufferPool.PageTracking.None);
     private readonly PooledSpanDictionary _bigDict;
 
     private const int BigDictCount = 32_000;
@@ -35,7 +35,7 @@ public class PooledSpanDictionaryBenchmarks
 
     public PooledSpanDictionaryBenchmarks()
     {
-        _bigDict = new PooledSpanDictionary(new BufferPool(128, false, null));
+        _bigDict = new PooledSpanDictionary(new BufferPool(128, BufferPool.PageTracking.None, null));
 
         Span<byte> key = stackalloc byte[4];
 
@@ -45,7 +45,7 @@ public class PooledSpanDictionaryBenchmarks
             _bigDict.Set(key, i, Value32Bytes, 1);
         }
 
-        _varLengthKeys = new PooledSpanDictionary(new BufferPool(32, false, null));
+        _varLengthKeys = new PooledSpanDictionary(new BufferPool(32, BufferPool.PageTracking.None, null));
 
         for (uint i = 0; i < VarLengthKeyCollisions; i++)
         {
