@@ -78,7 +78,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             "How long it takes to process Merkle total");
 
         // Pool
-        _pool = new BufferPool(128, true, _meter);
+        _pool = new BufferPool(128, BufferPool.PageTracking.AssertCount, _meter);
     }
 
     /// <summary>
