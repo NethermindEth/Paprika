@@ -1345,6 +1345,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
             return new Account(0, 0);
         }
+
+        public override string ToString() => $"{AccountKeccak}: {Written}";
     }
 
 
