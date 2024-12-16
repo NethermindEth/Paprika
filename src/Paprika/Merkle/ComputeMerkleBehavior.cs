@@ -304,10 +304,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             return data;
         }
 
-        Debug.Assert(memoizedRlp.Length == RlpMemo.Size);
+        //Debug.Assert(memoizedRlp.Length == RlpMemo.Size, $"Unexpected status of {memoizedRlp.Length}");
 
         // There are RLPs here, compress them
-        var dataLength = data.Length - RlpMemo.Size;
+        var dataLength = data.Length - memoizedRlp.Length;
         data[..dataLength].CopyTo(workingSet);
 
         var compressedLength = RlpMemo.Compress(key, memoizedRlp, branch.Children, workingSet[dataLength..]);
@@ -917,8 +917,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             if (childRlpRequiresUpdate)
             {
                 // TODO: make it a context and pass through all the layers
-                rlpWorkingSet = ArrayPool<byte>.Shared.Rent(RlpMemo.Size);
-                memo = RlpMemo.Decompress(leftover, branch.Children, rlpWorkingSet.AsSpan());
+                rlpWorkingSet = ArrayPool<byte>.Shared.Rent(leftover.Length);
+                memo = RlpMemo.Copy(leftover, rlpWorkingSet.AsSpan());
             }
             else
             {
@@ -1182,7 +1182,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                         var childRlpRequiresUpdate = owner.IsOwnedBy(commit) == false || leftover.Length != RlpMemo.Size;
                         var memo = childRlpRequiresUpdate
-                            ? RlpMemo.Decompress(leftover, branch.Children, rlpMemoWorkingSet)
+                            ? RlpMemo.Copy(leftover, rlpMemoWorkingSet)
                             : new RlpMemo(MakeRlpWritable(leftover));
 
                         memo.Clear(nibble);
@@ -1410,10 +1410,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         // Write branch first
         var leftover = branch.WriteToWithLeftover(workspace);
 
-        // Decompress to the leftover
-        RlpMemo.Decompress(leftover, branch.Children, leftover);
-
-        return workspace[..(workspace.Length - leftover.Length + RlpMemo.Size)];
+        return workspace[..^leftover.Length];
     }
 
     [SkipLocalsInit]
