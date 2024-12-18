@@ -72,7 +72,7 @@ public class PrefetchingTests
     }
 
     [Test]
-    public async Task Makes_all_decompression_on_prefetch()
+    public async Task Makes_no_decompression_on_prefetch()
     {
         using var db = PagedDb.NativeMemoryDb(8 * 1024 * 1024, 2);
         var merkle = new ComputeMerkleBehavior(ComputeMerkleBehavior.ParallelismNone);
@@ -105,30 +105,30 @@ public class PrefetchingTests
             // Open prefetcher on blocks beyond first
             var prefetcher = isFirst == false ? block.OpenPrefetcher() : null;
 
-            for (var i = 0; i < contracts; i++)
-            {
-                var contract = random.NextKeccak();
-                prefetcher?.PrefetchAccount(contract);
-
-                if (isFirst)
-                {
-                    block.SetAccount(contract, new Account(1, 1, Keccak.Zero, Keccak.Zero));
-                }
-
-                for (var j = 0; j < slots; j++)
-                {
-                    var storage = random.NextKeccak();
-                    prefetcher?.PrefetchStorage(contract, storage);
-                    block.SetStorage(contract, storage, value);
-                }
-            }
-
-            prefetcher?.SpinTillPrefetchDone();
-
             using (RlpMemo.NoDecompression())
             {
-                return block.Commit(number);
+                for (var i = 0; i < contracts; i++)
+                {
+                    var contract = random.NextKeccak();
+                    prefetcher?.PrefetchAccount(contract);
+
+                    if (isFirst)
+                    {
+                        block.SetAccount(contract, new Account(1, 1, Keccak.Zero, Keccak.Zero));
+                    }
+
+                    for (var j = 0; j < slots; j++)
+                    {
+                        var storage = random.NextKeccak();
+                        prefetcher?.PrefetchStorage(contract, storage);
+                        block.SetStorage(contract, storage, value);
+                    }
+                }
+
+                prefetcher?.SpinTillPrefetchDone();
             }
+
+            return block.Commit(number);
         }
     }
 
