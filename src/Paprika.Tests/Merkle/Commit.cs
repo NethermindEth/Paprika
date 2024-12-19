@@ -27,7 +27,7 @@ public class Commit(bool skipMemoizedRlpCheck = false) : ICommitWithStats
 
     // stats
     private readonly HashSet<Keccak> _touchedAccounts = new();
-    private readonly Dictionary<Keccak, StorageStats> _storageSlots = new();
+    private readonly Dictionary<Keccak, IStorageStats> _storageSlots = new();
 
     public void Set(in Key key, ReadOnlySpan<byte> value)
     {
@@ -51,7 +51,7 @@ public class Commit(bool skipMemoizedRlpCheck = false) : ICommitWithStats
                     stats = new StorageStats();
                 }
 
-                stats!.SetStorage(key.StoragePath.UnsafeAsKeccak, value);
+                Unsafe.As<StorageStats>(stats!).SetStorage(key.StoragePath.UnsafeAsKeccak, value);
             }
         }
     }

@@ -8,7 +8,6 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
-using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
@@ -493,7 +492,7 @@ public class Blockchain : IAsyncDisposable
 
         // stats
         private readonly HashSet<Keccak> _touchedAccounts = new();
-        private readonly Dictionary<Keccak, StorageStats> _storageSlots = new();
+        private readonly Dictionary<Keccak, IStorageStats> _storageSlots = new();
 
         /// <summary>
         /// Stores information about contracts that should have their previous incarnations destroyed.
@@ -1080,7 +1079,7 @@ public class Blockchain : IAsyncDisposable
                 slot = new StorageStats();
             }
 
-            return slot!;
+            return Unsafe.As<StorageStats>(slot!);
         }
 
         public IStorageSetter GetStorageSetter(in Keccak address) =>
@@ -1173,7 +1172,7 @@ public class Blockchain : IAsyncDisposable
 
         public IReadOnlySet<Keccak> TouchedAccounts => _touchedAccounts;
 
-        public IReadOnlyDictionary<Keccak, IStorageStats> TouchedStorageSlots => Unsafe.As<IReadOnlyDictionary<Keccak, IStorageStats>>(_storageSlots);
+        public IReadOnlyDictionary<Keccak, IStorageStats> TouchedStorageSlots => _storageSlots;
 
         class ChildCommit(BufferPool pool, ICommit parent) : RefCountingDisposable, IChildCommit
         {
