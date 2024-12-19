@@ -304,10 +304,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             return data;
         }
 
-        Debug.Assert(memoizedRlp.Length == RlpMemo.Size);
-
         // There are RLPs here, compress them
-        var dataLength = data.Length - RlpMemo.Size;
+        var dataLength = data.Length - memoizedRlp.Length;
         data[..dataLength].CopyTo(workingSet);
 
         var compressedLength = RlpMemo.Compress(key, memoizedRlp, branch.Children, workingSet[dataLength..]);
@@ -910,15 +908,15 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         static void UpdateBranchOnDelete(ICommit commit, in Node.Branch branch, NibbleSet.Readonly children,
             ReadOnlySpan<byte> leftover, ReadOnlySpanOwnerWithMetadata<byte> owner, byte nibble, in Key key)
         {
-            var childRlpRequiresUpdate = owner.IsOwnedBy(commit) == false || leftover.Length != RlpMemo.Size;
+            var childRlpRequiresUpdate = owner.IsOwnedBy(commit) == false;
             RlpMemo memo;
             byte[]? rlpWorkingSet = null;
 
             if (childRlpRequiresUpdate)
             {
                 // TODO: make it a context and pass through all the layers
-                rlpWorkingSet = ArrayPool<byte>.Shared.Rent(RlpMemo.Size);
-                memo = RlpMemo.Decompress(leftover, branch.Children, rlpWorkingSet.AsSpan());
+                rlpWorkingSet = ArrayPool<byte>.Shared.Rent(leftover.Length);
+                memo = RlpMemo.Copy(leftover, rlpWorkingSet.AsSpan());
             }
             else
             {
@@ -1181,6 +1179,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         var nibble = path[i];
 
                         var childRlpRequiresUpdate = owner.IsOwnedBy(commit) == false || leftover.Length != RlpMemo.Size;
+
                         var memo = childRlpRequiresUpdate
                             ? RlpMemo.Decompress(leftover, branch.Children, rlpMemoWorkingSet)
                             : new RlpMemo(MakeRlpWritable(leftover));
@@ -1387,10 +1386,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         // Write branch first
         var leftover = branch.WriteToWithLeftover(workspace);
 
-        // Decompress to the leftover
-        RlpMemo.Decompress(leftover, branch.Children, leftover);
-
-        return workspace[..(workspace.Length - leftover.Length + RlpMemo.Size)];
+        return workspace[..^leftover.Length];
     }
 
     [SkipLocalsInit]

@@ -17,21 +17,23 @@ public readonly ref struct RlpMemo
 
     public RlpMemo(Span<byte> buffer)
     {
-        Debug.Assert(buffer.Length == Size);
-
         _buffer = buffer;
     }
 
     public ReadOnlySpan<byte> Raw => _buffer;
 
+    public bool isCompressed() => _buffer.Length != Size;
+
     public void SetRaw(ReadOnlySpan<byte> keccak, byte nibble)
     {
-        Debug.Assert(keccak.Length == Keccak.Size);
+        Debug.Assert(keccak.Length == Keccak.Size && _buffer.Length == Size);
         keccak.CopyTo(GetAtNibble(nibble));
     }
 
     public void Set(in KeccakOrRlp keccakOrRlp, byte nibble)
     {
+        Debug.Assert(_buffer.Length == Size);
+
         var span = GetAtNibble(nibble);
 
         if (keccakOrRlp.DataType == KeccakOrRlp.Type.Keccak)
@@ -47,17 +49,27 @@ public readonly ref struct RlpMemo
 
     public void Clear(byte nibble)
     {
-        GetAtNibble(nibble).Clear();
+        var maxIndex = _buffer.Length / Keccak.Size;
+
+        if (_buffer.Length == Size || nibble < maxIndex)
+        {
+            GetAtNibble(nibble).Clear();
+        }
     }
 
     public bool TryGetKeccak(byte nibble, out ReadOnlySpan<byte> keccak)
     {
-        var span = GetAtNibble(nibble);
+        var maxIndex = _buffer.Length / Keccak.Size;
 
-        if (span.IndexOfAnyExcept((byte)0) >= 0)
+        if (_buffer.Length == Size || nibble < maxIndex)
         {
-            keccak = span;
-            return true;
+            var span = GetAtNibble(nibble);
+
+            if (span.IndexOfAnyExcept((byte)0) >= 0)
+            {
+                keccak = span;
+                return true;
+            }
         }
 
         keccak = default;
@@ -65,6 +77,13 @@ public readonly ref struct RlpMemo
     }
 
     private Span<byte> GetAtNibble(byte nibble) => _buffer.Slice(nibble * Keccak.Size, Keccak.Size);
+
+    public static RlpMemo Copy(ReadOnlySpan<byte> from, scoped in Span<byte> to)
+    {
+        var span = to[..from.Length];
+        from.CopyTo(span);
+        return new RlpMemo(span);
+    }
 
     public static RlpMemo Decompress(scoped in ReadOnlySpan<byte> leftover, NibbleSet.Readonly children,
         scoped in Span<byte> workingSet)
