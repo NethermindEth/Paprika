@@ -52,7 +52,7 @@ public class PooledSpanDictionaryBenchmarks
         {
             _bigDict.Set(VarLengthKey[..VarLengthKeyCollisions], VarLengthKeyCollisionHash, Value32Bytes, 1);
         }
-        
+
         _readWrite = new PooledSpanDictionary(new BufferPool(128, BufferPool.PageTracking.None, null));
     }
 
@@ -136,7 +136,7 @@ public class PooledSpanDictionaryBenchmarks
 
             _readWrite.Set(key, i, key, 1);
             _readWrite.TryGet(key, i, out var result);
-            
+
             count += result[0];
         }
 

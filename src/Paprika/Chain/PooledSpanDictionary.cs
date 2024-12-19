@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Store;
+using Paprika.Utils;
 
 namespace Paprika.Chain;
 
@@ -49,8 +50,14 @@ public class PooledSpanDictionary : IDisposable
         var pages = new Page[Root.PageCount];
         for (var i = 0; i < Root.PageCount; i++)
         {
-            pages[i] = RentNewPage(true);
+            pages[i] = RentNewPage(false);
         }
+
+        ParallelUnbalancedWork.For(0, Root.PageCount, pages, (i, p) =>
+        {
+            p[i].Clear();
+            return p;
+        });
 
         _root = new Root(pages);
 
@@ -433,9 +440,7 @@ public class PooledSpanDictionary : IDisposable
         return page;
     }
 
-
     private static uint Mix(ulong hash) => unchecked((uint)((hash >> 32) ^ hash));
-
 
     private Span<byte> Write(int size, out UIntPtr addr)
     {
