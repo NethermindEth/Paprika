@@ -50,7 +50,7 @@ public class RootHashFuzzyTests
 
     [TestCase(nameof(Accounts_100_Storage_1), int.MaxValue, 4)]
     [TestCase(nameof(Accounts_1_Storage_100), 11, 8)]
-    [TestCase(nameof(Accounts_1000_Storage_1000), int.MaxValue, 752, Category = Categories.LongRunning)]
+    [TestCase(nameof(Accounts_1000_Storage_1000), int.MaxValue, 1016, Category = Categories.LongRunning)]
     public async Task In_memory_run(string test, int commitEvery, int blockchainPoolSizeMB)
     {
         var generator = Build(test);
@@ -125,7 +125,7 @@ public class RootHashFuzzyTests
     }
 
     [TestCase(nameof(Accounts_10_000), 256 * 1024 * 1024L, 8)]
-    [TestCase(nameof(Accounts_1_000_000), 2 * 1024 * 1024 * 1024L, 28, Category = Categories.LongRunning)]
+    [TestCase(nameof(Accounts_1_000_000), 2 * 1024 * 1024 * 1024L, 32, Category = Categories.LongRunning)]
     public async Task CalculateThenDelete(string test, long size, int blockchainPoolSizeMB)
     {
         var generator = Build(test);
@@ -207,11 +207,11 @@ public class RootHashFuzzyTests
 
         public void Run(Commit commit)
         {
-            Run((ICommit)commit);
+            RunImpl(commit);
             commit.MergeAfterToBefore();
         }
 
-        public void Run(ICommit commit)
+        public void RunImpl(Commit commit)
         {
             var random = GetRandom();
             Span<byte> account = stackalloc byte[Account.MaxByteCount];
@@ -308,7 +308,7 @@ public class RootHashFuzzyTests
         private static Random GetRandom() => new(13);
     }
 
-    private static void AssertRoot(string hex, ICommit commit)
+    private static void AssertRoot(string hex, ICommitWithStats commit)
     {
         using var merkle = new ComputeMerkleBehavior();
 

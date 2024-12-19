@@ -78,7 +78,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             "How long it takes to process Merkle total");
 
         // Pool
-        _pool = new BufferPool(128, true, _meter);
+        _pool = new BufferPool(128, BufferPool.PageTracking.AssertCount, _meter);
     }
 
     /// <summary>
@@ -151,7 +151,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
     }
 
-    public Keccak BeforeCommit(ICommit commit, CacheBudget budget)
+    public Keccak BeforeCommit(ICommitWithStats commit, CacheBudget budget)
     {
         using var total = _totalMerkle.Measure();
 
@@ -172,19 +172,21 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         using (_storageProcessing.Measure())
         {
+            var storageItems = GetStorageWorkItems(commit, budget);
+
             if (_maxDegreeOfParallelism == ParallelismNone)
             {
-                ProcessStorageSingleThreaded(commit, budget);
+                ProcessStorageSingleThreaded(commit, storageItems);
             }
             else
             {
-                ScatterGather(commit, GetStorageWorkItems(commit, budget));
+                ScatterGather(commit, storageItems);
             }
         }
 
         using (_stateProcessing.Measure())
         {
-            new BuildStateTreeItem(commit, commit.Stats.Keys, budget, _pool).DoWork();
+            new BuildStateTreeItem(commit, commit.TouchedAccounts, budget, _pool).DoWork();
 
             var root = Key.Merkle(NibblePath.Empty);
             UIntPtr stack = default;
@@ -200,44 +202,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
     }
 
-    private void ProcessStorageSingleThreaded(ICommit commit, CacheBudget budget)
+    private static void ProcessStorageSingleThreaded(ICommitWithStats commit, BuildStorageTriesItem[] items)
     {
-        var prefixed = new PrefixingCommit(commit);
-
-        var page = _pool.Rent(false);
-
-        // Visit changes and build trees
-        try
+        foreach (var item in items)
         {
-            commit.Visit((in Key key, ReadOnlySpan<byte> value) =>
-            {
-                var keccak = key.Path.UnsafeAsKeccak;
-                prefixed.SetPrefix(keccak);
-
-                if (value.IsEmpty)
-                {
-                    Delete(in key.StoragePath, 0, prefixed, budget);
-                }
-                else
-                {
-                    MarkPathDirty(in key.StoragePath, page.Span, prefixed, budget, TrieType.Storage);
-                }
-            }, TrieType.Storage);
-        }
-        finally
-        {
-            _pool.Return(page);
-        }
-
-        // Calculate and update accounts
-        foreach (var (keccak, value) in commit.Stats)
-        {
-            var hasSStores = value > 0;
-            if (hasSStores)
-            {
-                prefixed.SetPrefix(keccak);
-                BuildStorageTriesItem.CalculateStorageRoot(keccak, this, budget, prefixed, commit);
-            }
+            item.DoWork(commit);
         }
     }
 
@@ -297,10 +266,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// <summary>
     /// Builds works items responsible for building up the storage tries.
     /// </summary>
-    private BuildStorageTriesItem[] GetStorageWorkItems(ICommit commit, CacheBudget budget)
+    private BuildStorageTriesItem[] GetStorageWorkItems(ICommitWithStats commit, CacheBudget budget)
     {
-        return commit.Stats
-            .Where(kvp => kvp.Value > 0)
+        return commit.TouchedStorageSlots
             .Select(kvp => new BuildStorageTriesItem(this, commit, kvp.Key, budget, _pool))
             .ToArray();
     }
@@ -736,9 +704,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         public bool Owns(object? actualSpanOwner) => ReferenceEquals(actualSpanOwner, commit);
 
-        public IReadOnlyDictionary<Keccak, int> Stats =>
-            throw new NotImplementedException("No stats for the child commit");
-
         private class ChildCommit(PrefixingCommit parent, IChildCommit commit) : IChildCommit
         {
             public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) =>
@@ -758,9 +723,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             public IChildCommit GetChild() => new ChildCommit(parent, commit.GetChild());
 
             public bool Owns(object? actualSpanOwner) => ReferenceEquals(actualSpanOwner, parent);
-
-            public IReadOnlyDictionary<Keccak, int> Stats =>
-                throw new NotImplementedException("No stats for the child commit");
         }
     }
 
@@ -1022,8 +984,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     }
 
     [SkipLocalsInit]
-    private static void MarkPathDirty(in NibblePath path, in Span<byte> rlpMemoWorkingSet, ICommit commit,
-        CacheBudget budget, TrieType trieType)
+    private static void MarkPathDirty(in NibblePath path, in Span<byte> rlpMemoWorkingSet, ICommit commit, CacheBudget budget)
     {
         // Flag forcing the leaf creation, that saves one get of the non-existent value.
         var createLeaf = false;
@@ -1257,11 +1218,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
     }
 
-    interface IWorkItem
-    {
-        void DoWork(ICommit commit);
-    }
-
     /// <summary>
     /// Builds a part of State Trie, invalidating paths and marking them as dirty whenever needed.
     /// </summary>
@@ -1277,17 +1233,14 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         {
             _budget = budget;
             _pool = pool;
-            _toTouch = new HashSet<Keccak>(toTouch);
+            _toTouch = [.. toTouch];
             _commit = commit;
-
             _page = _pool.Rent(false);
         }
 
         public void DoWork()
         {
-            _commit.Visit(OnState, TrieType.State);
-
-            // dirty the leftovers
+            // Visit every account that was touched.
             foreach (var keccak in _toTouch)
             {
                 // Requires checking whether exists or not. There are cases where Storage Tries are
@@ -1302,93 +1255,59 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 }
                 else
                 {
-                    MarkPathDirty(in key.Path, _page.Span, _commit, _budget, TrieType.State);
+                    MarkPathDirty(in key.Path, _page.Span, _commit, _budget);
                 }
             }
 
             _pool.Return(_page);
             _page = default;
         }
-
-        private void OnState(in Key key, ReadOnlySpan<byte> value)
-        {
-            Debug.Assert(key.Type == DataType.Account);
-
-            if (value.IsEmpty)
-            {
-                Delete(in key.Path, 0, _commit!, _budget);
-            }
-            else
-            {
-                MarkPathDirty(in key.Path, _page.Span, _commit!, _budget, TrieType.State);
-            }
-
-            // mark as touched already
-            _toTouch.Remove(key.Path.UnsafeAsKeccak);
-        }
     }
 
-    private sealed class BuildStorageTriesItem : IWorkItem
+    private sealed class BuildStorageTriesItem(
+        ComputeMerkleBehavior behavior,
+        ICommitWithStats parent,
+        Keccak account,
+        CacheBudget budget,
+        BufferPool pool)
     {
-        private readonly ComputeMerkleBehavior _behavior;
-        private readonly ICommit _parent;
-        private readonly Keccak _account;
-        private readonly CacheBudget _budget;
-        private readonly BufferPool _pool;
-        private PrefixingCommit? _prefixed;
-        private Page _page;
-
-        public BuildStorageTriesItem(ComputeMerkleBehavior behavior, ICommit parent, Keccak account,
-            CacheBudget budget, BufferPool pool)
-        {
-            _behavior = behavior;
-            _parent = parent;
-            _account = account;
-            _budget = budget;
-            _pool = pool;
-            _prefixed = null;
-
-            _page = pool.Rent(false);
-        }
+        public Keccak AccountKeccak => account;
+        public Account Written { get; private set; }
 
         public void DoWork(ICommit commit)
         {
+            Page page = default;
             try
             {
-                _prefixed = new PrefixingCommit(commit);
-                _prefixed.SetPrefix(_account);
-                _parent.Visit(OnStorage, TrieType.Storage);
+                page = pool.Rent(false);
 
-                CalculateStorageRoot(_account, _behavior, _budget, _prefixed, commit);
+                var prefixed = new PrefixingCommit(commit);
+                prefixed.SetPrefix(account);
+
+                // Process all the keys that were updated
+                var stats = parent.TouchedStorageSlots[account];
+
+                // Sets first
+                foreach (var key in stats.Set)
+                {
+                    MarkPathDirty(NibblePath.FromKey(key), page.Span, prefixed, budget);
+                }
+
+                // Then deletes
+                foreach (var key in stats.Deleted)
+                {
+                    Delete(NibblePath.FromKey(key), 0, prefixed, budget);
+                }
+
+                Written = CalculateStorageRoot(account, behavior, budget, prefixed, commit);
             }
             finally
             {
-                _pool.Return(_page);
-                _page = default;
+                pool.Return(page);
             }
         }
 
-        private void OnStorage(in Key key, ReadOnlySpan<byte> value)
-        {
-            Debug.Assert(key.Type == DataType.StorageCell);
-
-            var keccak = key.Path.UnsafeAsKeccak;
-            if (_account != keccak)
-            {
-                return;
-            }
-
-            if (value.IsEmpty)
-            {
-                Delete(in key.StoragePath, 0, _prefixed!, _budget);
-            }
-            else
-            {
-                MarkPathDirty(in key.StoragePath, _page.Span, _prefixed!, _budget, TrieType.Storage);
-            }
-        }
-
-        public static void CalculateStorageRoot(in Keccak keccak, ComputeMerkleBehavior behavior, CacheBudget budget,
+        private static Account CalculateStorageRoot(in Keccak keccak, ComputeMerkleBehavior behavior, CacheBudget budget,
             PrefixingCommit prefixed, ICommit commit)
         {
             // Don't parallelize this work as it would be counter-productive to have parallel over parallel.
@@ -1412,17 +1331,22 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                 // set it in
                 using var pooled = ctx.Rent();
-                commit.Set(key, account.WriteTo(pooled.Span));
+                var written = account.WriteTo(pooled.Span);
+                commit.Set(key, written);
+
+                return account;
             }
-            else
-            {
-                //see: https://sepolia.etherscan.io/tx/0xb3790025b59b7e31d6d8249e8962234217e0b5b02e47ecb2942b8c4d0f4a3cfe
-                // Contract is created and destroyed, then its values are destroyed
-                // The storage root should be empty, otherwise, it's wrong
-                Debug.Assert(keccakOrRlp.Keccak == Keccak.EmptyTreeHash,
-                    $"Non-existent account with hash of {keccak.ToString()} should have the storage root empty");
-            }
+
+            //see: https://sepolia.etherscan.io/tx/0xb3790025b59b7e31d6d8249e8962234217e0b5b02e47ecb2942b8c4d0f4a3cfe
+            // Contract is created and destroyed, then its values are destroyed
+            // The storage root should be empty, otherwise, it's wrong
+            Debug.Assert(keccakOrRlp.Keccak == Keccak.EmptyTreeHash,
+                $"Non-existent account with hash of {keccak.ToString()} should have the storage root empty");
+
+            return new Account(0, 0);
         }
+
+        public override string ToString() => $"{AccountKeccak}: {Written}";
     }
 
 

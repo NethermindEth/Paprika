@@ -29,11 +29,6 @@ public class Blockchain : IAsyncDisposable
     // allocate 1024 pages (4MB) at once
     private readonly BufferPool _pool;
 
-    /// <summary>
-    /// 512 kb gives 4 million buckets.
-    /// </summary>
-    private const int BitMapFilterSizePerBlock = 512 * 1024 / Page.PageSize;
-
     private readonly object _blockLock = new();
     private readonly Dictionary<uint, List<CommittedBlockState>> _blocksByNumber = new();
     private readonly Dictionary<Keccak, CommittedBlockState> _blocksByHash = new();
@@ -103,7 +98,7 @@ public class Blockchain : IAsyncDisposable
             "Key count", "Keys prefetched in the background by the prefetcher");
 
         // pool
-        _pool = new(1024, true, _meter);
+        _pool = new(1024, BufferPool.PageTracking.AssertCount, _meter);
 
         using var batch = _db.BeginReadOnlyBatch();
         _lastFinalized = batch.Metadata.BlockNumber;
@@ -488,14 +483,16 @@ public class Blockchain : IAsyncDisposable
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload.
     /// </summary>
-    private class BlockState : RefCountingDisposable, IWorldState, ICommit, IProvideDescription, IStateStats
+    private class BlockState : RefCountingDisposable, IWorldState, ICommitWithStats, IProvideDescription, IStateStats
     {
         /// <summary>
         /// A simple set filter to assert whether the given key was set in a given block, used to speed up getting the keys.
         /// </summary>
         private readonly BitFilter _filter;
 
-        private readonly Dictionary<Keccak, int>? _stats;
+        // stats
+        private readonly HashSet<Keccak> _touchedAccounts = new();
+        private readonly Dictionary<Keccak, IStorageStats> _storageSlots = new();
 
         /// <summary>
         /// Stores information about contracts that should have their previous incarnations destroyed.
@@ -549,8 +546,6 @@ public class Blockchain : IAsyncDisposable
 
             _filter = _blockchain.CreateBitFilter();
             _destroyed = null;
-            _stats = new Dictionary<Keccak, int>();
-
             _hash = ParentHash;
 
             _cacheBudgetStorageAndStage = blockchain._cacheBudgetStateAndStorage.Build();
@@ -586,6 +581,7 @@ public class Blockchain : IAsyncDisposable
         }
 
         public Keccak ParentHash { get; }
+
 
         /// <summary>
         /// Commits the block to the blockchain.
@@ -951,6 +947,8 @@ public class Blockchain : IAsyncDisposable
         {
             _hash = null;
 
+            _touchedAccounts.Add(address);
+
             var searched = NibblePath.FromKey(address);
 
             var account = Key.Account(address);
@@ -962,7 +960,7 @@ public class Blockchain : IAsyncDisposable
             Destroy(searched, _storage);
             Destroy(searched, _preCommit);
 
-            _stats![address] = 0;
+            _storageSlots.Remove(address);
 
             _destroyed ??= new HashSet<Keccak>();
             _destroyed.Add(address);
@@ -1052,18 +1050,50 @@ public class Blockchain : IAsyncDisposable
                 _blockchain._preCommit.OnNewAccountCreated(address, this);
             }
 
-            _stats!.RegisterSetAccount(address);
+            _touchedAccounts.Add(address);
         }
 
         public void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value)
+        {
+            SetStorageImpl(address, storage, value, EnsureStorageStats(address));
+        }
+
+        private void SetStorageImpl(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value,
+            StorageStats stats)
         {
             var path = NibblePath.FromKey(address);
             var key = Key.StorageCell(path, storage);
 
             SetImpl(key, value, EntryType.Persistent, _storage);
 
-            _stats!.RegisterSetStorageAccount(address);
+            stats.SetStorage(storage, value);
         }
+
+        private StorageStats EnsureStorageStats(Keccak address)
+        {
+            _touchedAccounts.Add(address);
+
+            ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_storageSlots, address, out var exists);
+            if (exists == false)
+            {
+                slot = new StorageStats();
+            }
+
+            return Unsafe.As<StorageStats>(slot!);
+        }
+
+        public IStorageSetter GetStorageSetter(in Keccak address) =>
+            new StorageSetter(this, address, EnsureStorageStats(address));
+
+        private sealed class StorageSetter(
+            BlockState state,
+            Keccak address,
+            StorageStats stats) : IStorageSetter
+        {
+            public void SetStorage(in Keccak storage, ReadOnlySpan<byte> value) =>
+                state.SetStorageImpl(address, storage, value, stats);
+        }
+
 
         [SkipLocalsInit]
         private void SetImpl(in Key key, in ReadOnlySpan<byte> payload, EntryType type, PooledSpanDictionary dict)
@@ -1140,7 +1170,9 @@ public class Blockchain : IAsyncDisposable
 
         IChildCommit ICommit.GetChild() => new ChildCommit(Pool, this);
 
-        public IReadOnlyDictionary<Keccak, int> Stats => _stats!;
+        public IReadOnlySet<Keccak> TouchedAccounts => _touchedAccounts;
+
+        public IReadOnlyDictionary<Keccak, IStorageStats> TouchedStorageSlots => _storageSlots;
 
         class ChildCommit(BufferPool pool, ICommit parent) : RefCountingDisposable, IChildCommit
         {
@@ -1196,9 +1228,6 @@ public class Blockchain : IAsyncDisposable
             }
 
             public IChildCommit GetChild() => new ChildCommit(pool, this);
-
-            public IReadOnlyDictionary<Keccak, int> Stats =>
-                throw new NotImplementedException("Child commits provide no stats");
 
             protected override void CleanUp()
             {

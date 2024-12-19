@@ -12,8 +12,6 @@ namespace Paprika;
 /// </summary>
 public readonly struct Account : IEquatable<Account>
 {
-    public static readonly Account Empty = default;
-
     public readonly UInt256 Balance;
     public readonly UInt256 Nonce;
     public readonly Keccak CodeHash;
