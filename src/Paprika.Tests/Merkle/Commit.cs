@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using FluentAssertions;
@@ -26,7 +27,7 @@ public class Commit(bool skipMemoizedRlpCheck = false) : ICommitWithStats
 
     // stats
     private readonly HashSet<Keccak> _touchedAccounts = new();
-    private readonly Dictionary<Keccak, (List<Keccak> set, List<Keccak> deleted)> _storageSlots = new();
+    private readonly Dictionary<Keccak, StorageStats> _storageSlots = new();
 
     public void Set(in Key key, ReadOnlySpan<byte> value)
     {
@@ -47,11 +48,10 @@ public class Commit(bool skipMemoizedRlpCheck = false) : ICommitWithStats
                 ref var stats = ref CollectionsMarshal.GetValueRefOrAddDefault(_storageSlots, keccak, out var exists);
                 if (exists == false)
                 {
-                    stats = (new List<Keccak>(), new List<Keccak>());
+                    stats = new StorageStats();
                 }
 
-                var storage = key.StoragePath.UnsafeAsKeccak;
-                (value.IsEmpty ? stats.deleted : stats.set).Add(storage);
+                stats!.SetStorage(key.StoragePath.UnsafeAsKeccak, value);
             }
         }
     }
@@ -308,5 +308,5 @@ public class Commit(bool skipMemoizedRlpCheck = false) : ICommitWithStats
     }
 
     public IReadOnlySet<Keccak> TouchedAccounts => _touchedAccounts;
-    public IReadOnlyDictionary<Keccak, (List<Keccak> set, List<Keccak> deleted)> TouchedStorageSlots => _storageSlots;
+    public IReadOnlyDictionary<Keccak, IStorageStats> TouchedStorageSlots => Unsafe.As<IReadOnlyDictionary<Keccak, IStorageStats>>(_storageSlots);
 }
