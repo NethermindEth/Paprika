@@ -525,11 +525,9 @@ public class PooledSpanDictionary : IDisposable
         private const int SizeOf = PageCount * PointerSize;
 
         /// <summary>
-        /// 16 pages, gives 4kb * 16, 64kb of memory allocated per dictionary.
-        /// This gives 8k buckets (<see cref="PooledSpanDictionary.PointerSize"/>
-        /// which should be sufficient to have a really low ratio of collisions for the majority of the blocks.
+        /// The total number of pages used by the root construct. The bigger, the bigger fanout it is.
         /// </summary>
-        public const int PageCount = 16;
+        public const int PageCount = 32;
 
         public static readonly int BucketCountLog2 = BitOperations.Log2(BucketCount);
 
