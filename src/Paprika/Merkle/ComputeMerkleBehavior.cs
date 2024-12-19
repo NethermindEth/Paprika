@@ -1285,16 +1285,16 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 prefixed.SetPrefix(account);
 
                 // Process all the keys that were updated
-                var (set, deleted) = parent.TouchedStorageSlots[account];
+                var stats = parent.TouchedStorageSlots[account];
 
                 // Sets first
-                foreach (var key in set)
+                foreach (var key in stats.Set)
                 {
                     MarkPathDirty(NibblePath.FromKey(key), page.Span, prefixed, budget);
                 }
 
                 // Then deletes
-                foreach (var key in deleted)
+                foreach (var key in stats.Deleted)
                 {
                     Delete(NibblePath.FromKey(key), 0, prefixed, budget);
                 }
