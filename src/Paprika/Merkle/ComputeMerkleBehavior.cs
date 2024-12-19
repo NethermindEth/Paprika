@@ -11,6 +11,7 @@ using Paprika.RLP;
 using Paprika.Store;
 using Paprika.Utils;
 using System.Diagnostics.CodeAnalysis;
+using System.Text;
 
 namespace Paprika.Merkle;
 
@@ -984,7 +985,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     }
 
     [SkipLocalsInit]
-    private static void MarkPathDirty(in NibblePath path, in Span<byte> rlpMemoWorkingSet, ICommit commit, CacheBudget budget)
+    private static void MarkPathDirty(in NibblePath path, in Span<byte> rlpMemoWorkingSet, ICommit commit,
+        CacheBudget budget)
     {
         // Flag forcing the leaf creation, that saves one get of the non-existent value.
         var createLeaf = false;
@@ -1307,7 +1309,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             }
         }
 
-        private static Account CalculateStorageRoot(in Keccak keccak, ComputeMerkleBehavior behavior, CacheBudget budget,
+        private static Account CalculateStorageRoot(in Keccak keccak, ComputeMerkleBehavior behavior,
+            CacheBudget budget,
             PrefixingCommit prefixed, ICommit commit)
         {
             // Don't parallelize this work as it would be counter-productive to have parallel over parallel.
@@ -1349,6 +1352,71 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         public override string ToString() => $"{AccountKeccak}: {Written}";
     }
 
+    /// <summary>
+    /// The logging commit not used by the release code.
+    /// Useful to diagnose which operations are called on the wrapped commit.
+    /// Capable of deciphering Merkle values.
+    /// </summary>
+    public class LoggingCommit(string name, ICommit commit) : ICommit
+    {
+        private readonly StringBuilder _logs = new();
+
+        public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
+        {
+            ReadOnlySpanOwnerWithMetadata<byte> owner = commit.Get(in key);
+
+            Log(nameof(Get), key, owner.Span);
+
+            return owner;
+        }
+
+        private void Log(string method, in Key key, ReadOnlySpan<byte> span)
+        {
+            var path = key.Path.ToString();
+            string value = "";
+            if (span.IsEmpty)
+            {
+                value = "EMPTY";
+            }
+            else
+            {
+                Node.ReadFrom(out var type, out var leaf, out var ext, out var branch, span);
+                switch (type)
+                {
+                    case Node.Type.Leaf:
+                        value = $"LEAF: {leaf.Path.ToString()}";
+                        break;
+                    case Node.Type.Extension:
+                        value = $"EXTENSION: {ext.Path.ToString()}";
+                        break;
+                    case Node.Type.Branch:
+                        value = $"BRANCH: {branch.Children.ToString()}";
+                        break;
+                }
+            }
+
+            _logs.AppendLine($"{method}({path}): {value}");
+        }
+
+        public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type = EntryType.Persistent)
+        {
+            Log(nameof(Set), key, payload);
+            commit.Set(in key, in payload, type);
+        }
+
+        public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1,
+            EntryType type = EntryType.Persistent)
+        {
+            Log(nameof(Set), key, payload0);
+            commit.Set(in key, in payload0, in payload1, type);
+        }
+
+        public IChildCommit GetChild() => throw new NotImplementedException();
+
+        public bool Owns(object? actualSpanOwner) => commit.Owns(actualSpanOwner);
+
+        public override string ToString() => $"{name}: \n {_logs}";
+    }
 
     public bool CanPrefetch => true;
 
