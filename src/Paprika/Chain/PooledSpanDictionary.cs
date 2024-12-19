@@ -40,8 +40,6 @@ public class PooledSpanDictionary : IDisposable
     /// <remarks>
     /// Set <paramref name="preserveOldValues"/> to true, if the data written once should not be overwritten.
     /// This allows to hold values returned by the dictionary through multiple operations.
-    /// 
-    /// This dictionary uses <see cref="ThreadLocal{T}"/> to store keys buffers to allow concurrent readers
     /// </remarks>
     public PooledSpanDictionary(BufferPool pool, bool preserveOldValues = false)
     {
