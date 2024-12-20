@@ -307,7 +307,9 @@ public class PooledSpanDictionary : IDisposable
         data0.CopyTo(destination[(valueStart + ValueLengthLength)..]);
         data1.CopyTo(destination[(valueStart + ValueLengthLength + data0.Length)..]);
 
-        // write root back to the bucket
+        // Write root back to the bucket at the root.
+        // The location is a subject of CAS operation and should always be aligned. This is ensured by the root.
+        // All the other writes require no alignment as they are not updated with CAS.
         ref var location = ref _root[(int)bucket];
 
         UIntPtr root;
@@ -458,11 +460,16 @@ public class PooledSpanDictionary : IDisposable
 
     private readonly object _lock = new();
 
+    private static int Align(int value, int alignment) => (value + (alignment - 1)) & -alignment;
+
     private Span<byte> Write(int size, out UIntPtr addr)
     {
         // Memoize to make contention as small as possible
         Page current;
         int position;
+
+        // Align so that we don't step on each other too much.
+        size = Align(size, PointerSize);
 
         lock (_lock)
         {
