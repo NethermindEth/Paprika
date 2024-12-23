@@ -1316,6 +1316,111 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     }
 
     /// <summary>
+    /// Just for tests - accept visitor method to traverse the merkle trie
+    /// </summary>
+    /// <param name="visitor"></param>
+    /// <param name="path"></param>
+    /// <param name="context"></param>
+    public void Accept(IMerkleTrieVisitor visitor, NibblePath path, MerkleVisitorContext context)
+    {
+        var key = Key.Merkle(path);
+
+        // Query for the node
+        using var owner = context.Commit.Get(key);
+        if (owner.IsEmpty)
+        {
+            return;
+        }
+
+        // read the existing one
+        var leftover = Node.ReadFrom(out var type, out var leaf, out var ext, out var branch, owner.Span);
+
+        var keccak = context.IsStorage
+            ? GetStorageHash(context.WorldState, context.AccountHash, path, false)
+            : GetHash(path, context.WorldState, false);
+
+        switch (type)
+        {
+            case Node.Type.Leaf:
+                {
+                    visitor.VisitLeaf(path, keccak, leaf.Path, context, context.WorldState);
+
+                    if (!context.IsStorage)
+                    {
+                        var full = path.Append(leaf.Path, stackalloc byte[NibblePath.MaxLengthValue * 2 + 1]);
+                        using var leadDataOwner = context.Commit.Get(Key.Account(full));
+                        Account.ReadFrom(leadDataOwner.Span, out Account account);
+
+                        if (account.StorageRootHash != Keccak.EmptyTreeHash)
+                        {
+                            var prefixed = new ComputeMerkleBehavior.PrefixingCommit(context.Commit);
+                            prefixed.SetPrefix(full);
+                            MerkleVisitorContext storageContext = new MerkleVisitorContext(prefixed, context.WorldState);
+                            storageContext.Level = context.Level + 1;
+                            storageContext.IsStorage = true;
+                            storageContext.AccountHash = full.UnsafeAsKeccak;
+                            Accept(visitor, NibblePath.Empty, storageContext);
+                        }
+                    }
+
+                    return;
+                }
+            case Node.Type.Extension:
+                {
+                    visitor.VisitExtension(path, keccak, ext, context, context.WorldState);
+
+                    context.Level++;
+                    context.BranchChildIndex = null;
+                    NibblePath childPath = path.Append(ext.Path, stackalloc byte[NibblePath.MaxLengthValue * 2 + 1]);
+                    Accept(visitor, childPath, context);
+                    context.Level--;
+                    return;
+                }
+            case Node.Type.Branch:
+                {
+                    visitor.VisitBranch(path, keccak, context, context.WorldState);
+
+                    context.Level++;
+                    Span<byte> workingSpan = stackalloc byte[NibblePath.MaxLengthValue * 2 + 1];
+                    Span<byte> rlpMemoization = stackalloc byte[RlpMemo.Size];
+                    for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+                    {
+                        if (branch.Children[i])
+                        {
+                            context.BranchChildIndex = i;
+                            NibblePath childPath = path.AppendNibble(i, workingSpan);
+
+                            if (childPath.Length == NibblePath.KeccakNibbleCount)
+                            {
+                                RlpMemo memo = RlpMemo.Decompress(leftover, branch.Children, rlpMemoization);
+                                KeccakOrRlp childKeccakOrRlp = Keccak.Zero;
+                                if (memo.TryGetKeccak(i, out var keccakSpan))
+                                {
+                                    childKeccakOrRlp = new Keccak(keccakSpan);
+                                }
+                                else
+                                {
+                                    var spanOwner = context.Commit.Get(Key.Raw(childPath, context.IsStorage ? DataType.StorageCell : DataType.Account, NibblePath.Empty));
+                                    if (!spanOwner.IsEmpty)
+                                        KeccakOrRlp.FromSpan(spanOwner.Span, out childKeccakOrRlp);
+                                }
+                                visitor.VisitLeaf(childPath, childKeccakOrRlp, NibblePath.Empty, context, context.WorldState);
+                                continue;
+                            }
+
+                            Accept(visitor, childPath, context);
+                        }
+                    }
+
+                    context.Level--;
+                    return;
+                }
+            default:
+                return;
+        }
+    }
+
+    /// <summary>
     /// Builds a part of State Trie, invalidating paths and marking them as dirty whenever needed.
     /// </summary>
     private sealed class BuildStateTreeItem
@@ -1645,4 +1750,34 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     {
         _meter.Dispose();
     }
+}
+
+/// <summary>
+/// Trie visitor context providing access to data and tracking progress
+/// </summary>
+/// <param name="commit"></param>
+/// <param name="worldState"></param>
+public class MerkleVisitorContext(ICommit commit, IReadOnlyWorldState worldState)
+{
+    public int Level { get; set; }
+    public bool IsStorage { get; set; }
+    public int? BranchChildIndex { get; internal set; }
+
+    public Keccak AccountHash { get; internal set; }
+
+    public ICommit Commit { get; internal set; } = commit;
+    public IReadOnlyWorldState WorldState { get; internal set; } = worldState;
+}
+
+/// <summary>
+/// Visitor interface - for tests
+/// </summary>
+public interface IMerkleTrieVisitor
+{
+    void VisitTree(Keccak rootHash, MerkleVisitorContext context);
+    void VisitBranch(NibblePath path, KeccakOrRlp keccakOrRlp, MerkleVisitorContext context, IReadOnlyWorldState worldState);
+
+    void VisitExtension(NibblePath path, KeccakOrRlp keccakOrRlp, Node.Extension extension, MerkleVisitorContext context, IReadOnlyWorldState worldState);
+
+    void VisitLeaf(NibblePath path, KeccakOrRlp keccakOrRlp, NibblePath leafPath, MerkleVisitorContext context, IReadOnlyWorldState worldState);
 }

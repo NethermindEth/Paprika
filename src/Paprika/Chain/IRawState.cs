@@ -1,5 +1,6 @@
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Merkle;
 
 namespace Paprika.Chain;
 
@@ -67,5 +68,10 @@ public interface IRawState : IReadOnlyWorldState
     /// </summary>
     void Discard();
 
-    string DumpTrie();
+    /// <summary>
+    /// Accept a merkle trie visitor and traverse trie from given path
+    /// </summary>
+    /// <param name="visitor"></param>
+    /// <param name="rootPath"></param>
+    void Accept(IMerkleTrieVisitor visitor, NibblePath rootPath);
 }
