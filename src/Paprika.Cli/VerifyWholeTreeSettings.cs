@@ -16,12 +16,13 @@ public class VerifyWholeTreeSettings : BasePaprikaSettings
             using var read = db.BeginReadOnlyBatch();
             using var latest = Blockchain.StartReadOnlyLatestFromDb(db);
 
-            AnsiConsole.WriteLine("Checking whole tree...");
+
+            AnsiConsole.WriteLine($"The latest state root hash persisted: {latest.Hash}.");
+            AnsiConsole.WriteLine("Verification of the whole state tree in progress...");
 
             var keccak = new ComputeMerkleBehavior().CalculateStateRootHash(latest);
 
-            AnsiConsole.WriteLine($"Keccak {keccak.ToString()}");
-
+            AnsiConsole.WriteLine($"The computed state root hash {keccak.ToString()}");
 
             return 0;
         }

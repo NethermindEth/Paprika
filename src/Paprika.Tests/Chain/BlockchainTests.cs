@@ -64,6 +64,51 @@ public class BlockchainTests
     }
 
     [Test]
+    public async Task Storage_setter()
+    {
+        var account1 = new Account(1, 1);
+        var account2 = new Account(2, 2);
+
+        using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
+
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
+
+        var storageKey1 = Key1;
+        byte[] storageValue1 = [1];
+
+        var storageKey2 = Key2;
+        byte[] storageValue2 = [7];
+
+        using var block1 = blockchain.StartNew(Keccak.EmptyTreeHash);
+
+        // account Key0
+        block1.SetAccount(Key0, account1);
+        block1.SetStorage(Key0, storageKey1, storageValue1);
+        block1.SetStorage(Key0, storageKey2, storageValue2);
+
+        // account Key1 using StorageSetter
+        block1.SetAccount(Key1, account2);
+        var setter = block1.GetStorageSetter(Key1);
+        setter.SetStorage(storageKey1, storageValue1);
+        setter.SetStorage(storageKey2, storageValue2);
+
+        var keccak1 = block1.Commit(1);
+
+        // Assert that the roots are the same.
+        using var reader = blockchain.StartReadOnly(keccak1);
+
+        var read1 = reader.GetAccount(Key0);
+        read1.Balance.Should().Be(account1.Balance);
+        read1.Nonce.Should().Be(account1.Nonce);
+
+        var read2 = reader.GetAccount(Key1);
+        read2.Balance.Should().Be(account2.Balance);
+        read2.Nonce.Should().Be(account2.Nonce);
+
+        read1.StorageRootHash.Should().Be(read2.StorageRootHash);
+    }
+
+    [Test]
     [Explicit("Non parallel")]
     public async Task Delays_reporting_metrics()
     {

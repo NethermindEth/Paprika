@@ -26,6 +26,13 @@ public interface IWorldState : IStateStorageAccessor, IDisposable
     void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value);
 
     /// <summary>
+    /// Gets the storage setter, so that some of the heavy calls for the storage can be amortized. 
+    /// </summary>
+    /// <param name="address"></param>
+    /// <returns></returns>
+    IStorageSetter GetStorageSetter(in Keccak address);
+
+    /// <summary>
     /// Commits the block to the chain allowing to build upon it.
     /// Also runs the <see cref="IPreCommitBehavior"/> that the blockchain was configured with.
     /// </summary>
@@ -40,6 +47,14 @@ public interface IWorldState : IStateStorageAccessor, IDisposable
     public IStateStats Stats { get; }
 
     public IPreCommitPrefetcher? OpenPrefetcher();
+}
+
+public interface IStorageSetter
+{
+    /// <summary>
+    /// Sets the storage in the same way <see cref="IWorldState.SetStorage"/> does.
+    /// </summary>
+    void SetStorage(in Keccak storage, ReadOnlySpan<byte> value);
 }
 
 public interface IReadOnlyWorldState : IStateStorageAccessor, IReadOnlyCommit, IDisposable

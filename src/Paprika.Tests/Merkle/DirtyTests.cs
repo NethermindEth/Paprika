@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
@@ -10,15 +11,8 @@ namespace Paprika.Tests.Merkle;
 [TestFixture(true, TestName = "With deletes",
     Description = "These tests write data only to delete them before assertion.")]
 [TestFixture(false, TestName = "Asserting Merkle structure")]
-public class DirtyTests
+public class DirtyTests(bool delete)
 {
-    private readonly bool _delete;
-
-    public DirtyTests(bool delete)
-    {
-        _delete = delete;
-    }
-
     [Test(Description = "No values set, no changes tracked")]
     public void Empty()
     {
@@ -243,7 +237,7 @@ public class DirtyTests
 
         Assert(commit, c =>
         {
-            if (_delete == false)
+            if (delete == false)
             {
                 NUnit.Framework.Assert.Ignore("No asserting for non-delete scenario");
             }
@@ -267,7 +261,7 @@ public class DirtyTests
 
         Assert(commit, c =>
         {
-            if (_delete == false)
+            if (delete == false)
             {
                 NUnit.Framework.Assert.Ignore("No asserting for non-delete scenario");
             }
@@ -290,7 +284,7 @@ public class DirtyTests
 
         Assert(commit, c =>
         {
-            if (_delete == false)
+            if (delete == false)
             {
                 NUnit.Framework.Assert.Ignore("No asserting for non-delete scenario");
             }
@@ -304,7 +298,7 @@ public class DirtyTests
         // run merkle before
         merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());
 
-        if (_delete)
+        if (delete)
         {
             // get all the keys inserted before merkle
             var keys = commit.GetSnapshotOfBefore();
@@ -322,7 +316,7 @@ public class DirtyTests
             merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());
         }
 
-        if (!_delete)
+        if (!delete)
         {
             commit.StartAssert();
             assert(commit);
@@ -341,25 +335,47 @@ public static class CommitExtensions
 {
     public static void SetLeafWithSplitOn(this ICommit commit, in NibblePath key, int splitOnNibble)
     {
-        commit.SetLeaf(Key.Merkle(key.SliceTo(splitOnNibble)), key.SliceFrom(splitOnNibble));
+        var expanded = ExpandToFullAccount(key);
+        commit.SetLeaf(Key.Merkle(expanded.SliceTo(splitOnNibble)), expanded.SliceFrom(splitOnNibble));
     }
 
     public static void SetLeafWithSplitOn(this ICommit commit, string path, int splitOnNibble)
     {
         var key = NibblePath.Parse(path);
-        commit.SetLeaf(Key.Merkle(key.SliceTo(splitOnNibble)), key.SliceFrom(splitOnNibble));
+        var expanded = ExpandToFullAccount(key);
+        commit.SetLeaf(Key.Merkle(expanded.SliceTo(splitOnNibble)), expanded.SliceFrom(splitOnNibble));
     }
-
 
     public static void SetLeaf(this ICommit commit, in Key key, string leafPath)
     {
-        var leaf = new Node.Leaf(NibblePath.Parse(leafPath));
+        var path = NibblePath.Parse(leafPath);
+        var expanded = ExpandToFullAccount(path);
+        var leaf = new Node.Leaf(expanded);
         commit.Set(key, leaf.WriteTo(stackalloc byte[Node.Leaf.MaxByteLength]));
     }
 
     public static void Set(this Commit commit, string path) => commit.Set(NibblePath.Parse(path));
 
-    public static void Set(this Commit commit, in NibblePath path) => commit.Set(Key.Account(path), SmallestAccount);
+    public static void Set(this Commit commit, in NibblePath path)
+    {
+        var expanded = ExpandToFullAccount(path);
+        commit.Set(Key.Account(expanded), SmallestAccount);
+    }
+
+    private static NibblePath ExpandToFullAccount(in NibblePath path)
+    {
+        var missing = NibblePath.KeccakNibbleCount - path.Length;
+        var expanded = path;
+
+        if (missing > 0)
+        {
+            var amendment = NibblePath.FromKey(new byte[32], path.Length, missing);
+            expanded = path.Append(amendment, new byte[32]);
+        }
+
+        Debug.Assert(expanded.Length == NibblePath.KeccakNibbleCount);
+        return expanded;
+    }
 
     private static readonly byte[] SmallestAccount;
 

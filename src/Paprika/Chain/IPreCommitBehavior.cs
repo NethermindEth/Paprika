@@ -1,3 +1,4 @@
+using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
@@ -78,7 +79,7 @@ public interface ICommitWithStats : ICommit
     /// Provides a collection of stats for storages.
     /// For each contract a set of sets and deletes. 
     /// </summary>
-    IReadOnlyDictionary<Keccak, (List<Keccak> set, List<Keccak> deleted)> TouchedStorageSlots { get; }
+    IReadOnlyDictionary<Keccak, IStorageStats> TouchedStorageSlots { get; }
 }
 
 /// <summary>

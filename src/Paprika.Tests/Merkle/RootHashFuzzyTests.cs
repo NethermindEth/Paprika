@@ -125,7 +125,7 @@ public class RootHashFuzzyTests
     }
 
     [TestCase(nameof(Accounts_10_000), 256 * 1024 * 1024L, 8)]
-    [TestCase(nameof(Accounts_1_000_000), 2 * 1024 * 1024 * 1024L, 28, Category = Categories.LongRunning)]
+    [TestCase(nameof(Accounts_1_000_000), 2 * 1024 * 1024 * 1024L, 32, Category = Categories.LongRunning)]
     public async Task CalculateThenDelete(string test, long size, int blockchainPoolSizeMB)
     {
         var generator = Build(test);
@@ -207,11 +207,11 @@ public class RootHashFuzzyTests
 
         public void Run(Commit commit)
         {
-            Run((ICommit)commit);
+            RunImpl(commit);
             commit.MergeAfterToBefore();
         }
 
-        public void Run(ICommit commit)
+        public void RunImpl(Commit commit)
         {
             var random = GetRandom();
             Span<byte> account = stackalloc byte[Account.MaxByteCount];

@@ -32,11 +32,6 @@ public class Blockchain : IAsyncDisposable
     // allocate 1024 pages (4MB) at once
     private readonly BufferPool _pool;
 
-    /// <summary>
-    /// 512 kb gives 4 million buckets.
-    /// </summary>
-    private const int BitMapFilterSizePerBlock = 512 * 1024 / Page.PageSize;
-
     private readonly object _blockLock = new();
     private readonly Dictionary<uint, List<CommittedBlockState>> _blocksByNumber = new();
     private readonly Dictionary<Keccak, CommittedBlockState> _blocksByHash = new();
@@ -107,7 +102,7 @@ public class Blockchain : IAsyncDisposable
             "Key count", "Keys prefetched in the background by the prefetcher");
 
         // pool
-        _pool = new(1024, true, _meter);
+        _pool = new(1024, BufferPool.PageTracking.AssertCount, _meter);
 
         using var batch = _db.BeginReadOnlyBatch();
         _lastFinalized = batch.Metadata.BlockNumber;
@@ -511,7 +506,7 @@ public class Blockchain : IAsyncDisposable
 
         // stats
         private readonly HashSet<Keccak> _touchedAccounts = new();
-        private readonly Dictionary<Keccak, (List<Keccak> set, List<Keccak> deleted)> _storageSlots = new();
+        private readonly Dictionary<Keccak, IStorageStats> _storageSlots = new();
 
         /// <summary>
         /// Stores information about contracts that should have their previous incarnations destroyed.
@@ -600,6 +595,7 @@ public class Blockchain : IAsyncDisposable
         }
 
         public Keccak ParentHash { get; }
+
 
         /// <summary>
         /// Commits the block to the blockchain.
@@ -958,6 +954,8 @@ public class Blockchain : IAsyncDisposable
         {
             _hash = null;
 
+            _touchedAccounts.Add(address);
+
             var searched = NibblePath.FromKey(address);
 
             var account = Key.Account(address);
@@ -1065,20 +1063,45 @@ public class Blockchain : IAsyncDisposable
 
         public void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value)
         {
+            SetStorageImpl(address, storage, value, EnsureStorageStats(address));
+        }
+
+        private void SetStorageImpl(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value,
+            StorageStats stats)
+        {
             var path = NibblePath.FromKey(address);
             var key = Key.StorageCell(path, storage);
 
             SetImpl(key, value, EntryType.Persistent, _storage);
 
+            stats.SetStorage(storage, value);
+        }
+
+        private StorageStats EnsureStorageStats(Keccak address)
+        {
             _touchedAccounts.Add(address);
+
             ref var slot = ref CollectionsMarshal.GetValueRefOrAddDefault(_storageSlots, address, out var exists);
             if (exists == false)
             {
-                slot = (new List<Keccak>(), new List<Keccak>());
+                slot = new StorageStats();
             }
 
-            (value.IsEmpty ? slot.deleted : slot.set).Add(storage);
+            return Unsafe.As<StorageStats>(slot!);
         }
+
+        public IStorageSetter GetStorageSetter(in Keccak address) =>
+            new StorageSetter(this, address, EnsureStorageStats(address));
+
+        private sealed class StorageSetter(
+            BlockState state,
+            Keccak address,
+            StorageStats stats) : IStorageSetter
+        {
+            public void SetStorage(in Keccak storage, ReadOnlySpan<byte> value) =>
+                state.SetStorageImpl(address, storage, value, stats);
+        }
+
 
         [SkipLocalsInit]
         protected virtual void SetImpl(in Key key, in ReadOnlySpan<byte> payload, EntryType type, PooledSpanDictionary dict)
@@ -1269,7 +1292,7 @@ public class Blockchain : IAsyncDisposable
 
         public IReadOnlySet<Keccak> TouchedAccounts => _touchedAccounts;
 
-        public IReadOnlyDictionary<Keccak, (List<Keccak> set, List<Keccak> deleted)> TouchedStorageSlots => _storageSlots;
+        public IReadOnlyDictionary<Keccak, IStorageStats> TouchedStorageSlots => _storageSlots;
 
         class ChildCommit(BufferPool pool, ICommit parent) : RefCountingDisposable, IChildCommit
         {

@@ -11,6 +11,7 @@ using Paprika.RLP;
 using Paprika.Store;
 using Paprika.Utils;
 using System.Diagnostics.CodeAnalysis;
+using System.Text;
 using DataType = Paprika.Data.DataType;
 
 namespace Paprika.Merkle;
@@ -79,7 +80,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             "How long it takes to process Merkle total");
 
         // Pool
-        _pool = new BufferPool(128, true, _meter);
+        _pool = new BufferPool(128, BufferPool.PageTracking.AssertCount, _meter);
     }
 
     /// <summary>
@@ -683,7 +684,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             }
 #endif
 
-            Parallel.For((long)0, NibbleSet.NibbleCount, s_parallelOptions, nibble =>
+            ParallelUnbalancedWork.For(0, NibbleSet.NibbleCount, s_parallelOptions, nibble =>
             {
                 var childPath = NibblePath.Single((byte)nibble, 0);
                 var child = commits[nibble] = commit.GetChild();
@@ -1102,7 +1103,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     }
 
     [SkipLocalsInit]
-    private static void MarkPathDirty(in NibblePath path, in Span<byte> rlpMemoWorkingSet, ICommit commit, CacheBudget budget)
+    private static void MarkPathDirty(in NibblePath path, in Span<byte> rlpMemoWorkingSet, ICommit commit,
+        CacheBudget budget)
     {
         // Flag forcing the leaf creation, that saves one get of the non-existent value.
         var createLeaf = false;
@@ -1330,15 +1332,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             _pool = pool;
             _toTouch = [.. toTouch];
             _commit = commit;
-
             _page = _pool.Rent(false);
         }
 
         public void DoWork()
         {
-            _commit.Visit(OnState, TrieType.State);
-
-            // dirty the leftovers
+            // Visit every account that was touched.
             foreach (var keccak in _toTouch)
             {
                 // Requires checking whether exists or not. There are cases where Storage Tries are
@@ -1360,77 +1359,53 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             _pool.Return(_page);
             _page = default;
         }
-
-        private void OnState(in Key key, ReadOnlySpan<byte> value)
-        {
-            Debug.Assert(key.Type == DataType.Account);
-
-            if (value.IsEmpty)
-            {
-                Delete(in key.Path, 0, _commit!, _budget);
-            }
-            else
-            {
-                MarkPathDirty(in key.Path, _page.Span, _commit!, _budget);
-            }
-
-            // mark as touched already
-            _toTouch.Remove(key.Path.UnsafeAsKeccak);
-        }
     }
 
-    private sealed class BuildStorageTriesItem
+    private sealed class BuildStorageTriesItem(
+        ComputeMerkleBehavior behavior,
+        ICommitWithStats parent,
+        Keccak account,
+        CacheBudget budget,
+        BufferPool pool)
     {
-        private readonly ComputeMerkleBehavior _behavior;
-        private readonly ICommitWithStats _parent;
-        private readonly Keccak _account;
-        private readonly CacheBudget _budget;
-        private readonly BufferPool _pool;
-        private Page _page;
-
-        public BuildStorageTriesItem(ComputeMerkleBehavior behavior, ICommitWithStats parent, Keccak account,
-            CacheBudget budget, BufferPool pool)
-        {
-            _behavior = behavior;
-            _parent = parent;
-            _account = account;
-            _budget = budget;
-            _pool = pool;
-            _page = pool.Rent(false);
-        }
+        public Keccak AccountKeccak => account;
+        public Account Written { get; private set; }
 
         public void DoWork(ICommit commit)
         {
+            Page page = default;
             try
             {
+                page = pool.Rent(false);
+
                 var prefixed = new PrefixingCommit(commit);
-                prefixed.SetPrefix(_account);
+                prefixed.SetPrefix(account);
 
                 // Process all the keys that were updated
-                var (set, deleted) = _parent.TouchedStorageSlots[_account];
+                var stats = parent.TouchedStorageSlots[account];
 
                 // Sets first
-                foreach (var key in set)
+                foreach (var key in stats.Set)
                 {
-                    MarkPathDirty(NibblePath.FromKey(key), _page.Span, prefixed, _budget);
+                    MarkPathDirty(NibblePath.FromKey(key), page.Span, prefixed, budget);
                 }
 
                 // Then deletes
-                foreach (var key in deleted)
+                foreach (var key in stats.Deleted)
                 {
-                    Delete(NibblePath.FromKey(key), 0, prefixed, _budget);
+                    Delete(NibblePath.FromKey(key), 0, prefixed, budget);
                 }
 
-                CalculateStorageRoot(_account, _behavior, _budget, prefixed, commit);
+                Written = CalculateStorageRoot(account, behavior, budget, prefixed, commit);
             }
             finally
             {
-                _pool.Return(_page);
-                _page = default;
+                pool.Return(page);
             }
         }
 
-        public static void CalculateStorageRoot(in Keccak keccak, ComputeMerkleBehavior behavior, CacheBudget budget,
+        private static Account CalculateStorageRoot(in Keccak keccak, ComputeMerkleBehavior behavior,
+            CacheBudget budget,
             PrefixingCommit prefixed, ICommit commit)
         {
             // Don't parallelize this work as it would be counter-productive to have parallel over parallel.
@@ -1454,20 +1429,90 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                 // set it in
                 using var pooled = ctx.Rent();
-                commit.Set(key, account.WriteTo(pooled.Span));
+                var written = account.WriteTo(pooled.Span);
+                commit.Set(key, written);
+
+                return account;
+            }
+
+            //see: https://sepolia.etherscan.io/tx/0xb3790025b59b7e31d6d8249e8962234217e0b5b02e47ecb2942b8c4d0f4a3cfe
+            // Contract is created and destroyed, then its values are destroyed
+            // The storage root should be empty, otherwise, it's wrong
+            //TODO: remove assert for fast sync / healing implementation - storage tries saved before accounts
+            //Debug.Assert(keccakOrRlp.Keccak == Keccak.EmptyTreeHash,
+            //    $"Non-existent account with hash of {keccak.ToString()} should have the storage root empty");
+
+            return new Account(0, 0);
+        }
+
+        public override string ToString() => $"{AccountKeccak}: {Written}";
+    }
+
+    /// <summary>
+    /// The logging commit not used by the release code.
+    /// Useful to diagnose which operations are called on the wrapped commit.
+    /// Capable of deciphering Merkle values.
+    /// </summary>
+    public class LoggingCommit(string name, ICommit commit) : ICommit
+    {
+        private readonly StringBuilder _logs = new();
+
+        public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
+        {
+            ReadOnlySpanOwnerWithMetadata<byte> owner = commit.Get(in key);
+
+            Log(nameof(Get), key, owner.Span);
+
+            return owner;
+        }
+
+        private void Log(string method, in Key key, ReadOnlySpan<byte> span)
+        {
+            var path = key.Path.ToString();
+            string value = "";
+            if (span.IsEmpty)
+            {
+                value = "EMPTY";
             }
             else
             {
-                //see: https://sepolia.etherscan.io/tx/0xb3790025b59b7e31d6d8249e8962234217e0b5b02e47ecb2942b8c4d0f4a3cfe
-                // Contract is created and destroyed, then its values are destroyed
-                // The storage root should be empty, otherwise, it's wrong
-                //TODO: remove assert for fast sync / healing implementation - storage tries saved before accounts
-                //Debug.Assert(keccakOrRlp.Keccak == Keccak.EmptyTreeHash,
-                //    $"Non-existent account with hash of {keccak.ToString()} should have the storage root empty");
+                Node.ReadFrom(out var type, out var leaf, out var ext, out var branch, span);
+                switch (type)
+                {
+                    case Node.Type.Leaf:
+                        value = $"LEAF: {leaf.Path.ToString()}";
+                        break;
+                    case Node.Type.Extension:
+                        value = $"EXTENSION: {ext.Path.ToString()}";
+                        break;
+                    case Node.Type.Branch:
+                        value = $"BRANCH: {branch.Children.ToString()}";
+                        break;
+                }
             }
-        }
-    }
 
+            _logs.AppendLine($"{method}({path}): {value}");
+        }
+
+        public void Set(in Key key, in ReadOnlySpan<byte> payload, EntryType type = EntryType.Persistent)
+        {
+            Log(nameof(Set), key, payload);
+            commit.Set(in key, in payload, type);
+        }
+
+        public void Set(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1,
+            EntryType type = EntryType.Persistent)
+        {
+            Log(nameof(Set), key, payload0);
+            commit.Set(in key, in payload0, in payload1, type);
+        }
+
+        public IChildCommit GetChild() => throw new NotImplementedException();
+
+        public bool Owns(object? actualSpanOwner) => commit.Owns(actualSpanOwner);
+
+        public override string ToString() => $"{name}: \n {_logs}";
+    }
 
     public bool CanPrefetch => true;
 
