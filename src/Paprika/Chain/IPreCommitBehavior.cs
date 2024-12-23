@@ -60,6 +60,8 @@ public interface IPreCommitBehavior
     void Prefetch(in Keccak account, in Keccak storage, IPrefetcherContext accessor)
     {
     }
+
+    Keccak RecalculateStorageTrie(ICommit commit, Keccak account, CacheBudget budget) => Keccak.EmptyTreeHash;
 }
 
 /// <summary>

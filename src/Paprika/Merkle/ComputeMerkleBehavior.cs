@@ -264,58 +264,39 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
     }
 
-    public void RecalculateStorageTries(ICommitWithStats commit, CacheBudget budget)
-    {
-        using (_storageProcessing.Measure())
-        {
-            if (_maxDegreeOfParallelism == ParallelismNone)
-            {
-                var storageItems = GetStorageWorkItems(commit, budget);
-                ProcessStorageSingleThreaded(commit, storageItems);
-            }
-            else
-            {
-                ScatterGather(commit, GetStorageWorkItems(commit, budget));
-            }
-        }
-    }
-
     public Keccak RecalculateStorageTrie(ICommit commit, Keccak account, CacheBudget budget)
     {
-        using (_storageProcessing.Measure())
+        var page = _pool.Rent(false);
+        var prefixed = new PrefixingCommit(commit);
+        prefixed.SetPrefix(account);
+
+        try
         {
-            var page = _pool.Rent(false);
-            var prefixed = new PrefixingCommit(commit);
-            prefixed.SetPrefix(account);
-
-            try
+            commit.Visit((in Key key, ReadOnlySpan<byte> value) =>
             {
-                commit.Visit((in Key key, ReadOnlySpan<byte> value) =>
-                {
-                    var keccak = key.Path.UnsafeAsKeccak;
-                    if (account != keccak)
-                        return;
+                var keccak = key.Path.UnsafeAsKeccak;
+                if (account != keccak)
+                    return;
 
-                    if (value.IsEmpty)
-                        Delete(in key.StoragePath, 0, prefixed!, budget);
-                    else
-                        MarkPathDirty(in key.StoragePath, page.Span, prefixed!, budget);
-                }, TrieType.Storage);
+                if (value.IsEmpty)
+                    Delete(in key.StoragePath, 0, prefixed!, budget);
+                else
+                    MarkPathDirty(in key.StoragePath, page.Span, prefixed!, budget);
+            }, TrieType.Storage);
 
-                // Allow parallelism - this always processes single storage trie (for a single account)
-                const ComputeHint hint = ComputeHint.None;
+            // Allow parallelism - this always processes single storage trie (for a single account)
+            const ComputeHint hint = ComputeHint.None;
 
-                // compute new storage root hash
-                UIntPtr stack = default;
-                using var ctx = new ComputeContext(prefixed, TrieType.Storage, hint, budget, _pool, ref stack);
-                Compute(Key.Merkle(NibblePath.Empty), ctx, out var keccakOrRlp);
-                return keccakOrRlp.Keccak;
-            }
-            finally
-            {
-                _pool.Return(page);
-                page = default;
-            }
+            // compute new storage root hash
+            UIntPtr stack = default;
+            using var ctx = new ComputeContext(prefixed, TrieType.Storage, hint, budget, _pool, ref stack);
+            Compute(Key.Merkle(NibblePath.Empty), ctx, out var keccakOrRlp);
+            return keccakOrRlp.Keccak;
+        }
+        finally
+        {
+            _pool.Return(page);
+            page = default;
         }
     }
 

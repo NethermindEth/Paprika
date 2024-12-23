@@ -676,11 +676,11 @@ public class Blockchain : IAsyncDisposable
             var data = new PooledSpanDictionary(Pool, false);
 
             // use append for faster copies as state and storage won't overwrite each other
-            _state.CopyTo(data, OmitUseOnce, filter, true);
-            _storage.CopyTo(data, OmitUseOnce, filter, true);
+            _state.CopyTo(data, OnlyPersistentAndCached, filter, true);
+            _storage.CopyTo(data, OnlyPersistentAndCached, filter, true);
 
             // TODO: apply InspectBeforeApply here to reduce memory usage?
-            _preCommit.CopyTo(data, OmitUseOnce, filter);
+            _preCommit.CopyTo(data, OnlyPersistentAndCached, filter);
 
             // Creation acquires the lease
             return new CommittedBlockState(filter, _destroyed, _blockchain, data, hash,
@@ -946,17 +946,9 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-        /// <summary>
-        /// Run merkle behaviour for storage tries only
-        /// </summary>
-        public void RecalculateStorageTries()
-        {
-            ((ComputeMerkleBehavior)_blockchain._preCommit).RecalculateStorageTries(this, _cacheBudgetPreCommit);
-        }
-
         public Keccak RecalculateStorageTrie(Keccak account)
         {
-            return ((ComputeMerkleBehavior)_blockchain._preCommit).RecalculateStorageTrie(this, account, _cacheBudgetPreCommit);
+            return _blockchain._preCommit.RecalculateStorageTrie(this, account, _cacheBudgetPreCommit);
         }
 
         protected BufferPool Pool => _blockchain._pool;
@@ -1070,21 +1062,6 @@ public class Blockchain : IAsyncDisposable
             _touchedAccounts.Add(address);
         }
 
-        public void SetKeyForProof(in Key key, Span<byte> payLoad)
-        {
-            SetImpl(key, payLoad, EntryType.Proof, key.Type == DataType.Account ? _state : _storage);
-        }
-
-        public void RemoveMerkle(in Key key)
-        {
-            //Remove without marking hash dirty - dangerous!
-
-            var hash = GetHash(key);
-            _filter.Add(hash);
-
-            var k = key.WriteTo(stackalloc byte[key.MaxByteLength]);
-            _preCommit.Set(k, hash, Span<byte>.Empty, (byte)EntryType.Persistent);
-        }
 
         public void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value)
         {
@@ -2271,7 +2248,7 @@ public class Blockchain : IAsyncDisposable
 
         public Keccak RecalculateStorageRoot(in Keccak accountAddress)
         {
-            return _current.RecalculateStorageTrie(accountAddress);
+            return _current?.RecalculateStorageTrie(accountAddress) ?? Keccak.EmptyTreeHash;
         }
 
         private void ThrowOnFinalized()
