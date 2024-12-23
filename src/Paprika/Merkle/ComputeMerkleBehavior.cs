@@ -100,7 +100,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         return value.Keccak;
     }
 
-    public Keccak GetHash(NibblePath path, IReadOnlyWorldState commit, bool ignoreCache = false)
+    public Keccak GetHash(scoped in NibblePath path, IReadOnlyWorldState commit, bool ignoreCache = false)
     {
         ComputeHint hint = ComputeHint.None;
         var wrapper = new CommitWrapper(commit, true);

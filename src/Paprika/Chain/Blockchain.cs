@@ -698,7 +698,7 @@ public class Blockchain : IAsyncDisposable
         /// <summary>
         /// Filters out entries that are of type <see cref="EntryType.UseOnce"/> as they should be used once only.
         /// </summary>
-        private static bool OmitUseOnce(byte metadata) => (metadata != (int)EntryType.UseOnce && metadata != (int)EntryType.Proof);
+        private static bool OnlyPersistentAndCached(byte metadata) => (metadata != (int)EntryType.UseOnce && metadata != (int)EntryType.Proof);
 
         /// <summary>
         /// Applies this state directly on the <see cref="IBatch"/>
