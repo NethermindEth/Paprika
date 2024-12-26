@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -9,7 +10,9 @@ namespace Paprika.Merkle;
 
 public readonly ref struct RlpMemo
 {
-    public static readonly byte[] Empty = new byte[Size];
+    public static readonly byte[] FullyEmpty = new byte[Size];
+
+    public static readonly byte[] Empty = [];
 
     private readonly Span<byte> _buffer;
 
@@ -17,22 +20,32 @@ public readonly ref struct RlpMemo
 
     public RlpMemo(Span<byte> buffer)
     {
-        Debug.Assert(buffer.Length == Size);
-
         _buffer = buffer;
+    }
+
+    public RlpMemo(int count)
+    {
+        _buffer = new byte[count * Keccak.Size];
     }
 
     public ReadOnlySpan<byte> Raw => _buffer;
 
-    public void SetRaw(ReadOnlySpan<byte> keccak, byte nibble)
+    public int Length => _buffer.Length;
+
+    public void SetRaw(ReadOnlySpan<byte> keccak, byte nibble, NibbleSet.Readonly children)
     {
-        Debug.Assert(keccak.Length == Keccak.Size);
-        keccak.CopyTo(GetAtNibble(nibble));
+        var span = GetAtNibble(nibble, children);
+        Debug.Assert(span != null);
+        Debug.Assert(_buffer.Length == (children.SetCount * Keccak.Size));
+
+        keccak.CopyTo(span);
     }
 
-    public void Set(in KeccakOrRlp keccakOrRlp, byte nibble)
+    public void Set(in KeccakOrRlp keccakOrRlp, byte nibble, NibbleSet.Readonly children)
     {
-        var span = GetAtNibble(nibble);
+        var span = GetAtNibble(nibble, children);
+        Debug.Assert(span != null);
+        Debug.Assert(_buffer.Length == (children.SetCount * Keccak.Size));
 
         if (keccakOrRlp.DataType == KeccakOrRlp.Type.Keccak)
         {
@@ -45,16 +58,23 @@ public readonly ref struct RlpMemo
         }
     }
 
-    public void Clear(byte nibble)
+    public void Clear(byte nibble, NibbleSet.Readonly children)
     {
-        GetAtNibble(nibble).Clear();
+        var span = GetAtNibble(nibble, children);
+        Debug.Assert(_buffer.Length == 0 || _buffer.Length == (children.SetCount * Keccak.Size));
+
+        if (span != null)
+        {
+            span.Clear();
+        }
     }
 
-    public bool TryGetKeccak(byte nibble, out ReadOnlySpan<byte> keccak)
+    public bool TryGetKeccak(byte nibble, out ReadOnlySpan<byte> keccak, NibbleSet.Readonly children)
     {
-        var span = GetAtNibble(nibble);
+        var span = GetAtNibble(nibble, children);
+        Debug.Assert(_buffer.Length == 0 || _buffer.Length == (children.SetCount * Keccak.Size));
 
-        if (span.IndexOfAnyExcept((byte)0) >= 0)
+        if (span != null && span.IndexOfAnyExcept((byte)0) >= 0)
         {
             keccak = span;
             return true;
@@ -64,7 +84,123 @@ public readonly ref struct RlpMemo
         return false;
     }
 
-    private Span<byte> GetAtNibble(byte nibble) => _buffer.Slice(nibble * Keccak.Size, Keccak.Size);
+    public bool Exists(byte nibble, NibbleSet.Readonly children)
+    {
+        var leftChildren = (ushort)((ushort)children & ((1U << (nibble + 1)) - 1));
+
+        // Check if the element exists
+        if (_buffer.Length == 0 || (leftChildren & (1U << nibble)) == 0)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private Span<byte> GetAtNibble(byte nibble, NibbleSet.Readonly children)
+    {
+        var leftChildren = (ushort)((ushort)children & ((1U << (nibble + 1)) - 1));
+
+        // Check if the element exists
+        if (_buffer.Length == 0 || (leftChildren & (1U << nibble)) == 0)
+        {
+            return null;
+        }
+
+        var index = BitOperations.PopCount(leftChildren) - 1;
+        return _buffer.Slice(index * Keccak.Size, Keccak.Size);
+    }
+
+    public static RlpMemo Copy(ReadOnlySpan<byte> from, scoped in Span<byte> to)
+    {
+        var span = to[..from.Length];
+        from.CopyTo(span);
+        return new RlpMemo(span);
+    }
+
+    public static RlpMemo Insert(RlpMemo memo, byte nibble, NibbleSet.Readonly children,
+        ReadOnlySpan<byte> keccak, scoped in Span<byte> workingSet)
+    {
+        // Compute the destination size for copying.
+        var size = children.SetCount * Keccak.Size;
+
+        Debug.Assert(workingSet.Length >= size);
+        var span = workingSet[..size];
+
+        // Ensure that this element already exists in the list of children
+        var leftChildren = (ushort)((ushort)children & ((1U << (nibble + 1)) - 1));
+        Debug.Assert((leftChildren & (1U << nibble)) != 0);
+
+        // Find the index of this nibble in the memo
+        var insertIndex = BitOperations.PopCount(leftChildren) - 1;
+        var insertOffset = insertIndex * Keccak.Size;
+
+        if (memo.Length != 0)
+        {
+            var remainingBytes = (children.SetCount - insertIndex - 1) * Keccak.Size;
+
+            // Copy all the elements after the new element
+            if (remainingBytes > 0)
+            {
+                memo._buffer.Slice(insertOffset, remainingBytes)
+                    .CopyTo(span.Slice(insertOffset + Keccak.Size));
+            }
+
+            // Copy elements before the new element
+            if (insertOffset > 0)
+            {
+                memo._buffer.Slice(0, insertOffset).CopyTo(span);
+            }
+        }
+        else
+        {
+            // Insert empty keccak for all the existing children
+            span.Clear();
+        }
+
+        keccak.CopyTo(span.Slice(insertOffset));
+
+        return new RlpMemo(span);
+    }
+
+    public static RlpMemo Delete(RlpMemo memo, byte nibble, NibbleSet.Readonly children,
+        scoped in Span<byte> workingSet)
+    {
+        // Compute the destination size for copying.
+        var size = memo.Length - Keccak.Size;
+        if (size < 0)
+        {
+            // Memo is already empty, nothing to delete.
+            size = 0;
+            return new RlpMemo(workingSet[..size]);
+        }
+
+        var span = workingSet[..size];
+
+        // Ensure that this element does not exist in the list of children
+        var leftChildren = (ushort)((ushort)children & ((1U << (nibble + 1)) - 1));
+        Debug.Assert((leftChildren & (1U << nibble)) == 0);
+
+        // Find the index of this nibble in the memo
+        var deleteIndex = BitOperations.PopCount(leftChildren);
+        var deleteOffset = deleteIndex * Keccak.Size;
+
+        // Copy elements after the deleted element
+        int remainingBytes = (children.SetCount - deleteIndex) * Keccak.Size;
+        if (remainingBytes > 0)
+        {
+            memo._buffer.Slice(deleteOffset + Keccak.Size, remainingBytes)
+                .CopyTo(span.Slice(deleteOffset));
+        }
+
+        // Copy elements before the deleted element
+        if (deleteOffset > 0)
+        {
+            memo._buffer.Slice(0, deleteOffset).CopyTo(span);
+        }
+
+        return new RlpMemo(span);
+    }
 
     public static RlpMemo Decompress(scoped in ReadOnlySpan<byte> leftover, NibbleSet.Readonly children,
         scoped in Span<byte> workingSet)
@@ -116,7 +252,7 @@ public readonly ref struct RlpMemo
                 var keccak = leftover.Slice(at * Keccak.Size, Keccak.Size);
                 at++;
 
-                memo.SetRaw(keccak, i);
+                memo.SetRaw(keccak, i, children);
             }
         }
 
@@ -147,7 +283,7 @@ public readonly ref struct RlpMemo
         {
             if (children[i])
             {
-                if (memo.TryGetKeccak(i, out var keccak))
+                if (memo.TryGetKeccak(i, out var keccak, children))
                 {
                     var dest = writeTo.Slice(at * Keccak.Size, Keccak.Size);
                     at++;

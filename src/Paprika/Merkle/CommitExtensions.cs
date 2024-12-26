@@ -42,6 +42,7 @@ public static class CommitExtensions
         EntryType type = EntryType.Persistent)
     {
         var branch = new Branch(children);
+        Debug.Assert(rlp.Length == 0 || rlp.Length == (children.SetCount * Keccak.Size));
         commit.Set(key, branch.WriteTo(stackalloc byte[Branch.MaxByteLength]), rlp, type);
     }
 

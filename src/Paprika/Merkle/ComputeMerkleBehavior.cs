@@ -406,15 +406,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             return data;
         }
 
-        Debug.Assert(memoizedRlp.Length == RlpMemo.Size);
-
-        // There are RLPs here, compress them
-        var dataLength = data.Length - RlpMemo.Size;
+        // Copy the memoized RLPs
+        var dataLength = data.Length - memoizedRlp.Length;
         data[..dataLength].CopyTo(workingSet);
+        memoizedRlp.CopyTo(workingSet[dataLength..]);
 
-        var compressedLength = RlpMemo.Compress(key, memoizedRlp, branch.Children, workingSet[dataLength..]);
-
-        return workingSet[..(dataLength + compressedLength)];
+        return workingSet[..data.Length];
     }
 
     public Keccak RootHash { get; private set; }
@@ -597,9 +594,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         if (memoize)
         {
-            var childRlpRequiresUpdate = isOwnedByThisCommit == false || previousRlp.Length != RlpMemo.Size;
+            var childRlpRequiresUpdate = isOwnedByThisCommit == false;
             memo = childRlpRequiresUpdate
-                ? RlpMemo.Decompress(previousRlp, branch.Children, rlpMemoization)
+                ? RlpMemo.Copy(previousRlp, rlpMemoization)
                 : new RlpMemo(MakeRlpWritable(previousRlp));
         }
 
@@ -619,7 +616,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             {
                 if (branch.Children[i])
                 {
-                    if (memoize && memo.TryGetKeccak(i, out var keccak))
+                    if (memoize && memo.TryGetKeccak(i, out var keccak, branch.Children))
                     {
                         // keccak from cache
                         stream.Encode(keccak);
@@ -651,16 +648,24 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     if (memoize)
                     {
                         memoizedUpdated = true;
-                        memo.Set(keccakOrRlp, i);
+
+                        if (memo.Exists(i, branch.Children))
+                        {
+                            memo.Set(keccakOrRlp, i, branch.Children);
+                        }
+                        else if (keccakOrRlp.DataType == KeccakOrRlp.Type.Keccak)
+                        {
+                            memo = RlpMemo.Insert(memo, i, branch.Children, keccakOrRlp.Span, rlpMemoization);
+                        }
                     }
                 }
                 else
                 {
                     stream.EncodeEmptyArray();
 
-                    if (memoize)
+                    if (memoize && memo.TryGetKeccak(i, out var keccak, branch.Children))
                     {
-                        memo.Clear(i);
+                        memo = RlpMemo.Delete(memo, i, branch.Children, rlpMemoization);
                         memoizedUpdated = true;
                     }
                 }
@@ -732,12 +737,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     if (value.Length == Keccak.Size)
                     {
                         memoizedUpdated = true;
-                        memo.SetRaw(value, i);
+                        memo.SetRaw(value, i, branch.Children);
                     }
                     else
                     {
                         memoizedUpdated = true;
-                        memo.Clear(i);
+                        memo.Clear(i, branch.Children);
                     }
                 }
             }
@@ -759,7 +764,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         if (memoize && !isOwnedByThisCommit && memoizedUpdated)
         {
             //
-            ctx.Commit.SetBranch(key, branch.Children, rlpMemoization, EntryType.Persistent);
+            ctx.Commit.SetBranch(key, branch.Children, memo.Raw, EntryType.Persistent);
         }
 
         KeccakOrRlp.FromSpan(rlp.Slice(from, end - from), out keccakOrRlp);
@@ -952,6 +957,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             case Node.Type.Branch:
                 {
                     var nibble = path[at];
+                    Debug.Assert(leftover.Length == 0 || leftover.Length == (branch.Children.SetCount * Keccak.Size));
                     if (!branch.Children[nibble])
                     {
                         // no such child
@@ -1040,22 +1046,31 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         static void UpdateBranchOnDelete(ICommit commit, in Node.Branch branch, NibbleSet.Readonly children,
             ReadOnlySpan<byte> leftover, ReadOnlySpanOwnerWithMetadata<byte> owner, byte nibble, in Key key)
         {
-            var childRlpRequiresUpdate = owner.IsOwnedBy(commit) == false || leftover.Length != RlpMemo.Size;
+            var childRlpRequiresUpdate = owner.IsOwnedBy(commit) == false;
             RlpMemo memo;
             byte[]? rlpWorkingSet = null;
+            byte[]? deleteWorkingSet = null;
 
             if (childRlpRequiresUpdate)
             {
                 // TODO: make it a context and pass through all the layers
-                rlpWorkingSet = ArrayPool<byte>.Shared.Rent(RlpMemo.Size);
-                memo = RlpMemo.Decompress(leftover, branch.Children, rlpWorkingSet.AsSpan());
+                rlpWorkingSet = ArrayPool<byte>.Shared.Rent(leftover.Length);
+                memo = RlpMemo.Copy(leftover, rlpWorkingSet.AsSpan());
             }
             else
             {
                 memo = new RlpMemo(MakeRlpWritable(leftover));
             }
 
-            memo.Clear(nibble);
+            if (memo.Exists(nibble, children))
+            {
+                memo.Clear(nibble, children);
+            }
+            else if (memo.Length > 0)
+            {
+                deleteWorkingSet = ArrayPool<byte>.Shared.Rent(leftover.Length - Keccak.Size);
+                memo = RlpMemo.Delete(memo, nibble, children, deleteWorkingSet);
+            }
 
             var shouldUpdate = !branch.Children.Equals(children);
 
@@ -1068,6 +1083,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             if (rlpWorkingSet != null)
             {
                 ArrayPool<byte>.Shared.Return(rlpWorkingSet);
+            }
+
+            if (deleteWorkingSet != null)
+            {
+                ArrayPool<byte>.Shared.Return(deleteWorkingSet);
             }
         }
 
@@ -1288,20 +1308,28 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     {
                         var nibble = path[i];
 
-                        var childRlpRequiresUpdate = owner.IsOwnedBy(commit) == false || leftover.Length != RlpMemo.Size;
+                        var childRlpRequiresUpdate = owner.IsOwnedBy(commit) == false;
                         var memo = childRlpRequiresUpdate
-                            ? RlpMemo.Decompress(leftover, branch.Children, rlpMemoWorkingSet)
+                            ? RlpMemo.Copy(leftover, rlpMemoWorkingSet)
                             : new RlpMemo(MakeRlpWritable(leftover));
-
-                        memo.Clear(nibble);
 
                         createLeaf = !branch.Children[nibble];
                         var children = branch.Children.Set(nibble);
                         var shouldUpdateBranch = createLeaf;
 
+                        // If this path does not exist, insert an empty Keccak. Otherwise, clear it in the memo.
+                        if (createLeaf)
+                        {
+                            memo = RlpMemo.Insert(memo, nibble, children, Keccak.Zero.Span, rlpMemoWorkingSet);
+                        }
+                        else
+                        {
+                            memo.Clear(nibble, children);
+                        }
+
                         if (shouldUpdateBranch || childRlpRequiresUpdate)
                         {
-                            // Set the branch if either the children has hanged or the RLP requires the update
+                            // Set the branch if either the children has changed or the RLP requires the update
                             commit.SetBranch(key, children, memo.Raw);
                         }
 
@@ -1655,23 +1683,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         // Branch should be always persistent, already copied and ready to work with.
         type = EntryType.Persistent;
-
-        var leftoverLength = Node.Branch.ReadFrom(data, out var branch).Length;
-        if (leftoverLength == RlpMemo.Size)
-        {
-            // Rlp memo is decompressed, good to be stored as is.
-            return data;
-        }
-
-        // RlpMemo not decompressed.
-
-        // Write branch first
-        var leftover = branch.WriteToWithLeftover(workspace);
-
-        // Decompress to the leftover
-        RlpMemo.Decompress(leftover, branch.Children, leftover);
-
-        return workspace[..(workspace.Length - leftover.Length + RlpMemo.Size)];
+        return data;
     }
 
     [SkipLocalsInit]
