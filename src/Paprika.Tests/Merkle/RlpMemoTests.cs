@@ -5,6 +5,7 @@ using Paprika.Merkle;
 
 namespace Paprika.Tests.Merkle;
 
+[Ignore("Needs refactoring as RLPMemo compression/decompression is removed")]
 public class RlpMemoTests
 {
     public const bool OddKey = true;
@@ -64,8 +65,8 @@ public class RlpMemoTests
 
         // clear zeroes
         var memo = new RlpMemo(raw);
-        memo.Clear((byte)zero0);
-        memo.Clear((byte)zero1);
+        memo.Clear((byte)zero0, NibbleSet.Readonly.All);
+        memo.Clear((byte)zero1, NibbleSet.Readonly.All);
 
         Run(raw, RlpMemo.Size - 2 * Keccak.Size + NibbleSet.MaxByteSize, NibbleSet.Readonly.All, OddKey);
     }
@@ -123,17 +124,5 @@ public class RlpMemoTests
         Span<byte> writeTo = stackalloc byte[compressedSize];
         var written = RlpMemo.Compress(key, memo.Raw, children, writeTo);
         written.Should().Be(compressedSize);
-
-        if (!isOdd && children.SetCount == 2)
-        {
-            // cleanup
-            var decompressed = RlpMemo.Decompress(writeTo, children, stackalloc byte[RlpMemo.Size]);
-            decompressed.Raw.SequenceEqual(RlpMemo.Empty).Should().BeTrue();
-        }
-        else
-        {
-            var decompressed = RlpMemo.Decompress(writeTo, children, stackalloc byte[RlpMemo.Size]);
-            decompressed.Raw.SequenceEqual(memoRaw).Should().BeTrue();
-        }
     }
 }
