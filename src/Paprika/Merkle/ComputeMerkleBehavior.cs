@@ -587,7 +587,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         const int rlpSlice = 1024;
 
         var rlp = buffer.Span[..rlpSlice];
-        var rlpMemoization = buffer.Span.Slice(rlpSlice, RlpMemo.Size);
+        var rlpMemoization = buffer.Span.Slice(rlpSlice, RlpMemo.MaxSize);
         var memoizedUpdated = false;
 
         RlpMemo memo = default;
@@ -610,7 +610,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         if (!runInParallel)
         {
-            var childSpan = buffer.Span[(RlpMemo.Size + rlpSlice)..];
+            var childSpan = buffer.Span[(RlpMemo.MaxSize + rlpSlice)..];
 
             for (byte i = 0; i < NibbleSet.NibbleCount; i++)
             {
@@ -1062,6 +1062,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 memo = new RlpMemo(MakeRlpWritable(leftover));
             }
 
+            // If this child still exists, only clear the memo. Otherwise, delete it from the memo.
             if (memo.Exists(nibble, children))
             {
                 memo.Clear(nibble, children);
