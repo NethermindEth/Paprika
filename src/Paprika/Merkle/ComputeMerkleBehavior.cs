@@ -663,7 +663,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 {
                     stream.EncodeEmptyArray();
 
-                    if (memoize && memo.TryGetKeccak(i, out var keccak, branch.Children))
+                    if (memoize && memo.Exists(i, branch.Children))
                     {
                         memo = RlpMemo.Delete(memo, i, branch.Children, rlpMemoization);
                         memoizedUpdated = true;
@@ -1049,7 +1049,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             var childRlpRequiresUpdate = owner.IsOwnedBy(commit) == false;
             RlpMemo memo;
             byte[]? rlpWorkingSet = null;
-            byte[]? deleteWorkingSet = null;
 
             if (childRlpRequiresUpdate)
             {
@@ -1067,10 +1066,14 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             {
                 memo.Clear(nibble, children);
             }
-            else if (memo.Length > 0)
+            else if (leftover.Length > 0)
             {
-                deleteWorkingSet = ArrayPool<byte>.Shared.Rent(leftover.Length - Keccak.Size);
-                memo = RlpMemo.Delete(memo, nibble, children, deleteWorkingSet);
+                if (rlpWorkingSet == null)
+                {
+                    rlpWorkingSet = ArrayPool<byte>.Shared.Rent(leftover.Length - Keccak.Size);
+                }
+
+                memo = RlpMemo.Delete(memo, nibble, children, rlpWorkingSet);
             }
 
             var shouldUpdate = !branch.Children.Equals(children);
@@ -1084,11 +1087,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             if (rlpWorkingSet != null)
             {
                 ArrayPool<byte>.Shared.Return(rlpWorkingSet);
-            }
-
-            if (deleteWorkingSet != null)
-            {
-                ArrayPool<byte>.Shared.Return(deleteWorkingSet);
             }
         }
 
