@@ -183,7 +183,7 @@ public class RlpMemoTests
 
         for (var i = 0; i < NibbleSet.NibbleCount; i++)
         {
-            children[(byte)i] = false;
+            children[(byte)i] = true;
         }
 
         var memo = new RlpMemo(raw);

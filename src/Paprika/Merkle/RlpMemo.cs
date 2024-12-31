@@ -128,19 +128,18 @@ public readonly ref struct RlpMemo
 
         if (memo.Length != 0)
         {
-            var remainingBytes = (children.SetCount - insertIndex - 1) * Keccak.Size;
+            // Copy all the elements before the new element
+            if (insertOffset > 0)
+            {
+                memo._buffer.Slice(0, insertOffset).CopyTo(span);
+            }
 
             // Copy all the elements after the new element
+            var remainingBytes = (children.SetCount - insertIndex - 1) * Keccak.Size;
             if (remainingBytes > 0)
             {
                 memo._buffer.Slice(insertOffset, remainingBytes)
                     .CopyTo(span.Slice(insertOffset + Keccak.Size));
-            }
-
-            // Copy elements before the new element
-            if (insertOffset > 0)
-            {
-                memo._buffer.Slice(0, insertOffset).CopyTo(span);
             }
         }
         else
@@ -176,18 +175,18 @@ public readonly ref struct RlpMemo
         var deleteIndex = BitOperations.PopCount(leftChildren);
         var deleteOffset = deleteIndex * Keccak.Size;
 
-        // Copy elements after the deleted element
-        int remainingBytes = (children.SetCount - deleteIndex) * Keccak.Size;
+        // Copy all the elements before the deleted element
+        if (deleteOffset > 0)
+        {
+            memo._buffer.Slice(0, deleteOffset).CopyTo(span);
+        }
+
+        // Copy all the elements after the deleted element
+        var remainingBytes = (children.SetCount - deleteIndex) * Keccak.Size;
         if (remainingBytes > 0)
         {
             memo._buffer.Slice(deleteOffset + Keccak.Size, remainingBytes)
                 .CopyTo(span.Slice(deleteOffset));
-        }
-
-        // Copy elements before the deleted element
-        if (deleteOffset > 0)
-        {
-            memo._buffer.Slice(0, deleteOffset).CopyTo(span);
         }
 
         return new RlpMemo(span);

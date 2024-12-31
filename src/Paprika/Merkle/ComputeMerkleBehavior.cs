@@ -734,14 +734,21 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 stream.Encode(value);
                 if (memoize)
                 {
+                    memoizedUpdated = true;
+
                     if (value.Length == Keccak.Size)
                     {
-                        memoizedUpdated = true;
-                        memo.SetRaw(value, i, branch.Children);
+                        if (memo.Exists(i, branch.Children))
+                        {
+                            memo.SetRaw(value, i, branch.Children);
+                        }
+                        else
+                        {
+                            memo = RlpMemo.Insert(memo, i, branch.Children, value, rlpMemoization);
+                        }
                     }
-                    else
+                    else if (memo.Exists(i, branch.Children))
                     {
-                        memoizedUpdated = true;
                         memo.Clear(i, branch.Children);
                     }
                 }
