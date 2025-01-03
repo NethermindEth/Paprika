@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using Paprika.Crypto;
 using Paprika.Data;
@@ -9,30 +10,35 @@ namespace Paprika.Merkle;
 
 public readonly ref struct RlpMemo
 {
-    public static readonly byte[] Empty = new byte[Size];
+    public static readonly byte[] Empty = [];
 
     private readonly Span<byte> _buffer;
 
-    public const int Size = NibbleSet.NibbleCount * Keccak.Size;
+    public const int MaxSize = NibbleSet.NibbleCount * Keccak.Size;
 
     public RlpMemo(Span<byte> buffer)
     {
-        Debug.Assert(buffer.Length == Size);
-
         _buffer = buffer;
     }
 
     public ReadOnlySpan<byte> Raw => _buffer;
 
-    public void SetRaw(ReadOnlySpan<byte> keccak, byte nibble)
+    public int Length => _buffer.Length;
+
+    public void SetRaw(ReadOnlySpan<byte> keccak, byte nibble, NibbleSet.Readonly children)
     {
-        Debug.Assert(keccak.Length == Keccak.Size);
-        keccak.CopyTo(GetAtNibble(nibble));
+        var span = GetAtNibble(nibble, children);
+        Debug.Assert(!span.IsEmpty);
+        Debug.Assert(_buffer.Length == (children.SetCount * Keccak.Size));
+
+        keccak.CopyTo(span);
     }
 
-    public void Set(in KeccakOrRlp keccakOrRlp, byte nibble)
+    public void Set(in KeccakOrRlp keccakOrRlp, byte nibble, NibbleSet.Readonly children)
     {
-        var span = GetAtNibble(nibble);
+        var span = GetAtNibble(nibble, children);
+        Debug.Assert(!span.IsEmpty);
+        Debug.Assert(_buffer.Length == (children.SetCount * Keccak.Size));
 
         if (keccakOrRlp.DataType == KeccakOrRlp.Type.Keccak)
         {
@@ -45,14 +51,21 @@ public readonly ref struct RlpMemo
         }
     }
 
-    public void Clear(byte nibble)
+    public void Clear(byte nibble, NibbleSet.Readonly children)
     {
-        GetAtNibble(nibble).Clear();
+        var span = GetAtNibble(nibble, children);
+        Debug.Assert(_buffer.Length == 0 || _buffer.Length == (children.SetCount * Keccak.Size));
+
+        if (!span.IsEmpty)
+        {
+            span.Clear();
+        }
     }
 
-    public bool TryGetKeccak(byte nibble, out ReadOnlySpan<byte> keccak)
+    public bool TryGetKeccak(byte nibble, out ReadOnlySpan<byte> keccak, NibbleSet.Readonly children)
     {
-        var span = GetAtNibble(nibble);
+        var span = GetAtNibble(nibble, children);
+        Debug.Assert(_buffer.Length == 0 || _buffer.Length == (children.SetCount * Keccak.Size));
 
         if (span.IndexOfAnyExcept((byte)0) >= 0)
         {
@@ -64,139 +77,118 @@ public readonly ref struct RlpMemo
         return false;
     }
 
-    private Span<byte> GetAtNibble(byte nibble) => _buffer.Slice(nibble * Keccak.Size, Keccak.Size);
-
-    public static RlpMemo Decompress(scoped in ReadOnlySpan<byte> leftover, NibbleSet.Readonly children,
-        scoped in Span<byte> workingSet)
+    public bool Exists(byte nibble, NibbleSet.Readonly children)
     {
-        if (_decompressionForbidden)
+        // Check if the element exists
+        if (_buffer.Length == 0 || ((ushort)children & (1U << nibble)) == 0)
         {
-            ThrowDecompressionForbidden();
+            return false;
         }
 
-        var span = workingSet[..Size];
+        return true;
+    }
 
-        if (leftover.IsEmpty)
+    private Span<byte> GetAtNibble(byte nibble, NibbleSet.Readonly children)
+    {
+        var leftChildren = (ushort)((ushort)children & ((1U << (nibble + 1)) - 1));
+
+        // Check if the element exists
+        if (_buffer.Length == 0 || (leftChildren & (1U << nibble)) == 0)
         {
-            // no RLP cached yet
-            span.Clear();
-            return new RlpMemo(span);
+            return [];
         }
 
-        if (leftover.Length == Size)
+        var index = BitOperations.PopCount(leftChildren) - 1;
+        return _buffer.Slice(index * Keccak.Size, Keccak.Size);
+    }
+
+    public static RlpMemo Copy(ReadOnlySpan<byte> from, scoped in Span<byte> to)
+    {
+        var span = to[..from.Length];
+        from.CopyTo(span);
+        return new RlpMemo(span);
+    }
+
+    public static RlpMemo Insert(RlpMemo memo, byte nibble, NibbleSet.Readonly children,
+        ReadOnlySpan<byte> keccak, scoped in Span<byte> workingSet)
+    {
+        // Compute the destination size for copying.
+        var size = children.SetCount * Keccak.Size;
+
+        Debug.Assert(workingSet.Length >= size);
+        var span = workingSet[..size];
+
+        // Ensure that this element already exists in the list of children
+        var leftChildren = (ushort)((ushort)children & ((1U << (nibble + 1)) - 1));
+        Debug.Assert((leftChildren & (1U << nibble)) != 0);
+
+        // Find the index of this nibble in the memo
+        var insertIndex = BitOperations.PopCount(leftChildren) - 1;
+        var insertOffset = insertIndex * Keccak.Size;
+
+        if (memo.Length != 0)
         {
-            leftover.CopyTo(span);
-            return new RlpMemo(span);
-        }
+            // Copy all the elements before the new element
+            if (insertOffset > 0)
+            {
+                memo._buffer.Slice(0, insertOffset).CopyTo(span);
+            }
 
-        // It's neither empty nor full. It must be the compressed form, prepare setup first
-        span.Clear();
-        var memo = new RlpMemo(span);
-
-        // Extract empty bits if any
-        NibbleSet.Readonly empty;
-
-        // The empty bytes length is anything that is not aligned to the Keccak size
-        var emptyBytesLength = leftover.Length % Keccak.Size;
-        if (emptyBytesLength > 0)
-        {
-            var bits = leftover[^emptyBytesLength..];
-            NibbleSet.Readonly.ReadFrom(bits, out empty);
+            // Copy all the elements after the new element
+            var remainingBytes = (children.SetCount - insertIndex - 1) * Keccak.Size;
+            if (remainingBytes > 0)
+            {
+                memo._buffer.Slice(insertOffset, remainingBytes)
+                    .CopyTo(span.Slice(insertOffset + Keccak.Size));
+            }
         }
         else
         {
-            empty = default;
+            // Insert empty keccak for all the existing children
+            span.Clear();
         }
 
-        var at = 0;
-        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
-        {
-            if (children[i] && empty[i] == false)
-            {
-                var keccak = leftover.Slice(at * Keccak.Size, Keccak.Size);
-                at++;
+        keccak.CopyTo(span.Slice(insertOffset));
 
-                memo.SetRaw(keccak, i);
-            }
-        }
-
-        return memo;
-
-        [DoesNotReturn]
-        [MethodImpl(MethodImplOptions.NoInlining)]
-        static void ThrowDecompressionForbidden() => throw new InvalidOperationException("Decompression is forbidden.");
+        return new RlpMemo(span);
     }
 
-    [SkipLocalsInit]
-    public static int Compress(in Key key, scoped in ReadOnlySpan<byte> memoizedRlp, NibbleSet.Readonly children, scoped in Span<byte> writeTo)
+    public static RlpMemo Delete(RlpMemo memo, byte nibble, NibbleSet.Readonly children,
+        scoped in Span<byte> workingSet)
     {
-        // Optimization, omitting some of the branches to memoize.
-        // It omits only these with two children where the cost of the recompute is not big.
-        // To prevent an attack of spawning multiple levels of such branches, only even are skipped
-        if (children.SetCount == 2 && (key.Path.Length + key.StoragePath.Length) % 2 == 0)
+        // Compute the destination size for copying.
+        var size = memo.Length - Keccak.Size;
+        if (size < 0)
         {
-            return 0;
+            // Memo is already empty, nothing to delete.
+            size = 0;
+            return new RlpMemo(workingSet[..size]);
         }
 
-        var memo = new RlpMemo(ComputeMerkleBehavior.MakeRlpWritable(memoizedRlp));
-        var at = 0;
+        var span = workingSet[..size];
 
-        var empty = new NibbleSet();
+        // Ensure that this element does not exist in the list of children
+        var leftChildren = (ushort)((ushort)children & ((1U << (nibble + 1)) - 1));
+        Debug.Assert((leftChildren & (1U << nibble)) == 0);
 
-        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+        // Find the index of this nibble in the memo
+        var deleteIndex = BitOperations.PopCount(leftChildren);
+        var deleteOffset = deleteIndex * Keccak.Size;
+
+        // Copy all the elements before the deleted element
+        if (deleteOffset > 0)
         {
-            if (children[i])
-            {
-                if (memo.TryGetKeccak(i, out var keccak))
-                {
-                    var dest = writeTo.Slice(at * Keccak.Size, Keccak.Size);
-                    at++;
-                    keccak.CopyTo(dest);
-                }
-                else
-                {
-                    empty[i] = true;
-                }
-            }
+            memo._buffer.Slice(0, deleteOffset).CopyTo(span);
         }
 
-        Debug.Assert(at != 16 || empty.SetCount == 0, "If at = 16, empty should be empty");
-
-        if (empty.SetCount == children.SetCount)
+        // Copy all the elements after the deleted element
+        var remainingBytes = (children.SetCount - deleteIndex) * Keccak.Size;
+        if (remainingBytes > 0)
         {
-            // None of children has their Keccak memoized. Instead of reporting it, return nothing written.
-            return 0;
+            memo._buffer.Slice(deleteOffset + Keccak.Size, remainingBytes)
+                .CopyTo(span.Slice(deleteOffset));
         }
 
-        if (empty.SetCount > 0)
-        {
-            var dest = writeTo.Slice(at * Keccak.Size, NibbleSet.MaxByteSize);
-            new NibbleSet.Readonly(empty).WriteToWithLeftover(dest);
-            return at * Keccak.Size + NibbleSet.MaxByteSize;
-        }
-
-        // Return only children that were written
-        return at * Keccak.Size;
-    }
-
-    /// <summary>
-    /// Test only method to forbid decompression.
-    /// </summary>
-    /// <returns></returns>
-    public static NoDecompressionScope NoDecompression() => new();
-
-    private static volatile bool _decompressionForbidden;
-
-    public readonly struct NoDecompressionScope : IDisposable
-    {
-        public NoDecompressionScope()
-        {
-            _decompressionForbidden = true;
-        }
-
-        public void Dispose()
-        {
-            _decompressionForbidden = false;
-        }
+        return new RlpMemo(span);
     }
 }
