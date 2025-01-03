@@ -1,11 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
-    <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
-      <DefineConstants>$(DefineConstants);SNAP_SYNC_SUPPORT</DefineConstants>
-    </PropertyGroup>
-    <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
-      <DefineConstants>$(DefineConstants);SNAP_SYNC_SUPPORT</DefineConstants>
-    </PropertyGroup>
-
     <ItemGroup>
       <PackageReference Include="HdrHistogram" Version="2.5.0" />
       <PackageReference Include="Nethermind.Numerics.Int256" Version="1.2.0" />

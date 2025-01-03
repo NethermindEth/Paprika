@@ -17,8 +17,9 @@ public interface IPreCommitBehavior
     /// </summary>
     /// <param name="commit">The object representing the commit.</param>
     /// <param name="budget">The budget for caching capabilities.</param>
+    /// <param name="isSnapSync">Whether the current execution is done for snap sync purposes.</param>
     /// <returns>The result of the before commit.</returns>
-    Keccak BeforeCommit(ICommitWithStats commit, CacheBudget budget);
+    Keccak BeforeCommit(ICommitWithStats commit, CacheBudget budget, bool isSnapSync = false);
 
     /// <summary>
     /// Inspects the data allowing it to overwrite them if needed, before the commit is applied to the database.

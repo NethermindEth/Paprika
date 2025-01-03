@@ -54,7 +54,7 @@ public interface IRawState : IReadOnlyWorldState
     /// Enforces root hash calculation without actual commit
     /// </summary>
     /// <returns></returns>
-    Keccak RefreshRootHash();
+    Keccak RefreshRootHash(bool isSyncMode = false);
 
     /// <summary>
     /// Recalculates storage roots and returns new storage root hash for a given account 

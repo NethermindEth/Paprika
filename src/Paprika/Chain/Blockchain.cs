@@ -2111,9 +2111,9 @@ public class Blockchain : IAsyncDisposable
             _prefixesToDelete.ResetWrittenCount();
         }
 
-        public Keccak RefreshRootHash()
+        public Keccak RefreshRootHash(bool isSyncMode = false)
         {
-            Hash = _current.Hash;
+            Hash = _blockchain._preCommit.BeforeCommit(_current, CacheBudget.Options.None.Build(), isSyncMode);
             return Hash;
         }
 

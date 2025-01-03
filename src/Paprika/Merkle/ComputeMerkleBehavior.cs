@@ -214,7 +214,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
     }
 
-    public Keccak BeforeCommit(ICommitWithStats commit, CacheBudget budget)
+    public Keccak BeforeCommit(ICommitWithStats commit, CacheBudget budget, bool isSnapSync = false)
     {
         using var total = _totalMerkle.Measure();
 
@@ -235,7 +235,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         using (_storageProcessing.Measure())
         {
-            var storageItems = GetStorageWorkItems(commit, budget);
+            var storageItems = GetStorageWorkItems(commit, budget, isSnapSync);
 
             if (_maxDegreeOfParallelism == ParallelismNone)
             {
@@ -253,7 +253,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
             var root = Key.Merkle(NibblePath.Empty);
             UIntPtr stack = default;
-            var hint = _maxDegreeOfParallelism == ParallelismNone ? ComputeHint.DontUseParallel : ComputeHint.None;
+
+            var hint = (_maxDegreeOfParallelism == ParallelismNone ? ComputeHint.DontUseParallel : ComputeHint.None) |
+                       (isSnapSync ? ComputeHint.SnapSync : ComputeHint.None);
+
             using var ctx = new ComputeContext(commit, TrieType.State, hint, budget, _pool, ref stack);
             Compute(root, ctx, out var rootKeccak);
 
@@ -365,10 +368,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     /// <summary>
     /// Builds works items responsible for building up the storage tries.
     /// </summary>
-    private BuildStorageTriesItem[] GetStorageWorkItems(ICommitWithStats commit, CacheBudget budget)
+    private BuildStorageTriesItem[] GetStorageWorkItems(ICommitWithStats commit, CacheBudget budget, bool isSnapSync)
     {
         return commit.TouchedStorageSlots
-            .Select(kvp => new BuildStorageTriesItem(this, commit, kvp.Key, budget, _pool))
+            .Select(kvp => new BuildStorageTriesItem(this, commit, kvp.Key, budget, _pool, isSnapSync))
             .ToArray();
     }
 
@@ -434,7 +437,12 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         /// <summary>
         /// Forces the recalculation of the storage root hash.
         /// </summary>
-        ForceStorageRootHashRecalculation = 4
+        ForceStorageRootHashRecalculation = 4,
+
+        /// <summary>
+        /// The current computation is done for <see cref="Chain.SnapSync"/> purposes.
+        /// </summary>
+        SnapSync = 8,
     }
 
     private readonly ref struct ComputeContext
@@ -670,31 +678,34 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             var budget = ctx.Budget;
 
             // parallel calculation
-#if SNAP_SYNC_SUPPORT
-            //Unpack RlpMemo to be used in parallel calculations
-            //used for node proofs in snap sync
-            Keccak[] memoKeccaks = new Keccak[NibbleSet.NibbleCount];
-            if (memoize)
+
+            Keccak[]? snapSyncMemo = null;
+
+            if (hint.HasFlag(ComputeHint.SnapSync))
             {
-                for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+                // The hint provides information that we're snap syncing.
+                // RlpMemo is unpacked to be used in parallel calculations.
+                snapSyncMemo = new Keccak[NibbleSet.NibbleCount];
+                if (memoize)
                 {
-                    if (memo.TryGetKeccak(i, out var keccakBytes))
-                        memoKeccaks[i] = new Keccak(keccakBytes);
+                    for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+                    {
+                        if (memo.TryGetKeccak(i, out var keccakBytes))
+                            snapSyncMemo[i] = new Keccak(keccakBytes);
+                    }
                 }
             }
-#endif
 
             ParallelUnbalancedWork.For(0, NibbleSet.NibbleCount, s_parallelOptions, nibble =>
             {
                 var childPath = NibblePath.Single((byte)nibble, 0);
                 var child = commits[nibble] = commit.GetChild();
-#if SNAP_SYNC_SUPPORT
-                if (memoKeccaks[nibble] != Keccak.Zero)
+
+                if (snapSyncMemo != null && snapSyncMemo[nibble] != Keccak.Zero)
                 {
-                    results[nibble] = memoKeccaks[nibble].Span.ToArray();
+                    results[nibble] = snapSyncMemo[nibble].Span.ToArray();
                 }
                 else
-#endif
                 {
                     UIntPtr stack = default;
                     using var ctx = new ComputeContext(child, trieType, hint, budget, _pool, ref stack);
@@ -1471,7 +1482,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         ICommitWithStats parent,
         Keccak account,
         CacheBudget budget,
-        BufferPool pool)
+        BufferPool pool,
+        bool isSnapSync)
     {
         public Keccak AccountKeccak => account;
         public Account Written { get; private set; }
@@ -1501,7 +1513,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     Delete(NibblePath.FromKey(key), 0, prefixed, budget);
                 }
 
-                Written = CalculateStorageRoot(account, behavior, budget, prefixed, commit);
+                Written = CalculateStorageRoot(account, behavior, budget, prefixed, commit, isSnapSync);
             }
             finally
             {
@@ -1511,10 +1523,10 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         private static Account CalculateStorageRoot(in Keccak keccak, ComputeMerkleBehavior behavior,
             CacheBudget budget,
-            PrefixingCommit prefixed, ICommit commit)
+            PrefixingCommit prefixed, ICommit commit, bool isSnapSync)
         {
             // Don't parallelize this work as it would be counter-productive to have parallel over parallel.
-            const ComputeHint hint = ComputeHint.DontUseParallel;
+            var hint = ComputeHint.DontUseParallel | (isSnapSync ? ComputeHint.SnapSync : ComputeHint.None);
 
             // compute new storage root hash
             UIntPtr stack = default;
