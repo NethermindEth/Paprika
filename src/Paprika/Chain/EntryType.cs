@@ -18,5 +18,10 @@ public enum EntryType : byte
     /// <summary>
     /// The entry is put only for a short period of computation and should not be considered to be stored in memory beyond this computation.
     /// </summary>
-    UseOnce = 2
+    UseOnce = 2,
+
+    /// <summary>
+    /// Entry used by snap sync to add keccak of a given path from proof. Used in calculating merkle, but not persisted
+    /// </summary>
+    Proof = 3,
 }
