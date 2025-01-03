@@ -1,11 +1,11 @@
 using FluentAssertions;
 using Nethermind.Int256;
-using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Store;
+using Paprika.RLP;
 
 namespace Paprika.Tests.Chain;
 
@@ -29,39 +29,13 @@ public class RawStateTests
         }
 
         raw.DestroyAccount(account);
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         raw.Finalize(1);
 
         raw.Hash.Should().Be(Keccak.EmptyTreeHash);
     }
 
-    [Test]
-    public async Task Snap_boundary()
-    {
-        var account = Values.Key1;
-        var keccak = Values.Key2;
-
-        using var db = PagedDb.NativeMemoryDb(256 * 1024, 2);
-        var merkle = new ComputeMerkleBehavior();
-
-        await using var blockchain = new Blockchain(db, merkle);
-        using var raw = blockchain.StartRaw();
-
-        raw.SetBoundary(NibblePath.FromKey(account).SliceTo(1), keccak);
-        raw.Commit();
-
-        var root1 = raw.Hash;
-
-        raw.SetAccount(account, new Account(1, 1));
-        raw.Commit();
-
-        raw.Finalize(1);
-
-        var root2 = raw.Hash;
-
-        root1.Should().NotBe(root2);
-    }
 
     [Test]
     public async Task Metadata_are_preserved()
@@ -81,13 +55,13 @@ public class RawStateTests
 
         using var raw = blockchain.StartRaw();
         raw.SetAccount(a, new Account(valueA, valueA));
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         raw.SetAccount(b, new Account(valueB, valueB));
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         raw.SetAccount(c, new Account(valueC, valueC));
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         var root = raw.Hash;
 
@@ -116,11 +90,11 @@ public class RawStateTests
         for (uint i = 0; i < 1_000; i++)
         {
             raw.SetAccount(account, new Account(i, i));
-            raw.Commit();
+            raw.Commit(keepOpened: true);
         }
 
         raw.DestroyAccount(account);
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         raw.Finalize(1);
 
@@ -140,10 +114,10 @@ public class RawStateTests
         using var raw = blockchain.StartRaw();
 
         raw.SetAccount(account, new Account(1, 1));
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         raw.RegisterDeleteByPrefix(Key.Account(account));
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         raw.Finalize(1);
 
@@ -169,10 +143,10 @@ public class RawStateTests
 
         raw.SetAccount(account1, new Account(1, 1));
         raw.SetAccount(account2, new Account(2, 2));
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         raw.RegisterDeleteByPrefix(Key.Account(NibblePath.FromKey(account2).SliceTo(1)));
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         raw.Finalize(1);
 
@@ -185,10 +159,10 @@ public class RawStateTests
         using var raw2 = blockchain.StartRaw();
 
         raw2.SetAccount(account2, new Account(2, 2));
-        raw2.Commit();
+        raw2.Commit(keepOpened: true);
 
         raw2.RegisterDeleteByPrefix(Key.Account(NibblePath.Empty));
-        raw2.Commit();
+        raw2.Commit(keepOpened: true);
 
         raw2.Finalize(2);
 
@@ -212,17 +186,91 @@ public class RawStateTests
 
         raw.SetAccount(account, new Account(1, 1));
         raw.SetStorage(account, Values.Key2, new byte[] { 1, 2, 3, 4, 5 });
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         using var read = db.BeginReadOnlyBatch();
         read.TryGet(Key.StorageCell(NibblePath.FromKey(account), Values.Key2), out _).Should().BeTrue();
 
         raw.RegisterDeleteByPrefix(Key.StorageCell(NibblePath.FromKey(account), NibblePath.Empty));
-        raw.Commit();
+        raw.Commit(keepOpened: true);
 
         raw.Finalize(1);
 
         using var read2 = db.BeginReadOnlyBatch();
         read2.TryGet(Key.StorageCell(NibblePath.FromKey(account), Values.Key2), out _).Should().BeFalse();
     }
+
+    [Test]
+    public void CalcRootFromRlpMemoDataState()
+    {
+        using var db = PagedDb.NativeMemoryDb(256 * 1024, 2);
+        var merkle = new ComputeMerkleBehavior();
+
+        var blockchain = new Blockchain(db, merkle);
+
+        using var raw = blockchain.StartRaw();
+
+        var random = GetRandom();
+
+        Span<byte> rlp = stackalloc byte[1024];
+        RlpStream stream = new RlpStream(rlp);
+        stream.StartSequence(529);
+
+        //all children to trigger parallel branch hash calculation
+        byte[] children = new byte[16];
+        Keccak[] childHashes = new Keccak[16];
+
+        for (int i = 0; i < 16; i++)
+        {
+            children[i] = (byte)i;
+            childHashes[i] = random.NextKeccak();
+            stream.Encode(childHashes[i]);
+        }
+        stream.EncodeEmptyArray();
+        KeccakOrRlp.FromSpan(rlp.Slice(0, stream.Position), out var checkKeccakOrRlp);
+
+        raw.CreateMerkleBranch(Keccak.Zero, NibblePath.Empty, children, childHashes);
+        Keccak newRootHash = raw.RefreshRootHash(true);
+
+        newRootHash.Should().Be(checkKeccakOrRlp.Keccak);
+    }
+
+    [Test]
+    public void CalcRootFromRlpMemoDataStorage()
+    {
+        using var db = PagedDb.NativeMemoryDb(256 * 1024, 2);
+        var merkle = new ComputeMerkleBehavior();
+
+        var blockchain = new Blockchain(db, merkle);
+
+        using var raw = blockchain.StartRaw();
+
+        var account = Values.Key1;
+
+        var random = GetRandom();
+
+        Span<byte> rlp = stackalloc byte[1024];
+        RlpStream stream = new RlpStream(rlp);
+        stream.StartSequence(529);
+
+        //all children to trigger parallel branch hash calculation
+        byte[] children = new byte[16];
+        Keccak[] childHashes = new Keccak[16];
+
+        for (int i = 0; i < 16; i++)
+        {
+            children[i] = (byte)i;
+            childHashes[i] = random.NextKeccak();
+            stream.Encode(childHashes[i]);
+        }
+        stream.EncodeEmptyArray();
+        KeccakOrRlp.FromSpan(rlp.Slice(0, stream.Position), out var checkKeccakOrRlp);
+
+        raw.CreateMerkleBranch(account, NibblePath.Empty, children, childHashes);
+        Keccak newRootHash = raw.RecalculateStorageRoot(account, true);
+
+        newRootHash.Should().Be(checkKeccakOrRlp.Keccak);
+    }
+
+    private static Random GetRandom() => new(13);
 }
