@@ -268,7 +268,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
         }
     }
 
-    public Keccak RecalculateStorageTrie(ICommit commit, Keccak account, CacheBudget budget)
+    public Keccak RecalculateStorageTrie(ICommit commit, Keccak account, CacheBudget budget, bool isSnapSync = false)
     {
         var page = _pool.Rent(false);
         var prefixed = new PrefixingCommit(commit);
@@ -289,7 +289,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             }, TrieType.Storage);
 
             // Allow parallelism - this always processes single storage trie (for a single account)
-            const ComputeHint hint = ComputeHint.None;
+            ComputeHint hint = isSnapSync ? ComputeHint.SnapSync : ComputeHint.None;
 
             // compute new storage root hash
             UIntPtr stack = default;

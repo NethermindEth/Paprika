@@ -63,7 +63,15 @@ public interface IPreCommitBehavior
     {
     }
 
-    Keccak RecalculateStorageTrie(ICommit commit, Keccak account, CacheBudget budget) => Keccak.EmptyTreeHash;
+    /// <summary>
+    /// Recalculate storage trie for a given account
+    /// </summary>
+    /// <param name="commit">The object representing the commit.</param>
+    /// <param name="account">Account for which the storage trie root should be recalculated</param>
+    /// <param name="budget">The budget for caching capabilities.</param>
+    /// <param name="isSnapSync">Whether the current execution is done for snap sync purposes.</param>
+    /// <returns></returns>
+    Keccak RecalculateStorageTrie(ICommit commit, Keccak account, CacheBudget budget, bool isSnapSync = false) => Keccak.EmptyTreeHash;
 }
 
 /// <summary>

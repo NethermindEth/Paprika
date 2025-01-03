@@ -61,7 +61,7 @@ public interface IRawState : IReadOnlyWorldState
     /// </summary>
     /// <param name="accountAddress"></param>
     /// <returns></returns>
-    Keccak RecalculateStorageRoot(in Keccak accountAddress);
+    Keccak RecalculateStorageRoot(in Keccak accountAddress, bool isSyncMode = false);
 
     /// <summary>
     /// Cleans current data

@@ -942,9 +942,9 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-        public Keccak RecalculateStorageTrie(Keccak account)
+        public Keccak RecalculateStorageTrie(Keccak account, bool isSyncMode = false)
         {
-            return _blockchain._preCommit.RecalculateStorageTrie(this, account, _cacheBudgetPreCommit);
+            return _blockchain._preCommit.RecalculateStorageTrie(this, account, _cacheBudgetPreCommit, isSyncMode);
         }
 
         protected BufferPool Pool => _blockchain._pool;
@@ -2155,9 +2155,9 @@ public class Blockchain : IAsyncDisposable
             ((ComputeMerkleBehavior)_blockchain._preCommit).Accept(visitor, rootPath, context);
         }
 
-        public Keccak RecalculateStorageRoot(in Keccak accountAddress)
+        public Keccak RecalculateStorageRoot(in Keccak accountAddress, bool isSyncMode = false)
         {
-            return _current?.RecalculateStorageTrie(accountAddress) ?? Keccak.EmptyTreeHash;
+            return _current?.RecalculateStorageTrie(accountAddress, isSyncMode) ?? Keccak.EmptyTreeHash;
         }
 
         private void ThrowOnFinalized()

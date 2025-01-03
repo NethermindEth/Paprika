@@ -1,11 +1,11 @@
 using FluentAssertions;
 using Nethermind.Int256;
-using NUnit.Framework;
 using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
 using Paprika.Store;
+using Paprika.RLP;
 
 namespace Paprika.Tests.Chain;
 
@@ -199,4 +199,78 @@ public class RawStateTests
         using var read2 = db.BeginReadOnlyBatch();
         read2.TryGet(Key.StorageCell(NibblePath.FromKey(account), Values.Key2), out _).Should().BeFalse();
     }
+
+    [Test]
+    public void CalcRootFromRlpMemoDataState()
+    {
+        using var db = PagedDb.NativeMemoryDb(256 * 1024, 2);
+        var merkle = new ComputeMerkleBehavior();
+
+        var blockchain = new Blockchain(db, merkle);
+
+        using var raw = blockchain.StartRaw();
+
+        var random = GetRandom();
+
+        Span<byte> rlp = stackalloc byte[1024];
+        RlpStream stream = new RlpStream(rlp);
+        stream.StartSequence(529);
+
+        //all children to trigger parallel branch hash calculation
+        byte[] children = new byte[16];
+        Keccak[] childHashes = new Keccak[16];
+
+        for (int i = 0; i < 16; i++)
+        {
+            children[i] = (byte)i;
+            childHashes[i] = random.NextKeccak();
+            stream.Encode(childHashes[i]);
+        }
+        stream.EncodeEmptyArray();
+        KeccakOrRlp.FromSpan(rlp.Slice(0, stream.Position), out var checkKeccakOrRlp);
+
+        raw.CreateMerkleBranch(Keccak.Zero, NibblePath.Empty, children, childHashes);
+        Keccak newRootHash = raw.RefreshRootHash(true);
+
+        newRootHash.Should().Be(checkKeccakOrRlp.Keccak);
+    }
+
+    [Test]
+    public void CalcRootFromRlpMemoDataStorage()
+    {
+        using var db = PagedDb.NativeMemoryDb(256 * 1024, 2);
+        var merkle = new ComputeMerkleBehavior();
+
+        var blockchain = new Blockchain(db, merkle);
+
+        using var raw = blockchain.StartRaw();
+
+        var account = Values.Key1;
+
+        var random = GetRandom();
+
+        Span<byte> rlp = stackalloc byte[1024];
+        RlpStream stream = new RlpStream(rlp);
+        stream.StartSequence(529);
+
+        //all children to trigger parallel branch hash calculation
+        byte[] children = new byte[16];
+        Keccak[] childHashes = new Keccak[16];
+
+        for (int i = 0; i < 16; i++)
+        {
+            children[i] = (byte)i;
+            childHashes[i] = random.NextKeccak();
+            stream.Encode(childHashes[i]);
+        }
+        stream.EncodeEmptyArray();
+        KeccakOrRlp.FromSpan(rlp.Slice(0, stream.Position), out var checkKeccakOrRlp);
+
+        raw.CreateMerkleBranch(account, NibblePath.Empty, children, childHashes);
+        Keccak newRootHash = raw.RecalculateStorageRoot(account, true);
+
+        newRootHash.Should().Be(checkKeccakOrRlp.Keccak);
+    }
+
+    private static Random GetRandom() => new(13);
 }
