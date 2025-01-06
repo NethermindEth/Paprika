@@ -120,11 +120,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             using var merkleData = commit.Get(parentKey);
             if (!merkleData.Span.IsEmpty)
             {
-                var leftover = Node.ReadFrom(out var parenType, out var leaf, out _, out var branch, merkleData.Span);
-                if (parenType == Node.Type.Branch && !ignoreCache)
+                var leftover = Node.ReadFrom(out var parentType, out var leaf, out _, out var branch, merkleData.Span);
+                if (parentType == Node.Type.Branch && !ignoreCache)
                 {
-                    Span<byte> rlpMemoization = stackalloc byte[RlpMemo.Size];
-                    RlpMemo memo = RlpMemo.Decompress(leftover, branch.Children, rlpMemoization);
+                    Span<byte> rlpMemoization = stackalloc byte[leftover.Length];
+                    var memo = RlpMemo.Copy(leftover, rlpMemoization);
                     if (memo.TryGetKeccak(path[NibblePath.KeccakNibbleCount - 1], out var keccakSpan))
                         return new Keccak(keccakSpan);
                 }
@@ -161,8 +161,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 var leftover = Node.ReadFrom(out var parenType, out var leaf, out _, out var branch, merkleData.Span);
                 if (parenType == Node.Type.Branch && !ignoreCache)
                 {
-                    Span<byte> rlpMemoization = stackalloc byte[RlpMemo.Size];
-                    RlpMemo memo = RlpMemo.Decompress(leftover, branch.Children, rlpMemoization);
+                    Span<byte> rlpMemoization = stackalloc byte[leftover.Length];
+                    var memo = RlpMemo.Copy(leftover, rlpMemoization);
                     if (memo.TryGetKeccak(storagePath[NibblePath.KeccakNibbleCount - 1], out var keccakSpan))
                         return new Keccak(keccakSpan);
                 }
@@ -1406,7 +1406,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                     context.Level++;
                     Span<byte> workingSpan = stackalloc byte[NibblePath.MaxLengthValue * 2 + 1];
-                    Span<byte> rlpMemoization = stackalloc byte[RlpMemo.Size];
+                    Span<byte> rlpMemoization = stackalloc byte[leftover.Length];
                     for (byte i = 0; i < NibbleSet.NibbleCount; i++)
                     {
                         if (branch.Children[i])
@@ -1416,7 +1416,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                             if (childPath.Length == NibblePath.KeccakNibbleCount)
                             {
-                                RlpMemo memo = RlpMemo.Decompress(leftover, branch.Children, rlpMemoization);
+                                var memo = RlpMemo.Copy(leftover, rlpMemoization);
                                 KeccakOrRlp childKeccakOrRlp = Keccak.Zero;
                                 if (memo.TryGetKeccak(i, out var keccakSpan))
                                 {
