@@ -200,7 +200,7 @@ public class RlpMemoTests
         var children = new NibbleSet();
 
         Span<byte> keccak = new byte[Keccak.Size];
-        keccak.Fill(0xFF);            
+        keccak.Fill(0xFF);
 
         for (var i = 0; i < RlpMemo.MaxSize - NibbleSet.MaxByteSize; i++)
         {
