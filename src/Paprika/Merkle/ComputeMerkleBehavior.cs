@@ -379,39 +379,19 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
     public ReadOnlySpan<byte> InspectBeforeApply(in Key key, ReadOnlySpan<byte> data, Span<byte> workingSet)
     {
-        if (data.IsEmpty)
-            return data;
-
-        if (key.Type != DataType.Merkle)
-            return data;
-
-        var node = Node.Header.Peek(data).NodeType;
-
-        if (node != Node.Type.Branch)
+        if (data.IsEmpty || key.Type != DataType.Merkle)
         {
-            // Return data as is, either the node is not a branch or the memoization is not set for branches.
             return data;
         }
 
-        if (key.Path.Length < SkipRlpMemoizationForTopLevelsCount)
+        if (key.Path.Length < SkipRlpMemoizationForTopLevelsCount &&
+            Node.Header.Peek(data).NodeType == Node.Type.Branch)
         {
             // For State branches, omit top levels of RLP memoization
             return Node.Branch.GetOnlyBranchData(data);
         }
 
-        var memoizedRlp = Node.Branch.ReadFrom(data, out var branch);
-        if (memoizedRlp.Length == 0)
-        {
-            // no RLP of children memoized, return
-            return data;
-        }
-
-        // Copy the memoized RLPs
-        var dataLength = data.Length - memoizedRlp.Length;
-        data[..dataLength].CopyTo(workingSet);
-        memoizedRlp.CopyTo(workingSet[dataLength..]);
-
-        return workingSet[..data.Length];
+        return data;
     }
 
     public Keccak RootHash { get; private set; }
@@ -616,7 +596,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             {
                 if (branch.Children[i])
                 {
-                    if (memoize && memo.TryGetKeccak(i, out var keccak, branch.Children))
+                    if (memoize && memo.TryGetKeccak(i, out var keccak))
                     {
                         // keccak from cache
                         stream.Encode(keccak);
@@ -649,13 +629,13 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     {
                         memoizedUpdated = true;
 
-                        if (memo.Exists(i, branch.Children))
+                        if (memo.Exists(i))
                         {
-                            memo.Set(keccakOrRlp, i, branch.Children);
+                            memo.Set(keccakOrRlp.Span, i);
                         }
                         else if (keccakOrRlp.DataType == KeccakOrRlp.Type.Keccak)
                         {
-                            memo = RlpMemo.Insert(memo, i, branch.Children, keccakOrRlp.Span, rlpMemoization);
+                            memo = RlpMemo.Insert(memo, i, keccakOrRlp.Span, rlpMemoization);
                         }
                     }
                 }
@@ -663,9 +643,9 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                 {
                     stream.EncodeEmptyArray();
 
-                    if (memoize && memo.Exists(i, branch.Children))
+                    if (memoize && memo.Exists(i))
                     {
-                        memo = RlpMemo.Delete(memo, i, branch.Children, rlpMemoization);
+                        memo = RlpMemo.Delete(memo, i, rlpMemoization);
                         memoizedUpdated = true;
                     }
                 }
@@ -738,18 +718,18 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
                     if (value.Length == Keccak.Size)
                     {
-                        if (memo.Exists(i, branch.Children))
+                        if (memo.Exists(i))
                         {
-                            memo.SetRaw(value, i, branch.Children);
+                            memo.Set(value, i);
                         }
                         else
                         {
-                            memo = RlpMemo.Insert(memo, i, branch.Children, value, rlpMemoization);
+                            memo = RlpMemo.Insert(memo, i, value, rlpMemoization);
                         }
                     }
-                    else if (memo.Exists(i, branch.Children))
+                    else if (memo.Exists(i))
                     {
-                        memo.Clear(i, branch.Children);
+                        memo = RlpMemo.Delete(memo, i, rlpMemoization);
                     }
                 }
             }
@@ -964,7 +944,6 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             case Node.Type.Branch:
                 {
                     var nibble = path[at];
-                    Debug.Assert(leftover.Length == 0 || leftover.Length == (branch.Children.SetCount * Keccak.Size));
                     if (!branch.Children[nibble])
                     {
                         // no such child
@@ -1069,18 +1048,18 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             }
 
             // If this child still exists, only clear the memo. Otherwise, delete it from the memo.
-            if (memo.Exists(nibble, children))
+            if (children[nibble] && memo.Exists(nibble))
             {
-                memo.Clear(nibble, children);
+                memo.Clear(nibble);
             }
-            else if (leftover.Length > 0)
+            else if (memo.Exists(nibble))
             {
                 if (rlpWorkingSet == null)
                 {
                     rlpWorkingSet = ArrayPool<byte>.Shared.Rent(leftover.Length - Keccak.Size);
                 }
 
-                memo = RlpMemo.Delete(memo, nibble, children, rlpWorkingSet);
+                memo = RlpMemo.Delete(memo, nibble, rlpWorkingSet);
             }
 
             var shouldUpdate = !branch.Children.Equals(children);
@@ -1326,11 +1305,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                         // If this path does not exist, insert an empty Keccak. Otherwise, clear it in the memo.
                         if (createLeaf)
                         {
-                            memo = RlpMemo.Insert(memo, nibble, children, Keccak.Zero.Span, rlpMemoWorkingSet);
+                            memo = RlpMemo.Insert(memo, nibble, Keccak.Zero.Span, rlpMemoWorkingSet);
                         }
                         else
                         {
-                            memo.Clear(nibble, children);
+                            memo.Clear(nibble);
                         }
 
                         if (shouldUpdateBranch || childRlpRequiresUpdate)

@@ -13,7 +13,6 @@ public class RlpMemoTests
     private enum RlpMemoOperation
     {
         Set,
-        SetRaw,
         Clear,
         Delete,
         Insert
@@ -25,9 +24,15 @@ public class RlpMemoTests
         Span<byte> raw = stackalloc byte[RlpMemo.MaxSize];
         var children = new NibbleSet();
 
-        for (var i = 0; i < RlpMemo.MaxSize; i++)
+        for (var i = 0; i < RlpMemo.MaxSize - NibbleSet.MaxByteSize; i++)
         {
             raw[i] = (byte)(i & 0xFF);
+        }
+
+        // Set all the index bits at the end.
+        for (var i = RlpMemo.MaxSize - 1; i >= RlpMemo.MaxSize - NibbleSet.MaxByteSize; i--)
+        {
+            raw[i] = 0xFF;
         }
 
         for (var i = 0; i < NibbleSet.NibbleCount; i++)
@@ -48,11 +53,15 @@ public class RlpMemoTests
             }
 
             children[child] = false;
-            memo = RlpMemo.Delete(memo, child, children, raw);
+            memo = RlpMemo.Delete(memo, child, raw);
 
-            memo.Length.Should().Be(RlpMemo.MaxSize - (i + 1) * Keccak.Size);
-            memo.Exists(child, children).Should().BeFalse();
-            memo.TryGetKeccak(child, out var keccak, children).Should().BeFalse();
+            var expectedLength = (i != NibbleSet.NibbleCount - 1)
+                ? RlpMemo.MaxSize - (i + 1) * Keccak.Size + NibbleSet.MaxByteSize
+                : 0;
+
+            memo.Length.Should().Be(expectedLength);
+            memo.Exists(child).Should().BeFalse();
+            memo.TryGetKeccak(child, out var keccak).Should().BeFalse();
             keccak.IsEmpty.Should().BeTrue();
         }
 
@@ -87,11 +96,15 @@ public class RlpMemoTests
             }
 
             children[child] = true;
-            memo = RlpMemo.Insert(memo, child, children, keccak, workingMemory);
+            memo = RlpMemo.Insert(memo, child, keccak, workingMemory);
 
-            memo.Length.Should().Be((i + 1) * Keccak.Size);
-            memo.Exists(child, children).Should().BeTrue();
-            memo.TryGetKeccak(child, out var k, children).Should().BeTrue();
+            var expectedLength = (i != NibbleSet.NibbleCount - 1)
+                ? (i + 1) * Keccak.Size + NibbleSet.MaxByteSize
+                : RlpMemo.MaxSize;
+
+            memo.Length.Should().Be(expectedLength);
+            memo.Exists(child).Should().BeTrue();
+            memo.TryGetKeccak(child, out var k).Should().BeTrue();
             k.SequenceEqual(keccak).Should().BeTrue();
         }
 
@@ -102,29 +115,39 @@ public class RlpMemoTests
     public void In_place_update()
     {
         Span<byte> raw = stackalloc byte[RlpMemo.MaxSize];
+        var children = new NibbleSet();
 
-        for (var i = 0; i < RlpMemo.MaxSize; i++)
+        for (var i = 0; i < RlpMemo.MaxSize - NibbleSet.MaxByteSize; i++)
         {
             raw[i] = (byte)(i & 0xFF);
         }
 
-        var memo = new RlpMemo(raw);
+        // Set all the index bits at the end.
+        for (var i = RlpMemo.MaxSize - 1; i >= RlpMemo.MaxSize - NibbleSet.MaxByteSize; i--)
+        {
+            raw[i] = 0xFF;
+        }
 
-        var children = new NibbleSet();
         for (var i = 0; i < NibbleSet.NibbleCount; i++)
         {
             children[(byte)i] = true;
         }
 
+        var memo = new RlpMemo(raw);
+
         // Delete each child and the corresponding keccak
         for (byte i = 0; i < NibbleSet.NibbleCount; i++)
         {
             children[i] = false;
-            memo = RlpMemo.Delete(memo, i, children, raw);
+            memo = RlpMemo.Delete(memo, i, raw);
 
-            memo.Length.Should().Be(RlpMemo.MaxSize - (i + 1) * Keccak.Size);
-            memo.Exists(i, children).Should().BeFalse();
-            memo.TryGetKeccak(i, out var k, children).Should().BeFalse();
+            var expectedLength = (i != NibbleSet.NibbleCount - 1)
+                ? RlpMemo.MaxSize - (i + 1) * Keccak.Size + NibbleSet.MaxByteSize
+                : 0;
+
+            memo.Length.Should().Be(expectedLength);
+            memo.Exists(i).Should().BeFalse();
+            memo.TryGetKeccak(i, out var k).Should().BeFalse();
             k.IsEmpty.Should().BeTrue();
         }
 
@@ -137,11 +160,15 @@ public class RlpMemoTests
         for (byte i = 0; i < NibbleSet.NibbleCount; i++)
         {
             children[i] = true;
-            memo = RlpMemo.Insert(memo, i, children, keccak, raw);
+            memo = RlpMemo.Insert(memo, i, keccak, raw);
 
-            memo.Length.Should().Be((i + 1) * Keccak.Size);
-            memo.Exists(i, children).Should().BeTrue();
-            memo.TryGetKeccak(i, out var k, children).Should().BeTrue();
+            var expectedLength = (i != NibbleSet.NibbleCount - 1)
+                ? (i + 1) * Keccak.Size + NibbleSet.MaxByteSize
+                : RlpMemo.MaxSize;
+
+            memo.Length.Should().Be(expectedLength);
+            memo.Exists(i).Should().BeTrue();
+            memo.TryGetKeccak(i, out var k).Should().BeTrue();
             k.SequenceEqual(keccak).Should().BeTrue();
         }
 
@@ -173,12 +200,17 @@ public class RlpMemoTests
         var children = new NibbleSet();
 
         Span<byte> keccak = new byte[Keccak.Size];
-        keccak.Fill(0xFF);
-        KeccakOrRlp.FromSpan(keccak, out var keccakOrRlp);
+        keccak.Fill(0xFF);            
 
-        for (var i = 0; i < RlpMemo.MaxSize; i++)
+        for (var i = 0; i < RlpMemo.MaxSize - NibbleSet.MaxByteSize; i++)
         {
             raw[i] = (byte)(i & 0xFF);
+        }
+
+        // Set all the index bits at the end.
+        for (var i = RlpMemo.MaxSize - 1; i >= RlpMemo.MaxSize - NibbleSet.MaxByteSize; i--)
+        {
+            raw[i] = 0xFF;
         }
 
         for (var i = 0; i < NibbleSet.NibbleCount; i++)
@@ -197,53 +229,43 @@ public class RlpMemoTests
             switch (op)
             {
                 case RlpMemoOperation.Set:
-                    if (memo.Exists(child, children))
+                    if (memo.Exists(child))
                     {
-                        memo.Set(keccakOrRlp, child, children);
+                        memo.Set(keccak, child);
 
-                        memo.TryGetKeccak(child, out var k, children).Should().BeTrue();
-                        k.SequenceEqual(keccakOrRlp.Span).Should().BeTrue();
-                    }
-
-                    break;
-                case RlpMemoOperation.SetRaw:
-                    if (memo.Exists(child, children))
-                    {
-                        memo.SetRaw(keccak, child, children);
-
-                        memo.TryGetKeccak(child, out var k, children).Should().BeTrue();
+                        memo.TryGetKeccak(child, out var k).Should().BeTrue();
                         k.SequenceEqual(keccak).Should().BeTrue();
                     }
 
                     break;
                 case RlpMemoOperation.Clear:
-                    if (memo.Exists(child, children))
+                    if (memo.Exists(child))
                     {
-                        memo.Clear(child, children);
+                        memo.Clear(child);
 
-                        memo.TryGetKeccak(child, out var k, children).Should().BeFalse();
+                        memo.TryGetKeccak(child, out var k).Should().BeFalse();
                         k.IsEmpty.Should().BeTrue();
                     }
 
                     break;
                 case RlpMemoOperation.Delete:
-                    if (memo.Exists(child, children))
+                    if (memo.Exists(child))
                     {
                         children[child] = false;
-                        memo = RlpMemo.Delete(memo, child, children, raw);
+                        memo = RlpMemo.Delete(memo, child, raw);
 
-                        memo.TryGetKeccak(child, out var k, children).Should().BeFalse();
+                        memo.TryGetKeccak(child, out var k).Should().BeFalse();
                         k.IsEmpty.Should().BeTrue();
                     }
 
                     break;
                 case RlpMemoOperation.Insert:
-                    if (!memo.Exists(child, children))
+                    if (!memo.Exists(child))
                     {
                         children[child] = true;
-                        memo = RlpMemo.Insert(memo, child, children, keccak, raw);
+                        memo = RlpMemo.Insert(memo, child, keccak, raw);
 
-                        memo.TryGetKeccak(child, out var k, children).Should().BeTrue();
+                        memo.TryGetKeccak(child, out var k).Should().BeTrue();
                         k.SequenceEqual(keccak).Should().BeTrue();
                     }
 
