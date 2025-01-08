@@ -709,7 +709,7 @@ public class BlockchainTests
 
     private class PreCommit : IPreCommitBehavior
     {
-        public Keccak BeforeCommit(ICommitWithStats commit, CacheBudget budget)
+        public Keccak BeforeCommit(ICommitWithStats commit, CacheBudget budget, bool isSnapSync = false)
         {
             var hashCode = RuntimeHelpers.GetHashCode(commit);
             Keccak hash = default;
