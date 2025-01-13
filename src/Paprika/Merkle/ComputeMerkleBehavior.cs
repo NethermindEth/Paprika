@@ -158,8 +158,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             using var merkleData = prefixed.Get(parentKey);
             if (!merkleData.Span.IsEmpty)
             {
-                var leftover = Node.ReadFrom(out var parenType, out var leaf, out _, out var branch, merkleData.Span);
-                if (parenType == Node.Type.Branch && !ignoreCache)
+                var leftover = Node.ReadFrom(out var parentType, out var leaf, out _, out var branch, merkleData.Span);
+                if (parentType == Node.Type.Branch && !ignoreCache)
                 {
                     Span<byte> rlpMemoization = stackalloc byte[leftover.Length];
                     var memo = RlpMemo.Copy(leftover, rlpMemoization);
@@ -384,10 +384,27 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             return data;
         }
 
-        if (key.Path.Length < SkipRlpMemoizationForTopLevelsCount &&
-            Node.Header.Peek(data).NodeType == Node.Type.Branch)
+        var node = Node.Header.Peek(data).NodeType;
+
+        if (node != Node.Type.Branch)
+        {
+            // Return data as is, either the node is not a branch or the memoization is not set for branches.
+            return data;
+        }
+
+        if (key.Path.Length < SkipRlpMemoizationForTopLevelsCount)
         {
             // For State branches, omit top levels of RLP memoization
+            return Node.Branch.GetOnlyBranchData(data);
+        }
+
+        Node.Branch.ReadFrom(data, out var branch);
+
+        // Optimization, omitting some of the branches to memoize.
+        // It omits only these with two children where the cost of the recompute is not big.
+        // To prevent an attack of spawning multiple levels of such branches, only even are skipped
+        if (branch.Children.SetCount == 2 && (key.Path.Length + key.StoragePath.Length) % 2 == 0)
+        {
             return Node.Branch.GetOnlyBranchData(data);
         }
 

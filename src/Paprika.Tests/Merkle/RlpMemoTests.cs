@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Paprika.Chain;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
@@ -16,6 +17,141 @@ public class RlpMemoTests
         Clear,
         Delete,
         Insert
+    }
+
+    [Test]
+    public void Insert_get_operation()
+    {
+        Span<byte> raw = [];
+        Span<byte> workingMemory = new byte[RlpMemo.MaxSize];
+
+        Span<byte> keccak = new byte[Keccak.Size];
+        keccak.Fill(0xFF);
+
+        NibbleSet.Readonly children = new NibbleSet(0xA, 0xB, 0xC);
+
+        var memo = new RlpMemo(raw);
+        memo = InsertKeccak(memo, children, keccak, workingMemory);
+
+        memo.Length.Should().Be(GetExpectedSize(children.SetCount));
+
+        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+        {
+            if (children[i])
+            {
+                memo.Exists(i).Should().BeTrue();
+                memo.TryGetKeccak(i, out var k).Should().BeTrue();
+                k.SequenceEqual(keccak).Should().BeTrue();
+            }
+        }
+    }
+
+    [Test]
+    public void Set_get_operation()
+    {
+        Span<byte> raw = [];
+        Span<byte> workingMemory = new byte[RlpMemo.MaxSize];
+
+        Span<byte> keccak = new byte[Keccak.Size];
+        keccak.Fill(0xFF);
+
+        Span<byte> keccakNew = new byte[Keccak.Size];
+        keccakNew.Fill(0xAA);
+
+        NibbleSet.Readonly children = new NibbleSet(0xA, 0xB, 0xC);
+
+        var memo = new RlpMemo(raw);
+        memo = InsertKeccak(memo, children, keccak, workingMemory);
+
+        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+        {
+            if (children[i])
+            {
+                memo.Set(keccakNew, i);
+            }
+        }
+
+        memo.Length.Should().Be(GetExpectedSize(children.SetCount));
+
+        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+        {
+            if (children[i])
+            {
+                memo.Exists(i).Should().BeTrue();
+                memo.TryGetKeccak(i, out var k).Should().BeTrue();
+                k.SequenceEqual(keccakNew).Should().BeTrue();
+            }
+        }
+    }
+
+    [Test]
+    public void Clear_get_operation()
+    {
+        Span<byte> raw = [];
+        Span<byte> workingMemory = new byte[RlpMemo.MaxSize];
+
+        Span<byte> keccak = new byte[Keccak.Size];
+        keccak.Fill(0xFF);
+
+        NibbleSet.Readonly children = new NibbleSet(0xA, 0xB, 0xC);
+
+        var memo = new RlpMemo(raw);
+        memo = InsertKeccak(memo, children, keccak, workingMemory);
+
+        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+        {
+            if (children[i])
+            {
+                memo.Clear(i);
+            }
+        }
+
+        memo.Length.Should().Be(GetExpectedSize(children.SetCount));
+
+        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+        {
+            if (children[i])
+            {
+                memo.Exists(i).Should().BeTrue();
+                memo.TryGetKeccak(i, out var k).Should().BeFalse();
+                k.IsEmpty.Should().BeTrue();
+            }
+        }
+    }
+
+    [Test]
+    public void Delete_get_operation()
+    {
+        Span<byte> raw = [];
+        Span<byte> workingMemory = new byte[RlpMemo.MaxSize];
+
+        Span<byte> keccak = new byte[Keccak.Size];
+        keccak.Fill(0xFF);
+
+        NibbleSet.Readonly children = new NibbleSet(0xA, 0xB, 0xC);
+
+        var memo = new RlpMemo(raw);
+        memo = InsertKeccak(memo, children, keccak, workingMemory);
+
+        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+        {
+            if (children[i])
+            {
+                memo = RlpMemo.Delete(memo, i, workingMemory);
+            }
+        }
+
+        memo.Length.Should().Be(0);
+
+        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+        {
+            if (children[i])
+            {
+                memo.Exists(i).Should().BeFalse();
+                memo.TryGetKeccak(i, out var k).Should().BeFalse();
+                k.IsEmpty.Should().BeTrue();
+            }
+        }
     }
 
     [Test]
@@ -55,11 +191,7 @@ public class RlpMemoTests
             children[child] = false;
             memo = RlpMemo.Delete(memo, child, raw);
 
-            var expectedLength = (i != NibbleSet.NibbleCount - 1)
-                ? RlpMemo.MaxSize - (i + 1) * Keccak.Size + NibbleSet.MaxByteSize
-                : 0;
-
-            memo.Length.Should().Be(expectedLength);
+            memo.Length.Should().Be(GetExpectedSize(NibbleSet.NibbleCount - i - 1));
             memo.Exists(child).Should().BeFalse();
             memo.TryGetKeccak(child, out var keccak).Should().BeFalse();
             keccak.IsEmpty.Should().BeTrue();
@@ -98,11 +230,7 @@ public class RlpMemoTests
             children[child] = true;
             memo = RlpMemo.Insert(memo, child, keccak, workingMemory);
 
-            var expectedLength = (i != NibbleSet.NibbleCount - 1)
-                ? (i + 1) * Keccak.Size + NibbleSet.MaxByteSize
-                : RlpMemo.MaxSize;
-
-            memo.Length.Should().Be(expectedLength);
+            memo.Length.Should().Be(GetExpectedSize(i + 1));
             memo.Exists(child).Should().BeTrue();
             memo.TryGetKeccak(child, out var k).Should().BeTrue();
             k.SequenceEqual(keccak).Should().BeTrue();
@@ -272,5 +400,31 @@ public class RlpMemoTests
                     break;
             }
         }
+    }
+
+    private RlpMemo InsertKeccak(RlpMemo memo, NibbleSet.Readonly children, ReadOnlySpan<byte> keccak, Span<byte> workingMemory)
+    {
+        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+        {
+            if (children[i])
+            {
+                memo = RlpMemo.Insert(memo, i, keccak, workingMemory);
+            }
+        }
+
+        return memo;
+    }
+
+    private static int GetExpectedSize(int numElements)
+    {
+        var size = numElements * Keccak.Size;
+
+        // Empty and full memo doesn't contain the index.
+        if (size != 0 && size != RlpMemo.MaxSize)
+        {
+            size += NibbleSet.MaxByteSize;
+        }
+
+        return size;
     }
 }
