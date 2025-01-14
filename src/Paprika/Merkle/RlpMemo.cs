@@ -85,8 +85,7 @@ public readonly ref struct RlpMemo
         }
 
         var nibbleIndex = index.SetCountBefore(nibble) - 1;
-        var dataStartOffset = (_buffer.Length != MaxSize) ? NibbleSet.MaxByteSize : 0;
-        return _buffer.Slice(dataStartOffset + nibbleIndex * Keccak.Size, Keccak.Size);
+        return _buffer.Slice(nibbleIndex * Keccak.Size, Keccak.Size);
     }
 
     private NibbleSet.Readonly GetIndex()
@@ -98,7 +97,8 @@ public readonly ref struct RlpMemo
         if (indexLength != 0)
         {
             Debug.Assert(indexLength == NibbleSet.MaxByteSize, "Unexpected index length");
-            NibbleSet.Readonly.ReadFrom(_buffer, out index);
+            var bits = _buffer[^indexLength..];
+            NibbleSet.Readonly.ReadFrom(bits, out index);
         }
         else
         {
@@ -132,33 +132,28 @@ public readonly ref struct RlpMemo
 
         var span = workingSet[..size];
 
-        // Start offsets for the data in the source (if any) and destination memo.
-        const int sourceStartOffset = NibbleSet.MaxByteSize;
-        var destStartOffset = (size != MaxSize) ? NibbleSet.MaxByteSize : 0;
-
         // Compute the index of this nibble in the destination memo
         var insertIndex = index.SetCountBefore(nibble) - 1;
-        var insertOffset = destStartOffset + insertIndex * Keccak.Size;
+        var insertOffset = insertIndex * Keccak.Size;
 
         // Copy all the elements before the new element
-        if (insertOffset > destStartOffset)
+        if (insertOffset > 0)
         {
-            memo._buffer[sourceStartOffset..insertOffset].CopyTo(span[destStartOffset..]);
+            memo._buffer[..insertOffset].CopyTo(span);
         }
 
-        // Copy all the elements after the new element
-        if (memo.Length > insertOffset)
+        // Copy all the elements after the new element (except the index)
+        if (memo.Length > insertOffset + NibbleSet.MaxByteSize)
         {
-            var sourceRemaining = sourceStartOffset + insertIndex * Keccak.Size;
-            memo._buffer[sourceRemaining..].CopyTo(span[(insertOffset + Keccak.Size)..]);
+            memo._buffer[insertOffset..^NibbleSet.MaxByteSize].CopyTo(span[(insertOffset + Keccak.Size)..]);
         }
 
         keccak.CopyTo(span[insertOffset..]);
 
-        // Insert the new index header only if the destination memo is not full.
+        // Insert the new index only if the destination memo is not full.
         if (size != MaxSize)
         {
-            index.WriteToWithLeftover(span);
+            index.WriteToWithLeftover(span[^NibbleSet.MaxByteSize..]);
         }
 
         return new RlpMemo(span);
@@ -174,7 +169,7 @@ public readonly ref struct RlpMemo
         index = index.Remove(nibble);
         var size = ComputeRlpMemoSize(index);
 
-        Debug.Assert(size is < MaxSize and >= 0, "Unexpected size during deletion");
+        Debug.Assert(size is >= 0 and < MaxSize, "Unexpected size during deletion");
         Debug.Assert(workingSet.Length >= size, "Insufficient destination length for deletion");
 
         if (size == 0)
@@ -185,28 +180,24 @@ public readonly ref struct RlpMemo
 
         var span = workingSet[..size];
 
-        // Start offsets for the data in the source and destination memo. 
-        var sourceStartOffset = (memo.Length != MaxSize) ? NibbleSet.MaxByteSize : 0;
-        const int destStartOffset = NibbleSet.MaxByteSize;
-
         // Compute the index of this nibble in the memo
         var deleteIndex = index.SetCountBefore(nibble);
-        var deleteOffset = sourceStartOffset + deleteIndex * Keccak.Size;
+        var deleteOffset = deleteIndex * Keccak.Size;
 
         // Copy all the elements before the deleted element
-        if (deleteOffset > sourceStartOffset)
+        if (deleteOffset > 0)
         {
-            memo._buffer[sourceStartOffset..deleteOffset].CopyTo(span[destStartOffset..]);
+            memo._buffer[..deleteOffset].CopyTo(span);
         }
 
         // Copy all the elements after the deleted element
-        if (memo.Length > (deleteOffset + Keccak.Size))
+        if (memo.Length > deleteOffset + Keccak.Size + NibbleSet.MaxByteSize)
         {
-            memo._buffer[(deleteOffset + Keccak.Size)..].CopyTo(span[(deleteOffset + (destStartOffset - sourceStartOffset))..]);
+            memo._buffer[(deleteOffset + Keccak.Size)..].CopyTo(span[deleteOffset..]);
         }
 
-        // Since the destination memo is neither empty nor full here, it must always contain the index header.
-        index.WriteToWithLeftover(span);
+        // Since the destination memo is neither empty nor full here, it must always contain the index.
+        index.WriteToWithLeftover(span[^NibbleSet.MaxByteSize..]);
 
         return new RlpMemo(span);
     }
