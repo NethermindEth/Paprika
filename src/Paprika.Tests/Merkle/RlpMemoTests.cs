@@ -49,7 +49,7 @@ public class RlpMemoTests
         InsertRandomKeccak(ref memo, children, out var data, workingMemory);
 
         memo.Length.Should().Be(GetExpectedSize(children.SetCount));
-        
+
         var random = new Random(13);
 
         for (byte i = 0; i < NibbleSet.NibbleCount; i++)
@@ -421,9 +421,8 @@ public class RlpMemoTests
             else
             {
                 memo.TryGetKeccak(child.Key, out var k).Should().BeTrue();
-                k.SequenceEqual(child.Value.Span).Should().BeTrue();                
+                k.SequenceEqual(child.Value.Span).Should().BeTrue();
             }
-            
         }
 
         memo.Length.Should().Be(GetExpectedSize(data.Count));
