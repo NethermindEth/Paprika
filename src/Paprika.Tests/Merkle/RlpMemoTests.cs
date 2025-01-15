@@ -409,6 +409,7 @@ public class RlpMemoTests
 
     private static void CompareMemoAndDict(RlpMemo memo, Dictionary<byte, Keccak> data)
     {
+        // All the elements in dictionary should be in the memo.
         foreach (var child in data)
         {
             memo.Exists(child.Key).Should().BeTrue();
@@ -422,6 +423,25 @@ public class RlpMemoTests
             {
                 memo.TryGetKeccak(child.Key, out var k).Should().BeTrue();
                 k.SequenceEqual(child.Value.Span).Should().BeTrue();
+            }
+        }
+
+        // All the elements in the memo should be in the dictionary.
+        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
+        {
+            if (memo.Exists(i))
+            {
+                data.ContainsKey(i).Should().BeTrue();
+
+                if (memo.TryGetKeccak(i, out var k))
+                {
+                    k.SequenceEqual(data[i].Span).Should().BeTrue();
+                }
+                else
+                {
+                    k.IsEmpty.Should().BeTrue();
+                    Keccak.Zero.Span.SequenceEqual(data[i].Span).Should().BeTrue();
+                }
             }
         }
 
