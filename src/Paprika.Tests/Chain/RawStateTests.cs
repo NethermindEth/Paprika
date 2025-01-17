@@ -272,5 +272,86 @@ public class RawStateTests
         newRootHash.Should().Be(checkKeccakOrRlp.Keccak);
     }
 
+    [Test]
+    public void ProcessProofNodes()
+    {
+        using var remoteDb = PagedDb.NativeMemoryDb(32 * 1024, 2);
+        var merkle = new ComputeMerkleBehavior();
+
+        var remoteBlockchain = new Blockchain(remoteDb, merkle);
+
+        using var raw = remoteBlockchain.StartRaw();
+
+        var account1 = new Keccak(Convert.FromHexString("000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbb11"));
+        var account2 = new Keccak(Convert.FromHexString("003aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbb22"));
+        var account3 = new Keccak(Convert.FromHexString("100aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbb33"));
+        var account4 = new Keccak(Convert.FromHexString("020aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbb44"));
+
+        raw.SetAccount(account1, new Account(Values.Balance1, Values.Nonce1));
+        raw.SetAccount(account2, new Account(Values.Balance2, Values.Nonce2));
+        raw.SetAccount(account3, new Account(Values.Balance3, Values.Nonce3));
+        raw.SetAccount(account4, new Account(Values.Balance4, Values.Nonce4));
+
+        raw.Commit(true, true);
+
+        var hashAccount3 = raw.GetHash(NibblePath.Parse("1"), false);
+        var hashAccount4 = raw.GetHash(NibblePath.Parse("02"), false);
+        var hashBranch2 = raw.GetHash(NibblePath.Parse("0"), false);
+
+        using var localDb = PagedDb.NativeMemoryDb(32 * 1024, 2);
+        var localBlockchain = new Blockchain(localDb, merkle);
+
+        using var syncRaw = localBlockchain.StartRaw();
+
+        syncRaw.CreateMerkleBranch(Keccak.Zero, NibblePath.Empty, [0, 1], [hashBranch2, hashAccount3], false);
+        syncRaw.CreateMerkleBranch(Keccak.Zero, NibblePath.Parse("0"), [0, 2], [Keccak.Zero, hashAccount4], false);
+
+        syncRaw.SetAccount(account1, new Account(Values.Balance1, Values.Nonce1));
+        syncRaw.SetAccount(account2, new Account(Values.Balance2, Values.Nonce2));
+
+        var localHash = syncRaw.RefreshRootHash();
+
+        localHash.Should().Be(raw.Hash);
+
+        Span<byte> packed = stackalloc byte[3 * 33];
+
+        NibblePath proofPath = NibblePath.Parse("0");
+
+        for (int i = proofPath.Length; i >= 0; i--)
+        {
+            var currentPath = proofPath.SliceTo(i);
+            packed[i * 33] = currentPath.Length;
+            currentPath.RawSpan.CopyTo(packed.Slice(i * 33 + 1));
+        }
+        syncRaw.ProcessProofNodes(Keccak.Zero, packed, 2);
+
+        syncRaw.Commit(false);
+
+        //2nd pass
+        using var syncRaw2 = localBlockchain.StartRaw();
+
+        //check proof nodes from 1st pass were not persisted during commit
+        syncRaw2.GetHash(NibblePath.Parse("0"), false).Should().Be(Keccak.EmptyTreeHash);
+
+        var hashBranch3 = raw.GetHash(NibblePath.Parse("00"), false);
+
+        syncRaw2.CreateMerkleBranch(Keccak.Zero, NibblePath.Empty, [0, 1], [hashBranch2, Keccak.Zero], false);
+        syncRaw2.CreateMerkleBranch(Keccak.Zero, NibblePath.Parse("0"), [0, 2], [hashBranch3, Keccak.Zero], false);
+
+        syncRaw2.SetAccount(account3, new Account(Values.Balance3, Values.Nonce3));
+        syncRaw2.SetAccount(account4, new Account(Values.Balance4, Values.Nonce4));
+
+        localHash = syncRaw2.RefreshRootHash();
+        localHash.Should().Be(raw.Hash);
+
+        syncRaw2.ProcessProofNodes(Keccak.Zero, packed, 2);
+        syncRaw2.Commit(false);
+
+        //check
+        using var syncRaw3 = localBlockchain.StartRaw();
+        //check proof nodes from 2nd pass were persisted during commit - part from root node - only persisted for storage tries
+        syncRaw3.GetHash(NibblePath.Parse("0"), false).Should().Be(hashBranch2);
+    }
+
     private static Random GetRandom() => new(13);
 }
