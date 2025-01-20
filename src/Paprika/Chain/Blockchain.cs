@@ -1381,7 +1381,6 @@ public class Blockchain : IAsyncDisposable
     private class SyncBlockState : BlockState
     {
         private readonly PooledSpanDictionary _proofKeys;
-        private readonly HashSet<ulong> _proofHashSet;
 
         public SyncBlockState(Keccak parentStateRoot, IReadOnlyBatch batch, CommittedBlockState[] ancestors,
             Blockchain blockchain) : base(parentStateRoot, batch, ancestors, blockchain)
@@ -1390,7 +1389,6 @@ public class Blockchain : IAsyncDisposable
                 _proofKeys.Dispose();
 
             _proofKeys = new PooledSpanDictionary(Pool, true);
-            _proofHashSet = new HashSet<ulong>();
         }
 
         public override ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key)
@@ -1398,7 +1396,7 @@ public class Blockchain : IAsyncDisposable
             var hash = GetHash(key);
             var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
-            if (_proofHashSet.Contains(hash) && _proofKeys.TryGet(keyWritten, hash, out var span))
+            if (_proofKeys.TryGet(keyWritten, hash, out var span))
             {
                 AcquireLease();
                 return new ReadOnlySpanOwner<byte>(span, this).WithDepth(0);
@@ -1412,17 +1410,16 @@ public class Blockchain : IAsyncDisposable
             _hash = null;
 
             var hash = GetHash(key);
-            var k = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+            var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
-            if (type == EntryType.Proof || (type == EntryType.Persistent && _proofHashSet.Contains(hash)))
+            if (type == EntryType.Proof || (type == EntryType.Persistent && _proofKeys.TryGet(keyWritten, hash, out _)))
             {
-                _proofKeys.Set(k, hash, payload, (byte)type);
-                _proofHashSet.Add(hash);
+                _proofKeys.Set(keyWritten, hash, payload, (byte)type);
                 return;
             }
 
             _filter.Add(hash);
-            dict.Set(k, hash, payload, (byte)type);
+            dict.Set(keyWritten, hash, payload, (byte)type);
         }
 
         protected override void SetImpl(in Key key, in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1, EntryType type, PooledSpanDictionary dict)
@@ -1431,22 +1428,20 @@ public class Blockchain : IAsyncDisposable
             _hash = null;
 
             var hash = GetHash(key);
-            var k = key.WriteTo(stackalloc byte[key.MaxByteLength]);
+            var keyWritten = key.WriteTo(stackalloc byte[key.MaxByteLength]);
 
-            if (type == EntryType.Proof || (type == EntryType.Persistent && _proofHashSet.Contains(hash)))
+            if (type == EntryType.Proof || (type == EntryType.Persistent && _proofKeys.TryGet(keyWritten, hash, out _)))
             {
-                _proofKeys.Set(k, hash, payload0, payload1, (byte)type);
-                _proofHashSet.Add(hash);
+                _proofKeys.Set(keyWritten, hash, payload0, payload1, (byte)type);
                 return;
             }
 
             _filter.Add(hash);
-            dict.Set(k, hash, payload0, payload1, (byte)type);
+            dict.Set(keyWritten, hash, payload0, payload1, (byte)type);
         }
 
         protected override void CleanUp()
         {
-            _proofHashSet.Clear();
             _proofKeys.Dispose();
             base.CleanUp();
         }
@@ -1512,8 +1507,7 @@ public class Blockchain : IAsyncDisposable
                                 var childHash = GetHash(childKey);
 
                                 bool isPersisted;
-                                //double check due to potential hash collision
-                                if (_proofHashSet.Contains(childHash) && proofNodeResults.TryGetValue(childHash, out bool thisRoundPersisted))
+                                if (proofNodeResults.TryGetValue(childHash, out bool thisRoundPersisted))
                                 {
                                     isPersisted = thisRoundPersisted;
                                 }
@@ -1550,7 +1544,7 @@ public class Blockchain : IAsyncDisposable
                             : Key.Merkle(extChildPath);
                         var extChildHash = GetHash(extChildKey);
 
-                        if (_proofHashSet.Contains(extChildHash) && proofNodeResults[extChildHash] || IsPersisted(accountKeccak, extChildPath))
+                        if (proofNodeResults[extChildHash] || IsPersisted(accountKeccak, extChildPath))
                         {
                             proofNodeResults[hash] = true;
                             _preCommit.Set(k, hash, ext.WriteTo(nodeWorkingSpan), (byte)EntryType.Persistent);
