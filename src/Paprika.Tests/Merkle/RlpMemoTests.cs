@@ -1,6 +1,8 @@
 using FluentAssertions;
 using Paprika.Crypto;
 using Paprika.Merkle;
+using Paprika.Data;
+using Paprika.Chain;
 
 namespace Paprika.Tests.Merkle;
 
@@ -313,6 +315,44 @@ public class RlpMemoTests
         var memo = new RlpMemo(raw);
         memo = RlpMemo.Copy(memo.Raw, rawCopy);
         memo.Raw.SequenceEqual(raw).Should().BeTrue();
+    }
+
+    [Test]
+    public void Keccak_to_rlp_children()
+    {
+        NibbleSet.Readonly children = new NibbleSet(1, 2);
+        Span<byte> workingMemory = new byte[RlpMemo.MaxSize];
+
+        // Create memo with random keccak for the corresponding children
+        var memo = new RlpMemo([]);
+        InsertRandomKeccak(ref memo, children, out _, workingMemory);
+
+        // create E->B->L
+        //            ->L
+        // leaves without any key and very small value cause to be inlined in branch
+        // encoded branch rlp is also < 32 bytes which causes it to be encoded as RLP in extension node
+        Keccak storageKey1 =
+            new Keccak(Convert.FromHexString("ccccccccccccccccccccddddddddddddddddeeeeeeeeeeeeeeeeeeeeeeeeeeb1"));
+        Keccak storageKey2 =
+            new Keccak(Convert.FromHexString("ccccccccccccccccccccddddddddddddddddeeeeeeeeeeeeeeeeeeeeeeeeeeb2"));
+
+        var commit = new Commit();
+        commit.Set(Key.Account(Values.Key0),
+            new Account(0, 1).WriteTo(stackalloc byte[Paprika.Account.MaxByteCount]));
+        commit.Set(Key.StorageCell(NibblePath.FromKey(Values.Key0), storageKey1), new byte[] { 1, 2, 3 });
+        commit.Set(Key.StorageCell(NibblePath.FromKey(Values.Key0), storageKey2), new byte[] { 10, 20, 30 });
+
+        using var merkle = new ComputeMerkleBehavior();
+
+        merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());
+
+        // Update the branch with memo
+        commit.SetBranch(
+            Key.Raw(NibblePath.FromKey(Values.Key0), DataType.Merkle,
+                NibblePath.Parse("CCCCCCCCCCCCCCCCCCCCDDDDDDDDDDDDDDDDEEEEEEEEEEEEEEEEEEEEEEEEEEB")), children,
+            memo.Raw);
+
+        merkle.RecalculateStorageTrie(commit, Values.Key0, CacheBudget.Options.None.Build());
     }
 
     [TestCase(1000)]
