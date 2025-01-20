@@ -320,6 +320,7 @@ public class RlpMemoTests
     [Test]
     public void Keccak_to_rlp_children()
     {
+        const string prefix = "ccccccccccccccccccccddddddddddddddddeeeeeeeeeeeeeeeeeeeeeeeeeeb";
         NibbleSet.Readonly children = new NibbleSet(1, 2);
         Span<byte> workingMemory = new byte[RlpMemo.MaxSize];
 
@@ -332,9 +333,9 @@ public class RlpMemoTests
         // leaves without any key and very small value cause to be inlined in branch
         // encoded branch rlp is also < 32 bytes which causes it to be encoded as RLP in extension node
         Keccak storageKey1 =
-            new Keccak(Convert.FromHexString("ccccccccccccccccccccddddddddddddddddeeeeeeeeeeeeeeeeeeeeeeeeeeb1"));
+            new Keccak(Convert.FromHexString(prefix + "1"));
         Keccak storageKey2 =
-            new Keccak(Convert.FromHexString("ccccccccccccccccccccddddddddddddddddeeeeeeeeeeeeeeeeeeeeeeeeeeb2"));
+            new Keccak(Convert.FromHexString(prefix + "2"));
 
         var commit = new Commit();
         commit.Set(Key.Account(Values.Key0),
@@ -347,9 +348,7 @@ public class RlpMemoTests
         merkle.BeforeCommit(commit, CacheBudget.Options.None.Build());
 
         // Update the branch with memo
-        commit.SetBranch(
-            Key.Raw(NibblePath.FromKey(Values.Key0), DataType.Merkle,
-                NibblePath.Parse("CCCCCCCCCCCCCCCCCCCCDDDDDDDDDDDDDDDDEEEEEEEEEEEEEEEEEEEEEEEEEEB")), children,
+        commit.SetBranch(Key.Raw(NibblePath.FromKey(Values.Key0), DataType.Merkle, NibblePath.Parse(prefix)), children,
             memo.Raw);
 
         merkle.RecalculateStorageTrie(commit, Values.Key0, CacheBudget.Options.None.Build());
