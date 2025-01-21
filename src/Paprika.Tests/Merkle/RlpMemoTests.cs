@@ -320,7 +320,6 @@ public class RlpMemoTests
     [Test]
     public void Keccak_to_rlp_children()
     {
-        const string prefix = "ccccccccccccccccccccddddddddddddddddeeeeeeeeeeeeeeeeeeeeeeeeeeb";
         NibbleSet.Readonly children = new NibbleSet(1, 2);
         Span<byte> workingMemory = new byte[RlpMemo.MaxSize];
 
@@ -332,6 +331,7 @@ public class RlpMemoTests
         //            ->L
         // leaves without any key and very small value cause to be inlined in branch
         // encoded branch rlp is also < 32 bytes which causes it to be encoded as RLP in extension node
+        const string prefix = "ccccccccccccccccccccddddddddddddddddeeeeeeeeeeeeeeeeeeeeeeeeeeb";
         Keccak storageKey1 =
             new Keccak(Convert.FromHexString(prefix + "1"));
         Keccak storageKey2 =

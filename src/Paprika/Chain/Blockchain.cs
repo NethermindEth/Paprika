@@ -2014,8 +2014,18 @@ public class Blockchain : IAsyncDisposable
             {
                 set[childNibbles[i]] = true;
                 if (childHashes[i] != Keccak.Zero)
-                    memo.Set(childHashes[i].Span, childNibbles[i]);
+                {
+                    if (memo.Exists(childNibbles[i]))
+                    {
+                        memo.Set(childHashes[i].Span, childNibbles[i]);
+                    }
+                    else
+                    {
+                        memo = RlpMemo.Insert(memo, childNibbles[i], childHashes[i].Span, rlpMemoization);
+                    }
+                }
             }
+
             _current.SetBranch(key, set, memo.Raw, persist ? EntryType.Persistent : EntryType.Proof);
         }
 
