@@ -55,6 +55,13 @@ public struct NibbleSet
 
     public int SetCount => BitOperations.PopCount(_value);
 
+    public int SetCountBefore(byte nibble)
+    {
+        // Compute the number of set bits before `nibble` (including itself).
+        var leftChildren = (ushort)(_value & ((1U << (nibble + 1)) - 1));
+        return BitOperations.PopCount(leftChildren);
+    }
+
     public byte SmallestNibbleSet => (byte)BitOperations.TrailingZeroCount(_value);
 
     public byte BiggestNibbleSet => (byte)(31 - BitOperations.LeadingZeroCount((uint)_value));
@@ -102,9 +109,13 @@ public struct NibbleSet
 
         public static Readonly AllWithout(byte nibble) => new((ushort)(AllSetValue & ~(1 << nibble)));
 
+        public static Readonly None => new(0);
+
         public bool AllSet => _value == AllSetValue;
 
         public int SetCount => new NibbleSet(_value).SetCount;
+
+        public int SetCountBefore(byte nibble) => new NibbleSet(_value).SetCountBefore(nibble);
 
         public byte SmallestNibbleSet => new NibbleSet(_value).SmallestNibbleSet;
         public byte SmallestNibbleNotSet => new NibbleSet(_value).SmallestNibbleNotSet;
