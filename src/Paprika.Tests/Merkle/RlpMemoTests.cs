@@ -441,7 +441,7 @@ public class RlpMemoTests
 
         // Expected layout:
         // [index (0b 0000 0000 0001 1100) | keccakA | keccakB | keccakC]
-        return Verify(workingMemory.ToArray());
+        return Verify(memo.Raw.ToArray());
     }
 
     private static void InsertRandomKeccak(ref RlpMemo memo, NibbleSet.Readonly children, out Dictionary<byte, Keccak> data
