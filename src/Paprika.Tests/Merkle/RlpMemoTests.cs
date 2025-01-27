@@ -440,7 +440,7 @@ public class RlpMemoTests
         InsertRandomKeccak(ref memo, children, out _, workingMemory);
 
         // Expected layout:
-        // [keccakA | keccakB | keccakC | index (0b 0000 0000 0001 1100)]
+        // [index (0b 0000 0000 0001 1100) | keccakA | keccakB | keccakC]
         return Verify(workingMemory.ToArray());
     }
 
