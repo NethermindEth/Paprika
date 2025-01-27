@@ -430,6 +430,20 @@ public class RlpMemoTests
         }
     }
 
+    [Test]
+    public Task Verify_layout()
+    {
+        Span<byte> workingMemory = new byte[RlpMemo.MaxSize];
+        NibbleSet.Readonly children = new NibbleSet(0xA, 0xB, 0xC);
+        var memo = new RlpMemo([]);
+
+        InsertRandomKeccak(ref memo, children, out _, workingMemory);
+
+        // Expected layout:
+        // [keccakA | keccakB | keccakC | index (0b 0000 0000 0001 1100)]
+        return Verify(workingMemory.ToArray());
+    }
+
     private static void InsertRandomKeccak(ref RlpMemo memo, NibbleSet.Readonly children, out Dictionary<byte, Keccak> data
         , Span<byte> workingMemory)
     {
