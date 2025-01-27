@@ -130,6 +130,11 @@ public struct NibbleSet
             return destination.Slice(MaxByteSize);
         }
 
+        public static Readonly ReadFrom(ReadOnlySpan<byte> source)
+        {
+            return new Readonly(BinaryPrimitives.ReadUInt16LittleEndian(source));
+        }
+
         public static ReadOnlySpan<byte> ReadFrom(ReadOnlySpan<byte> source, out Readonly set)
         {
             set = new Readonly(BinaryPrimitives.ReadUInt16LittleEndian(source));
