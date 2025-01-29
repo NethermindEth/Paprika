@@ -625,7 +625,7 @@ public class BlockchainTests
     }
 
     [Test]
-    public async Task Read_accessor()
+    public async Task Read_accessor_updated_can_access_data()
     {
         const byte historyDepth = 16;
         using var db = PagedDb.NativeMemoryDb(16 * Mb, historyDepth);
@@ -661,6 +661,59 @@ public class BlockchainTests
 
             accessor.HasState(root).Should().BeTrue();
             accessor.GetAccount(root, Key(i)).Should().Be(Value(i));
+        }
+
+        return;
+
+        static Keccak Key(uint i)
+        {
+            Keccak k = default;
+            BinaryPrimitives.WriteUInt32LittleEndian(k.BytesAsSpan, i + 3);
+            return k;
+        }
+
+        static Account Value(uint i) => new(i, i);
+    }
+
+    [TestCase(true)]
+    [TestCase(false)]
+    public async Task Read_accessor_can_preload_readers_for_history(bool preloadHistory)
+    {
+        const byte historyDepth = 16;
+        using var db = PagedDb.NativeMemoryDb(16 * Mb, historyDepth);
+
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
+
+        const int count = 128;
+
+        var parent = Keccak.EmptyTreeHash;
+
+        var hashes = new Keccak[count + 1];
+        hashes[0] = parent;
+
+        for (uint i = 0; i < count; i++)
+        {
+            using var block = blockchain.StartNew(parent);
+            block.SetAccount(Key(i), Value(i));
+            parent = hashes[i + 1] = block.Commit(i + 1);
+        }
+
+        // Flush the last
+        var task = blockchain.WaitTillFlush(parent);
+        blockchain.Finalize(parent);
+        await task;
+
+        // Reload blockchain so that accessor is built from zero
+        await using var reloaded = new Blockchain(db, new ComputeMerkleBehavior());
+        var accessor = blockchain.BuildReadOnlyAccessor(preloadHistory);
+
+        // Assert only last historyDepth hashes
+        for (uint i = count - historyDepth + 1; i < count; i++)
+        {
+            var root = hashes[i + 1];
+
+            accessor.HasState(root).Should().Be(preloadHistory, $"Failed to properly assert at {i} out of {count}.");
+            accessor.GetAccount(root, Key(i)).Should().Be(preloadHistory ? Value(i) : default);
         }
 
         return;
