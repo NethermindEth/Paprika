@@ -60,3 +60,27 @@ jobs:
           header: Code Coverage
           recreate: true
           path: code-coverage-results.md
+
+  os-tests:
+    timeout-minutes: 10
+    name: "Run OS category tests on multiple OSs"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Test (OS Category Only)
+        run: dotnet test src/Paprika.Tests \
+          -c ${{ env.BUILD_CONFIG }} \
+          --filter "TestCategory=OS"
