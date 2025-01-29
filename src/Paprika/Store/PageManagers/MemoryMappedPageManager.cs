@@ -64,10 +64,10 @@ public sealed class MemoryMappedPageManager : PointerPageManager
         }
         else
         {
-            _file = File.OpenHandle(Path, FileMode.Open, FileAccess.ReadWrite, FileShare.None, PaprikaFileOptions);
+            _file = File.OpenHandle(Path, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite, PaprikaFileOptions);
         }
 
-        _mapped = MemoryMappedFile.CreateFromFile(_file, null, (long)size, MemoryMappedFileAccess.ReadWrite,
+        _mapped = MemoryMappedFile.CreateFromFile(_file, null, size, MemoryMappedFileAccess.ReadWrite,
             HandleInheritability.None, true);
 
         _whole = _mapped.CreateViewAccessor();
