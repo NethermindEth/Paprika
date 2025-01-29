@@ -2182,32 +2182,37 @@ public class Blockchain : IAsyncDisposable
         public ReadOnlySpanOwnerWithMetadata<byte> Get(scoped in Key key) => ((IReadOnlyWorldState)_current).Get(key);
     }
 
-    public IReadOnlyWorldStateAccessor BuildReadOnlyAccessor()
+    public IReadOnlyWorldStateAccessor BuildReadOnlyAccessor(bool preloadHistory = true)
     {
-        return _accessor = new ReadOnlyWorldStateAccessor(this);
+        return _accessor = new ReadOnlyWorldStateAccessor(this, preloadHistory);
     }
 
     private class ReadOnlyWorldStateAccessor : IReadOnlyWorldStateAccessor
     {
         private readonly ReaderWriterLockSlim _lock = new();
-        private Dictionary<Keccak, ReadOnlyState> _readers = new();
+        private readonly Dictionary<Keccak, ReadOnlyState> _readers = new();
         private readonly Queue<ReadOnlyState> _queue = new();
         private readonly Blockchain _blockchain;
 
-        public ReadOnlyWorldStateAccessor(Blockchain blockchain)
+        public ReadOnlyWorldStateAccessor(Blockchain blockchain, bool preloadHistory)
         {
             _blockchain = blockchain;
 
-            //var snapshot = _blockchain._db.SnapshotAll()
-            //    .Select(batch => new ReadOnlyState(new ReadOnlyBatchCountingRefs(batch)))
-            //    .ToArray();
+            if (preloadHistory == false)
+            {
+                return;
+            }
 
-            //// enqueue all to make them properly disposable
-            //foreach (ReadOnlyState state in snapshot)
-            //{
-            //    _queue.Enqueue(state);
-            //    _readers.Add(state.Hash, state);
-            //}
+            var snapshot = _blockchain._db.SnapshotAll()
+                .Select(batch => new ReadOnlyState(new ReadOnlyBatchCountingRefs(batch)))
+                .ToArray();
+
+            // enqueue all to make them properly disposable
+            foreach (var state in snapshot)
+            {
+                _queue.Enqueue(state);
+                _readers.Add(state.Hash, state);
+            }
         }
 
         public void OnCommitToBlockchain(in Keccak stateHash)
