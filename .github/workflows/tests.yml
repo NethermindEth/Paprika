@@ -73,4 +73,4 @@ jobs:
           submodules: true
 
       - name: Test (OS Category Only)
-        run: run: dotnet test src/Paprika.Tests -c ${{ env.BUILD_CONFIG }} --filter TestCategory=OS --collect:"XPlat Code Coverage" --results-directory ./coverage
+        run: dotnet test src/Paprika.Tests -c ${{ env.BUILD_CONFIG }} --filter TestCategory=OS --collect:"XPlat Code Coverage" --results-directory ./coverage
