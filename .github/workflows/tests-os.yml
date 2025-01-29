@@ -1,8 +1,4 @@
-name: "Paprika Tests"
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+name: "Paprika OS Tests"
 
 on:
   pull_request:
@@ -15,13 +11,13 @@ env:
   DOTNET_VERSION: 9
 
 jobs:
-  tests:
-    timeout-minutes: 20
-    name: "Run Paprika tests"
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write # for sticky-pull-request-comment
+  os-tests:
+    name: "Run OS category tests on multiple OSs"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
     steps:
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
@@ -33,10 +29,10 @@ jobs:
         with:
           submodules: true
 
-      - name: Test
+      - name: Test (OS Category Only)
         run: dotnet test src/Paprika.Tests \
           -c ${{ env.BUILD_CONFIG }} \
-          --filter "TestCategory!~LongRunning&TestCategory!~OS" \
+          --filter "TestCategory=OS" \
           --collect:"XPlat Code Coverage" \
           --results-directory ./coverage
 
@@ -57,6 +53,6 @@ jobs:
         uses: marocchino/sticky-pull-request-comment@v2
         if: github.event_name == 'pull_request'
         with:
-          header: Code Coverage
+          header: Code Coverage (OS Tests)
           recreate: true
           path: code-coverage-results.md
