@@ -440,6 +440,14 @@ public class Blockchain : IAsyncDisposable
 
     public void Finalize(Keccak keccak)
     {
+        if (TryFinalize(keccak) == false)
+        {
+            throw new Exception("Block that is marked as finalized is not present");
+        }
+    }
+
+    public bool TryFinalize(Keccak keccak)
+    {
         Stack<CommittedBlockState> finalized;
         uint count;
 
@@ -448,7 +456,7 @@ public class Blockchain : IAsyncDisposable
         {
             if (_blocksByHash.TryGetValue(keccak, out var block) == false)
             {
-                ThrowFinalizedBlockMissing();
+                return false;
             }
 
             Debug.Assert(block.BlockNumber > _lastFinalized,
@@ -484,12 +492,7 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
-        [DoesNotReturn]
-        [StackTraceHidden]
-        static void ThrowFinalizedBlockMissing()
-        {
-            throw new Exception("Block that is marked as finalized is not present");
-        }
+        return true;
     }
 
     private BitFilter CreateBitFilter() => BitMapFilter.CreateOfN<BitMapFilter.OfNSize128>(_pool);
