@@ -127,7 +127,7 @@ var budget = new CacheBudget.Options(1_000, 8);
 await using (var blockchain =
              new Blockchain(db, preCommit, TimeSpan.FromSeconds(10),
                  budget,
-                 budget, 50, () => reporter.Observe()))
+                 budget, 50, int.MaxValue, () => reporter.Observe()))
 {
     var visitor = new PaprikaCopyingVisitor(blockchain, 10_000, skipStorage);
     var visit = Task.Run(() =>
