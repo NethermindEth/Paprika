@@ -231,9 +231,8 @@ public class BlockchainTests
             if (no > automaticFinalityAfter)
             {
                 finalized = blockchain.WaitTillFlush(hashes.Dequeue());
+                finalized.IsCompleted.Should().BeFalse("The automatic finality should be reached only on the commit");
             }
-
-            finalized.IsCompleted.Should().BeFalse("The automatic finality should be reached only on the commit");
 
             hash = block.Commit(no);
             hashes.Enqueue(hash);
