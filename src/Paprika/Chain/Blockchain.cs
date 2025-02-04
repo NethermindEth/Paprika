@@ -29,6 +29,8 @@ namespace Paprika.Chain;
 /// </summary>
 public class Blockchain : IAsyncDisposable
 {
+    private const int NeverAutomaticallyFinalize = int.MaxValue;
+
     // allocate 1024 pages (4MB) at once
     private readonly BufferPool _pool;
 
@@ -56,23 +58,26 @@ public class Blockchain : IAsyncDisposable
     private readonly Histogram<int> _cacheUsagePreCommit;
     private readonly Histogram<int> _prefetchCount;
     private readonly MetricsExtensions.IAtomicIntGauge _flusherQueueCount;
+    private readonly MetricsExtensions.IAtomicIntGauge _committedBlocks;
 
     private readonly IDb _db;
     private readonly IPreCommitBehavior _preCommit;
     private readonly CacheBudget.Options _cacheBudgetStateAndStorage;
     private readonly CacheBudget.Options _cacheBudgetPreCommit;
+    private readonly int _automaticallyFinalizeAfter;
     private readonly Action? _beforeMetricsDisposed;
     private bool _verify;
 
     public Blockchain(IDb db, IPreCommitBehavior preCommit, TimeSpan? minFlushDelay = null,
         CacheBudget.Options cacheBudgetStateAndStorage = default,
         CacheBudget.Options cacheBudgetPreCommit = default,
-        int? finalizationQueueLimit = null, Action? beforeMetricsDisposed = null)
+        int? finalizationQueueLimit = null, int automaticallyFinalizeAfter = NeverAutomaticallyFinalize, Action? beforeMetricsDisposed = null)
     {
         _db = db;
         _preCommit = preCommit;
         _cacheBudgetStateAndStorage = cacheBudgetStateAndStorage;
         _cacheBudgetPreCommit = cacheBudgetPreCommit;
+        _automaticallyFinalizeAfter = automaticallyFinalizeAfter;
         _minFlushDelay = minFlushDelay ?? DefaultFlushDelay;
         _beforeMetricsDisposed = beforeMetricsDisposed;
 
@@ -92,6 +97,8 @@ public class Blockchain : IAsyncDisposable
             "The time it took to synchronize the file");
         _flusherQueueCount = _meter.CreateAtomicObservableGauge("Flusher queue size", "Blocks",
             "The number of the blocks in the flush queue");
+        _committedBlocks = _meter.CreateAtomicObservableGauge("Committed blocks", "Blocks",
+            "The number of the blocks that are committed but not finalized yet");
         _bloomMissedReads = _meter.CreateCounter<long>("Bloom missed reads", "Reads",
             "Number of reads that passed bloom but missed in dictionary");
         _cacheUsageState = _meter.CreateHistogram<int>("State transient cache usage per commit", "%",
@@ -299,6 +306,20 @@ public class Blockchain : IAsyncDisposable
             // blocks by hash
             _blocksByHash.Add(state.Hash, state);
 
+            // report metric
+            _committedBlocks.Set(_blocksByHash.Count);
+
+            // try automatically finalize if too many blocks
+            var canEverAutomaticallyFinalize = _automaticallyFinalizeAfter != NeverAutomaticallyFinalize;
+            if (canEverAutomaticallyFinalize && _blocksByNumber.Count > _automaticallyFinalizeAfter)
+            {
+                var (_, minimal) = _blocksByNumber.MinBy(kvp => kvp.Key);
+                if (minimal.Count == 1)
+                {
+                    TryFinalize(minimal[0].Hash);
+                }
+            }
+
             _accessor?.OnCommitToBlockchain(state.Hash);
         }
     }
@@ -449,7 +470,6 @@ public class Blockchain : IAsyncDisposable
     public bool TryFinalize(Keccak keccak)
     {
         Stack<CommittedBlockState> finalized;
-        uint count;
 
         // gather all the blocks to finalize
         lock (_blockLock)
@@ -464,7 +484,7 @@ public class Blockchain : IAsyncDisposable
 
             // gather all the blocks between last finalized and this.
 
-            count = block.BlockNumber - _lastFinalized;
+            var count = block.BlockNumber - _lastFinalized;
 
             finalized = new((int)count);
             for (var blockNumber = block.BlockNumber; blockNumber > _lastFinalized; blockNumber--)

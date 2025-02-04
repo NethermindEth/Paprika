@@ -164,7 +164,7 @@ public static class Program
             //IPreCommitBehavior preCommit = null;
 
             await using (var blockchain =
-                         new Blockchain(db, preCommit, config.FlushEvery, default, default, 1000, reporter.Observe))
+                         new Blockchain(db, preCommit, config.FlushEvery, default, default, 1000, int.MaxValue, reporter.Observe))
             {
                 blockchain.Flushed += (_, e) => gate.Signal(e.blockNumber);
 
