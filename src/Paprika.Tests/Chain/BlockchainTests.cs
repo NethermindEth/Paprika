@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Collections;
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
@@ -173,13 +174,16 @@ public class BlockchainTests
 
         block.Dispose();
 
+        Task finality = Task.CompletedTask;
+
         for (uint no = 2; no < count; no++)
         {
             // create new, set, commit and dispose
             block = blockchain.StartNew(hash);
             block.SetAccount(Key0, new Account(no, no));
 
-            // finalize but only previous so that the dependency is there and should be managed properly
+            // Finalize but only previous so that the dependency is there and should be managed properly
+            finality = blockchain.WaitTillFlush(hash);
             blockchain.Finalize(hash);
 
             hash = block.Commit(no);
@@ -189,11 +193,55 @@ public class BlockchainTests
         // DO NOT FINALIZE the last block! it will clean the dependencies and destroy the purpose of the test
         // blockchain.Finalize(block.Hash);
 
-        // for now, to monitor the block chain, requires better handling of ref-counting on finalized
-        await Task.Delay(1000);
+        // Await the last to be finalized.
+        await finality;
 
         using var last = blockchain.StartNew(hash);
         last.GetAccount(Key0).Should().Be(new Account(lastValue, lastValue));
+    }
+
+    [Test]
+    public async Task Automatic_finality()
+    {
+        const int count = 100;
+        const int automaticFinalityAfter = 10;
+
+        using var db = PagedDb.NativeMemoryDb(16 * Mb, 2);
+
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(),
+            null, default, default, null, automaticFinalityAfter);
+
+        var hashes = new Queue<Keccak>();
+
+        var block = blockchain.StartNew(Keccak.EmptyTreeHash);
+        block.SetAccount(Key0, new Account(1, 1));
+        var hash = block.Commit(1);
+        hashes.Enqueue(hash);
+
+        block.Dispose();
+
+        var finalized = Task.CompletedTask;
+
+        for (uint no = 2; no < count; no++)
+        {
+            // create new, set, commit and dispose
+            block = blockchain.StartNew(hash);
+            block.SetAccount(Key0, new Account(no, no));
+
+            if (no > automaticFinalityAfter)
+            {
+                finalized = blockchain.WaitTillFlush(hashes.Dequeue());
+                finalized.IsCompleted.Should().BeFalse("The automatic finality should be reached only on the commit");
+            }
+
+            hash = block.Commit(no);
+            hashes.Enqueue(hash);
+
+            // Should be finalized after the block breaching the finality is committed
+            await finalized;
+
+            block.Dispose();
+        }
     }
 
     [Test]
@@ -569,7 +617,7 @@ public class BlockchainTests
         var cacheBudgetPreCommit = new CacheBudget.Options(1, 1);
 
         await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(), null, CacheBudget.Options.None,
-            cacheBudgetPreCommit, 1, null);
+            cacheBudgetPreCommit, 1, int.MaxValue, null);
 
         // Initial commit
         using var start = blockchain.StartNew(Keccak.EmptyTreeHash);
