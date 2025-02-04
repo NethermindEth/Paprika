@@ -309,14 +309,21 @@ public class Blockchain : IAsyncDisposable
             // report metric
             _committedBlocks.Set(_blocksByHash.Count);
 
-            // try automatically finalize if too many blocks
-            var canEverAutomaticallyFinalize = _automaticallyFinalizeAfter != NeverAutomaticallyFinalize;
-            if (canEverAutomaticallyFinalize && _blocksByNumber.Count > _automaticallyFinalizeAfter)
+            // Try automatically finalize if too many blocks
+            if (_automaticallyFinalizeAfter != NeverAutomaticallyFinalize)
             {
-                var (_, minimal) = _blocksByNumber.MinBy(kvp => kvp.Key);
-                if (minimal.Count == 1)
+                var howManyToFinalize = _blocksByNumber.Count - _automaticallyFinalizeAfter;
+
+                if (howManyToFinalize > 0)
                 {
-                    TryFinalize(minimal[0].Hash);
+                    var minCommittedBlock = _blocksByNumber.Min(kvp => kvp.Key);
+                    var blockNumberToFinalize = minCommittedBlock + howManyToFinalize - 1;
+
+                    var toFinalize = _blocksByNumber[(uint)blockNumberToFinalize];
+                    if (toFinalize.Count == 1)
+                    {
+                        TryFinalize(toFinalize[0].Hash);
+                    }
                 }
             }
 
@@ -479,12 +486,17 @@ public class Blockchain : IAsyncDisposable
                 return false;
             }
 
-            Debug.Assert(block.BlockNumber > _lastFinalized,
-                "Block that is finalized should have a higher number than the last finalized");
+            if (block.BlockNumber <= _lastFinalized)
+            {
+                // Block is already in the finalization queue or forgotten.
+                // Return true to confirm that the request has been accepted.
+                return true;
+            }
 
-            // gather all the blocks between last finalized and this.
-
+            // Gather all the blocks between last finalized and this.
             var count = block.BlockNumber - _lastFinalized;
+
+            Debug.Assert(count > 0, "At least one block should be considered for finalization.");
 
             finalized = new((int)count);
             for (var blockNumber = block.BlockNumber; blockNumber > _lastFinalized; blockNumber--)
