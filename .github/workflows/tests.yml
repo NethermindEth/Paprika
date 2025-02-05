@@ -65,6 +65,8 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+    permissions:
+      contents: read
 
     steps:
       - name: Set up .NET
