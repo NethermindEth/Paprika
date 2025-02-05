@@ -1,5 +1,10 @@
 name: "Paprika Tests"
 
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   pull_request:
   push:
@@ -30,7 +35,7 @@ jobs:
           submodules: true
 
       - name: Test
-        run: dotnet test src/Paprika.Tests -c ${{ env.BUILD_CONFIG }} --filter "TestCategory\!~LongRunning\&TestCategory\!~OS" --collect:"XPlat Code Coverage" --results-directory ./coverage
+        run: dotnet test src/Paprika.Tests -c ${{ env.BUILD_CONFIG }} --filter TestCategory\!~LongRunning --collect:"XPlat Code Coverage" --results-directory ./coverage
 
       - name: Code Coverage Report
         uses: irongut/CodeCoverageSummary@v1.3.0
@@ -73,4 +78,4 @@ jobs:
           submodules: true
 
       - name: Test (OS Category Only)
-        run: dotnet test src/Paprika.Tests -c ${{ env.BUILD_CONFIG }} --filter TestCategory=OS
+        run: dotnet test src/Paprika.OS.Tests -c ${{ env.BUILD_CONFIG }}
