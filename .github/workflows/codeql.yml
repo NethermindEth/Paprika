@@ -25,6 +25,11 @@ jobs:
       contents: read
       security-events: write
 
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["csharp", "actions"]
+
     steps:
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
@@ -37,9 +42,11 @@ jobs:
           submodules: true
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@5618c9fc1e675841ca52c1c6b1304f5255a905a0 # v2.19.0
+        uses: github/codeql-action/init@7e3036b9cd87fc26dd06747b7aa4b96c27aaef3a #v2.20.3
         with:
-          languages: csharp
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+          packs: githubsecuritylab/codeql-csharp-queries
 
       - name: Cache nuget
         uses: actions/cache@v3
@@ -53,4 +60,4 @@ jobs:
           dotnet restore src/Paprika.sln
           dotnet build src/Paprika.sln -c ${{ env.BUILD_CONFIG }} -v d
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@5618c9fc1e675841ca52c1c6b1304f5255a905a0 # v2.19.0
+        uses: github/codeql-action/analyze@7e3036b9cd87fc26dd06747b7aa4b96c27aaef3a #v2.20.3
