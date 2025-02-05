@@ -11,9 +11,4 @@ public static class Categories
     /// The test asserts the memory using <see cref="JetBrains.dotMemoryUnit"/> capabilities.
     /// </summary>
     public const string Memory = nameof(Memory);
-
-    /// <summary>
-    /// An operating system dependent API.
-    /// </summary>
-    public const string OS = nameof(OS);
 }
