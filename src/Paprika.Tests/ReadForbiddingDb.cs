@@ -22,7 +22,7 @@ public class ReadForbiddingDb(IDb db) : IDb
     public int HistoryDepth => db.HistoryDepth;
     public void ForceFlush() => db.ForceFlush();
 
-    public IMultiHeadChain OpenMultiHeadChain() => db.OpenMultiHeadChain();
+    public IMultiHeadChain OpenMultiHeadChain(int automaticallyFinalizeAfter) => db.OpenMultiHeadChain(automaticallyFinalizeAfter);
 
     private class ReadOnlyBatch(IReadOnlyBatch batch, ReadForbiddingDb parent) : IReadOnlyBatch
     {

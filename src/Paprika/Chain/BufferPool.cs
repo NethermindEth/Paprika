@@ -1,5 +1,3 @@
-//#define STACK_TRACE_TRACKING
-
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
@@ -17,20 +15,23 @@ public class BufferPool : IDisposable
     public const int BufferSize = Page.PageSize;
 
     private readonly int _buffersInOneSlab;
-    private readonly bool _assertCountOnDispose;
+    private readonly PageTracking _tracking;
+
     private readonly ConcurrentQueue<Page> _pool = new();
     private readonly ConcurrentQueue<IntPtr> _slabs = new();
 
-#if STACK_TRACE_TRACKING
-    private readonly ConcurrentDictionary<Page, StackTrace> _traces = new();
-#endif
-
+    private readonly ConcurrentDictionary<Page, StackTrace>? _traces;
     private readonly MetricsExtensions.IAtomicIntGauge? _allocatedMB;
 
-    public BufferPool(int buffersInOneSlab, bool assertCountOnDispose = true, Meter? meter = null)
+    public BufferPool(int buffersInOneSlab, PageTracking tracking = PageTracking.AssertCount, Meter? meter = null)
     {
         _buffersInOneSlab = buffersInOneSlab;
-        _assertCountOnDispose = assertCountOnDispose;
+        _tracking = tracking;
+
+        if (_tracking == PageTracking.StackTrace)
+        {
+            _traces = new();
+        }
 
         if (meter != null)
         {
@@ -65,21 +66,20 @@ public class BufferPool : IDisposable
         if (clear)
             pooled.Clear();
 
-#if STACK_TRACE_TRACKING
-        _traces[pooled] = new StackTrace();
-#endif
+        if (_traces != null)
+        {
+            _traces[pooled] = new StackTrace();
+        }
 
         return pooled;
     }
 
     public void Return(Page page)
     {
-#if STACK_TRACE_TRACKING
-        if (_traces.TryRemove(page, out _) == false)
+        if (_traces != null && _traces.TryRemove(page, out _) == false)
         {
             throw new KeyNotFoundException("The page was not found in the pool.");
         }
-#endif
 
         _pool.Enqueue(page);
     }
@@ -89,14 +89,14 @@ public class BufferPool : IDisposable
         var expectedCount = _buffersInOneSlab * _slabs.Count;
         var actualCount = _pool.Count;
 
-#if STACK_TRACE_TRACKING
-        foreach (var (_, value) in _traces)
+        if (_traces != null)
         {
-            throw new Exception(value.ToString());
+            foreach (var (_, value) in _traces)
+            {
+                throw new Exception(value.ToString());
+            }
         }
-#endif
-
-        if (_assertCountOnDispose)
+        else if (_tracking == PageTracking.AssertCount)
         {
             Debug.Assert(expectedCount == actualCount,
                 $"There should be {expectedCount} pages in the pool but there are only {actualCount}");
@@ -109,5 +109,23 @@ public class BufferPool : IDisposable
                 NativeMemory.AlignedFree(slab.ToPointer());
             }
         }
+    }
+
+    public enum PageTracking
+    {
+        /// <summary>
+        /// No tracking enabled.
+        /// </summary>
+        None = 0,
+
+        /// <summary>
+        /// Count based tracking that throws on missing pages.
+        /// </summary>
+        AssertCount = 1,
+
+        /// <summary>
+        /// Heavy stack capturing tracking
+        /// </summary>
+        StackTrace = 2
     }
 }

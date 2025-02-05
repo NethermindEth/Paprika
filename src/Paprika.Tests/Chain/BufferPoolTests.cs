@@ -7,13 +7,13 @@ using Paprika.Store;
 
 namespace Paprika.Tests.Chain;
 
-public class PagePoolTests
+public class BufferPoolTests
 {
     [Test]
     public void Simple_reuse()
     {
         using var meter = new Meter(nameof(Simple_reuse));
-        using var pool = new BufferPool(1, true, meter);
+        using var pool = new BufferPool(1, BufferPool.PageTracking.AssertCount, meter);
 
         // lease and return
         var initial = pool.Rent();
@@ -30,6 +30,22 @@ public class PagePoolTests
         }
 
         pool.AllocatedMB.Should().Be(0, "No megabytes should be reported, it's one page only");
+    }
+
+    [Test]
+    public void Stack_trace_tracking()
+    {
+        var pool = new BufferPool(1, BufferPool.PageTracking.StackTrace);
+
+        // Rent and not return
+        pool.Rent();
+
+        var exception = Assert.Throws<Exception>(() => pool.Dispose());
+
+        exception.StackTrace
+            .Should()
+            .Contain(nameof(BufferPoolTests)).And
+            .Contain(nameof(Stack_trace_tracking));
     }
 
     [Test]
@@ -54,7 +70,7 @@ public class PagePoolTests
     public unsafe void Big_pool()
     {
         const int pageCount = 1024;
-        using var pool = new BufferPool(pageCount, assertCountOnDispose: false);
+        using var pool = new BufferPool(pageCount, BufferPool.PageTracking.None);
 
         var set = new HashSet<UIntPtr>();
 

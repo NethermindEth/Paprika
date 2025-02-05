@@ -22,7 +22,6 @@ public class VerifyWholeTreeSettings : BasePaprikaSettings
             //
             // AnsiConsole.WriteLine($"Keccak {keccak.ToString()}");
 
-
             return 0;
         }
     }

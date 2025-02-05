@@ -119,7 +119,7 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
             "The number of pages registered to be reused");
 #endif
         // Pool
-        _pool = new BufferPool(16, true, _meter);
+        _pool = new BufferPool(16, BufferPool.PageTracking.AssertCount, _meter);
     }
 
     public static PagedDb NativeMemoryDb(long size, byte historyDepth = 2) =>
@@ -486,7 +486,6 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
                 minBatch = Math.Min(batch.BatchId, minBatch);
             }
         }
-
 
         return minBatch;
     }
@@ -953,11 +952,11 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
             {
                 Abandoned = new List<DbAddress>();
                 Written = new HashSet<DbAddress>();
-                IdCache = new Dictionary<Keccak, uint>();
+                IdCache = new ConcurrentDictionary<Keccak, uint>();
                 ReusedImmediately = new Stack<DbAddress>();
             }
 
-            public Dictionary<Keccak, uint> IdCache { get; }
+            public ConcurrentDictionary<Keccak, uint> IdCache { get; }
 
             public List<DbAddress> Abandoned { get; }
             public HashSet<DbAddress> Written { get; }

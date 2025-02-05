@@ -12,7 +12,7 @@ namespace Paprika.Store;
 
 public sealed partial class PagedDb
 {
-    public IMultiHeadChain OpenMultiHeadChain()
+    public IMultiHeadChain OpenMultiHeadChain(int automaticallyFinalizeAfter = int.MaxValue)
     {
         lock (_batchLock)
         {
@@ -21,7 +21,7 @@ public sealed partial class PagedDb
                 ThrowOnlyOneBatch();
             }
 
-            var chain = new MultiHeadChain(this);
+            var chain = new MultiHeadChain(this, automaticallyFinalizeAfter);
             _batchCurrent = chain;
 
             return chain;
@@ -69,7 +69,7 @@ public sealed partial class PagedDb
         /// </summary>
         public event EventHandler<Exception> FlusherFailure;
 
-        public MultiHeadChain(PagedDb db)
+        public MultiHeadChain(PagedDb db, int automaticallyFinalizeAfter)
         {
             _db = db;
 

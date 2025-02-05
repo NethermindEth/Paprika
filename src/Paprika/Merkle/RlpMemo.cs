@@ -9,52 +9,45 @@ namespace Paprika.Merkle;
 
 public readonly ref struct RlpMemo
 {
-    public static readonly byte[] Empty = new byte[Size];
+    public static readonly byte[] Empty = [];
 
     private readonly Span<byte> _buffer;
 
-    public const int Size = NibbleSet.NibbleCount * Keccak.Size;
+    public const int MaxSize = NibbleSet.NibbleCount * Keccak.Size;
 
     public RlpMemo(Span<byte> buffer)
     {
-        Debug.Assert(buffer.Length == Size);
-
         _buffer = buffer;
     }
 
     public ReadOnlySpan<byte> Raw => _buffer;
 
-    public void SetRaw(ReadOnlySpan<byte> keccak, byte nibble)
-    {
-        Debug.Assert(keccak.Length == Keccak.Size);
-        keccak.CopyTo(GetAtNibble(nibble));
-    }
+    public int Length => _buffer.Length;
 
-    public void Set(in KeccakOrRlp keccakOrRlp, byte nibble)
+    public void Set(ReadOnlySpan<byte> keccak, byte nibble)
     {
         var span = GetAtNibble(nibble);
+        Debug.Assert(!span.IsEmpty, "Attempted to set a value on a non-existent index");
+        Debug.Assert(keccak.Length == Keccak.Size && span.Length == Keccak.Size, "Attempted to set incorrect length");
 
-        if (keccakOrRlp.DataType == KeccakOrRlp.Type.Keccak)
-        {
-            keccakOrRlp.Span.CopyTo(span);
-        }
-        else
-        {
-            // on rlp, memoize none
-            span.Clear();
-        }
+        keccak.CopyTo(span);
     }
 
     public void Clear(byte nibble)
     {
-        GetAtNibble(nibble).Clear();
+        var span = GetAtNibble(nibble);
+
+        if (!span.IsEmpty)
+        {
+            span.Clear();
+        }
     }
 
     public bool TryGetKeccak(byte nibble, out ReadOnlySpan<byte> keccak)
     {
         var span = GetAtNibble(nibble);
 
-        if (span.IndexOfAnyExcept((byte)0) >= 0)
+        if (!span.IsEmpty && span.IndexOfAnyExcept((byte)0) >= 0)
         {
             keccak = span;
             return true;
@@ -64,139 +57,170 @@ public readonly ref struct RlpMemo
         return false;
     }
 
-    private Span<byte> GetAtNibble(byte nibble) => _buffer.Slice(nibble * Keccak.Size, Keccak.Size);
-
-    public static RlpMemo Decompress(scoped in ReadOnlySpan<byte> leftover, NibbleSet.Readonly children,
-        scoped in Span<byte> workingSet)
+    public bool Exists(byte nibble)
     {
-        if (_decompressionForbidden)
+        if (_buffer.Length == 0)
         {
-            ThrowDecompressionForbidden();
+            return false;
         }
 
-        var span = workingSet[..Size];
+        var index = GetIndex();
 
-        if (leftover.IsEmpty)
+        return index[nibble];
+    }
+
+    private Span<byte> GetAtNibble(byte nibble)
+    {
+        if (_buffer.Length == 0)
         {
-            // no RLP cached yet
-            span.Clear();
-            return new RlpMemo(span);
+            return [];
         }
 
-        if (leftover.Length == Size)
+        var index = GetIndex();
+
+        // Check if the element exists
+        if (!index[nibble])
         {
-            leftover.CopyTo(span);
-            return new RlpMemo(span);
+            return [];
         }
 
-        // It's neither empty nor full. It must be the compressed form, prepare setup first
-        span.Clear();
-        var memo = new RlpMemo(span);
+        var nibbleIndex = index.SetCountBefore(nibble) - 1;
+        var dataStartOffset = (_buffer.Length != MaxSize) ? NibbleSet.MaxByteSize : 0;
+        return _buffer.Slice(dataStartOffset + nibbleIndex * Keccak.Size, Keccak.Size);
+    }
 
-        // Extract empty bits if any
-        NibbleSet.Readonly empty;
+    private NibbleSet.Readonly GetIndex()
+    {
+        // Extract the index bits.
+        var indexLength = _buffer.Length % Keccak.Size;
+        NibbleSet.Readonly index;
 
-        // The empty bytes length is anything that is not aligned to the Keccak size
-        var emptyBytesLength = leftover.Length % Keccak.Size;
-        if (emptyBytesLength > 0)
+        if (indexLength != 0)
         {
-            var bits = leftover[^emptyBytesLength..];
-            NibbleSet.Readonly.ReadFrom(bits, out empty);
+            Debug.Assert(indexLength == NibbleSet.MaxByteSize, "Unexpected index length");
+            index = NibbleSet.Readonly.ReadFrom(_buffer);
         }
         else
         {
-            empty = default;
+            Debug.Assert(_buffer.Length is 0 or MaxSize, "Only empty or full RlpMemo can have no index");
+            index = _buffer.IsEmpty ? NibbleSet.Readonly.None : NibbleSet.Readonly.All;
         }
 
-        var at = 0;
-        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
-        {
-            if (children[i] && empty[i] == false)
-            {
-                var keccak = leftover.Slice(at * Keccak.Size, Keccak.Size);
-                at++;
-
-                memo.SetRaw(keccak, i);
-            }
-        }
-
-        return memo;
-
-        [DoesNotReturn]
-        [MethodImpl(MethodImplOptions.NoInlining)]
-        static void ThrowDecompressionForbidden() => throw new InvalidOperationException("Decompression is forbidden.");
+        return index;
     }
 
-    [SkipLocalsInit]
-    public static int Compress(in Key key, scoped in ReadOnlySpan<byte> memoizedRlp, NibbleSet.Readonly children, scoped in Span<byte> writeTo)
+    public static RlpMemo Copy(ReadOnlySpan<byte> from, scoped in Span<byte> to)
     {
-        // Optimization, omitting some of the branches to memoize.
-        // It omits only these with two children where the cost of the recompute is not big.
-        // To prevent an attack of spawning multiple levels of such branches, only even are skipped
-        if (children.SetCount == 2 && (key.Path.Length + key.StoragePath.Length) % 2 == 0)
-        {
-            return 0;
-        }
-
-        var memo = new RlpMemo(ComputeMerkleBehavior.MakeRlpWritable(memoizedRlp));
-        var at = 0;
-
-        var empty = new NibbleSet();
-
-        for (byte i = 0; i < NibbleSet.NibbleCount; i++)
-        {
-            if (children[i])
-            {
-                if (memo.TryGetKeccak(i, out var keccak))
-                {
-                    var dest = writeTo.Slice(at * Keccak.Size, Keccak.Size);
-                    at++;
-                    keccak.CopyTo(dest);
-                }
-                else
-                {
-                    empty[i] = true;
-                }
-            }
-        }
-
-        Debug.Assert(at != 16 || empty.SetCount == 0, "If at = 16, empty should be empty");
-
-        if (empty.SetCount == children.SetCount)
-        {
-            // None of children has their Keccak memoized. Instead of reporting it, return nothing written.
-            return 0;
-        }
-
-        if (empty.SetCount > 0)
-        {
-            var dest = writeTo.Slice(at * Keccak.Size, NibbleSet.MaxByteSize);
-            new NibbleSet.Readonly(empty).WriteToWithLeftover(dest);
-            return at * Keccak.Size + NibbleSet.MaxByteSize;
-        }
-
-        // Return only children that were written
-        return at * Keccak.Size;
+        var span = to[..from.Length];
+        from.CopyTo(span);
+        return new RlpMemo(span);
     }
 
-    /// <summary>
-    /// Test only method to forbid decompression.
-    /// </summary>
-    /// <returns></returns>
-    public static NoDecompressionScope NoDecompression() => new();
-
-    private static volatile bool _decompressionForbidden;
-
-    public readonly struct NoDecompressionScope : IDisposable
+    public static RlpMemo Insert(RlpMemo memo, byte nibble, ReadOnlySpan<byte> keccak, scoped in Span<byte> workingSet)
     {
-        public NoDecompressionScope()
+        var index = memo.GetIndex();
+
+        Debug.Assert(!index[nibble], "Attempted to insert a value into an already existing index");
+
+        // Update the index and then compute the destination size for copying.
+        index = index.Set(nibble);
+        var size = ComputeRlpMemoSize(index);
+
+        Debug.Assert(size is >= Keccak.Size + NibbleSet.MaxByteSize and <= MaxSize, "Unexpected size during insert");
+        Debug.Assert(workingSet.Length >= size, "Insufficient destination length for insertion");
+
+        var span = workingSet[..size];
+
+        // Start offsets for the data in the source (if any) and destination memo.
+        var sourceStartOffset = (memo.Length != 0) ? NibbleSet.MaxByteSize : 0;
+        var destStartOffset = (size != MaxSize) ? NibbleSet.MaxByteSize : 0;
+
+        // Compute the offset of this nibble in the memos
+        var insertIndex = index.SetCountBefore(nibble) - 1;
+        var insertOffset = destStartOffset + insertIndex * Keccak.Size;
+        var sourceRemainingStartOffset = sourceStartOffset + insertIndex * Keccak.Size;
+
+        // Copy all the elements before the new element
+        if (insertOffset > destStartOffset)
         {
-            _decompressionForbidden = true;
+            memo._buffer[sourceStartOffset..sourceRemainingStartOffset].CopyTo(span[destStartOffset..]);
         }
 
-        public void Dispose()
+        // Copy all the elements after the new element
+        if (memo.Length > sourceRemainingStartOffset)
         {
-            _decompressionForbidden = false;
+            memo._buffer[sourceRemainingStartOffset..].CopyTo(span[(insertOffset + Keccak.Size)..]);
         }
+
+        keccak.CopyTo(span[insertOffset..]);
+
+        // Insert the new index only if the destination memo is not full.
+        if (size != MaxSize)
+        {
+            index.WriteToWithLeftover(span);
+        }
+
+        return new RlpMemo(span);
+    }
+
+    public static RlpMemo Delete(RlpMemo memo, byte nibble, scoped in Span<byte> workingSet)
+    {
+        var index = memo.GetIndex();
+
+        Debug.Assert(index[nibble], "Attempted to delete a non-existing index");
+
+        // Update the index and then compute the destination size for copying.
+        index = index.Remove(nibble);
+        var size = ComputeRlpMemoSize(index);
+
+        Debug.Assert(size is >= 0 and < MaxSize, "Unexpected size during deletion");
+        Debug.Assert(workingSet.Length >= size, "Insufficient destination length for deletion");
+
+        if (size == 0)
+        {
+            // Return empty RlpMemo
+            return new RlpMemo(workingSet[..size]);
+        }
+
+        var span = workingSet[..size];
+
+        // Start offsets for the data in the source and destination memo. 
+        var sourceStartOffset = (memo.Length != MaxSize) ? NibbleSet.MaxByteSize : 0;
+        const int destStartOffset = NibbleSet.MaxByteSize;
+
+        // Compute the offset of this nibble in the memos
+        var deleteIndex = index.SetCountBefore(nibble);
+        var deleteSourceOffset = sourceStartOffset + deleteIndex * Keccak.Size;
+        var deleteDestOffset = destStartOffset + deleteIndex * Keccak.Size;
+
+        // Copy all the elements before the deleted element
+        if (deleteSourceOffset > sourceStartOffset)
+        {
+            memo._buffer[sourceStartOffset..deleteSourceOffset].CopyTo(span[destStartOffset..]);
+        }
+
+        // Copy all the elements after the deleted element
+        if (memo.Length > deleteSourceOffset + Keccak.Size)
+        {
+            memo._buffer[(deleteSourceOffset + Keccak.Size)..].CopyTo(span[deleteDestOffset..]);
+        }
+
+        // Since the destination memo is neither empty nor full here, it must always contain the index.
+        index.WriteToWithLeftover(span);
+
+        return new RlpMemo(span);
+    }
+
+    private static int ComputeRlpMemoSize(NibbleSet.Readonly index)
+    {
+        var size = index.SetCount * Keccak.Size;
+
+        // Add extra space for the index. Empty and full memo doesn't contain the index.
+        if (size != 0 && size != MaxSize)
+        {
+            size += NibbleSet.MaxByteSize;
+        }
+
+        return size;
     }
 }

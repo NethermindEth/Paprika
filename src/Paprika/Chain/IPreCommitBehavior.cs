@@ -1,3 +1,4 @@
+using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
@@ -16,8 +17,9 @@ public interface IPreCommitBehavior
     /// </summary>
     /// <param name="commit">The object representing the commit.</param>
     /// <param name="budget">The budget for caching capabilities.</param>
+    /// <param name="isSnapSync">Whether the current execution is done for snap sync purposes.</param>
     /// <returns>The result of the before commit.</returns>
-    Keccak BeforeCommit(ICommitWithStats commit, CacheBudget budget);
+    Keccak BeforeCommit(ICommitWithStats commit, CacheBudget budget, bool isSnapSync = false);
 
     /// <summary>
     /// Inspects the data allowing it to overwrite them if needed, before the commit is applied to the database.
@@ -60,6 +62,16 @@ public interface IPreCommitBehavior
     void Prefetch(in Keccak account, in Keccak storage, IPrefetcherContext accessor)
     {
     }
+
+    /// <summary>
+    /// Recalculate storage trie for a given account
+    /// </summary>
+    /// <param name="commit">The object representing the commit.</param>
+    /// <param name="account">Account for which the storage trie root should be recalculated</param>
+    /// <param name="budget">The budget for caching capabilities.</param>
+    /// <param name="isSnapSync">Whether the current execution is done for snap sync purposes.</param>
+    /// <returns></returns>
+    Keccak RecalculateStorageTrie(ICommit commit, Keccak account, CacheBudget budget, bool isSnapSync = false) => Keccak.EmptyTreeHash;
 }
 
 /// <summary>
@@ -76,7 +88,7 @@ public interface ICommitWithStats : ICommit
     /// Provides a collection of stats for storages.
     /// For each contract a set of sets and deletes. 
     /// </summary>
-    IReadOnlyDictionary<Keccak, (List<Keccak> set, List<Keccak> deleted)> TouchedStorageSlots { get; }
+    IReadOnlyDictionary<Keccak, IStorageStats> TouchedStorageSlots { get; }
 }
 
 /// <summary>

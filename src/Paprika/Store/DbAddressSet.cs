@@ -11,7 +11,7 @@ namespace Paprika.Store;
 public class DbAddressSet : IDisposable
 {
     private readonly DbAddress _max;
-    private static readonly BufferPool _pool = new(128, false);
+    private static readonly BufferPool _pool = new(128, BufferPool.PageTracking.None);
     private readonly BitSet[] _bitSets;
 
     private const int BitsPerByte = 8;

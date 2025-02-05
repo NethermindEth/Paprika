@@ -49,5 +49,5 @@ public interface IDb
     /// Opens the multi head chain.
     /// </summary>
     /// <returns></returns>
-    IMultiHeadChain OpenMultiHeadChain();
+    IMultiHeadChain OpenMultiHeadChain(int automaticallyFinalizeAfter = int.MaxValue);
 }
