@@ -82,10 +82,10 @@ public static class SpanExtensions
         }
 
         /// <summary>Gets the element at the current position of the enumerator.</summary>
-        public (int Start, int Length) Current
+        public (T Start, int Length) Current
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => new(_from, _length);
+            get => new(_span[_from], _length);
         }
     }
 }

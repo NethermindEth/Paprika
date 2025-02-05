@@ -127,8 +127,7 @@ public sealed class MemoryMappedPageManager : PointerPageManager
 
         foreach (var range in numbers.BatchConsecutive(MaxWriteBatch))
         {
-            var addr = span[range.Start];
-            _pendingWrites.Add(WriteAt(addr, (uint)range.Length).AsTask());
+            _pendingWrites.Add(WriteAt(new DbAddress(range.Start), (uint)range.Length).AsTask());
         }
 
         _fileWrites.Record(_pendingWrites.Count);
