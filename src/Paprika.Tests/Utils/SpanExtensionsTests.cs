@@ -67,7 +67,7 @@ public class SpanExtensionsTests
         const int start1 = 3;
         const int start2 = 5;
         const int start3 = 7;
-        
+
         Span<int> span = [start0, start1, 4, start2, 6, start3];
 
         const int max = 2;
