@@ -669,7 +669,7 @@ public sealed partial class PagedDb
             _reusePagesOlderThanBatchId = reusePagesOlderThan;
             _batchId = _root.Header.BatchId;
             _read = read;
-            
+
             // Clear previously cached ids
             IdCache.Clear();
 
