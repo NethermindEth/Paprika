@@ -198,49 +198,46 @@ public class BlockchainTests
         last.GetAccount(Key0).Should().Be(new Account(lastValue, lastValue));
     }
 
-    // [Test]
-    // public async Task Automatic_finality()
-    // {
-    //     const int count = 100;
-    //     const int automaticFinalityAfter = 10;
-    //
-    //     using var db = PagedDb.NativeMemoryDb(16 * Mb, 2);
-    //
-    //     await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(),
-    //         null, default, default, null, automaticFinalityAfter);
-    //
-    //     var hashes = new Queue<Keccak>();
-    //
-    //     var block = blockchain.StartNew(Keccak.EmptyTreeHash);
-    //     block.SetAccount(Key0, new Account(1, 1));
-    //     var hash = block.Commit(1);
-    //     hashes.Enqueue(hash);
-    //
-    //     block.Dispose();
-    //
-    //     var finalized = Task.CompletedTask;
-    //
-    //     for (uint no = 2; no < count; no++)
-    //     {
-    //         // create new, set, commit and dispose
-    //         block = blockchain.StartNew(hash);
-    //         block.SetAccount(Key0, new Account(no, no));
-    //
-    //         if (no > automaticFinalityAfter)
-    //         {
-    //             finalized = blockchain.WaitTillFlush(hashes.Dequeue());
-    //             finalized.IsCompleted.Should().BeFalse("The automatic finality should be reached only on the commit");
-    //         }
-    //
-    //         hash = block.Commit(no);
-    //         hashes.Enqueue(hash);
-    //
-    //         // Should be finalized after the block breaching the finality is committed
-    //         await finalized;
-    //
-    //         block.Dispose();
-    //     }
-    // }
+    [Test]
+    public async Task Automatic_finality()
+    {
+        const int count = 100;
+        const int automaticFinalityAfter = 10;
+    
+        using var db = PagedDb.NativeMemoryDb(16 * Mb, 2);
+    
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(),
+            null, default, default, null, automaticFinalityAfter);
+    
+        var hashes = new Queue<Keccak>();
+    
+        var block = blockchain.StartNew(Keccak.EmptyTreeHash);
+        block.SetAccount(Key0, new Account(1, 1));
+        var hash = block.Commit(1);
+        hashes.Enqueue(hash);
+    
+        block.Dispose();
+
+        // Setup semaphore so that first N blocks are given, the last should be automatically flushed
+        var flushed = new SemaphoreSlim(automaticFinalityAfter, int.MaxValue);
+
+        blockchain.Flushed += (_, _) => flushed.Release();
+            
+        for (uint no = 2; no < count; no++)
+        {
+            // create new, set, commit and dispose
+            block = blockchain.StartNew(hash);
+            block.SetAccount(Key0, new Account(no, no));
+    
+            hash = block.Commit(no);
+            hashes.Enqueue(hash);
+    
+            // Should be finalized after the block breaching the finality is committed
+            await flushed.WaitAsync();
+    
+            block.Dispose();
+        }
+    }
 
     [Test]
     public async Task Account_destruction_same_block()

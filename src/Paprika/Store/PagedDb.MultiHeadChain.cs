@@ -72,6 +72,7 @@ public sealed partial class PagedDb
         public MultiHeadChain(PagedDb db, int automaticallyFinalizeAfter)
         {
             _db = db;
+            AutomaticallyFinalizeAfter = automaticallyFinalizeAfter;
 
             _flusherQueueCount = _db._meter.CreateAtomicObservableGauge("Flusher queue size", "Blocks",
                 "The number of the blocks in the flush queue");
@@ -96,6 +97,8 @@ public sealed partial class PagedDb
 
             _flusher = FlusherTask();
         }
+
+        public int AutomaticallyFinalizeAfter { get; }
 
         private void BuildAndRegisterReader(Keccak stateRootHash)
         {
@@ -666,6 +669,19 @@ public sealed partial class PagedDb
             _reusePagesOlderThanBatchId = reusePagesOlderThan;
             _batchId = _root.Header.BatchId;
             _read = read;
+
+            // Try automatically finalize
+            var toFinalize = _proposed.Count - _chain.AutomaticallyFinalizeAfter;  
+            if (toFinalize > 0)
+            {
+                // Finalize this
+                var candidate = _proposed.Skip(toFinalize - 1).FirstOrDefault();
+                Debug.Assert(candidate != null);
+                var hash = candidate.StateHash;
+                
+                // Offload the finalization call to a separate task. No need to wait on it.
+                Task.Run(() => _chain.Finalize(hash));
+            }
         }
 
         public override Page GetAt(DbAddress address) => GetAtImpl(address, false);
