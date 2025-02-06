@@ -671,14 +671,14 @@ public sealed partial class PagedDb
             _read = read;
 
             // Try automatically finalize
-            var toFinalize = _proposed.Count - _chain.AutomaticallyFinalizeAfter;  
+            var toFinalize = _proposed.Count - _chain.AutomaticallyFinalizeAfter;
             if (toFinalize > 0)
             {
                 // Finalize this
                 var candidate = _proposed.Skip(toFinalize - 1).FirstOrDefault();
                 Debug.Assert(candidate != null);
                 var hash = candidate.StateHash;
-                
+
                 // Offload the finalization call to a separate task. No need to wait on it.
                 Task.Run(() => _chain.Finalize(hash));
             }

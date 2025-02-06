@@ -127,7 +127,7 @@ public class Blockchain : IAsyncDisposable
     public IReadOnlyWorldState StartReadOnlyLatestFinalized() => new ReadOnlyState(_chain.LeaseLatestFinalized());
 
     public Task Finalize(Keccak keccak) => _chain.Finalize(keccak);
-    
+
     private BitFilter CreateBitFilter() => BitMapFilter.CreateOfN<BitMapFilter.OfNSize128>(_pool);
 
     /// <summary>
@@ -1291,7 +1291,7 @@ public class Blockchain : IAsyncDisposable
         return _accessor = new ReadOnlyWorldStateAccessor(_chain);
     }
 
-   private class ReadOnlyWorldStateAccessor(IMultiHeadChain chain) : IReadOnlyWorldStateAccessor
+    private class ReadOnlyWorldStateAccessor(IMultiHeadChain chain) : IReadOnlyWorldStateAccessor
     {
         public bool HasState(in Keccak keccak) => chain.HasState(keccak);
 
