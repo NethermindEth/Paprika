@@ -959,8 +959,8 @@ public sealed partial class PagedDb
                 batch.Dispose();
             }
 
-            var count = _pageTable!.Count;
-            if (count is > MinCachedSize and < MaxCachedSize)
+            var capacity = _pageTable!.Capacity;
+            if (capacity is > MinCachedSize and < MaxCachedSize)
             {
                 // dictionary is within boundaries, clear and cache
                 _pageTable.Clear();
