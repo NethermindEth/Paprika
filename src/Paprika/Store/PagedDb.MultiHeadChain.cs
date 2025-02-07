@@ -65,6 +65,7 @@ public sealed partial class PagedDb
 
         // Metrics
         private readonly MetricsExtensions.IAtomicIntGauge _flusherQueueCount;
+        private readonly MetricsExtensions.IAtomicIntGauge _lastReaderPageTableSize;
 
         /// <summary>
         /// Announces the last block number that was flushed to disk.
@@ -81,8 +82,11 @@ public sealed partial class PagedDb
             _db = db;
             AutomaticallyFinalizeAfter = automaticallyFinalizeAfter;
 
-            _flusherQueueCount = _db._meter.CreateAtomicObservableGauge("Flusher queue size", "Blocks",
+            var meter = _db._meter;
+            _flusherQueueCount = meter.CreateAtomicObservableGauge("Flusher queue size", "Blocks",
                 "The number of the blocks in the flush queue");
+            _lastReaderPageTableSize = meter.CreateAtomicObservableGauge("Last Reader page table size", "Entries",
+                "The number of entries hold in the last reader");
 
             _pool = _db._pool;
 
@@ -95,7 +99,7 @@ public sealed partial class PagedDb
             foreach (var batch in allWithoutTheOldest)
             {
                 _lastCommittedBatch = Math.Max(batch.BatchId, _lastCommittedBatch);
-                var reader = new Reader(_db, CreateNextRoot([], (ReadOnlyBatch)batch), batch, [], _pool);
+                var reader = new Reader(_db, CreateNextRoot([], (ReadOnlyBatch)batch), batch, [], _pool, _lastReaderPageTableSize);
                 RegisterReader(reader);
 
                 _readersDisposalQueue.Enqueue(reader);
@@ -115,7 +119,7 @@ public sealed partial class PagedDb
             lock (_db._batchLock)
             {
                 var read = BuildDependencies(stateRootHash, out var root, out _, out var proposed);
-                reader = new Reader(_db, root, read, proposed, _pool);
+                reader = new Reader(_db, root, read, proposed, _pool, _lastReaderPageTableSize);
             }
 
             RegisterReader(reader);
@@ -345,7 +349,7 @@ public sealed partial class PagedDb
 
                                 var read = BuildDependencies(batch.Root.Data.Metadata.StateHash, out var root, out _,
                                     out var proposed);
-                                newReader = new Reader(_db, root, read, proposed, _pool);
+                                newReader = new Reader(_db, root, read, proposed, _pool, _lastReaderPageTableSize);
                             }
 
                             // Register the new reader and await the disposal of the oldest one.
@@ -843,19 +847,22 @@ public sealed partial class PagedDb
         private readonly BufferPool _pool;
         private readonly PagedDb _db;
         private volatile Dictionary<DbAddress, Page>? _pageTable;
+        private readonly MetricsExtensions.IAtomicIntGauge _pageTableCount;
 
         // Current values, shifted with every commit
         private readonly RootPage _root;
         private readonly IReadOnlyBatch _read;
         private readonly ProposedBatch[] _proposed;
 
-        public Reader(PagedDb db, RootPage root, IReadOnlyBatch read, ProposedBatch[] proposed, BufferPool pool)
+        public Reader(PagedDb db, RootPage root, IReadOnlyBatch read, ProposedBatch[] proposed, BufferPool pool,
+            MetricsExtensions.IAtomicIntGauge pageTableCount)
         {
             _db = db;
             _root = root;
             BatchId = root.Header.BatchId;
 
             _pool = pool;
+            _pageTableCount = pageTableCount;
             _read = read;
             _proposed = proposed;
 
@@ -882,6 +889,8 @@ public sealed partial class PagedDb
                 {
                     _pageTable[at] = page;
                 }
+
+                _pageTableCount.Set(_pageTable.Count);
 
                 return;
             }
@@ -980,6 +989,9 @@ public sealed partial class PagedDb
                     }
                 }
             }
+
+            // Report
+            _pageTableCount.Set(table.Count);
 
             // A volatile write, eventually visible to the readers
             _pageTable = table;
