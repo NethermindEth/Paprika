@@ -165,7 +165,7 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
         var start = _roots[0];
         if (start.Data.NextFreePage < _historyDepth)
         {
-            // The start root must have the properly number set to first free page
+            // The very first root's NextFreePage must point to the very first page that can contain data.
             start.Data.NextFreePage = DbAddress.Page(_historyDepth);
 
             // The start root should be empty tree hash.
