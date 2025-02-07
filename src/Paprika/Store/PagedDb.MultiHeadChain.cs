@@ -12,6 +12,13 @@ namespace Paprika.Store;
 
 public sealed partial class PagedDb
 {
+    /// <summary>
+    /// Makes the database turn into a headed mode.
+    /// From now on, the database do not accept any batches and <see cref="BeginNextBatch"/> will throw an exception.
+    /// All the access should be done directly through the returned <see cref="IMultiHeadChain"/> object.
+    /// </summary>
+    /// <param name="automaticallyFinalizeAfter">The number of blocks, that historical heads are automatically finalized after. </param>
+    /// <returns></returns>
     public IMultiHeadChain OpenMultiHeadChain(int automaticallyFinalizeAfter = int.MaxValue)
     {
         lock (_batchLock)
@@ -988,21 +995,53 @@ public interface IHeadReader : IDataGetter, IRefCountingDisposable
 {
 }
 
+/// <summary>
+/// The head tracking component, responsible for creating heads of the blockchain.
+/// </summary>
 public interface IMultiHeadChain : IAsyncDisposable
 {
+    /// <summary>
+    /// Starts a new head that is tracking a head of the blockchain.
+    /// Once created should be captured and used to track the given head.
+    /// On reorg, dispose and create a new one.
+    /// </summary>
+    /// <param name="stateHash">The state hash to start from.</param>
+    /// <returns>A new head.</returns>
     IHead Begin(in Keccak stateHash);
 
+    /// <summary>
+    /// Creates a head that will never be committed and can be used only for the sake of reading or simulating.
+    /// </summary>
+    /// <param name="stateHash">The state hash to start from.</param>
+    /// <returns>A non-committable head.</returns>
     IHead BeginNonCommittable(in Keccak stateHash);
 
+    /// <summary>
+    /// Tries to lease a reader at the given hash.
+    /// </summary>
+    /// <param name="stateHash">The state hash to start from.</param>
+    /// <param name="leasedReader"></param>
+    /// <returns></returns>
     bool TryLeaseReader(in Keccak stateHash, out IHeadReader leasedReader);
 
+    /// <summary>
+    /// Lease the latest finalized reader. On startup, will return a reader from the database.
+    /// </summary>
     IHeadReader LeaseLatestFinalized();
 
     /// <summary>
     /// Finalizes the given block and all the blocks before it.
     /// </summary>
+    /// <summary>
+    /// Awaiting the task is not required. It's provided only for callers that need to wait on it.
+    /// </summary>
     Task Finalize(Keccak keccak);
 
+    /// <summary>
+    /// Whether there's a <see cref="IHeadReader"/> that can be obtained by the keccak.
+    /// </summary>
+    /// <param name="keccak"></param>
+    /// <returns></returns>
     bool HasState(in Keccak keccak);
 
     /// <summary>
