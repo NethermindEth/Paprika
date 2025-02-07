@@ -830,6 +830,16 @@ public sealed partial class PagedDb
     {
         private static readonly Dictionary<DbAddress, Page> Empty = new();
 
+        // Static cache of one dictionary
+        private static Dictionary<DbAddress, Page>? s_cached;
+
+        // This should be ~1.5MB
+        // Dict entry is uint, int, key, value which is 4 + 4 + 4 + 8 = 20.
+        private const int MaxCachedSize = 64 * 1024;
+
+        // No reason to cache smaller
+        private const int MinCachedSize = 1024;
+
         private readonly BufferPool _pool;
         private readonly PagedDb _db;
         private volatile Dictionary<DbAddress, Page>? _pageTable;
@@ -863,7 +873,6 @@ public sealed partial class PagedDb
                 return;
             }
 
-
             if (proposed.Length == 1)
             {
                 _pageTable = CreatePageTable();
@@ -887,11 +896,14 @@ public sealed partial class PagedDb
         /// <returns>A page table to be used and eventually assigned to <see cref="_pageTable"/>.</returns>
         private Dictionary<DbAddress, Page> CreatePageTable()
         {
+            var cached = Interlocked.Exchange(ref s_cached, null);
+            if (cached != null)
+                return cached;
+
             // Initializing dictionary with no initial capacity has no sense,
             // because it will have at least as many changes as max of the proposed sets.
             // A simple heuristic is used to allocate twice the size of the last set.
             var lastProposedCount = _proposed[^1].Changes.Length;
-
             return new Dictionary<DbAddress, Page>(2 * lastProposedCount);
         }
 
@@ -936,6 +948,14 @@ public sealed partial class PagedDb
             foreach (var batch in _proposed)
             {
                 batch.Dispose();
+            }
+
+            var count = _pageTable!.Count;
+            if (count is > MinCachedSize and < MaxCachedSize)
+            {
+                // dictionary is within boundaries, clear and cache
+                _pageTable.Clear();
+                Volatile.Write(ref s_cached, _pageTable);
             }
         }
 
