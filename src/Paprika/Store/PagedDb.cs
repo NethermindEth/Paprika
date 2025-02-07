@@ -110,7 +110,7 @@ public sealed partial class PagedDb : IPageResolver, IDb, IDisposable
         _lowestReadTxBatch = _meter.CreateAtomicObservableGauge($"Lowest read {BatchIdName}", BatchIdName,
             "The lowest BatchId that is locked by a read tx");
         _lastWriteTxBatch = _meter.CreateAtomicObservableGauge($"Last written {BatchIdName}", BatchIdName,
-            "The last ");
+            "The last BatchId that was written by a batch");
 
 
 #if TRACKING_REUSED_PAGES
