@@ -357,7 +357,7 @@ public sealed partial class PagedDb
                         if (reader.TryPeek(out _) == false)
                         {
                             // For now, perform sync only if there is no other coming.
-                            // TODO: This should take into consideration the actual number of blocks written so far 
+                            // TODO: This should take into consideration the actual number of blocks written so far
                             _db.Flush();
                         }
 
@@ -821,15 +821,16 @@ public sealed partial class PagedDb
 
     private sealed class Reader : RefCountingDisposable, IReadOnlyBatchContext, IHeadReader, IThreadPoolWorkItem
     {
+        private static readonly Dictionary<DbAddress, Page> Empty = new();
+
         private readonly BufferPool _pool;
         private readonly PagedDb _db;
-        private readonly Dictionary<DbAddress, Page> _pageTable = new();
+        private volatile Dictionary<DbAddress, Page>? _pageTable;
 
         // Current values, shifted with every commit
         private readonly RootPage _root;
         private readonly IReadOnlyBatch _read;
         private readonly ProposedBatch[] _proposed;
-        private volatile bool _ready;
 
         public Reader(PagedDb db, RootPage root, IReadOnlyBatch read, ProposedBatch[] proposed, BufferPool pool)
         {
@@ -851,25 +852,40 @@ public sealed partial class PagedDb
 
             if (proposed.Length == 0)
             {
-                _ready = true;
+                _pageTable = Empty;
                 return;
             }
 
+
             if (proposed.Length == 1)
             {
+                _pageTable = CreatePageTable();
+
                 // Don't run on thread with a single proposed
                 foreach (var (at, page) in proposed[0].Changes)
                 {
                     _pageTable[at] = page;
                 }
 
-                _ready = true;
                 return;
             }
 
-            // More than 1 proposed o scan, queue it.
-            _ready = false;
+            // More than 1 proposed batch, queue it as a work item.
             ThreadPool.UnsafeQueueUserWorkItem(this, false);
+        }
+
+        /// <summary>
+        /// Creates a reasonably sized page table.
+        /// </summary>
+        /// <returns>A page table to be used and eventually assigned to <see cref="_pageTable"/>.</returns>
+        private Dictionary<DbAddress, Page> CreatePageTable()
+        {
+            // Initializing dictionary with no initial capacity has no sense,
+            // because it will have at least as many changes as max of the proposed sets.
+            // A simple heuristic is used to allocate twice the size of the last set.
+            var lastProposedCount = _proposed[^1].Changes.Length;
+
+            return new Dictionary<DbAddress, Page>(2 * lastProposedCount);
         }
 
         public Metadata Metadata => _root.Data.Metadata;
@@ -882,16 +898,16 @@ public sealed partial class PagedDb
 
         private void EnsureReady()
         {
-            if (_ready == false)
+            if (_pageTable == null)
             {
-                SpinWait.SpinUntil(() => _ready);
+                SpinWait.SpinUntil(() => _pageTable != null);
             }
         }
 
         public Page GetAt(DbAddress address)
         {
             EnsureReady();
-            return _pageTable.TryGetValue(address, out var page) ? page : _db.GetAt(address);
+            return _pageTable!.TryGetValue(address, out var page) ? page : _db.GetAt(address);
         }
 
         public void Prefetch(DbAddress addr)
@@ -918,6 +934,10 @@ public sealed partial class PagedDb
 
         void IThreadPoolWorkItem.Execute()
         {
+            // Create locally to only set at the end of the Execute.
+            // Otherwise, readers could see a partially created table.
+            var table = CreatePageTable();
+
             foreach (var batch in _proposed)
             {
                 // TODO: this application could be done in parallel if the dictionaries were concurrent
@@ -925,7 +945,7 @@ public sealed partial class PagedDb
                 foreach (var (at, page) in batch.Changes)
                 {
                     ref var slot =
-                        ref CollectionsMarshal.GetValueRefOrAddDefault(_pageTable, at, out var exists);
+                        ref CollectionsMarshal.GetValueRefOrAddDefault(table, at, out var exists);
 
                     if (exists == false || ShouldOverwrite(page, slot))
                     {
@@ -934,7 +954,8 @@ public sealed partial class PagedDb
                 }
             }
 
-            _ready = true;
+            // A volatile write, eventually visible to the readers
+            _pageTable = table;
         }
     }
 
