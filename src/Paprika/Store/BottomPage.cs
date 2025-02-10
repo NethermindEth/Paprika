@@ -54,10 +54,12 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         if (existing == 0)
         {
             // No children yet. Create the first, flush there and set.
+            Debug.Assert(Data.Buckets[0].IsNull);
+
             var child = batch.GetNewPage<BottomPage>(out var childAddr, (byte)(Header.Level + 1));
             Data.Buckets[0] = childAddr;
 
-            // Move all down. Ensure that deletes are treated as tombsones.
+            // Move all down. Ensure that deletes are treated as tombstones.
             map.MoveNonEmptyKeysTo<All>(child.Map, true);
 
             map.Clear();
@@ -369,6 +371,8 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
             // Copy back the span
             buffer.CopyTo(child.Data.DataSpan);
         }
+
+        AssertChildrenRangeInvariant(batch);
 
         ArrayPool<byte>.Shared.Return(array);
 
