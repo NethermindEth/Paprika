@@ -584,6 +584,11 @@ public static class StorageFanOut
 
             public void Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
             {
+                if (key.GetHashCode() == 1906005005)
+                {
+                    Debugger.Break();
+                }
+
                 Page root;
 
                 // Try writing through if the key is non empty, the root exists and the Root was written in this batch
