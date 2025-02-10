@@ -195,7 +195,7 @@ public class DbTests
             return address;
         }
     }
-    
+
     [Test]
     public async Task Cross_block_entries()
     {
@@ -209,14 +209,14 @@ public class DbTests
             using (var batch = db.BeginNextBatch())
             {
                 var address = GetStorageAddress(i);
-                
+
                 batch.SetAccount(Key0, GetValue(i));
                 batch.SetStorage(Key0, address, GetValue(i));
 
                 await batch.Commit(CommitOptions.FlushDataAndRoot);
             }
         }
-        
+
         using (var read = db.BeginReadOnlyBatch())
         {
             for (int i = 0; i < count; i++)
