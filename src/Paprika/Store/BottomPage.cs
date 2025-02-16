@@ -150,7 +150,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         Span<ushort> sizes = stackalloc ushort[16];
         map.GatherSizeStats1Nibble(sizes);
 
-        var index = FindMaxSizeNotAllocatedChild(sizes);
+        var index = FindBestNotAllocatedChild(sizes, batch);
         if (index == ChildNotFound)
             return false;
 
@@ -205,38 +205,61 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         }
     }
 
-    private int FindMaxSizeNotAllocatedChild(Span<ushort> sizes)
+    private int FindBestNotAllocatedChild(Span<ushort> sizes, IBatchContext batch)
     {
         Debug.Assert(Data.Buckets[0].IsNull == false);
 
-        var maxSum = 0;
-        var maxNibble = 0;
+        var (allocatedMask, _) = GatherChildrenInfo(batch);
 
-        for (var i = 0; i < ChildCount; i++)
+        int bestStart = ChildNotFound, bestTotal = 0;
+        int curStart = ChildNotFound, curTotal = 0;
+
+        // Single loop: track free ranges based solely on their start and cumulative weight.
+        int i;
+
+        for (i = 0; i < ChildCount; i++)
         {
-            if (Data.Buckets[i].IsNull == false || sizes[i] == 0)
-                continue;
-
-            var sum = 0;
-            var nibble = i;
-
-            while (i < ChildCount && Data.Buckets[i].IsNull)
+            if ((allocatedMask & (1 << i)) == 0)
             {
-                sum += sizes[i];
-                i++;
+                if (curStart == -1)
+                    curStart = i;
+                curTotal += sizes[i];
             }
-
-            if (sum > maxSum)
+            else
             {
-                maxNibble = nibble;
-                maxSum = sum;
+                if (curStart != ChildNotFound && curTotal > bestTotal)
+                {
+                    bestStart = curStart;
+                    bestTotal = curTotal;
+                }
+                curStart = ChildNotFound;
+                curTotal = 0;
             }
-
-            // move one back to allow loop to increment
-            i--;
         }
 
-        return maxSum > 0 ? maxNibble : ChildNotFound;
+        if (curStart != ChildNotFound && curTotal > bestTotal)
+        {
+            bestStart = curStart;
+            bestTotal = curTotal;
+        }
+
+        if (bestStart == ChildNotFound)
+            return ChildNotFound;
+
+        // While loop: iterate within the best free-range until reaching roughly half of its cumulative weight.
+        var halfTotal = bestTotal / 2;
+        var cumulative = 0;
+        i = bestStart;
+
+        while (i < ChildCount && (allocatedMask & (1 << i)) == 0)
+        {
+            cumulative += sizes[i];
+            if (cumulative >= halfTotal)
+                return i;
+            i++;
+        }
+
+        return i - 1; // Return the last free nibble in the range.
     }
 
     private bool MoveToChildPages(in SlottedArray source, IBatchContext batch, ushort childIndexes, bool cow,
