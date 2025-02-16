@@ -43,6 +43,12 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
         var map = Map;
 
+        if (data.IsEmpty)
+        {
+            Delete(key, batch);
+            return page;
+        }
+
         // Try setting value directly
         if (map.TrySet(key, data))
         {
@@ -120,6 +126,47 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
         // The destination is set over this page.
         return page;
+    }
+
+    private void Delete(in NibblePath key, IBatchContext batch)
+    {
+        var map = Map;
+
+        var (children, _) = GatherChildrenInfo(batch);
+        map.Delete(key);
+
+        if (key.Length == 0)
+            return;
+
+        var at = GetExistingChildIndexWhereKeyBelongsTo(key, children);
+        if (at == ChildNotFound)
+        {
+            // Nothing else to delete
+            return;
+        }
+
+        var childAddr = Data.Buckets[at];
+        var child = new BottomPage(batch.GetAt(childAddr));
+
+        if (batch.WasWritten(childAddr))
+        {
+            // If the child was already written, no need to check whether it has a key or not.
+            // It's cheaper to try to delete it rather than trying to get and then delete on positive.
+            child.Map.Delete(key);
+            return;
+        }
+
+        // The child was not written in this batch. First check whether it's worth to COW it.
+        if (child.Map.Contains(key) == false)
+        {
+            return;
+        }
+
+        // The page contains the value but it was not COWed yet. COW and then delete.
+        child = new BottomPage(batch.EnsureWritableCopy(ref childAddr));
+        Data.Buckets[at] = childAddr;
+
+        child.Map.Delete(key);
     }
 
     private (ushort existing, ushort writtenThisBatch) GatherChildrenInfo(IBatchContext batch)
@@ -232,6 +279,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
                     bestStart = curStart;
                     bestTotal = curTotal;
                 }
+
                 curStart = ChildNotFound;
                 curTotal = 0;
             }
