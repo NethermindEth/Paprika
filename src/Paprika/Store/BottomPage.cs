@@ -70,8 +70,8 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         // If there are any children that were written this batch, try to write to them first.
         if (writtenThisBatch != 0)
         {
-            // Flush down to existing, no COW needed as we flush first only to the ones written this batch.
-            if (MoveToChildPages(map, batch, writtenThisBatch, false))
+            // Flush down to the children written in this batch does not require COW as they were already copied during this batch.
+            if (MoveToChildPages(map, batch, existing, false))
             {
                 if (map.TrySet(key, data))
                 {
@@ -84,8 +84,8 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         var childrenNotWrittenThisBatch = (ushort)(existing & ~writtenThisBatch);
         if (childrenNotWrittenThisBatch != 0)
         {
-            // Flush down to existing, no COW needed as we flush first only to the ones written this batch.
-            if (MoveToChildPages(map, batch, childrenNotWrittenThisBatch, true))
+            // There are children that were not COWed during this batch. Try to move using COW now.
+            if (MoveToChildPages(map, batch, existing, true))
             {
                 if (map.TrySet(key, data))
                 {
@@ -254,47 +254,51 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
             Debug.Assert(at <= k.Nibble0);
 
-            if (at >= 0)
+            if (at < 0)
             {
-                var addr = Data.Buckets[at];
+                // No existing child that allows writing it down
+                continue;
+            }
 
-                Debug.Assert(addr.IsNull == false);
+            var addr = Data.Buckets[at];
+            Debug.Assert(addr.IsNull == false);
 
-                if (batch.WasWritten(addr) == false)
-                {
-                    if (cow)
-                    {
-                        // copy the page as it was not written in this batch yet.
-                        batch.EnsureWritableCopy(ref addr);
-                        Data.Buckets[at] = addr;
-                    }
-                    else
-                    {
-                        Debug.Fail("The page should be written this batch");
-                    }
-                }
+            var written = batch.WasWritten(addr);
 
-                var childMap = new BottomPage(batch.GetAt(addr)).Map;
+            if (written == false && !cow)
+            {
+                // This call is performed only on pages that were already COWed during this batch.
+                // No cow allowance, continue
+                continue;
+            }
 
-                Debug.Assert(k.Nibble0 >= at);
+            if (written == false)
+            {
+                // copy the page as it was not written in this batch yet.
+                batch.EnsureWritableCopy(ref addr);
+                Data.Buckets[at] = addr;
+            }
 
-                if (item.RawData.IsEmpty)
-                {
-                    // It's a deletion, delete in original and in the child
-                    childMap.Delete(k);
-                    source.Delete(item);
-                    moved = true;
-                }
-                else if (childMap.TrySet(k, item.RawData))
-                {
-                    // Successfully pushed down, delete
-                    source.Delete(item);
-                    moved = true;
-                }
-                else if (assertAllCopied)
-                {
-                    Debug.Fail("Should always be able to set");
-                }
+            var childMap = new BottomPage(batch.GetAt(addr)).Map;
+
+            Debug.Assert(k.Nibble0 >= at);
+
+            if (item.RawData.IsEmpty)
+            {
+                // It's a deletion, delete in original and in the child
+                childMap.Delete(k);
+                source.Delete(item);
+                moved = true;
+            }
+            else if (childMap.TrySet(k, item.RawData))
+            {
+                // Successfully pushed down, delete
+                source.Delete(item);
+                moved = true;
+            }
+            else if (assertAllCopied)
+            {
+                Debug.Fail("Should always be able to set");
             }
         }
 
@@ -371,8 +375,6 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
             // Copy back the span
             buffer.CopyTo(child.Data.DataSpan);
         }
-
-        AssertChildrenRangeInvariant(batch);
 
         ArrayPool<byte>.Shared.Return(array);
 
