@@ -1617,7 +1617,8 @@ public class Blockchain : IAsyncDisposable
                             : Key.Merkle(extChildPath);
                         var extChildHash = GetHash(extChildKey);
 
-                        if ((proofNodeResults.TryGetValue(extChildHash, out bool extChildPersisted) && extChildPersisted) || IsPersisted(accountKeccak, extChildPath))
+                        var isChildPersisted = proofNodeResults.TryGetValue(extChildHash, out bool extChildPersisted) ? extChildPersisted : IsPersisted(accountKeccak, extChildPath);
+                        if (isChildPersisted)
                         {
                             proofNodeResults[hash] = true;
                             _preCommit.Set(k, hash, ext.WriteTo(nodeWorkingSpan), (byte)EntryType.Persistent);
