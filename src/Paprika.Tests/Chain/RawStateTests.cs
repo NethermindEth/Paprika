@@ -443,7 +443,7 @@ public class RawStateTests
         using var rootExtensionNodeData2 = syncRaw3.Get(Key.Raw(NibblePath.FromKey(accountHash), DataType.Merkle, NibblePath.Empty));
         rootExtensionNodeData2.IsEmpty.Should().BeFalse();
 
-        var leftover = Node.ReadFrom(out var type, out var _, out var ext, out var _, rootExtensionNodeData2.Span);
+        Node.ReadFrom(out var type, out var _, out var ext, out var _, rootExtensionNodeData2.Span);
         type.Should().Be(Node.Type.Extension);
 
         //recalculate ignoring RlpMemo cache to verify correctness
