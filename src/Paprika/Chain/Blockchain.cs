@@ -1554,10 +1554,10 @@ public class Blockchain : IAsyncDisposable
                 var hash = GetHash(key);
                 var k = key.WriteTo(targetKeySpan);
 
-                proofNodeResults[hash] = false;
-
                 if (!_proofKeys.TryGet(k, hash, out var span))
                     continue;
+
+                proofNodeResults[hash] = false;
 
                 var leftover = Node.ReadFrom(out var type, out _, out var ext, out var branch, span);
                 switch (type)
@@ -1617,7 +1617,7 @@ public class Blockchain : IAsyncDisposable
                             : Key.Merkle(extChildPath);
                         var extChildHash = GetHash(extChildKey);
 
-                        if (proofNodeResults[extChildHash] || IsPersisted(accountKeccak, extChildPath))
+                        if ((proofNodeResults.TryGetValue(extChildHash, out bool extChildPersisted) && extChildPersisted) || IsPersisted(accountKeccak, extChildPath))
                         {
                             proofNodeResults[hash] = true;
                             _preCommit.Set(k, hash, ext.WriteTo(nodeWorkingSpan), (byte)EntryType.Persistent);
@@ -1643,7 +1643,7 @@ public class Blockchain : IAsyncDisposable
             var preCommitBehavior = (ComputeMerkleBehavior)_blockchain._preCommit;
             var hash = account == Keccak.Zero ? preCommitBehavior.GetHash(path, this, false) : preCommitBehavior.GetStorageHash(this, account, path, false);
 
-            return hash == Keccak.EmptyTreeHash;
+            return hash != Keccak.EmptyTreeHash;
         }
     }
 
