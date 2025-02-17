@@ -433,7 +433,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
                     // Let's ensure it's created and move to the other child.
                     var otherAddr = Data.Buckets[nibble0];
                     var otherChild = otherAddr.IsNull
-                        ? batch.GetNewPage<BottomPage>(out otherAddr)
+                        ? batch.GetNewPage<BottomPage>(out otherAddr, (byte)(Header.Level + 1))
                         : new BottomPage(batch.EnsureWritableCopy(ref otherAddr));
                     Data.Buckets[nibble0] = otherAddr;
 
