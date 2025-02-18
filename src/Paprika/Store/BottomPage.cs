@@ -23,7 +23,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
     public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
         resolver.Prefetch(Data.Buckets);
-        
+
         using var scope = visitor.On(ref builder, this, addr);
 
         for (var i = 0; i < ChildCount; i++)
