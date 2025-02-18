@@ -31,7 +31,7 @@ public readonly ref struct SlottedArray /*: IClearable */
     private static readonly int VectorSize =
         Vector256.IsHardwareAccelerated ? Vector256<byte>.Count : Vector128<byte>.Count;
 
-    private static readonly int UShortsPerVector = VectorSize / 2;
+    private static readonly int UShortsPerVector = VectorSize / sizeof(ushort);
 
     /// <summary>
     /// How many vectors are used to create a batch of slots.
@@ -39,6 +39,10 @@ public readonly ref struct SlottedArray /*: IClearable */
     private const int VectorsByBatch = 2;
 
     private static readonly int DoubleVectorSize = VectorSize * VectorsByBatch;
+
+    private static readonly int HashesPerVector = VectorSize / sizeof(ushort);
+
+    private static readonly int SlotsPerVector = VectorSize / Slot.Size;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int AlignToDoubleVectorSize(int count) => (count + (DoubleVectorSize - 1)) & -DoubleVectorSize;
@@ -122,7 +126,7 @@ public readonly ref struct SlottedArray /*: IClearable */
     {
         if (prefix.Length == 0)
         {
-            Delete(prefix);
+            Clear();
         }
         else if (prefix.Length == 1)
         {
@@ -904,80 +908,216 @@ public readonly ref struct SlottedArray /*: IClearable */
         hash = (ushort)~hash;
     }
 
+    /// <summary>
+    /// Defragments the underlying slotted array by overwriting the deleted slots. Performs vectorized defragmentation
+    /// by creating a deleted mask from the slot data and then moving only the alive slots, hashes and the corresponding
+    /// payload data.
+    /// </summary>
+    [SkipLocalsInit]
     private void Defragment()
     {
-        // As data were fitting before, the will fit after so all the checks can be skipped
+        // As data were fitting before, it will fit after so all the checks can be skipped
         var count = _header.Low / Slot.TotalSize;
 
         if (count == 0 || _header.Deleted == 0)
             return;
 
-        // The pointer where the writing in the array ended, move it up when written.
-        var writeAt = -1;
+        var alive = (ushort)count;
+        var jump = DoubleVectorSize / sizeof(ushort);
+        var aligned = AlignToDoubleVectorSize(_header.Low) / sizeof(ushort);
+        ref var d = ref Unsafe.As<byte, ushort>(ref MemoryMarshal.GetReference(_data));
 
-        // The data offset where the last data was written to
-        ushort writtenTo = 0;
-        ushort readTo = 0;
-        var alive = (ushort)0;
+        // The data will be moved from index [start..end] to [writeAt..] where writeAt < start <= end.
+        var startIndex = NotFound;
+        var endIndex = NotFound;
+        var writeAtIndex = NotFound;
 
-        var i = 0;
-
-        // Search for the first deleted
-        for (; i < count; i++)
+        for (var i = HashesPerVector; i < aligned; i += jump)
         {
-            var slot = GetSlotRef(i);
-            if (slot.IsDeleted)
-            {
-                writeAt = i; // write at this slot
-                readTo = slot.ItemAddress; // mark it as read already
-                writtenTo = (ushort)(i == 0 ? _data.Length : GetSlotRef(i - 1).ItemAddress); // memoize the previous
+            var deletedMask = CreateDeletedBitmask(ref d, i);
 
-                // move to next
-                i++;
-                break;
+            if (deletedMask != 0 && i + jump >= aligned)
+            {
+                // Clear the bits beyond the last valid slot.
+                var alignedCount = aligned / VectorsByBatch;
+                var toClear = alignedCount - count;
+                var mask = (1U << SlotsPerVector - toClear) - 1;
+                deletedMask &= mask;
             }
 
-            alive++;
-        }
-
-        for (; i < count; i++)
-        {
-            var slot = GetSlotRef(i);
-            var addr = slot.ItemAddress;
-
-            if (!slot.IsDeleted)
+            while (deletedMask != 0)
             {
-                alive++;
+                // Consume the next set bit.
+                var setBitIndex = BitOperations.TrailingZeroCount(deletedMask);
+                deletedMask ^= 1U << setBitIndex;
+                alive--;
 
-                var length = readTo - addr;
-
-                if (length > 0)
+                if (startIndex == NotFound)
                 {
-                    var source = _data.Slice(addr, length);
-                    writtenTo = (ushort)(writtenTo - length);
-                    var destination = _data.Slice(writtenTo, length);
-                    source.CopyTo(destination);
+                    startIndex = setBitIndex + (i - HashesPerVector) / VectorsByBatch + 1;
+
+                    if (writeAtIndex == NotFound)
+                    {
+                        writeAtIndex = startIndex - 1;
+                    }
+
+                    if (deletedMask == 0)
+                    {
+                        // No more deleted slots, move on to the next vector to find the end.
+                        break;
+                    }
+
+                    setBitIndex = BitOperations.TrailingZeroCount(deletedMask);
+                    deletedMask ^= 1U << setBitIndex;
+                    alive--;
                 }
 
-                // Copy hash
-                GetHashRef(writeAt) = GetHashRef(i);
+                endIndex = setBitIndex + (i - HashesPerVector) / VectorsByBatch - 1;
 
-                // Copy everything, just overwrite the address
-                ref var destinationSlot = ref GetSlotRef(writeAt);
-                destinationSlot.KeyPreamble = slot.KeyPreamble;
-                destinationSlot.ItemAddress = writtenTo;
+                // In case of consecutive deleted slots, find the next non-consecutive set bit.
+                if (startIndex == endIndex + 1)
+                {
+                    if (deletedMask == 0)
+                    {
+                        // Could not find any non-consecutive set bits, progress start to the next non-deleted slot.
+                        startIndex++;
 
-                writeAt++;
+                        // Move on to the next vector to find the new end.
+                        break;
+                    }
+
+                    // Find the new start. Look for the first unset bit beyond the last observed set bit. 
+                    var shifted = deletedMask >> (setBitIndex + 1);
+                    var unSetBitIndex = BitOperations.TrailingZeroCount(~shifted);
+
+                    startIndex = unSetBitIndex + setBitIndex + (i - HashesPerVector) / VectorsByBatch + 1;
+
+                    // Clear all the consumed set bits and update the alive count.
+                    var mask = (1U << (unSetBitIndex + setBitIndex + 1)) - 1;
+                    alive -= (ushort)BitOperations.PopCount(deletedMask & mask);
+                    deletedMask &= ~mask;
+                    continue;
+                }
+
+                writeAtIndex = CopyDataInternal(startIndex, endIndex, writeAtIndex);
+                startIndex = endIndex + 2;
             }
-
-            // Memoize to what is read to
-            readTo = addr;
         }
 
-        // Finalize by setting the header
+        // If there was no valid end found for a corresponding start, move all the remaining slot.
+        if (startIndex != NotFound && startIndex < count)
+        {
+            while (GetSlotRef(startIndex).IsDeleted && startIndex < count)
+            {
+                startIndex++;
+            }
+
+            endIndex = count - 1;
+
+            if (startIndex <= endIndex)
+            {
+                writeAtIndex = CopyDataInternal(startIndex, endIndex, writeAtIndex);
+            }
+        }
+
+        Debug.Assert(_header.Deleted == Count - alive, "All the deleted items were not discovered");
+        Debug.Assert(writeAtIndex != NotFound, "No deleted slot was found");
+
+        // Adjust header values
         _header.Low = (ushort)(alive * Slot.TotalSize);
-        _header.High = (ushort)(_data.Length - writtenTo);
         _header.Deleted = 0;
+        _header.High = (ushort)((writeAtIndex == 0)
+            ? 0
+            : _data.Length - GetSlotRef(writeAtIndex - 1).ItemAddress);
+    }
+
+    /// <summary>
+    /// Helper function to create a deleted bitmask from the underlying data where each bit is
+    /// either 1 (deleted) or 0 (alive) for the corresponding slot index.
+    /// </summary>
+    private uint CreateDeletedBitmask(ref ushort d, int offset)
+    {
+        uint deletedMask = 0;
+
+        // Extract the preamble data from the underlying slots and compare it with the preamble delete mask.
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var slotData = Vector256.LoadUnsafe(ref d, (UIntPtr)offset);
+
+            if (slotData == Vector256<ushort>.Zero)
+            {
+                return 0;
+            }
+
+            var preambleData = Vector256.BitwiseAnd(slotData, Slot.GetKeyPreambleMaskAsVector256());
+
+            deletedMask = Vector256.Equals(preambleData, Slot.GetKeyPreambleDeleteAsVector256()).ExtractMostSignificantBits();
+        }
+        else if (Vector128.IsHardwareAccelerated)
+        {
+            var slotData = Vector128.LoadUnsafe(ref d, (UIntPtr)offset);
+
+            if (slotData == Vector128<ushort>.Zero)
+            {
+                return 0;
+            }
+
+            var preambleData = Vector128.BitwiseAnd(slotData, Slot.GetKeyPreambleMaskAsVector128());
+
+            deletedMask = Vector128.Equals(preambleData, Slot.GetKeyPreambleDeleteAsVector128()).ExtractMostSignificantBits();
+        }
+        else
+        {
+            ThrowNoVectorSupport();
+        }
+
+        return deletedMask;
+    }
+
+    /// <summary>
+    /// Helper function to copy data from index [start..end] to [writeAt..].
+    /// </summary>
+    private int CopyDataInternal(int startIndex, int endIndex, int writeAtIndex)
+    {
+        // Copy the payload data. For reference the layout is as follows:
+        // |...|endIndex||endIndex - 1|...|startIndex||startIndex - 1|...|writeAtIndex|...|
+        var endAddress = GetSlotRef(endIndex).ItemAddress;
+
+        Debug.Assert(startIndex != 0 && writeAtIndex < startIndex && startIndex <= endIndex);
+
+        // Form slice of the source data
+        var previousSlotAddress = GetSlotRef(startIndex - 1).ItemAddress;
+        var length = previousSlotAddress - endAddress;
+
+        Debug.Assert(length >= 0 && endAddress + length <= _data.Length, "The length of the source data is invalid");
+        var sourceData = _data.Slice(endAddress, length);
+
+        // Form slice of the destination data
+        var writeAtPreviousSlotAddress = (writeAtIndex != 0) ? GetSlotRef(writeAtIndex - 1).ItemAddress : _data.Length;
+        var overwrite = writeAtPreviousSlotAddress - previousSlotAddress;
+
+        Debug.Assert(overwrite >= 0 && endAddress + overwrite <= _data.Length, "The length of the dest data is invalid");
+        var destData = _data.Slice(endAddress + overwrite, length);
+
+        sourceData.CopyTo(destData);
+
+        // Copy the remaining data (hashes and slots)
+        for (var i = startIndex; i <= endIndex; i++)
+        {
+            var slot = GetSlotRef(i);
+
+            // Copy hash
+            GetHashRef(writeAtIndex) = GetHashRef(i);
+
+            // Copy everything, just overwrite the address
+            ref var destinationSlot = ref GetSlotRef(writeAtIndex);
+            destinationSlot.KeyPreamble = slot.KeyPreamble;
+            destinationSlot.ItemAddress = (ushort)(slot.ItemAddress + overwrite);
+
+            writeAtIndex++;
+        }
+
+        return writeAtIndex;
     }
 
     /// <summary>
@@ -1122,13 +1262,13 @@ public readonly ref struct SlottedArray /*: IClearable */
 
         data = default;
         return NotFound;
+    }
 
-        [MethodImpl(MethodImplOptions.NoInlining)]
-        void ThrowNoVectorSupport()
-        {
-            throw new NotSupportedException(
-                $"This platform does not support {nameof(Vector256)} nor {nameof(Vector128)}");
-        }
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void ThrowNoVectorSupport()
+    {
+        throw new NotSupportedException(
+            $"This platform does not support {nameof(Vector256)} nor {nameof(Vector128)}");
     }
 
     private int TryFind(int at, uint matches, in NibblePath key, byte preamble, out Span<byte> data)
@@ -1523,6 +1663,26 @@ public readonly ref struct SlottedArray /*: IClearable */
             Debug.Assert(shift == (odd == 0 ? EvenLengthShift : OddLengthShift));
             var extract = NibblePath.NibbleMask << shift;
             return (hash & extract) >> shift;
+        }
+
+        public static Vector256<ushort> GetKeyPreambleMaskAsVector256()
+        {
+            return Vector256.Create(KeyPreambleMask);
+        }
+
+        public static Vector128<ushort> GetKeyPreambleMaskAsVector128()
+        {
+            return Vector128.Create(KeyPreambleMask);
+        }
+
+        public static Vector256<ushort> GetKeyPreambleDeleteAsVector256()
+        {
+            return Vector256.Create((ushort)(KeyPreambleDelete << KeyPreambleShift));
+        }
+
+        public static Vector128<ushort> GetKeyPreambleDeleteAsVector128()
+        {
+            return Vector128.Create((ushort)(KeyPreambleDelete << KeyPreambleShift));
         }
     }
 

@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Collections;
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
@@ -61,6 +62,51 @@ public class BlockchainTests
         using var block3A = blockchain.StartNew(keccak2A);
 
         block3A.GetAccount(Key0).Should().Be(account1A);
+    }
+
+    [Test]
+    public async Task Storage_setter()
+    {
+        var account1 = new Account(1, 1);
+        var account2 = new Account(2, 2);
+
+        using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
+
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
+
+        var storageKey1 = Key1;
+        byte[] storageValue1 = [1];
+
+        var storageKey2 = Key2;
+        byte[] storageValue2 = [7];
+
+        using var block1 = blockchain.StartNew(Keccak.EmptyTreeHash);
+
+        // account Key0
+        block1.SetAccount(Key0, account1);
+        block1.SetStorage(Key0, storageKey1, storageValue1);
+        block1.SetStorage(Key0, storageKey2, storageValue2);
+
+        // account Key1 using StorageSetter
+        block1.SetAccount(Key1, account2);
+        var setter = block1.GetStorageSetter(Key1);
+        setter.SetStorage(storageKey1, storageValue1);
+        setter.SetStorage(storageKey2, storageValue2);
+
+        var keccak1 = block1.Commit(1);
+
+        // Assert that the roots are the same.
+        using var reader = blockchain.StartReadOnly(keccak1);
+
+        var read1 = reader.GetAccount(Key0);
+        read1.Balance.Should().Be(account1.Balance);
+        read1.Nonce.Should().Be(account1.Nonce);
+
+        var read2 = reader.GetAccount(Key1);
+        read2.Balance.Should().Be(account2.Balance);
+        read2.Nonce.Should().Be(account2.Nonce);
+
+        read1.StorageRootHash.Should().Be(read2.StorageRootHash);
     }
 
     [Test]
@@ -128,13 +174,16 @@ public class BlockchainTests
 
         block.Dispose();
 
+        Task finality = Task.CompletedTask;
+
         for (uint no = 2; no < count; no++)
         {
             // create new, set, commit and dispose
             block = blockchain.StartNew(hash);
             block.SetAccount(Key0, new Account(no, no));
 
-            // finalize but only previous so that the dependency is there and should be managed properly
+            // Finalize but only previous so that the dependency is there and should be managed properly
+            finality = blockchain.WaitTillFlush(hash);
             blockchain.Finalize(hash);
 
             hash = block.Commit(no);
@@ -144,11 +193,55 @@ public class BlockchainTests
         // DO NOT FINALIZE the last block! it will clean the dependencies and destroy the purpose of the test
         // blockchain.Finalize(block.Hash);
 
-        // for now, to monitor the block chain, requires better handling of ref-counting on finalized
-        await Task.Delay(1000);
+        // Await the last to be finalized.
+        await finality;
 
         using var last = blockchain.StartNew(hash);
         last.GetAccount(Key0).Should().Be(new Account(lastValue, lastValue));
+    }
+
+    [Test]
+    public async Task Automatic_finality()
+    {
+        const int count = 100;
+        const int automaticFinalityAfter = 10;
+
+        using var db = PagedDb.NativeMemoryDb(16 * Mb, 2);
+
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(),
+            null, default, default, null, automaticFinalityAfter);
+
+        var hashes = new Queue<Keccak>();
+
+        var block = blockchain.StartNew(Keccak.EmptyTreeHash);
+        block.SetAccount(Key0, new Account(1, 1));
+        var hash = block.Commit(1);
+        hashes.Enqueue(hash);
+
+        block.Dispose();
+
+        var finalized = Task.CompletedTask;
+
+        for (uint no = 2; no < count; no++)
+        {
+            // create new, set, commit and dispose
+            block = blockchain.StartNew(hash);
+            block.SetAccount(Key0, new Account(no, no));
+
+            if (no > automaticFinalityAfter)
+            {
+                finalized = blockchain.WaitTillFlush(hashes.Dequeue());
+                finalized.IsCompleted.Should().BeFalse("The automatic finality should be reached only on the commit");
+            }
+
+            hash = block.Commit(no);
+            hashes.Enqueue(hash);
+
+            // Should be finalized after the block breaching the finality is committed
+            await finalized;
+
+            block.Dispose();
+        }
     }
 
     [Test]
@@ -524,7 +617,7 @@ public class BlockchainTests
         var cacheBudgetPreCommit = new CacheBudget.Options(1, 1);
 
         await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior(), null, CacheBudget.Options.None,
-            cacheBudgetPreCommit, 1, null);
+            cacheBudgetPreCommit, 1, int.MaxValue, null);
 
         // Initial commit
         using var start = blockchain.StartNew(Keccak.EmptyTreeHash);
@@ -580,7 +673,7 @@ public class BlockchainTests
     }
 
     [Test]
-    public async Task Read_accessor()
+    public async Task Read_accessor_updated_can_access_data()
     {
         const byte historyDepth = 16;
         using var db = PagedDb.NativeMemoryDb(16 * Mb, historyDepth);
@@ -630,6 +723,59 @@ public class BlockchainTests
         static Account Value(uint i) => new(i, i);
     }
 
+    [TestCase(true)]
+    [TestCase(false)]
+    public async Task Read_accessor_can_preload_readers_for_history(bool preloadHistory)
+    {
+        const byte historyDepth = 16;
+        using var db = PagedDb.NativeMemoryDb(16 * Mb, historyDepth);
+
+        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
+
+        const int count = 128;
+
+        var parent = Keccak.EmptyTreeHash;
+
+        var hashes = new Keccak[count + 1];
+        hashes[0] = parent;
+
+        for (uint i = 0; i < count; i++)
+        {
+            using var block = blockchain.StartNew(parent);
+            block.SetAccount(Key(i), Value(i));
+            parent = hashes[i + 1] = block.Commit(i + 1);
+        }
+
+        // Flush the last
+        var task = blockchain.WaitTillFlush(parent);
+        blockchain.Finalize(parent);
+        await task;
+
+        // Reload blockchain so that accessor is built from zero
+        await using var reloaded = new Blockchain(db, new ComputeMerkleBehavior());
+        var accessor = blockchain.BuildReadOnlyAccessor(preloadHistory);
+
+        // Assert only last historyDepth hashes
+        for (uint i = count - historyDepth + 1; i < count; i++)
+        {
+            var root = hashes[i + 1];
+
+            accessor.HasState(root).Should().Be(preloadHistory, $"Failed to properly assert at {i} out of {count}.");
+            accessor.GetAccount(root, Key(i)).Should().Be(preloadHistory ? Value(i) : default);
+        }
+
+        return;
+
+        static Keccak Key(uint i)
+        {
+            Keccak k = default;
+            BinaryPrimitives.WriteUInt32LittleEndian(k.BytesAsSpan, i + 3);
+            return k;
+        }
+
+        static Account Value(uint i) => new(i, i);
+    }
+
     [Test]
     public async Task StartNew_when_throws_should_not_lock_db_readonly_batch()
     {
@@ -664,7 +810,7 @@ public class BlockchainTests
 
     private class PreCommit : IPreCommitBehavior
     {
-        public Keccak BeforeCommit(ICommit commit, CacheBudget budget)
+        public Keccak BeforeCommit(ICommitWithStats commit, CacheBudget budget, bool isSnapSync = false)
         {
             var hashCode = RuntimeHelpers.GetHashCode(commit);
             Keccak hash = default;

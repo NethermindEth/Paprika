@@ -1,16 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
     <PropertyGroup>
         <OutputType>Exe</OutputType>
-        <TargetFramework>net8.0</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
-        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
 
     <ItemGroup>
-      <PackageReference Include="BenchmarkDotNet" Version="0.13.12" />
-      <PackageReference Include="BenchmarkDotNet.Diagnostics.dotTrace" Version="0.13.12" />
+      <PackageReference Include="BenchmarkDotNet" Version="0.14.0" />
+      <PackageReference Include="BenchmarkDotNet.Diagnostics.dotMemory" Version="0.14.0" />
+      <PackageReference Include="BenchmarkDotNet.Diagnostics.dotTrace" Version="0.14.0" />
     </ItemGroup>
 
     <ItemGroup>

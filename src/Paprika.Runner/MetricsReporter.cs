@@ -28,6 +28,9 @@ public class MetricsReporter : IDisposable
         {
             InstrumentPublished = (instrument, listener) =>
             {
+                if (ShouldReport(instrument) == false)
+                    return;
+
                 lock (_sync)
                 {
                     var meter = instrument.Meter;
@@ -52,6 +55,9 @@ public class MetricsReporter : IDisposable
             },
             MeasurementsCompleted = (instrument, cookie) =>
             {
+                if (ShouldReport(instrument) == false)
+                    return;
+
                 lock (_sync)
                 {
                     var instruments = _instrument2State[instrument.Meter];
@@ -72,6 +78,8 @@ public class MetricsReporter : IDisposable
         _listener.SetMeasurementEventCallback<byte>((i, m, l, c) => ((IMeasurement)c!).Update(m, l));
         _listener.SetMeasurementEventCallback<decimal>((i, m, l, c) => ((IMeasurement)c!).Update((double)m, l));
     }
+
+    private static bool ShouldReport(Instrument instrument) => instrument.Meter.Name.Contains("Paprika");
 
     public void Observe()
     {

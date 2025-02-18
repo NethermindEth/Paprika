@@ -11,7 +11,7 @@ public abstract class BasePaprikaSettings : CommandSettings
     [CommandArgument(1, "<size>")]
     public int Size { get; set; }
 
-    [CommandArgument(1, "<historyDepth>")]
+    [CommandArgument(2, "<historyDepth>")]
     public byte HistoryDepth { get; set; }
 
     public const int NextArgPosition = 2;

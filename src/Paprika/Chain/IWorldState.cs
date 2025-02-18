@@ -5,12 +5,8 @@ namespace Paprika.Chain;
 /// <summary>
 /// Represents the world state of Ethereum at a given block.
 /// </summary>
-public interface IWorldState : IDisposable
+public interface IWorldState : IStateStorageAccessor, IDisposable
 {
-    Account GetAccount(in Keccak address);
-
-    Span<byte> GetStorage(in Keccak address, in Keccak storage, Span<byte> destination);
-
     /// <summary>
     /// Gets the current hash of the world state.
     /// </summary>
@@ -30,6 +26,13 @@ public interface IWorldState : IDisposable
     void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value);
 
     /// <summary>
+    /// Gets the storage setter, so that some of the heavy calls for the storage can be amortized. 
+    /// </summary>
+    /// <param name="address"></param>
+    /// <returns></returns>
+    IStorageSetter GetStorageSetter(in Keccak address);
+
+    /// <summary>
     /// Commits the block to the chain allowing to build upon it.
     /// Also runs the <see cref="IPreCommitBehavior"/> that the blockchain was configured with.
     /// </summary>
@@ -46,16 +49,31 @@ public interface IWorldState : IDisposable
     public IPreCommitPrefetcher? OpenPrefetcher();
 }
 
-public interface IReadOnlyWorldState : IReadOnlyCommit, IDisposable
+public interface IStorageSetter
 {
-    Account GetAccount(in Keccak address);
+    /// <summary>
+    /// Sets the storage in the same way <see cref="IWorldState.SetStorage"/> does.
+    /// </summary>
+    void SetStorage(in Keccak storage, ReadOnlySpan<byte> value);
+}
 
-    Span<byte> GetStorage(in Keccak address, in Keccak storage, Span<byte> destination);
-
+public interface IReadOnlyWorldState : IStateStorageAccessor, IReadOnlyCommit, IDisposable
+{
     /// <summary>
     /// Gets the current hash of the world state.
     /// </summary>
     Keccak Hash { get; }
+}
+
+/// <summary>
+/// A shared interface between <see cref="IReadOnlyWorldState"/>
+/// and <see cref="IWorldState"/>.
+/// </summary>
+public interface IStateStorageAccessor
+{
+    Account GetAccount(in Keccak address);
+
+    Span<byte> GetStorage(in Keccak address, in Keccak storage, Span<byte> destination);
 }
 
 /// <summary>
@@ -68,4 +86,6 @@ public interface IReadOnlyWorldStateAccessor
     Account GetAccount(in Keccak rootHash, in Keccak address);
 
     Span<byte> GetStorage(in Keccak rootHash, in Keccak address, in Keccak storage, Span<byte> destination);
+
+    void Reset();
 }

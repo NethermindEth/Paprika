@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using FluentAssertions;
 using NUnit.Framework;
@@ -12,25 +14,46 @@ namespace Paprika.Tests.Merkle;
 /// <summary>
 /// A commit mock used to provide the data and assert them when needed.
 /// </summary>
-public class Commit(bool skipMemoizedRlpCheck = false) : ICommit
+public class Commit(bool skipMemoizedRlpCheck = false) : ICommitWithStats
 {
     // history <- before <- after
     private readonly Dictionary<byte[], byte[]> _history = new(Comparer);
     private readonly Dictionary<byte[], byte[]> _before = new(Comparer);
     private readonly Dictionary<byte[], byte[]> _after = new(Comparer);
 
-    private readonly Dictionary<Keccak, int> _stats = new();
-
     private bool _asserting;
 
     private static readonly BytesEqualityComparer Comparer = new();
+
+    // stats
+    private readonly HashSet<Keccak> _touchedAccounts = new();
+    private readonly Dictionary<Keccak, IStorageStats> _storageSlots = new();
 
     public void Set(in Key key, ReadOnlySpan<byte> value)
     {
         _before[GetKey(key)] = value.ToArray();
         //to enable storage root calculation for tests
+
+        if (key.Path.Length == NibblePath.KeccakNibbleCount)
+        {
+            _touchedAccounts.Add(key.Path.UnsafeAsKeccak);
+        }
+
         if (!key.IsState)
-            _stats.RegisterSetStorageAccount(key.Path.UnsafeAsKeccak);
+        {
+            var keccak = key.Path.UnsafeAsKeccak;
+
+            if (key.StoragePath.Length == NibblePath.KeccakNibbleCount)
+            {
+                ref var stats = ref CollectionsMarshal.GetValueRefOrAddDefault(_storageSlots, keccak, out var exists);
+                if (exists == false)
+                {
+                    stats = new StorageStats();
+                }
+
+                Unsafe.As<StorageStats>(stats!).SetStorage(key.StoragePath.UnsafeAsKeccak, value);
+            }
+        }
     }
 
     public void DeleteKey(in Key key) => Set(key, ReadOnlySpan<byte>.Empty);
@@ -151,7 +174,6 @@ public class Commit(bool skipMemoizedRlpCheck = false) : ICommit
     }
 
     public IChildCommit GetChild() => new ChildCommit(this);
-    public IReadOnlyDictionary<Keccak, int> Stats => _stats;
 
     private static byte[] Concat(in ReadOnlySpan<byte> payload0, in ReadOnlySpan<byte> payload1)
     {
@@ -205,24 +227,17 @@ public class Commit(bool skipMemoizedRlpCheck = false) : ICommit
 
     public KeyEnumerator GetSnapshotOfBefore() => new(_before.Keys.ToArray());
 
-    public ref struct KeyEnumerator
+    public ref struct KeyEnumerator(byte[][] keys)
     {
-        private readonly byte[][] _keys;
-        private int _index;
-
-        public KeyEnumerator(byte[][] keys)
-        {
-            _keys = keys;
-            _index = -1;
-        }
+        private int _index = -1;
 
         public bool MoveNext()
         {
-            int index = _index + 1;
-            if (index < _keys.Length)
+            var index = _index + 1;
+            if (index < keys.Length)
             {
                 _index = index;
-                Key.ReadFrom(_keys[index], out var key);
+                Key.ReadFrom(keys[index], out var key);
                 Current = key;
 
                 return true;
@@ -276,7 +291,8 @@ public class Commit(bool skipMemoizedRlpCheck = false) : ICommit
             }
         }
 
-        _stats.Clear();
+        _touchedAccounts.Clear();
+        _storageSlots.Clear();
 
         return commit;
     }
@@ -290,4 +306,7 @@ public class Commit(bool skipMemoizedRlpCheck = false) : ICommit
 
         _after.Clear();
     }
+
+    public IReadOnlySet<Keccak> TouchedAccounts => _touchedAccounts;
+    public IReadOnlyDictionary<Keccak, IStorageStats> TouchedStorageSlots => Unsafe.As<IReadOnlyDictionary<Keccak, IStorageStats>>(_storageSlots);
 }

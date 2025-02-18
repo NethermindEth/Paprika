@@ -14,8 +14,7 @@ on:
 
 env:
   BUILD_CONFIG: release
-  DOTNET_VERSION: 8
-  DOTNET_INSTALL_DIR: "~/.dotnet"
+  DOTNET_VERSION: 9
 
 jobs:
   analyze:
@@ -26,30 +25,28 @@ jobs:
       contents: read
       security-events: write
 
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["csharp", "actions"]
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@d632683dd7b4114ad314bca15554477dd762a938 # v4.2.0
-        with:
-          submodules: true
-
-      - name: Cache dotnet
-        id: cache-dotnet
-        uses: actions/cache@v3
-        with:
-          path: ${{ env.DOTNET_INSTALL_DIR }}
-          key: ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}
-          restore-keys: ${{ runner.os }}-dotnet-${{ env.DOTNET_VERSION }}
-
       - name: Set up .NET
-        if: ${{ steps.cache-dotnet.outputs.cache-hit != 'true' }}
-        uses: actions/setup-dotnet@v3
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@5618c9fc1e675841ca52c1c6b1304f5255a905a0 # v2.19.0
+      - name: Check out repository
+        uses: actions/checkout@v4
         with:
-          languages: csharp
+          submodules: true
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@7e3036b9cd87fc26dd06747b7aa4b96c27aaef3a #v2.20.3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+          packs: githubsecuritylab/codeql-csharp-queries
 
       - name: Cache nuget
         uses: actions/cache@v3
@@ -63,4 +60,4 @@ jobs:
           dotnet restore src/Paprika.sln
           dotnet build src/Paprika.sln -c ${{ env.BUILD_CONFIG }} -v d
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@5618c9fc1e675841ca52c1c6b1304f5255a905a0 # v2.19.0
+        uses: github/codeql-action/analyze@7e3036b9cd87fc26dd06747b7aa4b96c27aaef3a #v2.20.3

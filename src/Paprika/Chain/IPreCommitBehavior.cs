@@ -1,3 +1,4 @@
+using Nethermind.Int256;
 using Paprika.Crypto;
 using Paprika.Data;
 using Paprika.Merkle;
@@ -16,8 +17,9 @@ public interface IPreCommitBehavior
     /// </summary>
     /// <param name="commit">The object representing the commit.</param>
     /// <param name="budget">The budget for caching capabilities.</param>
+    /// <param name="isSnapSync">Whether the current execution is done for snap sync purposes.</param>
     /// <returns>The result of the before commit.</returns>
-    Keccak BeforeCommit(ICommit commit, CacheBudget budget);
+    Keccak BeforeCommit(ICommitWithStats commit, CacheBudget budget, bool isSnapSync = false);
 
     /// <summary>
     /// Inspects the data allowing it to overwrite them if needed, before the commit is applied to the database.
@@ -60,16 +62,40 @@ public interface IPreCommitBehavior
     void Prefetch(in Keccak account, in Keccak storage, IPrefetcherContext accessor)
     {
     }
+
+    /// <summary>
+    /// Recalculate storage trie for a given account
+    /// </summary>
+    /// <param name="commit">The object representing the commit.</param>
+    /// <param name="account">Account for which the storage trie root should be recalculated</param>
+    /// <param name="budget">The budget for caching capabilities.</param>
+    /// <param name="isSnapSync">Whether the current execution is done for snap sync purposes.</param>
+    /// <returns></returns>
+    Keccak RecalculateStorageTrie(ICommit commit, Keccak account, CacheBudget budget, bool isSnapSync = false) => Keccak.EmptyTreeHash;
+}
+
+/// <summary>
+/// The commit implementation that provides direct dictionaries to assess keys that were touched during this commit.
+/// </summary>
+public interface ICommitWithStats : ICommit
+{
+    /// <summary>
+    /// The accounts that were touched during this commit.
+    /// </summary>
+    IReadOnlySet<Keccak> TouchedAccounts { get; }
+
+    /// <summary>
+    /// Provides a collection of stats for storages.
+    /// For each contract a set of sets and deletes. 
+    /// </summary>
+    IReadOnlyDictionary<Keccak, IStorageStats> TouchedStorageSlots { get; }
 }
 
 /// <summary>
 /// Provides the set of changes applied onto <see cref="IWorldState"/>,
 /// allowing for additional modifications of the data just before the commit.
 /// </summary>
-/// <remarks>
-/// Use <see cref="Visit"/> to access all the keys.
-/// </remarks>
-public interface ICommit
+public interface ICommit : ISpanOwner
 {
     /// <summary>
     /// Tries to retrieve the result stored under the given key.
@@ -99,13 +125,6 @@ public interface ICommit
     /// </summary>
     /// <returns>A child commit.</returns>
     IChildCommit GetChild();
-
-    /// <summary>
-    /// Gets the statistics of sets in the given commit.
-    /// Account writes make just key appear.
-    /// Storage writes increase it by 1.
-    /// </summary>
-    IReadOnlyDictionary<Keccak, int> Stats { get; }
 }
 
 public interface IReadOnlyCommit
@@ -153,6 +172,11 @@ public readonly ref struct ReadOnlySpanOwnerWithMetadata<T>(ReadOnlySpanOwner<T>
 
     public ReadOnlySpan<T> Span => _owner.Span;
 
+    /// <summary>
+    /// Returns the underlying owner. It's up to the caller to navigate the lifetime properly.
+    /// </summary>
+    public ReadOnlySpanOwner<T> Owner => _owner;
+
     public bool IsEmpty => _owner.IsEmpty;
 
     /// <summary>
@@ -161,18 +185,9 @@ public readonly ref struct ReadOnlySpanOwnerWithMetadata<T>(ReadOnlySpanOwner<T>
     public void Dispose() => _owner.Dispose();
 
     /// <summary>
-    /// Answers whether this span is owned and provided by <paramref name="owner"/>.
+    /// Answers whether this span is owned and provided by <paramref name="spanOwner"/>.
     /// </summary>
-    public bool IsOwnedBy(object owner) => _owner.IsOwnedBy(owner);
-
-    /// <summary>
-    /// Increases the <see cref="QueryDepth"/> of this span owner, reporting it as more nested.
-    /// </summary>
-    public ReadOnlySpanOwnerWithMetadata<T> Nest()
-    {
-        return new ReadOnlySpanOwnerWithMetadata<T>(_owner,
-            QueryDepth == DatabaseQueryDepth ? QueryDepth : (ushort)(QueryDepth + 1));
-    }
+    public bool IsOwnedBy(ISpanOwner spanOwner) => _owner.IsOwnedBy(spanOwner);
 }
 
 public static class ReadOnlySpanOwnerExtensions

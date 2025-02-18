@@ -13,7 +13,7 @@ public class PageOwnerTests
     [Test]
     public void Rent_then_return()
     {
-        using var pool = new BufferPool(1, true);
+        using var pool = new BufferPool(1, BufferPool.PageTracking.AssertCount);
 
         var stack = Empty;
         using (var o1 = PageOwner.Rent(pool, ref stack))

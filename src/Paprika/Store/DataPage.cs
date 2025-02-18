@@ -312,7 +312,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
 
     /// <summary>
     /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
-    /// These buckets is used to store up to <see cref="DataSize"/> entries before flushing them down as other pages
+    /// These buckets are used to store up to <see cref="DataSize"/> entries before flushing them down as other pages
     /// like page split.
     /// </summary>
     [StructLayout(LayoutKind.Explicit, Size = Size)]

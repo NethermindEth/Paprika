@@ -201,6 +201,8 @@ public class PooledSpanDictionary : IDisposable
             }
         }
 
+        public readonly byte Metadata => (byte)((_header & MetadataBits) >> MetadataShift);
+
         public bool TryUpdateInSitu(ReadOnlySpan<byte> data0, ReadOnlySpan<byte> data1, byte metadata)
         {
             if (IsFound == false)
@@ -242,13 +244,13 @@ public class PooledSpanDictionary : IDisposable
     public void Set(scoped ReadOnlySpan<byte> key, ulong hash, ReadOnlySpan<byte> data0, ReadOnlySpan<byte> data1,
         byte metadata) => SetImpl(key, Mix(hash), data0, data1, metadata);
 
-
     private void SetImpl(scoped ReadOnlySpan<byte> key, uint mixed, ReadOnlySpan<byte> data0, ReadOnlySpan<byte> data1,
         byte metadata, bool append = false)
     {
         Debug.Assert(metadata <= MaxMetadata, "Metadata size breached");
 
         var (leftover, bucket) = GetBucketAndLeftover(mixed);
+
         if (append == false)
         {
             var search = TryGetImpl(key, leftover, bucket);
@@ -274,6 +276,7 @@ public class PooledSpanDictionary : IDisposable
 
         var size = PreambleLength + AddressLength + KeyLengthLength + key.Length + ValueLengthLength + dataLength;
         Span<byte> destination = Write(size, out var address);
+
 
         // Write preamble, big endian
         destination[0] = (byte)((leftover >> 16) | (uint)(metadata << MetadataShift));

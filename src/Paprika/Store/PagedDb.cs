@@ -58,7 +58,9 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     private readonly Histogram<int> _commitPageAbandoned;
     private readonly Histogram<int> _commitAbandonedSameBatch;
     private readonly MetricsExtensions.IAtomicIntGauge _dbSize;
-
+    private readonly MetricsExtensions.IAtomicIntGauge _lowestReadTxBatch;
+    private readonly MetricsExtensions.IAtomicIntGauge _lastWriteTxBatch;
+    private const string? BatchIdName = "BatchId";
 
     // pooled objects
     private Context? _ctx;
@@ -108,6 +110,10 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             "The number of pages registered for future reuse (abandoned)");
         _commitAbandonedSameBatch = _meter.CreateHistogram<int>("Written and abandoned in the same batch", "pages",
             "The number of pages written and then registered for future reuse");
+        _lowestReadTxBatch = _meter.CreateAtomicObservableGauge($"Lowest read {BatchIdName}", BatchIdName,
+            "The lowest BatchId that is locked by a read tx");
+        _lastWriteTxBatch = _meter.CreateAtomicObservableGauge($"Last written {BatchIdName}", BatchIdName,
+            "The last ");
 
 #if TRACKING_REUSED_PAGES
         // Reuse tracking
@@ -115,7 +121,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             "The number of pages registered to be reused");
 #endif
         // Pool
-        _pooledRoots = new BufferPool(16, true, _meter);
+        _pooledRoots = new BufferPool(16, BufferPool.PageTracking.AssertCount, _meter);
     }
 
     public static PagedDb NativeMemoryDb(long size, byte historyDepth = 2) =>
@@ -231,7 +237,13 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         root.CopyTo(copy);
 
         var batch = new ReadOnlyBatch(this, copy, name);
+
+        // Update the lowest read tx batch
+        var batchId = (int)batch.BatchId;
+        _lowestReadTxBatch.Set(_batchesReadOnly.Count == 0 ? batchId : Math.Min(_lowestReadTxBatch.Read(), batchId));
+
         _batchesReadOnly.Add(batch);
+
         return batch;
     }
 
@@ -383,6 +395,16 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         {
             _batchesReadOnly.Remove(batch);
             _pooledRoots.Return(batch.Root.AsPage());
+
+            // update metrics
+            if (_batchesReadOnly.Count == 0)
+            {
+                _lowestReadTxBatch.Set(0);
+            }
+            else
+            {
+                _lowestReadTxBatch.Set((int)_batchesReadOnly.Min(b => b.BatchId));
+            }
         }
     }
 
@@ -404,6 +426,9 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
             // always inc the batchId
             root.Header.BatchId++;
+
+            // metrics
+            _lastWriteTxBatch.Set((int)root.Header.BatchId);
 
             // select min batch across the one respecting history and the min of all the read-only batches
             var rootBatchId = root.Header.BatchId;
