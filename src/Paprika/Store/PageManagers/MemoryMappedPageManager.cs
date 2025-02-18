@@ -94,7 +94,7 @@ public sealed class MemoryMappedPageManager : PointerPageManager
         _fileWrites = _meter.CreateHistogram<int>("File writes", "Syscall", "Actual numbers of file writes issued");
         _writeTime = _meter.CreateHistogram<int>("Write time", "ms", "Time spent in writing");
 
-        _prefetcher = Task.Factory.StartNew(RunPrefetcher);
+        _prefetcher = Platform.CanPrefetch ? Task.Factory.StartNew(RunPrefetcher) : Task.CompletedTask;
     }
 
     public static string GetPaprikaFilePath(string dir) => System.IO.Path.Combine(dir, PaprikaFileName);
@@ -105,6 +105,9 @@ public sealed class MemoryMappedPageManager : PointerPageManager
 
     protected override void PrefetchHeavy(DbAddress address)
     {
+        if (Platform.CanPrefetch == false)
+            return;
+
         if (address.IsNull == false)
         {
             _prefetches.Writer.TryWrite(address);
@@ -113,6 +116,9 @@ public sealed class MemoryMappedPageManager : PointerPageManager
 
     public override void Prefetch(ReadOnlySpan<DbAddress> addresses)
     {
+        if (Platform.CanPrefetch == false)
+            return;
+
         var writer = _prefetches.Writer;
 
         foreach (var address in addresses)
@@ -140,7 +146,7 @@ public sealed class MemoryMappedPageManager : PointerPageManager
         {
             const int maxPrefetch = 128;
 
-            Span<(UIntPtr, uint)> span = stackalloc (UIntPtr, uint)[maxPrefetch];
+            Span<AddressRange> span = stackalloc AddressRange[maxPrefetch];
             var i = 0;
 
             for (; i < maxPrefetch; i++)
@@ -148,7 +154,7 @@ public sealed class MemoryMappedPageManager : PointerPageManager
                 if (reader.TryRead(out var address) == false)
                     break;
 
-                span[i] = (manager.GetAt(address).Raw, Page.PageSize);
+                span[i] = manager.GetAddressRange(address);
             }
 
             if (i == 0)
@@ -257,6 +263,13 @@ public sealed class MemoryMappedPageManager : PointerPageManager
     }
 
     public override bool UsesPersistentPaging => _options == PersistenceOptions.FlushFile;
+
+    /// <summary>
+    /// Obtains an address range at the given <paramref name="address"/> for <see cref="Platform.Prefetch"/>.
+    /// </summary>
+    /// <param name="address"></param>
+    /// <returns></returns>
+    public AddressRange GetAddressRange(DbAddress address) => new(GetAt(address).Raw, Page.PageSize);
 
     public override void Dispose()
     {

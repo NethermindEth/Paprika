@@ -3,19 +3,34 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-using AddressRange = (System.UIntPtr, uint);
-
 namespace Paprika;
+
+/// <summary>
+/// Describes an unmanaged range.
+/// </summary>
+/// <param name="Pointer">The pointer to prefetch.</param>
+/// <param name="Length">The length to prefetch.</param>
+public record struct AddressRange(UIntPtr Pointer, uint Length);
 
 public static class Platform
 {
-    public static void Prefetch(ReadOnlySpan<AddressRange> ranges) => Manager.SchedulePrefetch(ranges);
+    public static bool CanPrefetch => Manager != null;
 
-    private static readonly IMemoryManager Manager =
-        IsPosix() ? new PosixMemoryManager() : new WindowsMemoryManager();
+    /// <summary>
+    /// Schedules an OS dependent prefetch. Performs a sys-call and should not be called from the main thread.
+    /// </summary>
+    /// <param name="ranges"></param>
+    public static void Prefetch(ReadOnlySpan<AddressRange> ranges) => Manager!.SchedulePrefetch(ranges);
 
-    private static bool IsPosix() => RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ||
-                                     RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
+    private static readonly IMemoryManager? Manager = CreateManager();
+
+    private static IMemoryManager? CreateManager()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return new WindowsMemoryManager();
+
+        return RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? new PosixMemoryManager() : null;
+    }
 
     private sealed class PosixMemoryManager : IMemoryManager
     {
@@ -67,9 +82,9 @@ public static class Platform
         {
             const int success = 0;
 
-            for (var i = 0; i < ranges.Length; i++)
+            foreach (var t in ranges)
             {
-                var result = madvise((IntPtr)ranges[i].Item1, ranges[i].Item2, Advice.MADV_WILLNEED);
+                var result = madvise((IntPtr)t.Pointer, t.Length, Advice.MADV_WILLNEED);
                 if (result != success)
                 {
                     throw new SystemException($"{nameof(madvise)} failed with the following error: {GetErrno()}");
@@ -107,8 +122,8 @@ public static class Platform
 
             for (var i = 0; i < span.Length; i++)
             {
-                span[i].VirtualAddress = (IntPtr)ranges[i].Item1;
-                span[i].NumberOfBytes = ranges[i].Item2;
+                span[i].VirtualAddress = (IntPtr)ranges[i].Pointer;
+                span[i].NumberOfBytes = ranges[i].Length;
             }
 
             const int reserved = 0;
@@ -123,7 +138,7 @@ public static class Platform
     private interface IMemoryManager
     {
         /// <summary>
-        /// Schedules an OS dependent prefetch.
+        /// Schedules an OS dependent prefetch. Performs a sys-call and should not be called from the main thread.
         /// </summary>
         void SchedulePrefetch(ReadOnlySpan<AddressRange> addresses);
     }
