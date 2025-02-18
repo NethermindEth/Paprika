@@ -197,6 +197,47 @@ public class DbTests
     }
 
     [Test]
+    public async Task Cross_block_entries()
+    {
+        const int size = MB64;
+        using var db = PagedDb.NativeMemoryDb(size);
+
+        const int count = 1600;
+
+        for (var i = 0; i < count; i++)
+        {
+            using (var batch = db.BeginNextBatch())
+            {
+                var address = GetStorageAddress(i);
+
+                batch.SetAccount(Key0, GetValue(i));
+                batch.SetStorage(Key0, address, GetValue(i));
+
+                await batch.Commit(CommitOptions.FlushDataAndRoot);
+            }
+        }
+
+        using (var read = db.BeginReadOnlyBatch())
+        {
+            for (int i = 0; i < count; i++)
+            {
+                var address = GetStorageAddress(i);
+                read.AssertStorageValue(Key0, address, GetValue(i));
+            }
+        }
+
+        AssertPageMetadataAssigned(db);
+        return;
+
+        static Keccak GetStorageAddress(int i)
+        {
+            var address = Key1A;
+            BinaryPrimitives.WriteInt32LittleEndian(address.BytesAsSpan, i);
+            return address;
+        }
+    }
+
+    [Test]
     public async Task Spin_large()
     {
         var account = Keccak.EmptyTreeHash;
