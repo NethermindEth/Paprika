@@ -165,9 +165,9 @@ await reportingTask;
 AnsiConsole.WriteLine(
         $"Root: {rootHash} from block {header.ToString(BlockHeader.Format.FullHashAndNumber)} was being imported to Paprika in {sw.Elapsed:g} and resulted in {rootHashActual}.");
 
-using var read = db.BeginReadOnlyBatch(rootHash);
+using var read = db.BeginReadOnlyBatch(rootHashActual);
 
-AnsiConsole.WriteLine($"Confirmed import of the {rootHash} by reading the state root hash from the database.");
+AnsiConsole.WriteLine($"Reading {rootHashActual} state root from the db succeeded.");
 
 return;
 
