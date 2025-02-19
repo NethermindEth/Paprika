@@ -152,10 +152,26 @@ public class PaprikaCopyingVisitor : ITreeVisitor<PathContext>, IDisposable
             parent = hash;
         }
 
+        var finalized = new TaskCompletionSource();
+
         while (finalization.TryDequeue(out var keccak))
         {
+            if (finalization.Count == 0)
+            {
+                _blockchain.Flushed += (_, e) =>
+                {
+                    if (e.blockHash == keccak)
+                    {
+                        finalized.SetResult();
+                    }
+                };
+            }
+
             _blockchain.Finalize(keccak);
         }
+
+        // Await the final task
+        await finalized.Task;
 
         return parent;
     }

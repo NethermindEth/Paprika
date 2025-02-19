@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Nethermind.Blockchain.Headers;
 using Nethermind.Core;
+using Nethermind.Core.Crypto;
 using Nethermind.Db;
 using Nethermind.Db.Rocks;
 using Nethermind.Db.Rocks.Config;
@@ -54,6 +55,9 @@ var trie = new StateTree(store, logs);
 var back = 0;
 var blockNumber = bestPersistedState.Value;
 TreePath emptyPath;
+BlockHeader header;
+Hash256 rootHash;
+
 do
 {
     var bestPersisted = blockInfos.Get(blockNumber - back);
@@ -62,10 +66,8 @@ do
     var chainLevel = Rlp.GetStreamDecoder<ChainLevelInfo>()!.Decode(new RlpStream(bestPersisted!));
     var main = chainLevel.BlockInfos[0];
 
-    var header = headerStore.Get(main.BlockHash);
-
-    var rootHash = header.StateRoot!;
-
+    header = headerStore.Get(main.BlockHash);
+    rootHash = header.StateRoot!;
     trie.RootHash = rootHash;
 
     if (back > 1000)
@@ -161,7 +163,11 @@ spectre.Cancel();
 await reportingTask;
 
 AnsiConsole.WriteLine(
-        $"Root: {trie.RootHash} was being imported to Paprika in {sw.Elapsed:g} and resulted in {rootHashActual}");
+        $"Root: {rootHash} from block {header.ToString(BlockHeader.Format.FullHashAndNumber)} was being imported to Paprika in {sw.Elapsed:g} and resulted in {rootHashActual}.");
+
+using var read = db.BeginReadOnlyBatch(rootHash);
+
+AnsiConsole.WriteLine($"Confirmed import of the {rootHash} by reading the state root hash from the database.");
 
 return;
 
