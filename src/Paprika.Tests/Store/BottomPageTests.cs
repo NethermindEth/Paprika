@@ -8,49 +8,69 @@ public class BottomPageTests : BasePageTests
 {
     private const uint BatchId = 1;
 
-    [Test]
-    public void Sufficient_to_set()
+    [TestCase(true, TestName = "Empty key - first")]
+    [TestCase(false, TestName = "Empty key - last")]
+    public void Ordering(bool emptyFirst)
     {
         var batch = NewBatch(BatchId);
         var bottom = ((IBatchContext)batch).GetNewPage<BottomPage>(out _);
 
         var key = NibblePath.Empty;
 
-        // construct keys so that they fall into child, grand-child left, grand-child rigth
-        // Left child
-        var key0 = NibblePath.FromKey([0x0A]); // 0 is 0th nibble
-        var key1 = NibblePath.FromKey([0x4A]); // 4 is 0th nibble
-        var key2 = NibblePath.FromKey([0x1A]); // 1 is 0th nibble
+        var key0 = NibblePath.FromKey([0x0A]);
+        var key1 = NibblePath.FromKey([0x4A]);
+        var key2 = NibblePath.FromKey([0x1A]);
+        var key3 = NibblePath.FromKey([0x8A]);
+        var key4 = NibblePath.FromKey([0xFA]);
+        var key5 = NibblePath.FromKey([0xCA]);
+        var key6 = NibblePath.FromKey([0x33]);
+        var key7 = NibblePath.FromKey([0x34]);
 
-        // Right child
-        var key8 = NibblePath.FromKey([0x8A]); // 8 is 0th nibble
-        var key9 = NibblePath.FromKey([0xFA]); // 9 is 0th nibble
-        var key10 = NibblePath.FromKey([0x9A]); // A is 0th nibble
+        var v = new byte[1799];
+        var v0 = new byte[1800];
+        var v1 = new byte[1801];
+        var v2 = new byte[1802];
+        var v3 = new byte[1803];
+        var v4 = new byte[1804];
+        var v5 = new byte[1805];
+        var v6 = new byte[1806];
+        var v7 = new byte[1807];
 
-        var v0 = new byte[3002];
-        var v1 = new byte[2999];
-        var v2 = new byte[2998];
-        var v8 = new byte[3003];
-        var v9 = new byte[3006];
-        var v10 = new byte[2980];
-        var v = new byte[3001];
+        if (emptyFirst)
+        {
+            Set(key, v);
+        }
 
-        bottom.Set(key0, v0, batch);
-        bottom.Set(key1, v1, batch);
-        bottom.Set(key2, v2, batch);
-        bottom.Set(key8, v8, batch);
-        bottom.Set(key9, v9, batch);
-        bottom.Set(key10, v10, batch);
-        bottom.Set(key, v, batch);
+        Set(key0, v0);
+        Set(key1, v1);
+        Set(key2, v2);
+        Set(key3, v3);
+        Set(key4, v4);
+        Set(key5, v5);
+        Set(key6, v6);
+        Set(key7, v7);
+
+        if (!emptyFirst)
+        {
+            Set(key, v);
+        }
 
         Assert(key, v);
         Assert(key0, v0);
         Assert(key1, v1);
         Assert(key2, v2);
-        Assert(key8, v8);
-        Assert(key9, v9);
-        Assert(key10, v10);
+        Assert(key3, v3);
+        Assert(key4, v4);
+        Assert(key5, v5);
+        Assert(key6, v6);
+        Assert(key7, v7);
+
         return;
+
+        void Set(in NibblePath path, byte[] value)
+        {
+            bottom.Set(path, value, batch);
+        }
 
         void Assert(in NibblePath key, in ReadOnlySpan<byte> expected)
         {
