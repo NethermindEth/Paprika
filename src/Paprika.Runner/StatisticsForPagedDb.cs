@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using HdrHistogram;
@@ -18,6 +19,8 @@ public static class StatisticsForPagedDb
 
         try
         {
+            var watch = Stopwatch.StartNew();
+
             var stats = new StatisticsVisitor(resolver);
 
             stats.TotalVisitedChanged += (_, __) =>
@@ -28,7 +31,10 @@ public static class StatisticsForPagedDb
                 if (total % pagePer128MB == 0)
                 {
                     var size = Page.FormatAsGb(total);
-                    reportTo.Update(new Panel($"{txt} Analyzed so far: {size}").Header(header).Expand());
+
+                    var msPerPage = watch.Elapsed.TotalMilliseconds / total;
+
+                    reportTo.Update(new Panel($"{txt} Analyzed so far: {size} with speed of {msPerPage:F2}ms per page").Header(header).Expand());
                 }
             };
 
