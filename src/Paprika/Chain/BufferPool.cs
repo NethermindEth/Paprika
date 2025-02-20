@@ -19,6 +19,7 @@ public class BufferPool : IDisposable
 
     private readonly ConcurrentQueue<Page> _pool = new();
     private readonly ConcurrentQueue<IntPtr> _slabs = new();
+
     private readonly ConcurrentDictionary<Page, StackTrace>? _traces;
     private readonly MetricsExtensions.IAtomicIntGauge? _allocatedMB;
 

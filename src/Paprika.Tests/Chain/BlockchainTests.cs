@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Collections;
 using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using FluentAssertions;
@@ -183,8 +182,7 @@ public class BlockchainTests
             block.SetAccount(Key0, new Account(no, no));
 
             // Finalize but only previous so that the dependency is there and should be managed properly
-            finality = blockchain.WaitTillFlush(hash);
-            blockchain.Finalize(hash);
+            finality = blockchain.Finalize(hash);
 
             hash = block.Commit(no);
             block.Dispose();
@@ -220,7 +218,10 @@ public class BlockchainTests
 
         block.Dispose();
 
-        var finalized = Task.CompletedTask;
+        // Setup semaphore so that first N blocks are given, the last should be automatically flushed
+        var flushed = new SemaphoreSlim(automaticFinalityAfter, int.MaxValue);
+
+        blockchain.Flushed += (_, _) => flushed.Release();
 
         for (uint no = 2; no < count; no++)
         {
@@ -228,17 +229,11 @@ public class BlockchainTests
             block = blockchain.StartNew(hash);
             block.SetAccount(Key0, new Account(no, no));
 
-            if (no > automaticFinalityAfter)
-            {
-                finalized = blockchain.WaitTillFlush(hashes.Dequeue());
-                finalized.IsCompleted.Should().BeFalse("The automatic finality should be reached only on the commit");
-            }
-
             hash = block.Commit(no);
             hashes.Enqueue(hash);
 
             // Should be finalized after the block breaching the finality is committed
-            await finalized;
+            await flushed.WaitAsync();
 
             block.Dispose();
         }
@@ -250,21 +245,21 @@ public class BlockchainTests
         using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
         await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
 
-        using var block = blockchain.StartNew(Keccak.EmptyTreeHash);
+        var before = Keccak.EmptyTreeHash;
 
-        var before = block.Hash;
+        using var worldState = blockchain.StartNew(before);
 
-        block.SetAccount(Key0, new Account(1, 1));
-        block.SetStorage(Key0, Key1, stackalloc byte[1] { 1 });
+        worldState.SetAccount(Key0, new Account(1, 1));
+        worldState.SetStorage(Key0, Key1, stackalloc byte[1] { 1 });
 
         // force hash calculation
-        var mid = block.Hash;
+        var mid = worldState.Hash;
 
-        block.DestroyAccount(Key0);
-        block.GetAccount(Key0).Should().Be(new Account(0, 0));
-        block.AssertNoStorageAt(Key0, Key1);
+        worldState.DestroyAccount(Key0);
+        worldState.GetAccount(Key0).Should().Be(new Account(0, 0));
+        worldState.AssertNoStorageAt(Key0, Key1);
 
-        var after = block.Hash;
+        var after = worldState.Hash;
 
         before.Should().Be(after);
         before.Should().NotBe(mid);
@@ -328,13 +323,13 @@ public class BlockchainTests
 
             if (finality.Count > 64)
             {
-                blockchain.Finalize(finality.Dequeue());
+                await blockchain.Finalize(finality.Dequeue());
             }
         }
 
         while (finality.TryDequeue(out var finalized))
         {
-            blockchain.Finalize(finalized);
+            await blockchain.Finalize(finalized);
         }
     }
 
@@ -344,9 +339,8 @@ public class BlockchainTests
         using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
         await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
 
-        using var block1 = blockchain.StartNew(Keccak.EmptyTreeHash);
-
-        var before = block1.Hash;
+        var before = Keccak.EmptyTreeHash;
+        using var block1 = blockchain.StartNew(before);
 
         block1.SetAccount(Key0, new Account(1, 1));
         block1.SetStorage(Key0, Key1, stackalloc byte[1] { 1 });
@@ -451,34 +445,28 @@ public class BlockchainTests
         using var db = PagedDb.NativeMemoryDb(1 * Mb, 2);
         await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
 
-        using var block1 = blockchain.StartNew(Keccak.EmptyTreeHash);
+        using var worldState = blockchain.StartNew(Keccak.EmptyTreeHash);
 
-        var before = block1.Hash;
+        worldState.SetAccount(Key1, new Account(2, 2));
 
-        block1.SetAccount(Key0, new Account(1, 1));
-        block1.SetStorage(Key0, Key1, stackalloc byte[1] { 1 });
+        var before = worldState.Commit(blockNo++);
+        await blockchain.Finalize(before);
 
-        var hash = block1.Commit(blockNo++);
+        worldState.SetAccount(Key0, new Account(1, 1));
+        worldState.SetStorage(Key0, Key1, [1]);
 
-        blockchain.Finalize(hash);
+        var hash = worldState.Commit(blockNo++);
 
-        // Poor man's await on finalization flushed
-        await blockchain.WaitTillFlush(hash);
+        await blockchain.Finalize(hash);
 
-        using var block2 = blockchain.StartNew(hash);
+        worldState.DestroyAccount(Key0);
+        var hash2 = worldState.Commit(blockNo);
 
-        block2.DestroyAccount(Key0);
-        var hash2 = block2.Commit(blockNo);
-
-        var wait = blockchain.WaitTillFlush(blockNo);
-
-        blockchain.Finalize(hash2);
-
-        await wait;
+        await blockchain.Finalize(hash2);
 
         using var read = db.BeginReadOnlyBatch();
 
-        read.Metadata.BlockNumber.Should().Be(2);
+        read.Metadata.BlockNumber.Should().Be(3);
 
         read.AssertNoAccount(Key0);
         read.AssertNoStorageAt(Key0, Key1);
@@ -499,7 +487,7 @@ public class BlockchainTests
 
         await using (var blockchain = new Blockchain(db, behavior))
         {
-            var hash = Keccak.Zero;
+            var hash = Keccak.EmptyTreeHash;
 
             for (uint i = 1; i < blockCount + 1; i++)
             {
@@ -567,11 +555,7 @@ public class BlockchainTests
                 const int block2 = 2;
 
                 var keccak2A = block2A.Commit(block2);
-                var task = blockchain.WaitTillFlush(block2);
-
-                blockchain.Finalize(keccak2A);
-
-                await task;
+                await blockchain.Finalize(keccak2A);
 
                 // start in the past
                 using (var block2B = blockchain.StartNew(keccak1A))
@@ -640,40 +624,7 @@ public class BlockchainTests
     }
 
     [Test]
-    public async Task Reports_ancestor_blocks()
-    {
-        using var db = PagedDb.NativeMemoryDb(1 * Mb);
-
-        await using var blockchain = new Blockchain(db, new PreCommit(), null, CacheBudget.Options.None,
-            CacheBudget.Options.None, 1);
-
-        // Arrange
-        const uint block1 = 1;
-        var (hash1, _) = BuildBlock(block1, Keccak.EmptyTreeHash);
-
-        const uint block2 = 2;
-        var (hash2, _) = BuildBlock(block2, hash1);
-
-        const uint block3 = 3;
-        var (hash3, last) = BuildBlock(block3, hash2);
-
-        // Assert stats in order
-        last.Stats.Ancestors
-            .Should()
-            .BeEquivalentTo(new[] { (block2, hash2), (block1, hash1) });
-
-        return;
-
-        (Keccak hash, IWorldState state) BuildBlock(uint number, in Keccak parent)
-        {
-            using var block = blockchain.StartNew(parent);
-            block.SetAccount(Keccak.OfAnEmptyString, new Account(number, number));
-            return (block.Commit(number), block);
-        }
-    }
-
-    [Test]
-    public async Task Read_accessor_updated_can_access_data()
+    public async Task Read_accessor()
     {
         const byte historyDepth = 16;
         using var db = PagedDb.NativeMemoryDb(16 * Mb, historyDepth);
@@ -698,9 +649,7 @@ public class BlockchainTests
 
         var h = hashes[historyDepth];
 
-        var task = blockchain.WaitTillFlush(h);
-        blockchain.Finalize(h);
-        await task;
+        await blockchain.Finalize(h);
 
         // omit 0th
         for (uint i = 10; i < count; i++)
@@ -723,45 +672,43 @@ public class BlockchainTests
         static Account Value(uint i) => new(i, i);
     }
 
-    [TestCase(true)]
-    [TestCase(false)]
-    public async Task Read_accessor_can_preload_readers_for_history(bool preloadHistory)
+    [Test]
+    public async Task Read_accessor_can_preload_readers_for_history()
     {
         const byte historyDepth = 16;
         using var db = PagedDb.NativeMemoryDb(16 * Mb, historyDepth);
 
-        await using var blockchain = new Blockchain(db, new ComputeMerkleBehavior());
-
         const int count = 128;
-
-        var parent = Keccak.EmptyTreeHash;
-
         var hashes = new Keccak[count + 1];
-        hashes[0] = parent;
 
-        for (uint i = 0; i < count; i++)
+        await using (var blockchain = new Blockchain(db, new ComputeMerkleBehavior()))
         {
-            using var block = blockchain.StartNew(parent);
-            block.SetAccount(Key(i), Value(i));
-            parent = hashes[i + 1] = block.Commit(i + 1);
-        }
+            var parent = Keccak.EmptyTreeHash;
+            hashes[0] = parent;
 
-        // Flush the last
-        var task = blockchain.WaitTillFlush(parent);
-        blockchain.Finalize(parent);
-        await task;
+            for (uint i = 0; i < count; i++)
+            {
+                using var block = blockchain.StartNew(parent);
+                block.SetAccount(Key(i), Value(i));
+                parent = hashes[i + 1] = block.Commit(i + 1);
+            }
+
+            // Flush the last
+            await blockchain.Finalize(parent);
+        }
 
         // Reload blockchain so that accessor is built from zero
         await using var reloaded = new Blockchain(db, new ComputeMerkleBehavior());
-        var accessor = blockchain.BuildReadOnlyAccessor(preloadHistory);
+        var accessor = reloaded.BuildReadOnlyAccessor();
 
         // Assert only last historyDepth hashes
         for (uint i = count - historyDepth + 1; i < count; i++)
         {
             var root = hashes[i + 1];
 
-            accessor.HasState(root).Should().Be(preloadHistory, $"Failed to properly assert at {i} out of {count}.");
-            accessor.GetAccount(root, Key(i)).Should().Be(preloadHistory ? Value(i) : default);
+            accessor.HasState(root).Should()
+                .BeTrue($"Failed to properly assert at {i} out of {count}.");
+            accessor.GetAccount(root, Key(i)).Should().Be(Value(i));
         }
 
         return;
@@ -776,6 +723,7 @@ public class BlockchainTests
         static Account Value(uint i) => new(i, i);
     }
 
+
     [Test]
     public async Task StartNew_when_throws_should_not_lock_db_readonly_batch()
     {
@@ -783,19 +731,17 @@ public class BlockchainTests
 
         await using var blockchain = new Blockchain(db, new PreCommit());
 
-        const int none = 0;
-
-        db.CountReadOnlyBatches().Should().Be(none);
+        var expected = db.CountReadOnlyBatches();
 
         var nonExistentParent = new Random(13).NextKeccak();
         try
         {
             var exception = Assert.Throws<Exception>(() => blockchain.StartNew(nonExistentParent));
-            exception.Message.Should().Contain("dependencies");
+            exception.Message.Should().Contain("There is no root page with the given stateHash");
         }
         finally
         {
-            db.CountReadOnlyBatches().Should().Be(none);
+            db.CountReadOnlyBatches().Should().Be(expected);
         }
     }
 

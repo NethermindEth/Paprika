@@ -25,6 +25,7 @@ public class Performance
         var path = ImportedDbPath();
 
         using var db = PagedDb.MemoryMappedDb(size, historyDepth, path);
+        await using var multi = db.OpenMultiHeadChain();
         var cache = new CacheBudget.Options(5000, 16);
         var merkle = new ComputeMerkleBehavior();
 

@@ -16,15 +16,21 @@ public class ReadForbiddingDb(IDb db) : IDb
     public IReadOnlyBatch BeginReadOnlyBatchOrLatest(in Keccak stateHash, string name = "") =>
         new ReadOnlyBatch(db.BeginReadOnlyBatchOrLatest(in stateHash, name), this);
 
-    public IReadOnlyBatch[] SnapshotAll() => db.SnapshotAll();
+    public IReadOnlyBatch[] SnapshotAll(bool withoutOldest = false) => db.SnapshotAll(withoutOldest);
 
     public bool HasState(in Keccak keccak) => db.HasState(in keccak);
     public int HistoryDepth => db.HistoryDepth;
     public void ForceFlush() => db.ForceFlush();
 
+    public IMultiHeadChain OpenMultiHeadChain(int automaticallyFinalizeAfter) => db.OpenMultiHeadChain(automaticallyFinalizeAfter);
+
     private class ReadOnlyBatch(IReadOnlyBatch batch, ReadForbiddingDb parent) : IReadOnlyBatch
     {
         public Metadata Metadata => batch.Metadata;
+
+        public RootPage Root => batch.Root;
+
+        public uint BatchId => batch.BatchId;
 
         public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result)
         {

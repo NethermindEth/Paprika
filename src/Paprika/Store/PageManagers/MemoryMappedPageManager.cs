@@ -35,6 +35,8 @@ public sealed class MemoryMappedPageManager : PointerPageManager
     private readonly Meter _meter;
     private readonly Histogram<int> _fileWrites;
     private readonly Histogram<int> _writeTime;
+    private readonly Histogram<int> _copyTime;
+    private readonly Histogram<int> _fsyncTime;
 
     public unsafe MemoryMappedPageManager(long size, byte historyDepth, string dir,
         PersistenceOptions options = PersistenceOptions.FlushFile) : base(size)
@@ -76,7 +78,9 @@ public sealed class MemoryMappedPageManager : PointerPageManager
 
         _meter = new Meter("Paprika.Store.PageManager");
         _fileWrites = _meter.CreateHistogram<int>("File writes", "Syscall", "Actual numbers of file writes issued");
-        _writeTime = _meter.CreateHistogram<int>("Write time", "ms", "Time spent in writing");
+        _writeTime = _meter.CreateHistogram<int>("Write time", "ms", "Time spent on writing");
+        _copyTime = _meter.CreateHistogram<int>("Copy time", "ms", "Time of copying data from memory to mmaped pages");
+        _fsyncTime = _meter.CreateHistogram<int>("FSYNC time", "ms", "Time spent in FSYNC");
     }
 
     public static string GetPaprikaFilePath(string dir) => System.IO.Path.Combine(dir, PaprikaFileName);
@@ -101,6 +105,8 @@ public sealed class MemoryMappedPageManager : PointerPageManager
             RandomAccess.FlushToDisk(_file);
         }
     }
+
+    protected override void ReportCopyTime(TimeSpan elapsed) => _copyTime.Record(elapsed.Milliseconds);
 
     /// <summary>
     /// The amount of pages that can be combined in a single write.
@@ -150,8 +156,6 @@ public sealed class MemoryMappedPageManager : PointerPageManager
         _writeTime.Record((int)writes.ElapsedMilliseconds);
     }
 
-    public override Page GetAtForWriting(DbAddress address, bool reused) => GetAt(address);
-
     public override async ValueTask WriteRootPage(DbAddress root, CommitOptions options)
     {
         if (_options == PersistenceOptions.MMapOnly)
@@ -164,7 +168,7 @@ public sealed class MemoryMappedPageManager : PointerPageManager
 
         if (options == CommitOptions.FlushDataAndRoot)
         {
-            RandomAccess.FlushToDisk(_file);
+            Fsync();
         }
     }
 
@@ -173,16 +177,21 @@ public sealed class MemoryMappedPageManager : PointerPageManager
         if (_options == PersistenceOptions.MMapOnly)
             return;
 
+        Fsync();
+    }
+
+    private void Fsync()
+    {
+        var watch = Stopwatch.StartNew();
         RandomAccess.FlushToDisk(_file);
+        _fsyncTime.Record((int)watch.ElapsedMilliseconds);
     }
 
     public override void ForceFlush()
     {
         _whole.Flush();
-        RandomAccess.FlushToDisk(_file);
+        Fsync();
     }
-
-    public override bool UsesPersistentPaging => _options == PersistenceOptions.FlushFile;
 
     public override void Dispose()
     {

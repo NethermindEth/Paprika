@@ -11,6 +11,16 @@ public interface IBatchContext : IReadOnlyBatchContext
     DbAddress GetAddress(Page page);
 
     /// <summary>
+    /// A counterpart to <see cref="IPageResolver.GetAt"/> used by places that write to a given page.
+    ///  </summary>
+    /// <remarks>
+    /// This method would not be needed if pages were provided only from <see cref="IPageManager"/>.
+    /// As <see cref="IMultiHeadChain"/> can provide in-memory copies of pages, independent to <see cref="IPageManager"/>,
+    /// the purpose of the page retrieved for should be communicated to.
+    /// </remarks>
+    Page GetAtForWriting(DbAddress address);
+
+    /// <summary>
     /// Gets a new (potentially reused) page. If <paramref name="clear"/> is set, the page will be cleared. 
     /// </summary>
     /// <returns>A new page.</returns>
@@ -124,7 +134,7 @@ public interface IPageResolver
     /// </summary>
     Page GetAt(DbAddress address);
 
-    void Prefetch(DbAddress address);
+    void Prefetch(DbAddress addr);
 
     void Prefetch(ReadOnlySpan<DbAddress> addresses)
     {

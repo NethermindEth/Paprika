@@ -86,6 +86,4 @@ public interface IReadOnlyWorldStateAccessor
     Account GetAccount(in Keccak rootHash, in Keccak address);
 
     Span<byte> GetStorage(in Keccak rootHash, in Keccak address, in Keccak storage, Span<byte> destination);
-
-    void Reset();
 }

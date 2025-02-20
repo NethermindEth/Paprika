@@ -7,11 +7,19 @@ namespace Paprika.Utils;
 /// <summary>
 /// Provides a component that can be disposed multiple times and runs <see cref="CleanUp"/> only on the last dispose. 
 /// </summary>
-public abstract class RefCountingDisposable : IDisposable
+public abstract class RefCountingDisposable : IRefCountingDisposable
 {
     private const int Single = 1;
     private const int NoAccessors = 0;
     private const int Disposing = -1;
+
+    // Always run continuations asynchronously.
+    private readonly TaskCompletionSource _tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>
+    /// A task that is completed once this is cleaned up using <see cref="CleanUp"/>.
+    /// </summary>
+    public Task CleanedUp => _tcs.Task;
 
     private PaddedValue _leases;
 
@@ -53,6 +61,7 @@ public abstract class RefCountingDisposable : IDisposable
                 // Successfully acquired
                 return true;
             }
+
             if (prev == Disposing)
             {
                 // Already disposed
@@ -110,6 +119,7 @@ public abstract class RefCountingDisposable : IDisposable
         {
             // set to disposed by this Release
             CleanUp();
+            _tcs.SetResult();
         }
 
         [DoesNotReturn]
@@ -134,4 +144,14 @@ public abstract class RefCountingDisposable : IDisposable
         [FieldOffset(64)]
         public long Value;
     }
+}
+
+public interface IRefCountingDisposable : IDisposable
+{
+    void AcquireLease();
+
+    /// <summary>
+    /// A task that is completed once this is cleaned up.
+    /// </summary>
+    public Task CleanedUp { get; }
 }

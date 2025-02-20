@@ -31,7 +31,7 @@ public interface IDb
     /// Performs a snapshot of all the valid roots in the database.
     /// </summary>
     /// <returns>An array of roots.</returns>
-    IReadOnlyBatch[] SnapshotAll();
+    IReadOnlyBatch[] SnapshotAll(bool withoutOldest = false);
 
     /// <summary>
     /// Whether there's a state with the given keccak.
@@ -44,4 +44,10 @@ public interface IDb
     int HistoryDepth { get; }
 
     void ForceFlush();
+
+    /// <summary>
+    /// Opens the multi head chain.
+    /// </summary>
+    /// <returns></returns>
+    IMultiHeadChain OpenMultiHeadChain(int automaticallyFinalizeAfter = int.MaxValue);
 }

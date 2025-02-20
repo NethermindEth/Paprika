@@ -16,6 +16,10 @@ public class ReadOnlyBatchCountingRefs(IReadOnlyBatch batch) : RefCountingDispos
 
     public bool TryGet(scoped in Key key, out ReadOnlySpan<byte> result) => batch.TryGet(key, out result);
 
+    public RootPage Root => batch.Root;
+
+    public uint BatchId => batch.BatchId;
+
     public void VerifyNoPagesMissing() => batch.VerifyNoPagesMissing();
 
     public override string ToString() => base.ToString() + $", Batch :{batch}";
