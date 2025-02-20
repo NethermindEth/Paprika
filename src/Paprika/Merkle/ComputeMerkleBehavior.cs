@@ -1007,6 +1007,11 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
                     var onlyChildKey = Key.Merkle(onlyChildPath);
                     using var onlyChildSpanOwner = commit.Get(onlyChildKey);
 
+                    if (onlyChildSpanOwner.IsEmpty)
+                    {
+                        Debugger.Break();
+                    }
+
                     // need to collapse the branch
                     var childType = Node.ReadFrom(out var childLeaf, out var childExt, onlyChildSpanOwner.Span);
 

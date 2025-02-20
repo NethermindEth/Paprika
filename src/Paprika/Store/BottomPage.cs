@@ -36,10 +36,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
     public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {
-        if (Header.BatchId != batch.BatchId)
-        {
-            return new BottomPage(batch.GetWritableCopy(page)).Set(key, data, batch);
-        }
+        Debug.Assert(batch.WasWritten(batch.GetAddress(page)), "All bottom pages should be COWed before use");
 
         var map = Map;
 
@@ -68,8 +65,12 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
             // Move all down. Ensure that deletes are treated as tombstones.
             map.MoveNonEmptyKeysTo<All>(child.Map, true);
 
-            map.Clear();
-            map.TrySet(key, data);
+            // All non-empty keys moved down. The map should is ready to accept the set.
+            if (map.TrySet(key, data) == false)
+            {
+                UnableToSet();
+            }
+
             return page;
         }
 
@@ -127,6 +128,9 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         // The destination is set over this page.
         return page;
     }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void UnableToSet() => throw new Exception("The map should be ready to accept the write");
 
     private void Delete(in NibblePath key, IBatchContext batch)
     {
@@ -350,7 +354,10 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
                 Data.Buckets[at] = addr;
             }
 
-            var childMap = new BottomPage(batch.GetAt(addr)).Map;
+            var child = batch.GetAt(addr);
+            Debug.Assert(batch.WasWritten(addr));
+
+            var childMap = new BottomPage(child).Map;
 
             Debug.Assert(k.Nibble0 >= at);
 
