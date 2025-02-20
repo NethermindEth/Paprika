@@ -264,6 +264,7 @@ public class Blockchain : IAsyncDisposable
                 _blockchain._prefetchCount.Record(_prefetcher.PrefetchCount);
 
                 _prefetcher.Dispose();
+                _prefetcher = null;
             }
 
             EnsureHash();
@@ -299,7 +300,7 @@ public class Blockchain : IAsyncDisposable
             _head.Commit(blockNumber, hash);
 
             // Cleanup
-            ResetAllButHash(_prefetcher != null);
+            ResetAllButHash();
 
 
             [DoesNotReturn]
@@ -342,10 +343,10 @@ public class Blockchain : IAsyncDisposable
         public void Reset()
         {
             _hash = ParentHash;
-            ResetAllButHash(true);
+            ResetAllButHash();
         }
 
-        private void ResetAllButHash(bool reopenPrefetcher)
+        private void ResetAllButHash()
         {
             _filter.Clear();
             _destroyed.Clear();
@@ -356,12 +357,6 @@ public class Blockchain : IAsyncDisposable
             _cacheBudgetPreCommit = _blockchain._cacheBudgetPreCommit.Build();
 
             CreateDictionaries();
-
-            if (reopenPrefetcher)
-            {
-                _prefetcher = null;
-                OpenPrefetcher();
-            }
         }
 
         IStateStats IWorldState.Stats => this;
