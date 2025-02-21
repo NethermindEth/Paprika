@@ -101,7 +101,10 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
 
             if (page.Header.PageType == PageType.Bottom)
             {
-                new BottomPage(page).Set(k, data, batch);
+                var result = new BottomPage(page).Set(k, data, batch);
+
+                Debug.Assert(result.Equals(page), "The page should have been copied before");
+
                 return;
             }
 
