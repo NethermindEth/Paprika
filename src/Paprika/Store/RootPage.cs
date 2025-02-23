@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Crypto;
@@ -96,11 +95,6 @@ public readonly unsafe struct RootPage(Page root) : IPage
         Data.AbandonedList.Accept(visitor, resolver);
     }
 
-    /// <summary>
-    /// How many id entries should be cached per readonly batch.
-    /// </summary>
-    public const int IdCacheLimit = 2_000;
-
     public bool TryGet(scoped in Key key, IReadOnlyBatchContext batch, out ReadOnlySpan<byte> result)
     {
         if (key.IsState)
@@ -114,36 +108,29 @@ public readonly unsafe struct RootPage(Page root) : IPage
             return new StateRootPage(batch.GetAt(Data.StateRoot)).TryGet(batch, key.Path, out result);
         }
 
-        var cache = batch.IdCache;
-        var keccak = key.Path.UnsafeAsKeccak;
+        var id = BuildIdIndex(key.Path);
 
-        if (cache.TryGetValue(keccak, out var id))
-        {
-            if (id == 0)
-            {
-                result = default;
-                return false;
-            }
-        }
-        else
-        {
-            if (Data.Storage.TryGetId(keccak, out id, batch))
-            {
-                if (cache.Count < IdCacheLimit)
-                {
-                    cache[keccak] = id;
-                }
-            }
-            else
-            {
-                // Not found, for now, not remember misses, remember miss
-                // cache[keccak] = 0;
-                result = default;
-                return false;
-            }
-        }
+        return Data.Storage.TryGetStorage(id, key.Path.UnsafeAsKeccak, key.StoragePath, out result, batch);
+    }
 
-        return Data.Storage.TryGetStorage(id, key.StoragePath, out result, batch);
+    private const int IdConsumedNibbles = 5;
+    public const int SlicedAccountByteLength = Keccak.Size - IdConsumedNibbles;
+
+    private const int MaxId = 1 << (IdConsumedNibbles * NibblePath.NibbleShift);
+
+    private static uint BuildIdIndex(in NibblePath path)
+    {
+        Debug.Assert(path.Length == NibblePath.KeccakNibbleCount);
+        Debug.Assert(path.IsOdd == false);
+
+        ref var span = ref path.UnsafeSpan;
+
+        var i = (span << (3 * NibblePath.NibbleShift)) |
+                 (Unsafe.Add(ref span, 1) << NibblePath.NibbleShift) |
+                 (Unsafe.Add(ref span, 2) >> NibblePath.NibbleShift);
+        Debug.Assert(i < MaxId);
+
+        return (uint)i;
     }
 
     public void SetRaw(in Key key, IBatchContext batch, ReadOnlySpan<byte> rawData)
@@ -154,29 +141,9 @@ public readonly unsafe struct RootPage(Page root) : IPage
         }
         else
         {
-            var keccak = key.Path.UnsafeAsKeccak;
+            var id = BuildIdIndex(key.Path);
 
-            if (batch.IdCache.TryGetValue(keccak, out var id) == false)
-            {
-                // try fetch existing first
-                if (Data.Storage.TryGetId(keccak, out id, batch) == false)
-                {
-                    Data.AccountCounter++;
-
-                    // memoize in cache
-                    batch.IdCache[keccak] = id = Data.AccountCounter;
-
-                    // update root
-                    Data.Storage.SetId(keccak, id, batch);
-                }
-                else
-                {
-                    // memoize in cache
-                    batch.IdCache[keccak] = id;
-                }
-            }
-
-            Data.Storage.SetStorage(id, key.StoragePath, rawData, batch);
+            Data.Storage.SetStorage(id, key.Path.UnsafeAsKeccak, key.StoragePath, rawData, batch);
         }
     }
 
@@ -185,16 +152,8 @@ public readonly unsafe struct RootPage(Page root) : IPage
         // GC for storage
         DeleteByPrefix(Key.Merkle(account), batch);
 
-        var keccak = account.UnsafeAsKeccak;
-
-        // Destroy the Id entry about it
-        Data.Storage.SetId(keccak, 0, batch);
-
         // Destroy the account entry
         SetAtRoot(batch, account, ReadOnlySpan<byte>.Empty, ref Data.StateRoot);
-
-        // Remove the cached
-        batch.IdCache.Remove(keccak);
     }
 
     public void DeleteByPrefix(in Key prefix, IBatchContext batch)
@@ -207,19 +166,8 @@ public readonly unsafe struct RootPage(Page root) : IPage
         }
         else
         {
-            var keccak = prefix.Path.UnsafeAsKeccak;
-
-            if (batch.IdCache.TryGetValue(keccak, out var id) == false)
-            {
-                // Not in cache, try fetch from db
-                if (Data.Storage.TryGetId(keccak, out id, batch) == false)
-                {
-                    // Has never been mapped, return.
-                    return;
-                }
-            }
-
-            Data.Storage.DeleteStorageByPrefix(id, prefix.StoragePath, batch);
+            var id = BuildIdIndex(prefix.Path);
+            Data.Storage.DeleteStorageByPrefix(id, prefix.Path.UnsafeAsKeccak, prefix.StoragePath, batch);
         }
     }
 

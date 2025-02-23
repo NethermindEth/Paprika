@@ -26,9 +26,6 @@ public unsafe class ClearableTests : IDisposable
     public void StorageFanOut_Level2Page() => TestPage<StorageFanOut.Level2Page>();
 
     [Test]
-    public void StorageFanOut_Level3Page() => TestPage<StorageFanOut.Level3Page>();
-
-    [Test]
     public void DbAddressList_Of4() => TestDbAddressList<DbAddressList.Of4>();
 
     [Test]

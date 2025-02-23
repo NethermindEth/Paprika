@@ -110,8 +110,6 @@ public interface IReadOnlyBatchContext : IPageResolver
     /// Gets the current <see cref="IBatch"/> id.
     /// </summary>
     uint BatchId { get; }
-
-    IDictionary<Keccak, uint> IdCache { get; }
 }
 
 /// <summary>

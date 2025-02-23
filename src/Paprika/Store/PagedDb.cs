@@ -471,12 +471,6 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     private sealed class ReadOnlyBatch(PagedDb db, RootPage root, string name)
         : IVisitableReadOnlyBatch, IReadOnlyBatchContext
     {
-        [ThreadStatic] private static ConcurrentDictionary<Keccak, uint>? s_cache;
-
-        private ConcurrentDictionary<Keccak, uint> _idCache = Interlocked.Exchange(ref s_cache, null) ?? new(
-            Environment.ProcessorCount,
-            RootPage.IdCacheLimit);
-
         public RootPage Root => root;
 
         private long _reads;
@@ -487,21 +481,6 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             db.ReportReads(Volatile.Read(ref _reads));
             _disposed = true;
             db.DisposeReadOnlyBatch(this);
-
-            ReturnCacheToPool();
-
-            void ReturnCacheToPool()
-            {
-                var idCache = _idCache;
-                _idCache = null!;
-                ref var cache = ref s_cache;
-                if (cache is null)
-                {
-                    // Return the cache to be reused
-                    idCache.Clear();
-                    cache = idCache;
-                }
-            }
         }
 
         public Metadata Metadata => root.Data.Metadata;
@@ -521,15 +500,6 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         public void Accept(IPageVisitor visitor) => Root.Accept(visitor, this);
 
         public uint BatchId => root.Header.BatchId;
-
-        public IDictionary<Keccak, uint> IdCache
-        {
-            get
-            {
-                ObjectDisposedException.ThrowIf(_disposed, this);
-                return _idCache;
-            }
-        }
 
         public void Prefetch(DbAddress address) => db.Prefetch(address);
 
