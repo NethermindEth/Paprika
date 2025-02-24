@@ -28,11 +28,12 @@ public static class StorageFanOut
 
     public const string ScopeStorage = "Storage";
 
-    private static (int level0, int level1) Split(uint id)
+    private static (int level0, int level1) Split(Keccak account)
     {
-        const int length = DbAddressList.Of1024.Count;
-        var level0 = Math.DivRem(id, length, out var level1);
-        return ((int)level0, (int)level1);
+        const int mask = Level0.FanOut * Level1Page.FanOut - 1;
+
+        var level0 = Math.DivRem(account.GetHashCode() & mask, Level0.FanOut, out var level1);
+        return (level0, level1);
     }
 
     /// <summary>
@@ -42,6 +43,8 @@ public static class StorageFanOut
     /// </summary>
     public readonly ref struct Level0(ref DbAddressList.Of1024 addresses)
     {
+        public const int FanOut = DbAddressList.Of1024.Count;
+
         private readonly ref DbAddressList.Of1024 _addresses = ref addresses;
 
         public void Accept(IPageVisitor visitor, IPageResolver resolver)
@@ -58,11 +61,11 @@ public static class StorageFanOut
             }
         }
 
-        public bool TryGetStorage(uint id, scoped in Keccak account, scoped in NibblePath storage,
+        public bool TryGetStorage(scoped in Keccak account, scoped in NibblePath storage,
             out ReadOnlySpan<byte> result,
             IReadOnlyBatchContext batch)
         {
-            var (level0, level1) = Split(id);
+            var (level0, level1) = Split(account);
 
             var addr = _addresses[level0];
             if (addr.IsNull)
@@ -75,28 +78,26 @@ public static class StorageFanOut
                 .TryGet(batch, level1, account, storage, out result);
         }
 
-        public void SetStorage(uint id, scoped in Keccak account, scoped in NibblePath storage,
+        public void SetStorage(scoped in Keccak account, scoped in NibblePath storage,
             ReadOnlySpan<byte> data, IBatchContext batch)
         {
-            var (level0, level1) = Split(id);
+            var (level0, level1) = Split(account);
             var addr = _addresses[level0];
 
-            if (addr.IsNull)
-            {
-                batch.GetNewCleanPage<Level1Page>(out addr).Set(level1, account, storage, data, batch);
-                _addresses[level0] = addr;
-                return;
-            }
+            // Ensure writable to flatten the stack
+            var l1 = addr.IsNull
+                ? batch.GetNewCleanPage<Level1Page>(out addr)
+                : Level1Page.Wrap(batch.EnsureWritableCopy(ref addr));
 
             // The page exists, update
-            var updated = Level1Page.Wrap(batch.GetAt(addr)).Set(level1, account, storage, data, batch);
-            _addresses[level0] = batch.GetAddress(updated);
+            l1.Set(level1, account, storage, data, batch);
+            _addresses[level0] = addr;
         }
 
-        public void DeleteStorageByPrefix(uint id, scoped in Keccak account, scoped in NibblePath prefix,
+        public void DeleteStorageByPrefix(scoped in Keccak account, scoped in NibblePath prefix,
             IBatchContext batch)
         {
-            var (level0, level1) = Split(id);
+            var (level0, level1) = Split(account);
             var addr = _addresses[level0];
 
             if (addr.IsNull)
@@ -119,6 +120,8 @@ public static class StorageFanOut
     [method: DebuggerStepThrough]
     public readonly unsafe struct Level1Page(Page page) : IPage<Level1Page>
     {
+        public const int FanOut = DbAddressList.Of1024.Count;
+
         public static Level1Page Wrap(Page page) => Unsafe.As<Page, Level1Page>(ref page);
         public static PageType DefaultType => PageType.FanOutPage;
 
@@ -159,16 +162,17 @@ public static class StorageFanOut
 
             var addr = Data.Storage[at];
 
-            if (addr.IsNull)
-            {
-                batch.GetNewCleanPage<Level2Page>(out addr);
-            }
+            // Ensure writable before the call to flatten the stack
+            var l2 = addr.IsNull
+                ? batch.GetNewCleanPage<Level2Page>(out addr)
+                : Level2Page.Wrap(batch.EnsureWritableCopy(ref addr));
 
-            Data.Storage[at] = batch.GetAddress(Level2Page.Wrap(batch.GetAt(addr)).Set(account, storage, data, batch));
+            l2.Set(account, storage, data, batch);
 
+            Debug.Assert(batch.WasWritten(addr));
+            Data.Storage[at] = addr;
             return page;
         }
-
 
         public Page DeleteByPrefix(int at, scoped in Keccak account, scoped in NibblePath prefix, IBatchContext batch)
         {
@@ -227,22 +231,24 @@ public static class StorageFanOut
     }
 
     [method: DebuggerStepThrough]
-    public readonly unsafe struct Level2Page(Page page) : IPage<Level2Page>, IClearable
+    public readonly unsafe struct Level2Page(Page page) : IPage<Level2Page>
     {
         public static Level2Page Wrap(Page page) => Unsafe.As<Page, Level2Page>(ref page);
         public static PageType DefaultType => PageType.FanOutPage;
 
         public void Clear()
         {
-            Data.Addresses.Clear();
             Data.Accounts.Clear();
             new SlottedArray(Data.DataSpan).Clear();
+            Data.Child = default;
+            Data.Overflow = default;
         }
 
         public bool IsClean =>
-            Data.Addresses.IndexOfAnyExcept(DbAddress.Null) < 0 &&
-            Data.Accounts.IndexOfAnyExcept(Keccak.Zero) < 0 &&
-            new SlottedArray(Data.DataSpan).IsEmpty;
+            Data.Child.IsNull &&
+            Data.Overflow.IsNull &&
+            new SlottedArray(Data.DataSpan).IsEmpty &&
+            Data.Accounts.IndexOfAnyExcept(Keccak.Zero) < 0;
 
         private ref PageHeader Header => ref page.Header;
 
@@ -254,34 +260,39 @@ public static class StorageFanOut
         {
             var slot = FindAccountSlot(account);
 
+            if (slot == BucketsFull && Data.Overflow.IsNull == false)
+            {
+                return new Level2Page(batch.GetAt(Data.Overflow)).TryGet(batch, account, storage, out result);
+            }
+
             if (slot < 0)
             {
                 result = default;
                 return false;
             }
 
-            var addr = Data.Addresses[slot];
-            if (addr.IsNull == false)
-            {
-                // Get the page and dispatch according to the type.
-                var p = batch.GetAt(addr);
+            Span<byte> workingSet = stackalloc byte[BuildKeyAllocSize];
+            var key = BuildKey(slot, storage, workingSet);
 
-                // No concatenation on the key needed. The page represents the whole storage tree of the given account.
-                return p.Header.PageType == PageType.Bottom
-                    ? new BottomPage(p).TryGet(batch, storage, out result)
-                    : new DataPage(p).TryGet(batch, storage, out result);
+            if (Data.Child.IsNull)
+            {
+                return new SlottedArray(Data.DataSpan).TryGet(key, out result);
             }
 
-            Span<byte> workingSet = stackalloc byte[NibblePath.FullKeccakByteLength + 4];
-            return new SlottedArray(Data.DataSpan).TryGet(BuildLocalKey(storage, slot, workingSet), out result);
+            var child = batch.GetAt(Data.Child);
+
+            return child.Header.PageType == PageType.Bottom
+                ? new BottomPage(child).TryGet(batch, key, out result)
+                : new DataPage(child).TryGet(batch, key, out result);
         }
 
-        // We use 2 nibbles to make sure that the storage path starts at the even nibble. It helps in slicing and alignment.
-        private const int AccountPrefixLength = 2;
 
-        private static NibblePath BuildLocalKey(in NibblePath storage, int slot, Span<byte> workingSet)
+        private const int BuildKeyAllocSize = NibblePath.FullKeccakByteLength + 2;
+
+        private static NibblePath BuildKey(int slot, in NibblePath storage, Span<byte> workingSet)
         {
-            return NibblePath.DoubleEven((byte)slot, 0)
+            Debug.Assert(slot < 256);
+            return NibblePath.DoubleEven((byte)slot)
                 .Append(storage, workingSet);
         }
 
@@ -294,8 +305,17 @@ public static class StorageFanOut
                 return new Level2Page(writable).Set(account, storage, data, batch);
             }
 
-            var map = new SlottedArray(Data.DataSpan);
             var slot = FindAccountSlot(account);
+
+            if (slot == BucketsFull)
+            {
+                if (Data.Overflow.IsNull)
+                    batch.GetNewPage<Level2Page>(out Data.Overflow).Set(account, storage, data, batch);
+                else
+                    new Level2Page(batch.EnsureWritableCopy(ref Data.Overflow)).Set(account, storage, data, batch);
+
+                return page;
+            }
 
             if (slot < 0)
             {
@@ -307,76 +327,40 @@ public static class StorageFanOut
                 // The account is allocated now, move forward with setting the value.
             }
 
-            // Account has been mapped already
-            ref var addr = ref Data.Addresses[slot];
-            if (addr.IsNull == false)
+            Span<byte> workingSet = stackalloc byte[BuildKeyAllocSize];
+            var key = BuildKey(slot, storage, workingSet);
+
+            var accounts = MemoryMarshal.Cast<Keccak, byte>(Data.Accounts);
+            Debug.Assert(Unsafe.IsAddressLessThan(ref accounts[^1], ref Data.DataSpan[0]));
+
+            if (Data.Child.IsNull)
             {
-                SetInChild(storage, data, batch, ref addr);
+                var map = new SlottedArray(Data.DataSpan);
+
+                if (map.TrySet(key, data))
+                {
+                    return page;
+                }
+
+                var destination = batch.GetNewPage<BottomPage>(out Data.Child).Map;
+                map.MoveNonEmptyKeysTo<NibbleSelector.All>(destination);
+
+                // Will always fit
+                destination.TrySet(key, data);
                 return page;
             }
 
-            Span<byte> workingSet = stackalloc byte[NibblePath.FullKeccakByteLength + 2];
-            var localKey = BuildLocalKey(storage, slot, workingSet);
+            var child = Data.Child.IsNull
+                ? batch.GetNewPage<BottomPage>(out Data.Child).AsPage()
+                : batch.EnsureWritableCopy(ref Data.Child);
 
-            while (map.TrySet(localKey, data) == false)
-            {
-                var flushedDown = FlushBiggest(map, batch);
-                if (flushedDown == slot)
-                {
-                    // It happens that it was the slot that was just created.
-                    // Write down directly, return
-                    SetInChild(storage, data, batch, ref addr);
-                    return page;
-                }
-            }
+            // It has its own page, use it
+            if (child.Header.PageType == PageType.Bottom)
+                new BottomPage(child).Set(key, data, batch);
+            else
+                new DataPage(child).Set(key, data, batch);
 
             return page;
-        }
-
-        private static void SetInChild(in NibblePath storage, ReadOnlySpan<byte> data, IBatchContext batch,
-            ref DbAddress addr)
-        {
-            // It has its own page, use it
-            var p = batch.EnsureWritableCopy(ref addr);
-            if (p.Header.PageType == PageType.Bottom)
-                new BottomPage(p).Set(storage, data, batch);
-            else
-                new DataPage(p).Set(storage, data, batch);
-        }
-
-        private int FlushBiggest(in SlottedArray map, IBatchContext batch)
-        {
-            Span<ushort> sizes = stackalloc ushort[Payload.BucketCount];
-            map.GatherSizeStats1Nibble(sizes);
-
-            var maxSize = -1;
-            var maxNibble = -1;
-
-            for (var i = 0; i < Payload.BucketCount; i++)
-            {
-                if (sizes[i] > maxSize)
-                {
-                    maxSize = sizes[i];
-                    maxNibble = i;
-                }
-            }
-
-            Debug.Assert(maxNibble >= 0);
-            Debug.Assert(Data.Addresses[maxNibble].IsNull);
-
-            var bottom = batch.GetNewPage<BottomPage>(out Data.Addresses[maxNibble], 0);
-
-            foreach (var item in map.EnumerateNibble((byte)maxNibble))
-            {
-                // The storage path is retrieved by removing the prefix of the account bucket
-                var path = item.Key.SliceFrom(AccountPrefixLength);
-
-                // Set down and delete locally
-                bottom.Set(path, item.RawData, batch);
-                map.Delete(item);
-            }
-
-            return maxNibble;
         }
 
         public Page DeleteByPrefix(scoped in Keccak account, scoped in NibblePath prefix, IBatchContext batch)
@@ -388,72 +372,80 @@ public static class StorageFanOut
                 return new Level2Page(writable).DeleteByPrefix(account, prefix, batch);
             }
 
-            var map = new SlottedArray(Data.DataSpan);
             var slot = FindAccountSlot(account);
 
-            if (slot < 0)
+            if (slot == BucketsFull)
+            {
+                if (Data.Overflow.IsNull)
+                    batch.GetNewPage<Level2Page>(out Data.Overflow).DeleteByPrefix(account, prefix, batch);
+                else
+                    new Level2Page(batch.EnsureWritableCopy(ref Data.Overflow)).DeleteByPrefix(account, prefix, batch);
+
+                return page;
+            }
+
+            if (slot < 0 || Data.Child.IsNull)
             {
                 // Not found, nothing to delete
                 return page;
             }
 
-            ref var addr = ref Data.Addresses[slot];
-            if (addr.IsNull)
-            {
-                // Account exists but has no child page, delete locally.
-                var nibble = (byte)slot;
-                foreach (var item in map.EnumerateNibble(nibble))
-                {
-                    if (prefix.IsEmpty || item.Key.SliceFrom(AccountPrefixLength).StartsWith(prefix))
-                    {
-                        map.Delete(item);
-                    }
-                }
+            Span<byte> workingSet = stackalloc byte[BuildKeyAllocSize];
+            var key = BuildKey(slot, prefix, workingSet);
 
+            if (Data.Child.IsNull)
+            {
+                var map = new SlottedArray(Data.DataSpan);
+                map.DeleteByPrefix(key);
                 return page;
             }
 
-            // The address is not null, should handle the deletion
-            // It has its own page, use it
-            var p = batch.EnsureWritableCopy(ref addr);
+            var child = Data.Child.IsNull
+                ? batch.GetNewPage<BottomPage>(out Data.Child).AsPage()
+                : batch.EnsureWritableCopy(ref Data.Child);
 
-            if (p.Header.PageType == PageType.Bottom)
-                new BottomPage(p).DeleteByPrefix(prefix, batch);
+            Debug.Assert(child.Header.PageType != PageType.None);
+
+            // It has its own page, use it
+            if (child.Header.PageType == PageType.Bottom)
+                new BottomPage(child).DeleteByPrefix(key, batch);
             else
-                new DataPage(p).DeleteByPrefix(prefix, batch);
+                new DataPage(child).DeleteByPrefix(key, batch);
 
             return page;
         }
 
         public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
         {
-            resolver.Prefetch(Data.Addresses);
+            resolver.Prefetch(Data.Overflow);
 
             using (visitor.On(ref builder, this, addr))
             {
-                for (byte i = 0; i < Payload.BucketCount; i++)
+                if (Data.Child.IsNull == false)
                 {
-                    var bucket = Data.Addresses[i];
-                    if (bucket.IsNull)
-                    {
-                        continue;
-                    }
-
-                    var child = resolver.GetAt(bucket);
+                    var child = resolver.GetAt(Data.Child);
                     var type = child.Header.PageType;
 
-                    if (type == PageType.DataPage)
+                    switch (type)
                     {
-                        new DataPage(child).Accept(ref builder, visitor, resolver, bucket);
+                        case PageType.DataPage:
+                            new DataPage(child).Accept(ref builder, visitor, resolver, Data.Child);
+                            break;
+                        case PageType.Bottom:
+                            new BottomPage(child).Accept(ref builder, visitor, resolver, Data.Child);
+                            break;
+                        default:
+                            throw new InvalidOperationException($"Invalid page type {type}");
                     }
-                    else if (type == PageType.Bottom)
-                    {
-                        new BottomPage(child).Accept(ref builder, visitor, resolver, bucket);
-                    }
-                    else
-                    {
-                        throw new InvalidOperationException($"Invalid page type {type}");
-                    }
+                }
+
+                if (Data.Overflow.IsNull)
+                    return;
+
+                var overflow = new Level2Page(resolver.GetAt(Data.Overflow));
+
+                using (visitor.On(ref builder, overflow, Data.Overflow))
+                {
                 }
             }
         }
@@ -470,7 +462,10 @@ public static class StorageFanOut
 
             var hashcode = account.GetHashCode();
 
-            for (int i = 0; i < Payload.BucketCount; i++)
+            // The limit of the linear search for the space.
+            const int probeLimit = 16;
+
+            for (var i = 0; i < probeLimit; i++)
             {
                 var index = (hashcode + i) & bucketMask;
                 var actual = Data.Accounts[index];
@@ -486,29 +481,36 @@ public static class StorageFanOut
                 }
             }
 
-            throw new Exception("Page is full");
+            return BucketsFull;
         }
+
+        private const int BucketsFull = ~(Payload.BucketCount + 1);
 
         [StructLayout(LayoutKind.Explicit, Size = Size)]
         private struct Payload
         {
             private const int Size = Page.PageSize - PageHeader.Size;
 
-            private const int DataOffset = BucketCount * Keccak.Size + BucketCount * DbAddress.Size;
-            private const int DataSize = Size - DataOffset;
+            private const int KeccakSize = BucketCount * Keccak.Size;
 
-            public const int BucketCount = 16;
+            private const int DataSize = Size - KeccakSize - DbAddress.Size * 2;
+            private const int DataOffset = KeccakSize + DbAddress.Size * 2;
+
+            public const int BucketCount = 64;
 
             [FieldOffset(0)] private Keccak K;
 
-            [FieldOffset(BucketCount * Keccak.Size)]
-            private DbAddress A;
+            [FieldOffset(KeccakSize)]
+            public DbAddress Child;
 
-            [FieldOffset(DataOffset)] private byte B;
+            [FieldOffset(KeccakSize + DbAddress.Size)] public DbAddress Overflow;
+
+            [FieldOffset(DataOffset)]
+            private byte b;
 
             public Span<Keccak> Accounts => MemoryMarshal.CreateSpan(ref K, BucketCount);
-            public Span<DbAddress> Addresses => MemoryMarshal.CreateSpan(ref A, BucketCount);
-            public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref B, DataSize);
+
+            public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref b, DataSize);
         }
     }
 }

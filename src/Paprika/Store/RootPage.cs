@@ -108,30 +108,9 @@ public readonly unsafe struct RootPage(Page root) : IPage
             return new StateRootPage(batch.GetAt(Data.StateRoot)).TryGet(batch, key.Path, out result);
         }
 
-        var id = BuildIdIndex(key.Path);
-
-        return Data.Storage.TryGetStorage(id, key.Path.UnsafeAsKeccak, key.StoragePath, out result, batch);
+        return Data.Storage.TryGetStorage(key.Path.UnsafeAsKeccak, key.StoragePath, out result, batch);
     }
 
-    private const int IdConsumedNibbles = 5;
-    public const int SlicedAccountByteLength = Keccak.Size - IdConsumedNibbles;
-
-    private const int MaxId = 1 << (IdConsumedNibbles * NibblePath.NibbleShift);
-
-    private static uint BuildIdIndex(in NibblePath path)
-    {
-        Debug.Assert(path.Length == NibblePath.KeccakNibbleCount);
-        Debug.Assert(path.IsOdd == false);
-
-        ref var span = ref path.UnsafeSpan;
-
-        var i = (span << (3 * NibblePath.NibbleShift)) |
-                 (Unsafe.Add(ref span, 1) << NibblePath.NibbleShift) |
-                 (Unsafe.Add(ref span, 2) >> NibblePath.NibbleShift);
-        Debug.Assert(i < MaxId);
-
-        return (uint)i;
-    }
 
     public void SetRaw(in Key key, IBatchContext batch, ReadOnlySpan<byte> rawData)
     {
@@ -141,9 +120,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         }
         else
         {
-            var id = BuildIdIndex(key.Path);
-
-            Data.Storage.SetStorage(id, key.Path.UnsafeAsKeccak, key.StoragePath, rawData, batch);
+            Data.Storage.SetStorage(key.Path.UnsafeAsKeccak, key.StoragePath, rawData, batch);
         }
     }
 
@@ -166,8 +143,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         }
         else
         {
-            var id = BuildIdIndex(prefix.Path);
-            Data.Storage.DeleteStorageByPrefix(id, prefix.Path.UnsafeAsKeccak, prefix.StoragePath, batch);
+            Data.Storage.DeleteStorageByPrefix(prefix.Path.UnsafeAsKeccak, prefix.StoragePath, batch);
         }
     }
 
