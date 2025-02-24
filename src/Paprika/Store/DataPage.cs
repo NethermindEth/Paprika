@@ -85,6 +85,33 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         return page;
     }
 
+    /// <summary>
+    /// Can be called to quickly collect unused bottom pages that were written this batch and are empty
+    /// </summary>
+    /// <param name="batch"></param>
+    public void ReturnUnusedChildBottomPages(IBatchContext batch)
+    {
+        Debug.Assert(batch.WasWritten(batch.GetAddress(page)), "Can be called only when COWed");
+
+        for (var i = 0; i < BucketCount; i++)
+        {
+            var childAddr = Data.Buckets[i];
+
+            if (childAddr.IsNull || batch.WasWritten(childAddr))
+                continue;
+
+            var child = batch.GetAt(childAddr);
+            if (child.Header.PageType != PageType.Bottom)
+                continue;
+
+            if (!new BottomPage(child).Map.IsEmpty)
+                continue;
+
+            batch.RegisterForFutureReuse(child, true);
+            Data.Buckets[i] = DbAddress.Null;
+        }
+    }
+
     [SkipLocalsInit]
     private static void Set(DbAddress at, in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
     {

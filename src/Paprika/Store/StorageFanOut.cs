@@ -27,10 +27,11 @@ public static class StorageFanOut
     public const int LevelCount = 3;
 
     public const string ScopeStorage = "Storage";
+    private const int Level0And1FanOut = Level0.FanOut * Level1Page.FanOut;
 
     private static (int level0, int level1) Split(Keccak account)
     {
-        const int mask = Level0.FanOut * Level1Page.FanOut - 1;
+        const int mask = Level0And1FanOut - 1;
 
         var level0 = Math.DivRem(account.GetHashCode() & mask, Level0.FanOut, out var level1);
         return (level0, level1);
@@ -384,7 +385,7 @@ public static class StorageFanOut
                 return page;
             }
 
-            if (slot < 0 || Data.Child.IsNull)
+            if (slot < 0)
             {
                 // Not found, nothing to delete
                 return page;
@@ -460,14 +461,15 @@ public static class StorageFanOut
         {
             const int bucketMask = Payload.BucketCount - 1;
 
-            var hashcode = account.GetHashCode();
+            // Divide the original hash code by the fan out of 0th and 1st level. They are used in the Split already 
+            var hash = account.GetHashCode() / Level0And1FanOut;
 
             // The limit of the linear search for the space.
-            const int probeLimit = 16;
+            const int probeLimit = 8;
 
             for (var i = 0; i < probeLimit; i++)
             {
-                var index = (hashcode + i) & bucketMask;
+                var index = (hash + i) & bucketMask;
                 var actual = Data.Accounts[index];
 
                 if (actual == account)

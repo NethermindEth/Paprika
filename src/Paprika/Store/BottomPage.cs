@@ -477,6 +477,8 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
             dpMap.Delete(item);
         }
 
+        dp.ReturnUnusedChildBottomPages(batch);
+
         return dp;
     }
 
