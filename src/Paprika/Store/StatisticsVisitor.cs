@@ -83,10 +83,6 @@ public class StatisticsVisitor : IPageVisitor
         {
             StorageFanOutLevels[2] += 1;
         }
-        else if (t == typeof(StorageFanOut.Level3Page))
-        {
-            StorageFanOutLevels[3] += 1;
-        }
         else
         {
             var length = prefix.Current.Length;

@@ -1,3 +1,4 @@
+using System;
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Numerics;
@@ -23,7 +24,7 @@ namespace Paprika.Store;
 /// </summary>
 public static class StorageFanOut
 {
-    public const int LevelCount = 3;
+    public const int LevelCount = 2;
 
     public const string ScopeIds = "Ids";
     public const string ScopeStorage = "Storage";
@@ -368,9 +369,30 @@ public static class StorageFanOut
     }
 
     [method: DebuggerStepThrough]
-    public readonly unsafe struct Level2Page(Page page) : IPage<Level2Page>, IClearable
+    public readonly unsafe struct Level2Page(Page page) : IPage<Level2Page>
     {
+        private const int LocalKeySize = NibblePath.KeccakNibbleCount + 2;
+
+        private static NibblePath BuildLocalKey(in NibblePath key, byte bucket, scoped Span<byte> workingSet)
+        {
+            return NibblePath.Single(bucket, 1).Append(key, workingSet);
+        }
+
+        private static (byte bucket, int index) GetIndex(uint at)
+        {
+            Debug.Assert(at < FanOutCount * 16);
+
+            var bucket = (byte)(at & NibblePath.NibbleMask);
+            var index = (int)(at >> NibblePath.NibbleShift);
+
+            Debug.Assert(index < FanOutCount);
+            Debug.Assert(bucket <= NibblePath.NibbleMask);
+
+            return (bucket, index);
+        }
+
         private const int Level = 2;
+        private const int FanOutCount = DbAddressList.Of256.Count;
         public static Level2Page Wrap(Page page) => Unsafe.As<Page, Level2Page>(ref page);
         public static PageType DefaultType => PageType.FanOutPage;
 
@@ -385,7 +407,7 @@ public static class StorageFanOut
         public bool TryGet(IPageResolver batch, uint at, scoped in NibblePath key,
             out ReadOnlySpan<byte> result)
         {
-            var (next, index) = GetIndex(at, Level);
+            var (bucket, index) = GetIndex(at);
 
             var addr = Data.Addresses[index];
             if (addr.IsNull)
@@ -394,7 +416,12 @@ public static class StorageFanOut
                 return false;
             }
 
-            return Level3Page.Wrap(batch.GetAt(addr)).TryGet(batch, next, key, out result);
+            var localKey = BuildLocalKey(key, bucket, stackalloc byte[LocalKeySize]);
+            var child = batch.GetAt(addr);
+
+            return child.Header.PageType == PageType.Bottom
+                ? new BottomPage(child).TryGet(batch, localKey, out result)
+                : new DataPage(child).TryGet(batch, localKey, out result);
         }
 
         public Page Set(uint at, in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
@@ -406,15 +433,22 @@ public static class StorageFanOut
                 return new Level2Page(writable).Set(at, key, data, batch);
             }
 
-            var (next, index) = GetIndex(at, Level);
+            var (next, index) = GetIndex(at);
             var addr = Data.Addresses[index];
 
-            if (addr.IsNull)
-            {
-                batch.GetNewCleanPage<Level3Page>(out addr);
-            }
+            var child = addr.IsNull
+                ? batch.GetNewCleanPage<BottomPage>(out addr).AsPage()
+                : batch.EnsureWritableCopy(ref addr);
+            Data.Addresses[index] = addr;
 
-            Data.Addresses[index] = batch.GetAddress(Level3Page.Wrap(batch.GetAt(addr)).Set(next, key, data, batch));
+            var localKey = BuildLocalKey(key, next, stackalloc byte[LocalKeySize]);
+
+            Debug.Assert(batch.WasWritten(addr));
+
+            if (child.Header.PageType == PageType.Bottom)
+                new BottomPage(child).Set(localKey, data, batch);
+            else
+                new DataPage(child).Set(localKey, data, batch);
 
             return page;
         }
@@ -428,7 +462,7 @@ public static class StorageFanOut
                 return new Level2Page(writable).DeleteByPrefix(at, prefix, batch);
             }
 
-            var (next, index) = GetIndex(at, Level);
+            var (next, index) = GetIndex(at);
             var addr = Data.Addresses[index];
 
             if (addr.IsNull)
@@ -436,8 +470,19 @@ public static class StorageFanOut
                 return page;
             }
 
-            Data.Addresses[index] =
-                batch.GetAddress(Level3Page.Wrap(batch.GetAt(addr)).DeleteByPrefix(next, prefix, batch));
+            var child = addr.IsNull
+                ? batch.GetNewCleanPage<BottomPage>(out addr).AsPage()
+                : batch.EnsureWritableCopy(ref addr);
+            Data.Addresses[index] = addr;
+
+            var localKey = BuildLocalKey(prefix, next, stackalloc byte[LocalKeySize]);
+
+            Debug.Assert(batch.WasWritten(addr));
+
+            if (child.Header.PageType == PageType.Bottom)
+                new BottomPage(child).DeleteByPrefix(localKey, batch);
+            else
+                new DataPage(child).DeleteByPrefix(localKey, batch);
 
             return page;
         }
@@ -448,13 +493,17 @@ public static class StorageFanOut
 
             using var scope = visitor.On(ref builder, this, addr);
 
-            for (var i = 0; i < DbAddressList.Of1024.Length; i++)
+            for (var i = 0; i < FanOutCount; i++)
             {
                 var bucket = Data.Addresses[i];
 
                 if (!bucket.IsNull)
                 {
-                    Level3Page.Wrap(resolver.GetAt(bucket)).Accept(ref builder, visitor, resolver, bucket);
+                    var child = resolver.GetAt(bucket);
+                    if (child.Header.PageType == PageType.Bottom)
+                        new BottomPage(child).Accept(ref builder, visitor, resolver, bucket);
+                    else
+                        new DataPage(child).Accept(ref builder, visitor, resolver, bucket);
                 }
             }
         }
@@ -464,241 +513,7 @@ public static class StorageFanOut
         {
             private const int Size = Page.PageSize - PageHeader.Size;
 
-            [FieldOffset(0)] public DbAddressList.Of1024 Addresses;
-        }
-    }
-
-    [method: DebuggerStepThrough]
-    public readonly unsafe struct Level3Page(Page page) : IPage<Level3Page>, IClearable
-    {
-        public static Level3Page Wrap(Page page) => Unsafe.As<Page, Level3Page>(ref page);
-        public static PageType DefaultType => PageType.FanOutPage;
-
-        private ref PageHeader Header => ref page.Header;
-
-        private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
-
-        public void Clear()
-        {
-            // ref var iteration to do not clear copies!
-            foreach (ref var bucket in Data.Buckets)
-            {
-                bucket.Clear();
-            }
-        }
-
-        public bool IsClean
-        {
-            get
-            {
-                foreach (ref readonly var bucket in Data.Buckets)
-                {
-                    if (bucket.IsClean == false)
-                        return false;
-                }
-
-                return true;
-            }
-        }
-
-        public bool TryGet(IPageResolver batch, uint at, in NibblePath key, out ReadOnlySpan<byte> result)
-        {
-            return Data.Buckets[(int)at].TryGet(batch, key, out result);
-        }
-
-        public Page Set(uint at, in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
-        {
-            if (Header.BatchId != batch.BatchId)
-            {
-                // the page is from another batch, meaning, it's readonly. Copy
-                var writable = batch.GetWritableCopy(page);
-                return new Level3Page(writable).Set(at, key, data, batch);
-            }
-
-            Data.Buckets[(int)at].Set(key, data, batch);
-
-            return page;
-        }
-
-        public Page DeleteByPrefix(uint at, in NibblePath prefix, IBatchContext batch)
-        {
-            if (Header.BatchId != batch.BatchId)
-            {
-                // the page is from another batch, meaning, it's readonly. Copy
-                var writable = batch.GetWritableCopy(page);
-                return new Level3Page(writable).DeleteByPrefix(at, prefix, batch);
-            }
-
-            Data.Buckets[(int)at].DeleteByPrefix(prefix, batch);
-
-            return page;
-        }
-
-        [StructLayout(LayoutKind.Explicit, Size = Size)]
-        private struct Payload
-        {
-            private const int Size = Page.PageSize - PageHeader.Size;
-
-            [FieldOffset(Bucket.Size * 0)] private Bucket Bucket0;
-
-            public Span<Bucket> Buckets => MemoryMarshal.CreateSpan(ref Bucket0, Size / Bucket.Size);
-        }
-
-        [StructLayout(LayoutKind.Explicit, Size = Size)]
-        private struct Bucket : IClearable
-        {
-            public const int Size = 1016;
-            private const int DataSize = Size - DbAddress.Size;
-
-            [FieldOffset(0)] public DbAddress Root;
-
-            [FieldOffset(DbAddress.Size)] private byte _first;
-
-            private SlottedArray Map => new(MemoryMarshal.CreateSpan(ref _first, DataSize));
-
-            public void Clear()
-            {
-                Root = default;
-                Map.Clear();
-            }
-
-            public bool IsClean => Root.IsNull && Map.IsEmpty;
-
-            public bool TryGet(IPageResolver batch, in NibblePath key, out ReadOnlySpan<byte> result)
-            {
-                if (Map.TryGet(key, out result))
-                {
-                    return true;
-                }
-
-                // If key is empty it should be in the bucket, if root is null, not progress as well
-                if (key.IsEmpty || Root.IsNull)
-                    return false;
-
-                var root = batch.GetAt(Root);
-
-                return root.Header.PageType == PageType.DataPage
-                    ? new DataPage(root).TryGet(batch, key, out result)
-                    : new BottomPage(root).TryGet(batch, key, out result);
-            }
-
-            public void Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
-            {
-                Page root;
-
-                // Try writing through if the key is non-empty, the root exists and the Root was written in this batch
-                if (key.IsEmpty == false && Root.IsNull == false && batch.WasWritten(Root))
-                {
-                    // Root exists, and was written in this batch. Write through.
-                    Map.Delete(key);
-
-                    root = batch.GetAt(Root);
-                    root = root.Header.PageType == PageType.DataPage
-                        ? new DataPage(root).Set(key, data, batch)
-                        : new BottomPage(root).Set(key, data, batch);
-
-                    Debug.Assert(batch.GetAddress(root) == Root, "Should have been COWed before");
-                    return;
-                }
-
-                if (Map.TrySet(key, data))
-                    return;
-
-                if (Root.IsNull)
-                {
-                    batch.GetNewCleanPage<BottomPage>(out Root);
-                }
-
-                // Ensure COWed
-                root = batch.EnsureWritableCopy(ref Root);
-
-                foreach (var item in Map.EnumerateAll())
-                {
-                    if (item.Key.IsEmpty)
-                    {
-                        // Omit flushing down the empty key
-                        continue;
-                    }
-
-                    root = root.Header.PageType == PageType.DataPage
-                        ? new DataPage(root).Set(item.Key, item.RawData, batch)
-                        : new BottomPage(root).Set(item.Key, item.RawData, batch);
-
-                    Debug.Assert(batch.GetAddress(root) == Root, "Should have been COWed before");
-
-                    // Delete each item that is moved
-                    Map.Delete(item);
-                }
-
-                if (key.IsEmpty)
-                {
-                    if (Map.TrySet(key, data))
-                    {
-                        return;
-                    }
-
-                    throw new Exception("Should be able to set the value");
-                }
-
-                Debug.Assert(key.IsEmpty == false, "Key should not be empty here");
-
-                // Set below
-                if (root.Header.PageType == PageType.DataPage)
-                    new DataPage(root).Set(key, data, batch);
-                else
-                    new BottomPage(root).Set(key, data, batch);
-            }
-
-            public void DeleteByPrefix(in NibblePath prefix, IBatchContext batch)
-            {
-                Map.DeleteByPrefix(prefix);
-
-                if (Root.IsNull)
-                    return;
-
-                var root = batch.GetAt(Root);
-
-                root = root.Header.PageType == PageType.DataPage
-                    ? new DataPage(root).DeleteByPrefix(prefix, batch)
-                    : new BottomPage(root).DeleteByPrefix(prefix, batch);
-
-                Root = batch.GetAddress(root);
-            }
-
-            public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver)
-            {
-                if (Root.IsNull)
-                    return;
-
-                var root = resolver.GetAt(Root);
-                if (root.Header.PageType == PageType.DataPage)
-                    new DataPage(root).Accept(ref builder, visitor, resolver, Root);
-                else
-                    new BottomPage(root).Accept(ref builder, visitor, resolver, Root);
-            }
-
-            public void Prefetch(IPageResolver resolver)
-            {
-                if (Root.IsNull)
-                    return;
-
-                resolver.Prefetch(Root);
-            }
-        }
-
-        public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
-        {
-            using var scope = visitor.On(ref builder, this, addr);
-
-            foreach (ref var bucket in Data.Buckets)
-            {
-                bucket.Prefetch(resolver);
-            }
-
-            foreach (ref var bucket in Data.Buckets)
-            {
-                bucket.Accept(ref builder, visitor, resolver);
-            }
+            [FieldOffset(0)] public DbAddressList.Of256 Addresses;
         }
     }
 }
