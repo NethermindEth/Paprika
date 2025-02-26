@@ -373,9 +373,12 @@ public static class StorageFanOut
     {
         private const int LocalKeySize = NibblePath.KeccakNibbleCount + 2;
 
+        // Align path creation and the oddity of the level of the page.
+        private const int PathOddity = 1;
+
         private static NibblePath BuildLocalKey(in NibblePath key, byte bucket, scoped Span<byte> workingSet)
         {
-            return NibblePath.Single(bucket, 1).Append(key, workingSet);
+            return NibblePath.Single(bucket, PathOddity).Append(key, workingSet);
         }
 
         private static (byte bucket, int index) GetIndex(uint at)
@@ -437,8 +440,9 @@ public static class StorageFanOut
             var addr = Data.Addresses[index];
 
             var child = addr.IsNull
-                ? batch.GetNewCleanPage<BottomPage>(out addr).AsPage()
+                ? batch.GetNewCleanPage<BottomPage>(out addr, PathOddity).AsPage()
                 : batch.EnsureWritableCopy(ref addr);
+
             Data.Addresses[index] = addr;
 
             var localKey = BuildLocalKey(key, next, stackalloc byte[LocalKeySize]);
