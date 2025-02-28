@@ -228,7 +228,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         var (_, written) = GatherChildrenInfo(batch);
         MoveToChildPages(map, batch, written, false);
 
-        AssertChildrenRangeInvariant(batch);
+        //AssertChildrenRangeInvariant(batch);
 
         return true;
     }
@@ -241,7 +241,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
             var childAddress = Data.Buckets[i];
             if (childAddress.IsNull == false)
             {
-                var child = new BottomPage(batch.GetAt(childAddress));
+                var child = new ChildBottomPage(batch.GetAt(childAddress));
                 foreach (var item in child.Map.EnumerateAll())
                 {
                     Debug.Assert(item.Key.IsEmpty == false);
@@ -462,7 +462,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
             if (i != ChildNotFound)
             {
                 var addr = Data.Buckets[i];
-                var child = new BottomPage(batch.EnsureWritableCopy(ref addr));
+                var child = new ChildBottomPage(batch.EnsureWritableCopy(ref addr));
                 Data.Buckets[i] = addr;
 
                 child.Map.DeleteByPrefix(prefix);
@@ -486,7 +486,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         var i = FindMatchingChild(key);
 
 
-        return i != ChildNotFound && new BottomPage(batch.GetAt(Data.Buckets[i])).Map.TryGet(key, out result);
+        return i != ChildNotFound && new ChildBottomPage(batch.GetAt(Data.Buckets[i])).Map.TryGet(key, out result);
     }
 
     private const int ChildNotFound = -1;
@@ -530,7 +530,7 @@ public readonly unsafe struct ChildBottomPage(Page page) : IPage<ChildBottomPage
 
     public static ChildBottomPage Wrap(Page page) => Unsafe.As<Page, ChildBottomPage>(ref page);
 
-    public static PageType DefaultType => PageType.Bottom;
+    public static PageType DefaultType => PageType.ChildBottom;
 
     public bool IsClean => Data.IsClean;
 

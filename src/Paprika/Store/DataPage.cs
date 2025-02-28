@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
+using Paprika.Merkle;
 
 namespace Paprika.Store;
 
@@ -105,7 +106,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
 
             if (ShouldBeKeptLocal(k))
             {
-                SetLocally(k, data, batch, ref payload);
+                SetLocally(k, data, batch, ref payload, page.Header);
                 break;
             }
 
@@ -124,8 +125,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             if (childAddr.IsNull)
             {
                 // Create a child
-                var lvl = (byte)(page.Header.Level + ConsumedNibbles);
-                batch.GetNewPage<BottomPage>(out childAddr, lvl);
+                batch.GetNewPage<BottomPage>(out childAddr, (byte)(page.Header.Level + 1));
                 payload.Buckets[bucket] = childAddr;
             }
             else
@@ -140,9 +140,10 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         }
     }
 
-    public static bool ShouldBeKeptLocal(in NibblePath key) => key.Length < ConsumedNibbles;
+    private static bool ShouldBeKeptLocal(in NibblePath key) => key.Length < ConsumedNibbles;
 
-    private static void SetLocally(in NibblePath key, ReadOnlySpan<byte> data, IBatchContext batch, ref Payload payload)
+    private static void SetLocally(in NibblePath key, ReadOnlySpan<byte> data, IBatchContext batch, ref Payload payload,
+        PageHeader header)
     {
         // The key should be kept locally
         var map = new SlottedArray(payload.DataSpan);
@@ -161,7 +162,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         }
 
         var local = payload.Local.IsNull
-            ? batch.GetNewPage<BottomPage>(out payload.Local)
+            ? batch.GetNewPage<BottomPage>(out payload.Local, header.Level)
             : new BottomPage(batch.EnsureWritableCopy(ref payload.Local));
 
         // Move all
@@ -169,8 +170,8 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         {
             local.Set(item.Key, item.RawData, batch);
         }
-
         map.Clear();
+
         map.Set(key, data);
     }
 

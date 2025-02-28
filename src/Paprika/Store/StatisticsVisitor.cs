@@ -100,6 +100,10 @@ public class StatisticsVisitor : IPageVisitor
                     _current.BottomPageCountPerNibblePathDepth[length + bottomLevel] += 1;
                     _current.ReportBottomPageMap(length, new BottomPage(p).Map);
                     return new BottomLevelUp(_current);
+                case PageType.ChildBottom:
+                    _current.BottomPageCountPerNibblePathDepth[length + 1] += 1;
+                    _current.ReportBottomPageMap(length, new ChildBottomPage(p).Map);
+                    break;
                 case PageType.StateRoot:
                     break;
                 default:
