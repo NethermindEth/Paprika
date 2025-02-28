@@ -1,10 +1,11 @@
 using System.Diagnostics;
 using System.Diagnostics.Contracts;
+using System.Dynamic;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
-using Paprika.Store;
+using System.Text;
 using static System.Runtime.CompilerServices.Unsafe;
 
 namespace Paprika.Data;
@@ -14,6 +15,8 @@ public static class BitVector
     public interface IBitVector
     {
         public static abstract ushort Count { get; }
+
+        public bool this[int bit] { get; set; }
     }
 
     private const int BitsPerByte = 8;
@@ -64,6 +67,12 @@ public static class BitVector
         public bool HasAnySet => Vector256.EqualsAll(Vector256.LoadUnsafe(in _start), Vector256<byte>.Zero) == false;
         public bool HasAllSet => Vector256.EqualsAll(Vector256.LoadUnsafe(in _start), Vector256<byte>.AllBitsSet);
 
+        public int PopCount =>
+            BitOperations.PopCount(ReadUnaligned<ulong>(in _start)) +
+            BitOperations.PopCount(ReadUnaligned<ulong>(in Add(ref _start, sizeof(ulong)))) +
+            BitOperations.PopCount(ReadUnaligned<ulong>(in Add(ref _start, sizeof(ulong) * 2))) +
+            BitOperations.PopCount(ReadUnaligned<ulong>(in Add(ref _start, sizeof(ulong) * 3)));
+
         static ushort IBitVector.Count => Count;
 
         [Pure]
@@ -107,6 +116,8 @@ public static class BitVector
             Vector256.AndNot(a, b).StoreUnsafe(ref result._start);
             return result;
         }
+
+        public override string ToString() => ToStringImpl(this);
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
@@ -176,6 +187,20 @@ public static class BitVector
         }
 
         return false;
+    }
+
+    private static string ToStringImpl<TBitVector>(in TBitVector vector)
+        where TBitVector : struct, IBitVector
+    {
+        var sb = new StringBuilder(TBitVector.Count + 2);
+        sb.Append('{');
+        for (var i = 0; i < TBitVector.Count; ++i)
+        {
+            sb.Append(vector[i] ? "1" : "_");
+        }
+
+        sb.Append('}');
+        return sb.ToString();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
