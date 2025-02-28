@@ -4,7 +4,6 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paprika.Data;
 using static Paprika.Data.NibbleSelector;
-using Payload = Paprika.Store.DataPage.Payload;
 
 namespace Paprika.Store;
 
@@ -125,9 +124,6 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         return page;
     }
 
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void UnableToSet() => throw new Exception("The map should be ready to accept the write");
-
     private void Delete(in NibblePath key, IBatchContext batch)
     {
         var map = Map;
@@ -231,23 +227,6 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         //AssertChildrenRangeInvariant(batch);
 
         return true;
-    }
-
-    [Conditional("DEBUG")]
-    private void AssertChildrenRangeInvariant(IBatchContext batch)
-    {
-        for (var i = 0; i < DataPage.BucketCount; i++)
-        {
-            var childAddress = Data.Buckets[i];
-            if (childAddress.IsNull == false)
-            {
-                var child = new ChildBottomPage(batch.GetAt(childAddress));
-                foreach (var item in child.Map.EnumerateAll())
-                {
-                    Debug.Assert(item.Key.IsEmpty == false);
-                }
-            }
-        }
     }
 
     private int FindBestNotAllocatedChild(Span<ushort> sizes, IBatchContext batch)
@@ -420,7 +399,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
                 dp.Set(item.Key, item.RawData, batch);
             }
 
-            // Register for reuse. Mark as immediate to let know that noone references it any longer.
+            // Register for reuse. Mark as immediate to let know that nothing references it any longer.
             batch.RegisterForFutureReuse(childPage.AsPage(), true);
         }
 
@@ -509,6 +488,45 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
     public static PageType DefaultType => PageType.Bottom;
 
     public bool IsClean => Data.IsClean;
+
+    /// <summary>
+    /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
+    /// These buckets are used to store up to <see cref="DataSize"/> entries before flushing them down as other pages
+    /// like page split.
+    /// </summary>
+    [StructLayout(LayoutKind.Explicit, Size = Size)]
+    public struct Payload
+    {
+        public const int Size = Page.PageSize - PageHeader.Size;
+        private const int BucketSize = DbAddressList.Of256.Size;
+
+        /// <summary>
+        /// The size of the raw byte data held in this page. Must be long aligned.
+        /// </summary>
+        private const int DataSize = Size - BucketSize;
+
+        private const int DataOffset = Size - DataSize;
+
+        [FieldOffset(0)] public DbAddressList.Of256 Buckets;
+
+        /// <summary>
+        /// The first item of map of frames to allow ref to it.
+        /// </summary>
+        [FieldOffset(DataOffset)] private byte DataStart;
+
+        /// <summary>
+        /// Writable area.
+        /// </summary>
+        public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
+
+        public void Clear()
+        {
+            new SlottedArray(DataSpan).Clear();
+            Buckets.Clear();
+        }
+
+        public bool IsClean => new SlottedArray(DataSpan).IsEmpty && Buckets.IsClean;
+    }
 }
 
 /// <summary>
@@ -522,6 +540,42 @@ public readonly unsafe struct ChildBottomPage(Page page) : IPage<ChildBottomPage
     private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
 
     public SlottedArray Map => new(Data.DataSpan);
+
+    public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
+    {
+        Debug.Assert(batch.WasWritten(batch.GetAddress(page)), "All bottom pages should be COWed before use");
+
+        if (Map.TrySet(key, data))
+        {
+            return page;
+        }
+
+        // No space, turn into BottomPage
+        var array = ArrayPool<byte>.Shared.Rent(Data.DataSpan.Length);
+        var span = array.AsSpan(0, Data.DataSpan.Length);
+        Data.DataSpan.CopyTo(span);
+        var copy = new SlottedArray(span);
+
+        // Turn to a regular Bottom
+        Header.PageType = PageType.Bottom;
+        var bottom = new BottomPage(page);
+        bottom.Clear();
+
+        foreach (var item in copy.EnumerateAll())
+        {
+            bottom.Set(item.Key, item.RawData, batch);
+        }
+
+        bottom.Set(key, data, batch);
+
+        ArrayPool<byte>.Shared.Return(array);
+
+        return page;
+    }
+
+    [SkipLocalsInit]
+    public bool TryGet(IPageResolver batch, scoped in NibblePath key, out ReadOnlySpan<byte> result) =>
+        Map.TryGet(key, out result);
 
     public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
     {
