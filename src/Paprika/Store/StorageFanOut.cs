@@ -394,7 +394,6 @@ public static class StorageFanOut
             return (bucket, index);
         }
 
-        private const int Level = 2;
         private const int FanOutCount = DbAddressList.Of256.Count;
         public static Level2Page Wrap(Page page) => Unsafe.As<Page, Level2Page>(ref page);
         public static PageType DefaultType => PageType.FanOutPage;
