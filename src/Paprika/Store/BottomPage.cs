@@ -205,7 +205,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
         // Allocate the new child
         Debug.Assert(Data.Buckets[index].IsNull);
-        batch.GetNewPage<BottomPage>(out var addr, (byte)(Header.Level + 1));
+        batch.GetNewPage<ChildBottomPage>(out var addr, (byte)(Header.Level + 1));
         Data.Buckets[index] = addr;
 
         // Never flush down from the main map first to the child. It could be the case that it will have not enough space to handle data from the child on the left.
@@ -217,7 +217,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
         // Migrate from the previously matching
         var prevAddr = Data.Buckets[previouslyMatching];
-        var prevChild = new BottomPage(batch.EnsureWritableCopy(ref prevAddr));
+        var prevChild = new ChildBottomPage(batch.EnsureWritableCopy(ref prevAddr));
         Data.Buckets[previouslyMatching] = prevAddr;
 
         // Pass the previous child as the source and construct the map to only point to the new child mask. Assert that everything what is needed is copied properly.
