@@ -52,9 +52,9 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             {
                 var sliced = prefix.SliceFrom(ConsumedNibbles);
                 var child = batch.GetAt(childAddr);
-                child = child.Header.PageType == PageType.DataPage ?
-                    new DataPage(child).DeleteByPrefix(sliced, batch) :
-                    new BottomPage(child).DeleteByPrefix(sliced, batch);
+                child = child.Header.PageType == PageType.DataPage
+                    ? new DataPage(child).DeleteByPrefix(sliced, batch)
+                    : new BottomPage(child).DeleteByPrefix(sliced, batch);
                 buckets[index] = batch.GetAddress(child);
             }
         }
@@ -158,7 +158,8 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         return true;
     }
 
-    private static bool ShouldBeKeptLocal(in NibblePath key) => key.Length < ConsumedNibbles;
+    private const int MerkleInMapToNibble = 2;
+    private const int MerkleInRightFromInclusive = 9;
 
     private static void SetLocally(in NibblePath key, ReadOnlySpan<byte> data, IBatchContext batch, ref Payload payload,
         PageHeader header)
@@ -167,7 +168,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         var map = new SlottedArray(payload.DataSpan);
 
         // Check if deletion with empty local
-        if (data.IsEmpty && payload.Local.IsNull)
+        if (data.IsEmpty && payload.MerkleLeft.IsNull)
         {
             map.Delete(key);
             return;
@@ -179,23 +180,67 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             return;
         }
 
-        var local = payload.Local.IsNull
-            ? batch.GetNewPage<ChildBottomPage>(out payload.Local, header.Level).AsPage()
-            : batch.EnsureWritableCopy(ref payload.Local);
+        var left = payload.MerkleLeft.IsNull
+            ? batch.GetNewPage<ChildBottomPage>(out payload.MerkleLeft, header.Level)
+            : new ChildBottomPage(batch.EnsureWritableCopy(ref payload.MerkleLeft));
 
-        // Move all
-        foreach (var item in map.EnumerateAll())
+        ChildBottomPage right;
+        if (payload.MerkleRight.IsNull)
         {
-            // We keep these three values  
-            if (item.Key.IsEmpty)
-                continue;
+            // Only left exist, try to move everything there.
+            foreach (var item in map.EnumerateAll())
+            {
+                // We keep these three values  
+                if (ShouldBeKeptLocalInMap(item.Key))
+                    continue;
 
-            TrySetAtBottom(item.Key, item.RawData, batch, local);
-            map.Delete(item);
+                if (left.Map.TrySet(item.Key, item.RawData))
+                {
+                    map.Delete(item);
+                }
+            }
+
+            if (map.TrySet(key, data))
+            {
+                // All good, map can hold the data.
+                return;
+            }
+
+            // Not enough space. Create the right and perform the split
+            right = batch.GetNewPage<ChildBottomPage>(out payload.MerkleRight, header.Level);
+
+            // Only left exist, try to move everything there.
+            foreach (var item in left.Map.EnumerateAll())
+            {
+                // We keep these three values  
+                if (ShouldBeKeptInRight(item.Key))
+                {
+                    right.Map.Set(item.Key, item.RawData);
+                    left.Map.Delete(item);
+                }
+            }
         }
 
-        map.Set(key, data);
+        right = new ChildBottomPage(batch.EnsureWritableCopy(ref payload.MerkleLeft));
+
+        if (ShouldBeKeptLocalInMap(key))
+        {
+            map.Set(key, data);
+        }
+        else if (ShouldBeKeptInRight(key))
+        {
+            right.Map.Set(key, data);
+        }
+        else
+        {
+            left.Map.Set(key, data);
+        }
     }
+
+    private static bool ShouldBeKeptInRight(in NibblePath key) => key.Nibble0 >= MerkleInRightFromInclusive;
+
+    private static bool ShouldBeKeptLocal(in NibblePath key) => key.IsEmpty || key.Length < ConsumedNibbles;
+    private static bool ShouldBeKeptLocalInMap(in NibblePath key) => key.IsEmpty || key.Nibble0 < MerkleInMapToNibble;
 
     public void Clear() => Data.Clear();
 
@@ -213,14 +258,16 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         /// <summary>
         /// The size of the raw byte data held in this page. Must be long aligned.
         /// </summary>
-        private const int DataSize = Size - BucketSize - DbAddress.Size;
+        private const int DataSize = Size - BucketSize - DbAddress.Size * 2;
 
         private const int DataOffset = Size - DataSize;
 
         [FieldOffset(0)] public DbAddressList.Of256 Buckets;
 
-        [FieldOffset(BucketSize)]
-        public DbAddress Local;
+        [FieldOffset(BucketSize)] public DbAddress MerkleLeft;
+
+        [FieldOffset(BucketSize + DbAddress.Size)]
+        public DbAddress MerkleRight;
 
         /// <summary>
         /// The first item of map of frames to allow ref to it.
@@ -235,11 +282,11 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         public void Clear()
         {
             new SlottedArray(DataSpan).Clear();
-            Local = default;
+            MerkleLeft = default;
             Buckets.Clear();
         }
 
-        public bool IsClean => Local.IsNull && new SlottedArray(DataSpan).IsEmpty && Buckets.IsClean;
+        public bool IsClean => MerkleLeft.IsNull && new SlottedArray(DataSpan).IsEmpty && Buckets.IsClean;
     }
 
     public bool TryGet(IPageResolver batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
@@ -257,11 +304,16 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         {
             if (page.Header.PageType == PageType.Bottom)
             {
-                return new BottomPage(page).TryGet(batch, sliced, out result);
+                new BottomPage(page).TryGet(batch, sliced, out result);
+                returnValue = true;
+                break;
             }
+
             if (page.Header.PageType == PageType.ChildBottom)
             {
-                return new ChildBottomPage(page).TryGet(batch, sliced, out result);
+                new ChildBottomPage(page).TryGet(batch, sliced, out result);
+                returnValue = true;
+                break;
             }
 
             var dp = new DataPage(page);
@@ -274,7 +326,19 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
                     break;
                 }
 
-                returnValue = !dp.Data.Local.IsNull && new BottomPage(batch.GetAt(dp.Data.Local)).TryGet(batch, sliced, out result);
+                if (dp.Data.MerkleLeft.IsNull == false && new ChildBottomPage(batch.GetAt(dp.Data.MerkleLeft)).TryGet(batch, sliced, out result))
+                {
+                    returnValue = true;
+                    break;
+                }
+
+                if (dp.Data.MerkleRight.IsNull == false && new ChildBottomPage(batch.GetAt(dp.Data.MerkleRight)).TryGet(batch, sliced, out result))
+                {
+                    returnValue = true;
+                    break;
+                }
+
+                returnValue = false;
                 break;
             }
 

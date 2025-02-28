@@ -235,7 +235,10 @@ public static class StorageFanOut
                     return false;
                 }
 
-                return DataPage.Wrap(batch.GetAt(addr)).TryGet(batch, key, out result);
+                var p = batch.GetAt(addr);
+                return p.Header.PageType == PageType.Bottom
+                    ? new BottomPage(p).TryGet(batch, key, out result)
+                    : new DataPage(p).TryGet(batch, key, out result);
             }
 
             Debug.Assert(type == Type.Storage);
