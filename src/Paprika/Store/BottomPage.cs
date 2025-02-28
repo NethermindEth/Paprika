@@ -1,6 +1,7 @@
 ﻿using System.Buffers;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Paprika.Data;
 using static Paprika.Data.NibbleSelector;
 using Payload = Paprika.Store.DataPage.Payload;
@@ -28,7 +29,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
             var child = Data.Buckets[i];
             if (child.IsNull == false)
             {
-                new BottomPage(resolver.GetAt(child)).Accept(ref builder, visitor, resolver, child);
+                new ChildBottomPage(resolver.GetAt(child)).Accept(ref builder, visitor, resolver, child);
             }
         }
     }
@@ -56,7 +57,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         if (Data.Buckets[0].IsNull)
         {
             // The case where the first child was not allocated yet.
-            var child = batch.GetNewPage<BottomPage>(out var childAddr, (byte)(Header.Level + 1));
+            var child = batch.GetNewPage<ChildBottomPage>(out var childAddr, (byte)(Header.Level + 1));
             Data.Buckets[0] = childAddr;
 
             // Move all down. Ensure that deletes are treated as tombstones.
@@ -348,7 +349,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
             var child = batch.GetAt(addr);
             Debug.Assert(batch.WasWritten(addr));
 
-            var childMap = new BottomPage(child).Map;
+            var childMap = new ChildBottomPage(child).Map;
 
             if (item.RawData.IsEmpty)
             {
@@ -380,10 +381,16 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
     private DataPage TurnToDataPage(IBatchContext batch)
     {
         // We need to turn this page into a full data page.
+        // The DataPage page should have all its children set.
+
         // To make it work we need to ensure that invariant of the data page is preserved.
         // The invariant is that keys that are ShouldBeKeptLocal, should be kept in the data page locally
         // To ensure that this invariant is preserved, we copy the whole map of the main BottomPage and insert it later.
         // Additionally, when moving children, we do select these that should be kept locally as well.
+
+        // The bottom page has the same layout as the DataPage. It can be directly turned into one.
+        Header.PageType = DataPage.DefaultType;
+        Header.Metadata = 0; // clear metadata
 
         // Copy the main
         var required = Data.DataSpan.Length;
@@ -393,70 +400,30 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         var mainCopy = new SlottedArray(mainBuffer);
         var dp = new DataPage(page);
 
-        // then clear the main
+        // Then clear the main
         new SlottedArray(Data.DataSpan).Clear();
 
-        // The bottom page has the same layout as the DataPage. It can be directly turned into one.
-        Header.PageType = DataPage.DefaultType;
-        Header.Metadata = 0; // clear metadata
+        // Copy children as local
+        var children = Data.Buckets;
 
-        // The child pages though are different because they don't have their prefix truncated.
-        // Each of them needs to be turned into a bottom page with children truncated by one nibble.
-        var array = ArrayPool<byte>.Shared.Rent(required);
-        var buffer = array.AsSpan(0, required);
-        var copy = new SlottedArray(buffer);
+        // Clear the original. It will be the DataPage that is responsible for setting things up.
+        Data.Buckets.Clear();
 
-        for (var i = 0; i < DataPage.BucketCount; i++)
+        foreach (var child in children)
         {
-            if (Data.Buckets[i].IsNull)
+            if (child.IsNull)
                 continue;
 
-            copy.Clear();
-
-            var addr = Data.Buckets[i];
-            var child = new BottomPage(batch.EnsureWritableCopy(ref addr));
-            Data.Buckets[i] = addr;
-
-            foreach (var item in child.Map.EnumerateAll())
+            var childPage = new ChildBottomPage(batch.GetAt(child));
+            foreach (var item in childPage.Map.EnumerateAll())
             {
-                if (DataPage.ShouldBeKeptLocal(item.Key))
-                {
-                    // The key should be kept locally, use the DataPage method to do it.
-                    dp.Set(item.Key, item.RawData, batch);
-                    continue;
-                }
-
-                var sliced = item.Key.SliceFrom(DataPage.ConsumedNibbles);
-                var bucket = DataPage.GetBucket(item.Key);
-
-                if (bucket == i)
-                {
-                    // A match on nibble, this is the value we should be writing to
-                    copy.TrySet(sliced, item.RawData);
-                }
-                else
-                {
-                    // The case, where the nibble is from a child that was not created.
-                    // Let's ensure it's created and move to the other child.
-                    var otherAddr = Data.Buckets[bucket];
-                    var otherChild = otherAddr.IsNull
-                        ? batch.GetNewPage<BottomPage>(out otherAddr, (byte)(Header.Level + DataPage.ConsumedNibbles))
-                        : new BottomPage(batch.EnsureWritableCopy(ref otherAddr));
-                    Data.Buckets[bucket] = otherAddr;
-
-                    // There will always be a place for it.
-                    // If the nibble is up front, don't set the sliced data there as it will be reevaluated later.
-                    otherChild.Map.TrySet(item.Key, item.RawData);
-                }
+                dp.Set(item.Key, item.RawData, batch);
             }
 
-            // Copy back the span
-            buffer.CopyTo(child.Data.DataSpan);
+            // Register for reuse. Mark as immediate to let know that noone references it any longer.
+            batch.RegisterForFutureReuse(childPage.AsPage(), true);
         }
 
-        ArrayPool<byte>.Shared.Return(array);
-
-        // Time to move the values from the copy of the main
         foreach (var item in mainCopy.EnumerateAll())
         {
             dp.Set(item.Key, item.RawData, batch);
@@ -542,4 +509,54 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
     public static PageType DefaultType => PageType.Bottom;
 
     public bool IsClean => Data.IsClean;
+}
+
+/// <summary>
+/// One of the bottom pages in the tree.
+/// </summary>
+[method: DebuggerStepThrough]
+public readonly unsafe struct ChildBottomPage(Page page) : IPage<ChildBottomPage>
+{
+    private ref PageHeader Header => ref page.Header;
+
+    private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
+
+    public SlottedArray Map => new(Data.DataSpan);
+
+    public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
+    {
+        using var scope = visitor.On(ref builder, this, addr);
+    }
+
+    public static ChildBottomPage Wrap(Page page) => Unsafe.As<Page, ChildBottomPage>(ref page);
+
+    public static PageType DefaultType => PageType.Bottom;
+
+    public bool IsClean => Data.IsClean;
+
+    public void Clear() => Data.Clear();
+
+    [StructLayout(LayoutKind.Explicit, Size = Size)]
+    private struct Payload
+    {
+        public const int Size = Page.PageSize - PageHeader.Size;
+
+        /// <summary>
+        /// The size of the raw byte data held in this page. Must be long aligned.
+        /// </summary>
+        private const int DataSize = Size;
+
+        private const int DataOffset = Size - DataSize;
+
+        [FieldOffset(DataOffset)] private byte DataStart;
+
+        /// <summary>
+        /// Writable area.
+        /// </summary>
+        public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
+
+        public void Clear() => new SlottedArray(DataSpan).Clear();
+
+        public bool IsClean => new SlottedArray(DataSpan).IsEmpty;
+    }
 }
