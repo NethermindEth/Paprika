@@ -91,14 +91,8 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             var page = batch.GetAt(current);
             Debug.Assert(batch.WasWritten(current));
 
-            if (page.Header.PageType == PageType.Bottom)
-            {
-                var result = new BottomPage(page).Set(k, data, batch);
-
-                Debug.Assert(result.Equals(page), "The page should have been copied before");
-
-                return;
-            }
+            if (TrySetAtBottom(k, data, batch, page))
+                break;
 
             Debug.Assert(page.Header.PageType == PageType.DataPage);
 
@@ -125,7 +119,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             if (childAddr.IsNull)
             {
                 // Create a child
-                batch.GetNewPage<BottomPage>(out childAddr, (byte)(page.Header.Level + 1));
+                batch.GetNewPage<ChildBottomPage>(out childAddr, (byte)(page.Header.Level + 1));
                 payload.Buckets[bucket] = childAddr;
             }
             else
@@ -138,6 +132,30 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             k = k.SliceFrom(ConsumedNibbles);
             current = childAddr;
         }
+    }
+
+    private static bool TrySetAtBottom(in NibblePath key, ReadOnlySpan<byte> data, IBatchContext batch, Page page)
+    {
+        Page result;
+        switch (page.Header.PageType)
+        {
+            case PageType.Bottom:
+                {
+                    result = new BottomPage(page).Set(key, data, batch);
+                    break;
+                }
+            case PageType.ChildBottom:
+                {
+                    result = new ChildBottomPage(page).Set(key, data, batch);
+                    break;
+                }
+            default:
+                return false;
+        }
+
+        Debug.Assert(result.Equals(page), "The page should have been copied before");
+
+        return true;
     }
 
     private static bool ShouldBeKeptLocal(in NibblePath key) => key.Length < ConsumedNibbles;
@@ -162,15 +180,19 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         }
 
         var local = payload.Local.IsNull
-            ? batch.GetNewPage<BottomPage>(out payload.Local, header.Level)
-            : new BottomPage(batch.EnsureWritableCopy(ref payload.Local));
+            ? batch.GetNewPage<ChildBottomPage>(out payload.Local, header.Level).AsPage()
+            : batch.EnsureWritableCopy(ref payload.Local);
 
         // Move all
         foreach (var item in map.EnumerateAll())
         {
-            local.Set(item.Key, item.RawData, batch);
+            // We keep these three values  
+            if (item.Key.IsEmpty)
+                continue;
+
+            TrySetAtBottom(item.Key, item.RawData, batch, local);
+            map.Delete(item);
         }
-        map.Clear();
 
         map.Set(key, data);
     }
@@ -236,6 +258,10 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             if (page.Header.PageType == PageType.Bottom)
             {
                 return new BottomPage(page).TryGet(batch, sliced, out result);
+            }
+            if (page.Header.PageType == PageType.ChildBottom)
+            {
+                return new ChildBottomPage(page).TryGet(batch, sliced, out result);
             }
 
             var dp = new DataPage(page);
