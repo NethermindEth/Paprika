@@ -267,12 +267,18 @@ public static class StorageFanOut
             {
                 var normalized = Level0.NormalizeAtForId(at);
                 addr = Data.Ids[normalized];
-                if (addr.IsNull)
-                {
-                    batch.GetNewCleanPage<DataPage>(out addr);
-                }
 
-                Data.Ids[normalized] = batch.GetAddress(DataPage.Wrap(batch.GetAt(addr)).Set(key, data, batch));
+                var p = addr.IsNull
+                    ? batch.GetNewCleanPage<BottomPage>(out addr).AsPage()
+                    : batch.EnsureWritableCopy(ref addr);
+
+                Data.Ids[normalized] = addr;
+
+                if (p.Header.PageType == PageType.Bottom)
+                    new BottomPage(p).Set(key, data, batch);
+                else
+                    new DataPage(p).Set(key, data, batch);
+
                 return page;
             }
 
@@ -290,7 +296,6 @@ public static class StorageFanOut
 
             return page;
         }
-
 
         public Page DeleteByPrefix(uint at, in NibblePath prefix, IBatchContext batch)
         {

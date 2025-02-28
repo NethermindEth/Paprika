@@ -82,12 +82,12 @@ public class AbandonedTests : BasePageTests
 
     private const int HistoryDepth = 2;
 
-    [TestCase(20, 1, 10_000, false, TestName = "Accounts - 1")]
-    [TestCase(428, 100, 10_000, false, TestName = "Accounts - 100")]
-    [TestCase(20067, 4000, 200, false,
+    [TestCase(24, 1, 10_000, false, TestName = "Accounts - 1")]
+    [TestCase(764, 100, 10_000, false, TestName = "Accounts - 100")]
+    [TestCase(17673, 4000, 200, false,
         TestName = "Accounts - 4000 to get a bit reuse",
         Category = Categories.LongRunning)]
-    [TestCase(51117, 10_000, 50, false,
+    [TestCase(44337, 10_000, 50, false,
         TestName = "Accounts - 10000 to breach the AbandonedPage",
         Category = Categories.LongRunning)]
     [TestCase(103345, 20_000, 50, true,

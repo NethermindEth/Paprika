@@ -1,17 +1,17 @@
-﻿using FluentAssertions;
-using NUnit.Framework;
+﻿using System.Collections.Specialized;
+using FluentAssertions;
 using Paprika.Data;
 
 namespace Paprika.Tests.Data;
 
-public class BitVector1024Tests
+public class BitVectorTests
 {
     [Test]
     public void Set_reset()
     {
         var v = new BitVector.Of1024();
 
-        for (int i = 0; i < BitVector.Of1024.Count; i++)
+        for (var i = 0; i < BitVector.Of1024.Count; i++)
         {
             v[i].Should().BeFalse();
             v[i] = true;
@@ -51,5 +51,27 @@ public class BitVector1024Tests
         }
 
         v.HasEmptyBits.Should().Be(anyNotSet);
+    }
+
+    [TestCase(0)]
+    [TestCase(63)]
+    [TestCase(64)]
+    [TestCase(127)]
+    [TestCase(128)]
+    [TestCase(BitVector.Of256.Count - 2)]
+    [TestCase(BitVector.Of256.Count - 1)]
+    public void HighestSmallerOrEqualThan(int set)
+    {
+        var v = new BitVector.Of256
+        {
+            [set] = true
+        };
+
+        for (var i = 0; i < BitVector.Of256.Count; i++)
+        {
+            var expected = i < set ? BitVector.NotFound : set;
+
+            v.HighestSmallerOrEqualThan(i).Should().Be(expected);
+        }
     }
 }

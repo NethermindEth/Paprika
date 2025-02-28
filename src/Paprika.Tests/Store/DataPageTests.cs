@@ -53,6 +53,6 @@ public class DataPageTests : BasePageTests
                 .BeTrue($"Failed to read value of {j}");
         }
 
-        batch.PageCount.Should().BeLessThan(100);
+        batch.PageCount.Should().BeLessThan(500);
     }
 }
