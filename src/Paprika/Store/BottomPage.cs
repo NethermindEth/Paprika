@@ -377,7 +377,6 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         var mainBuffer = mainArray.AsSpan(0, required);
         Data.DataSpan.CopyTo(mainBuffer);
         var mainCopy = new SlottedArray(mainBuffer);
-        var dp = new DataPage(page);
 
         // Then clear the main
         new SlottedArray(Data.DataSpan).Clear();
@@ -386,7 +385,8 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         var children = Data.Buckets;
 
         // Clear the original. It will be the DataPage that is responsible for setting things up.
-        Data.Buckets.Clear();
+        var dp = new DataPage(page);
+        dp.Clear();
 
         foreach (var child in children)
         {

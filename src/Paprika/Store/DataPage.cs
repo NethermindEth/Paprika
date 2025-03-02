@@ -221,7 +221,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             }
         }
 
-        right = new ChildBottomPage(batch.EnsureWritableCopy(ref payload.MerkleLeft));
+        right = new ChildBottomPage(batch.EnsureWritableCopy(ref payload.MerkleRight));
 
         if (ShouldBeKeptLocalInMap(key))
         {
@@ -240,6 +240,10 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
     private static bool ShouldBeKeptInRight(in NibblePath key) => key.Nibble0 >= MerkleInRightFromInclusive;
 
     private static bool ShouldBeKeptLocal(in NibblePath key) => key.IsEmpty || key.Length < ConsumedNibbles;
+
+    /// <summary>
+    /// Whether the key belong always in the local map.
+    /// </summary>
     private static bool ShouldBeKeptLocalInMap(in NibblePath key) => key.IsEmpty || key.Nibble0 < MerkleInMapToNibble;
 
     public void Clear() => Data.Clear();
@@ -283,10 +287,11 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         {
             new SlottedArray(DataSpan).Clear();
             MerkleLeft = default;
+            MerkleRight = default;
             Buckets.Clear();
         }
 
-        public bool IsClean => MerkleLeft.IsNull && new SlottedArray(DataSpan).IsEmpty && Buckets.IsClean;
+        public bool IsClean => MerkleLeft.IsNull && MerkleRight.IsNull && new SlottedArray(DataSpan).IsEmpty && Buckets.IsClean;
     }
 
     public bool TryGet(IPageResolver batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
@@ -320,25 +325,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
 
             if (ShouldBeKeptLocal(sliced))
             {
-                if (dp.Map.TryGet(sliced, out result))
-                {
-                    returnValue = true;
-                    break;
-                }
-
-                if (dp.Data.MerkleLeft.IsNull == false && new ChildBottomPage(batch.GetAt(dp.Data.MerkleLeft)).TryGet(batch, sliced, out result))
-                {
-                    returnValue = true;
-                    break;
-                }
-
-                if (dp.Data.MerkleRight.IsNull == false && new ChildBottomPage(batch.GetAt(dp.Data.MerkleRight)).TryGet(batch, sliced, out result))
-                {
-                    returnValue = true;
-                    break;
-                }
-
-                returnValue = false;
+                returnValue = dp.TryGetLocally(sliced, batch, out result);
                 break;
             }
 
@@ -364,6 +351,29 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         } while (true);
 
         return returnValue;
+    }
+
+    private bool TryGetLocally(scoped in NibblePath key, IPageResolver batch, out ReadOnlySpan<byte> result)
+    {
+        Unsafe.SkipInit(out result);
+
+        if (Map.TryGet(key, out result))
+        {
+            return true;
+        }
+
+        // TODO: potential IO optimization to search left only if the right does not exist or the key does not belong to the right
+        if (Data.MerkleLeft.IsNull == false && new ChildBottomPage(batch.GetAt(Data.MerkleLeft)).TryGet(batch, key, out result))
+        {
+            return true;
+        }
+
+        if (Data.MerkleRight.IsNull == false && new ChildBottomPage(batch.GetAt(Data.MerkleRight)).TryGet(batch, key, out result))
+        {
+            return true;
+        }
+
+        return false;
     }
 
     public SlottedArray Map => new(Data.DataSpan);

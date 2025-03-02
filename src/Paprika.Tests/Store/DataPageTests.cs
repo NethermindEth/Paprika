@@ -5,6 +5,7 @@ using Nethermind.Int256;
 using NUnit.Framework;
 using Paprika.Crypto;
 using Paprika.Data;
+using Paprika.Merkle;
 using Paprika.Store;
 
 namespace Paprika.Tests.Store;
@@ -54,5 +55,43 @@ public class DataPageTests : BasePageTests
         }
 
         batch.PageCount.Should().BeLessThan(500);
+    }
+
+    [TestCase(0)]
+    [TestCase(1)]
+    public void Should_hold_all_needed_full_branches_of_Merkle(byte oddity)
+    {
+        var batch = NewBatch(BatchId);
+        var data = ((IBatchContext)batch).GetNewPage<DataPage>(out _);
+
+        var path = NibblePath.Empty;
+        data.Set(path, GetValue(path), batch);
+
+        const int count = 16;
+        for (byte i = 0; i < count; i++)
+        {
+            path = NibblePath.Single(i, oddity);
+            data.Set(path, GetValue(path), batch);
+        }
+
+        for (byte i = 0; i < count; i++)
+        {
+            path = NibblePath.Single(i, oddity);
+            data.TryGet(batch, path, out var result).Should().BeTrue();
+            result.SequenceEqual(GetValue(path)).Should().BeTrue();
+        }
+
+        batch.PageCount.Should().Be(3, "One for the data page and two for the Merkle children");
+
+        return;
+        static byte[] GetValue(in NibblePath path)
+        {
+            const int someOverhead = 32;
+            var bytes = new byte[RlpMemo.MaxSize + Node.Branch.MaxByteLength + someOverhead];
+
+            path.WriteTo(bytes);
+
+            return bytes;
+        }
     }
 }
