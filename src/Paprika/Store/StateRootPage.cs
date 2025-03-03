@@ -156,7 +156,7 @@ public readonly unsafe struct StateRootPage(Page page) : IPage
         public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
     }
 
-    public bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
+    public bool TryGet(IPageResolver batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
     {
         if (key.Length < ConsumedNibbles)
         {

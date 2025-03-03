@@ -136,26 +136,14 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
 
     private static bool TrySetAtBottom(in NibblePath key, ReadOnlySpan<byte> data, IBatchContext batch, Page page)
     {
-        Page result;
-        switch (page.Header.PageType)
+        var type = page.Header.PageType;
+        if (type == PageType.Bottom || type == PageType.ChildBottom)
         {
-            case PageType.Bottom:
-                {
-                    result = new BottomPage(page).Set(key, data, batch);
-                    break;
-                }
-            case PageType.ChildBottom:
-                {
-                    result = new ChildBottomPage(page).Set(key, data, batch);
-                    break;
-                }
-            default:
-                return false;
+            page.Set(key, data, batch);
+            return true;
         }
 
-        Debug.Assert(result.Equals(page), "The page should have been copied before");
-
-        return true;
+        return false;
     }
 
     private const int MerkleInMapToNibble = 2;
@@ -332,15 +320,10 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
 
         do
         {
-            if (page.Header.PageType == PageType.Bottom)
+            if (page.Header.PageType != PageType.DataPage)
             {
-                returnValue = new BottomPage(page).TryGet(batch, sliced, out result);
-                break;
-            }
-
-            if (page.Header.PageType == PageType.ChildBottom)
-            {
-                returnValue = new ChildBottomPage(page).TryGet(batch, sliced, out result);
+                // Any other, handle like this
+                returnValue = page.TryGet(batch, sliced, out result);
                 break;
             }
 
@@ -386,12 +369,12 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         }
 
         // TODO: potential IO optimization to search left only if the right does not exist or the key does not belong to the right
-        if (Data.MerkleLeft.IsNull == false && new ChildBottomPage(batch.GetAt(Data.MerkleLeft)).TryGet(batch, key, out result))
+        if (Data.MerkleLeft.IsNull == false && batch.GetAt(Data.MerkleLeft).TryGet(batch, key, out result))
         {
             return true;
         }
 
-        if (Data.MerkleRight.IsNull == false && new ChildBottomPage(batch.GetAt(Data.MerkleRight)).TryGet(batch, key, out result))
+        if (Data.MerkleRight.IsNull == false && batch.GetAt(Data.MerkleRight).TryGet(batch, key, out result))
         {
             return true;
         }

@@ -429,9 +429,7 @@ public static class StorageFanOut
             var localKey = BuildLocalKey(key, bucket, stackalloc byte[LocalKeySize]);
             var child = batch.GetAt(addr);
 
-            return child.Header.PageType == PageType.Bottom
-                ? new BottomPage(child).TryGet(batch, localKey, out result)
-                : new DataPage(child).TryGet(batch, localKey, out result);
+            return child.TryGet(batch, localKey, out result);
         }
 
         public Page Set(uint at, in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
@@ -456,10 +454,7 @@ public static class StorageFanOut
 
             Debug.Assert(batch.WasWritten(addr));
 
-            if (child.Header.PageType == PageType.Bottom)
-                new BottomPage(child).Set(localKey, data, batch);
-            else
-                new DataPage(child).Set(localKey, data, batch);
+            child.Set(localKey, data, batch);
 
             return page;
         }
