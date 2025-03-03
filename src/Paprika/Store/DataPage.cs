@@ -19,8 +19,8 @@ namespace Paprika.Store;
 [method: DebuggerStepThrough]
 public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
 {
-    public const int ConsumedNibbles = 2;
-    public const int BucketCount = DbAddressList.Of256.Count;
+    public const int ConsumedNibbles = 1;
+    public const int BucketCount = DbAddressList.Of16.Count;
 
     public static DataPage Wrap(Page page) => Unsafe.As<Page, DataPage>(ref page);
     public static PageType DefaultType => PageType.DataPage;
@@ -223,6 +223,31 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
 
         right = new ChildBottomPage(batch.EnsureWritableCopy(ref payload.MerkleRight));
 
+        // Redistribute keys again
+        foreach (var item in map.EnumerateAll())
+        {
+            // We keep these three values  
+            if (ShouldBeKeptLocalInMap(item.Key))
+                continue;
+
+            if (ShouldBeKeptInRight(item.Key))
+            {
+                if (item.RawData.IsEmpty)
+                    right.Map.Delete(item.Key);
+                else
+                    right.Map.Set(item.Key, item.RawData);
+            }
+            else
+            {
+                if (item.RawData.IsEmpty)
+                    left.Map.Delete(item.Key);
+                else
+                    left.Map.Set(item.Key, item.RawData);
+            }
+
+            map.Delete(item);
+        }
+
         if (ShouldBeKeptLocalInMap(key))
         {
             map.Set(key, data);
@@ -239,7 +264,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
 
     private static bool ShouldBeKeptInRight(in NibblePath key) => key.Nibble0 >= MerkleInRightFromInclusive;
 
-    private static bool ShouldBeKeptLocal(in NibblePath key) => key.IsEmpty || key.Length < ConsumedNibbles;
+    private static bool ShouldBeKeptLocal(in NibblePath key) => key.IsEmpty || key.Length == 1;
 
     /// <summary>
     /// Whether the key belong always in the local map.
@@ -309,15 +334,13 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         {
             if (page.Header.PageType == PageType.Bottom)
             {
-                new BottomPage(page).TryGet(batch, sliced, out result);
-                returnValue = true;
+                returnValue = new BottomPage(page).TryGet(batch, sliced, out result);
                 break;
             }
 
             if (page.Header.PageType == PageType.ChildBottom)
             {
-                new ChildBottomPage(page).TryGet(batch, sliced, out result);
-                returnValue = true;
+                returnValue = new ChildBottomPage(page).TryGet(batch, sliced, out result);
                 break;
             }
 
@@ -395,9 +418,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
                 var child = resolver.GetAt(bucket);
                 var type = child.Header.PageType;
 
-                var (nibble0, nibble1) = GetBucketNibbles(i);
-
-                builder.Push(nibble0, nibble1);
+                builder.Push((byte)i);
                 {
                     if (type == PageType.DataPage)
                     {
@@ -407,19 +428,19 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
                     {
                         new BottomPage(child).Accept(ref builder, visitor, resolver, bucket);
                     }
+                    else if (type == PageType.ChildBottom)
+                    {
+                        new ChildBottomPage(child).Accept(ref builder, visitor, resolver, bucket);
+                    }
                     else
                     {
                         throw new InvalidOperationException($"Invalid page type {type}");
                     }
                 }
-                builder.Pop(2);
+                builder.Pop();
             }
         }
     }
 
-    public static int GetBucket(in NibblePath key) =>
-        (key.Nibble0 << NibblePath.NibbleShift) | (key.Length == 1 ? 0 : key.GetAt(1));
-
-    public static (byte nibble0, byte nibble1) GetBucketNibbles(int bucket) => (
-        (byte)(bucket >> NibblePath.NibbleShift), (byte)(bucket & NibblePath.NibbleMask));
+    public static int GetBucket(in NibblePath key) => key.Nibble0;
 }

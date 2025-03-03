@@ -498,7 +498,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
     public struct Payload
     {
         public const int Size = Page.PageSize - PageHeader.Size;
-        private const int BucketSize = DbAddressList.Of256.Size;
+        private const int BucketSize = DbAddressList.Of16.Size;
 
         /// <summary>
         /// The size of the raw byte data held in this page. Must be long aligned.
@@ -507,7 +507,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
         private const int DataOffset = Size - DataSize;
 
-        [FieldOffset(0)] public DbAddressList.Of256 Buckets;
+        [FieldOffset(0)] public DbAddressList.Of16 Buckets;
 
         /// <summary>
         /// The first item of map of frames to allow ref to it.
