@@ -23,7 +23,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
     {
         using var scope = visitor.On(ref builder, this, addr);
 
-        for (var i = 0; i < DataPage.BucketCount; i++)
+        for (var i = 0; i < BucketCount; i++)
         {
             var child = Data.Buckets[i];
             if (child.IsNull == false)
@@ -170,7 +170,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         BitVector.Of256 existing = default;
         BitVector.Of256 writtenThisBatch = default;
 
-        for (var i = 0; i < DataPage.BucketCount; i++)
+        for (var i = 0; i < BucketCount; i++)
         {
             var addr = Data.Buckets[i];
             if (addr.IsNull == false)
@@ -241,7 +241,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         // Single loop: track free ranges based solely on their start and cumulative weight.
         int i;
 
-        for (i = 0; i < DataPage.BucketCount; i++)
+        for (i = 0; i < BucketCount; i++)
         {
             if (allocatedMask[i] == false)
             {
@@ -276,7 +276,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         var cumulative = 0;
         i = bestStart;
 
-        while (i < DataPage.BucketCount && allocatedMask[i] == false)
+        while (i < BucketCount && allocatedMask[i] == false)
         {
             cumulative += sizes[i];
             if (cumulative >= halfTotal)

@@ -19,9 +19,6 @@ namespace Paprika.Store;
 [method: DebuggerStepThrough]
 public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
 {
-    public const int ConsumedNibbles = 1;
-    public const int BucketCount = DbAddressList.Of16.Count;
-
     public static DataPage Wrap(Page page) => Unsafe.As<Page, DataPage>(ref page);
     public static PageType DefaultType => PageType.DataPage;
     public bool IsClean => Data.IsClean;
@@ -43,14 +40,14 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
 
         ref var buckets = ref Data.Buckets;
 
-        if (prefix.Length >= ConsumedNibbles)
+        if (prefix.Length >= Data.ConsumedNibbles)
         {
-            var index = GetBucket(prefix);
+            var index = Data.GetBucket(prefix);
             var childAddr = buckets[index];
 
             if (childAddr.IsNull == false)
             {
-                var sliced = prefix.SliceFrom(ConsumedNibbles);
+                var sliced = prefix.SliceFrom(Data.ConsumedNibbles);
                 var child = batch.GetAt(childAddr);
                 child = child.Header.PageType == PageType.DataPage
                     ? new DataPage(child).DeleteByPrefix(sliced, batch)
@@ -104,9 +101,9 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
                 break;
             }
 
-            Debug.Assert(k.Length >= ConsumedNibbles);
+            Debug.Assert(k.Length >= payload.ConsumedNibbles);
 
-            var bucket = GetBucket(k);
+            var bucket = payload.GetBucket(k);
             var childAddr = payload.Buckets[bucket];
 
             if (data.IsEmpty && childAddr.IsNull)
@@ -124,13 +121,83 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             }
             else
             {
-                batch.EnsureWritableCopy(ref childAddr);
+                var child = batch.EnsureWritableCopy(ref childAddr);
                 payload.Buckets[bucket] = childAddr;
+
+                if (TryTurnToFanOut(page, child, bucket, batch))
+                {
+                    // Spin again as the page has been turned to a fanout.
+                    continue;
+                }
             }
 
             // Slice nibbles, set current, spin again
-            k = k.SliceFrom(ConsumedNibbles);
+            k = k.SliceFrom(payload.ConsumedNibbles);
             current = childAddr;
+        }
+
+        static bool TryTurnToFanOut(Page page, Page child, int bucket, IBatchContext batch)
+        {
+            if (page.Header.Level % 2 != 0 || page.Header.PageType != PageType.DataPage)
+            {
+                // Only DataPage s on even levels are transformed to fan outs.
+                return false;
+            }
+
+            var @this = new DataPage(page);
+            ref var payload = ref @this.Data;
+            if (payload.IsFanOut)
+                return false;
+
+            // Turn to fan out only these with all children being data pages.
+            if (child.Header.PageType != PageType.DataPage)
+                return false;
+
+            payload.ChildDataPages |= 1 << bucket;
+            if (!payload.IsFanOut)
+                return false;
+
+            // Copy buckets to local then clear the original
+            var children = payload.Buckets;
+            payload.Buckets.Clear();
+
+            for (byte i = 0; i < Payload.NotFanOutBucketCount; i++)
+            {
+                var p = batch.GetAt(children[i]);
+                Debug.Assert(p.Header.PageType == PageType.DataPage);
+
+                // Get the page and steal its buckets
+                var dp = new DataPage(p);
+
+                // Copy the buckets
+                for (byte j = 0; j < Payload.NotFanOutBucketCount; j++)
+                {
+                    var index = (i << NibblePath.NibbleShift) | j;
+                    payload.Buckets[index] = dp.Data.Buckets[j];
+
+                    // The bucket is set, try to extract the single nibble key that it may store
+                    if (dp.TryGet(batch, NibblePath.Single(j, 1), out var data))
+                    {
+                        // Construct the path that follows the ordering and allows setting the data
+                        @this.Set(NibblePath.DoubleEven(i, j), data, batch);
+                    }
+                }
+
+                // The child data page is no longer needed and can be recycled with its Merkle side-cars
+                if (dp.Data.MerkleLeft.IsNull == false)
+                {
+                    batch.RegisterForFutureReuse(batch.GetAt(dp.Data.MerkleLeft), true);
+                }
+
+                if (dp.Data.MerkleRight.IsNull == false)
+                {
+                    batch.RegisterForFutureReuse(batch.GetAt(dp.Data.MerkleRight), true);
+                }
+
+                batch.RegisterForFutureReuse(dp.AsPage(), true);
+            }
+
+            return true;
         }
     }
 
@@ -150,6 +217,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
     /// The highest single nibble path that will be stored in local map. 
     /// </summary>
     private const int MerkleInMapToNibble = 3;
+
     private const int MerkleInRightFromInclusive = 9;
 
     private static void SetLocally(in NibblePath key, ReadOnlySpan<byte> data, IBatchContext batch, ref Payload payload,
@@ -171,9 +239,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             return;
         }
 
-        var left = payload.MerkleLeft.IsNull
-            ? batch.GetNewPage<ChildBottomPage>(out payload.MerkleLeft, header.Level)
-            : new ChildBottomPage(batch.EnsureWritableCopy(ref payload.MerkleLeft));
+        var left = batch.EnsureWritableOrGetNew<ChildBottomPage>(ref payload.MerkleLeft, header.Level);
 
         ChildBottomPage right;
         if (payload.MerkleRight.IsNull)
@@ -278,9 +344,10 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         /// <summary>
         /// The size of the raw byte data held in this page. Must be long aligned.
         /// </summary>
-        private const int DataSize = Size - BucketSize - DbAddress.Size * 2;
+        private const int DataSize = Size - BucketSize - DbAddress.Size * 2 - sizeof(int);
 
         private const int DataOffset = Size - DataSize;
+
 
         [FieldOffset(0)] public DbAddressList.Of256 Buckets;
 
@@ -288,6 +355,9 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
 
         [FieldOffset(BucketSize + DbAddress.Size)]
         public DbAddress MerkleRight;
+
+        [FieldOffset(BucketSize + DbAddress.Size * 2)]
+        public int ChildDataPages;
 
         /// <summary>
         /// The first item of map of frames to allow ref to it.
@@ -305,9 +375,24 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             MerkleLeft = default;
             MerkleRight = default;
             Buckets.Clear();
+            ChildDataPages = 0;
         }
 
-        public bool IsClean => MerkleLeft.IsNull && MerkleRight.IsNull && new SlottedArray(DataSpan).IsEmpty && Buckets.IsClean;
+        public bool IsClean => MerkleLeft.IsNull &&
+                               MerkleRight.IsNull &&
+                               ChildDataPages == 0 &&
+                               new SlottedArray(DataSpan).IsEmpty &&
+                               Buckets.IsClean;
+
+        public bool IsFanOut => ChildDataPages == 0xFF_FF;
+        public int ConsumedNibbles => IsFanOut ? 2 : 1;
+
+        public const int NotFanOutBucketCount = DbAddressList.Of16.Count;
+
+        public int BucketCount => IsFanOut ? DbAddressList.Of256.Count : NotFanOutBucketCount;
+
+        public int GetBucket(in NibblePath key) =>
+            IsFanOut ? (key.Nibble0 << NibblePath.NibbleShift) | key.GetAt(1) : key.Nibble0;
     }
 
     public bool TryGet(IPageResolver batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
@@ -343,7 +428,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             {
                 // As the CPU does not auto-prefetch across page boundaries
                 // Prefetch child page in case we go there next to reduce CPU stalls
-                bucket = dp.Data.Buckets[GetBucket(sliced)];
+                bucket = dp.Data.Buckets[dp.Data.GetBucket(sliced)];
                 if (bucket.IsNull == false)
                     batch.Prefetch(bucket);
             }
@@ -355,7 +440,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             }
 
             // non-null page jump, follow it!
-            sliced = sliced.SliceFrom(ConsumedNibbles);
+            sliced = sliced.SliceFrom(dp.Data.ConsumedNibbles);
             page = batch.GetAt(bucket);
         } while (true);
 
@@ -393,7 +478,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
 
         using (visitor.On(ref builder, this, addr))
         {
-            for (int i = 0; i < BucketCount; i++)
+            for (int i = 0; i < Data.BucketCount; i++)
             {
                 var bucket = Data.Buckets[i];
                 if (bucket.IsNull)
@@ -404,7 +489,15 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
                 var child = resolver.GetAt(bucket);
                 var type = child.Header.PageType;
 
-                builder.Push((byte)i);
+                if (Data.IsFanOut)
+                {
+                    builder.Push((byte)(i >> NibblePath.NibbleShift), (byte)(i & NibblePath.NibbleMask));
+                }
+                else
+                {
+                    builder.Push((byte)i);
+                }
+
                 {
                     if (type == PageType.DataPage)
                     {
@@ -423,10 +516,8 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
                         throw new InvalidOperationException($"Invalid page type {type}");
                     }
                 }
-                builder.Pop();
+                builder.Pop(Data.IsFanOut ? 2 : 1);
             }
         }
     }
-
-    private static int GetBucket(in NibblePath key) => key.Nibble0;
 }
