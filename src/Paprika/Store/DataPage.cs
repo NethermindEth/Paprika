@@ -146,7 +146,10 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         return false;
     }
 
-    private const int MerkleInMapToNibble = 2;
+    /// <summary>
+    /// The highest single nibble path that will be stored in local map. 
+    /// </summary>
+    private const int MerkleInMapToNibble = 3;
     private const int MerkleInRightFromInclusive = 9;
 
     private static void SetLocally(in NibblePath key, ReadOnlySpan<byte> data, IBatchContext batch, ref Payload payload,
@@ -255,7 +258,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
     private static bool ShouldBeKeptLocal(in NibblePath key) => key.IsEmpty || key.Length == 1;
 
     /// <summary>
-    /// Whether the key belong always in the local map.
+    /// Whether the key belong always in the local <see cref="SlottedArray"/> over <see cref="Payload.BucketSize"/>.
     /// </summary>
     private static bool ShouldBeKeptLocalInMap(in NibblePath key) => key.IsEmpty || key.Nibble0 < MerkleInMapToNibble;
 
