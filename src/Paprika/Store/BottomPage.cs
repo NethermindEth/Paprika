@@ -186,8 +186,8 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
     private bool AllocateNewChild(IBatchContext batch, in SlottedArray map)
     {
         // Gather size stats and find the biggest one that can help.
-        Span<ushort> sizes = stackalloc ushort[256];
-        map.GatherNonEmptySizeStats(sizes, static key => DataPage.GetBucket(key));
+        Span<ushort> sizes = stackalloc ushort[16];
+        map.GatherNonEmptySizeStats(sizes, static key => GetBucket(key));
 
         var index = FindBestNotAllocatedChild(sizes, batch);
         if (index == ChildNotFound)
@@ -354,8 +354,10 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
     private static int GetExistingChildIndexWhereKeyBelongsTo(in NibblePath key, in BitVector.Of256 children)
     {
-        return children.HighestSmallerOrEqualThan(DataPage.GetBucket(key));
+        return children.HighestSmallerOrEqualThan(GetBucket(key));
     }
+    
+    private static int GetBucket(in NibblePath key) => key.Nibble0;
 
     private DataPage TurnToDataPage(IBatchContext batch)
     {
@@ -425,7 +427,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
         if (prefix.Length == 0)
         {
-            for (var i = 0; i < DataPage.BucketCount; i++)
+            for (var i = 0; i < BucketCount; i++)
             {
                 if (Data.Buckets[i].IsNull == false)
                 {
@@ -470,7 +472,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
     private const int ChildNotFound = -1;
 
-    private int FindMatchingChild(in NibblePath key) => FindMatchingChild(DataPage.GetBucket(key));
+    private int FindMatchingChild(in NibblePath key) => FindMatchingChild(GetBucket(key));
 
     private int FindMatchingChild(int index)
     {
@@ -489,6 +491,8 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
     public bool IsClean => Data.IsClean;
 
+    public const int BucketCount = DbAddressList.Of16.Count;
+    
     /// <summary>
     /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
     /// These buckets are used to store up to <see cref="DataSize"/> entries before flushing them down as other pages

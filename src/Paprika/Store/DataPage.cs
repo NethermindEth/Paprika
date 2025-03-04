@@ -425,5 +425,5 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         }
     }
 
-    public static int GetBucket(in NibblePath key) => key.Nibble0;
+    private static int GetBucket(in NibblePath key) => key.Nibble0;
 }
