@@ -405,7 +405,20 @@ public readonly ref struct NibblePath
 
         var length = (int)Length;
         var appended = new NibblePath(ref workingSet[PreambleLength], _odd, (byte)(length + other.Length));
-        for (int i = 0; i < other.Length; i++)
+
+        // TODO: if aligned, can be based on bytes
+        var i = 0;
+
+        if (other._odd == 0 && ((_odd + length) & OddBit) == other._odd)
+        {
+            // Aligned, where the first ends, the second starts.
+            for (; i < other.Length; i += 2)
+            {
+                Unsafe.Add(ref appended._span, (_odd + length + i) / 2) = Unsafe.Add(ref other._span, i / 2);
+            }
+        }
+
+        for (; i < other.Length; i++)
         {
             appended.UnsafeSetAt(length + i, other[i]);
         }
