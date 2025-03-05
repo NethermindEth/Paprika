@@ -54,7 +54,7 @@ public interface IBatchContext : IReadOnlyBatchContext
     {
         if (addr.IsNull)
             return GetNewPage<TPage>(out addr, level);
-        
+
         var copy = EnsureWritableCopy(ref addr);
         Debug.Assert(TPage.DefaultType == copy.Header.PageType);
         return TPage.Wrap(copy);

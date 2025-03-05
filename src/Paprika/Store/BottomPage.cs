@@ -356,7 +356,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
     {
         return children.HighestSmallerOrEqualThan(GetBucket(key));
     }
-    
+
     private static int GetBucket(in NibblePath key) => key.Nibble0;
 
     private DataPage TurnToDataPage(IBatchContext batch)
@@ -492,7 +492,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
     public bool IsClean => Data.IsClean;
 
     public const int BucketCount = DbAddressList.Of16.Count;
-    
+
     /// <summary>
     /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
     /// These buckets are used to store up to <see cref="DataSize"/> entries before flushing them down as other pages

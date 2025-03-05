@@ -381,8 +381,17 @@ public static class StorageFanOut
     {
         private const int LocalKeySize = NibblePath.KeccakNibbleCount + 2;
 
-        // Align path creation and the oddity of the level of the page.
+        /// <summary>
+        /// The path oddity that is used for the local keys so that the concatenated with ease.
+        /// </summary>
+        /// <remarks>Not used as the level of the child page. This might be confusing at first,
+        /// but we want to have the DataPage starting at even number so that it can fan out with ease.</remarks>
         private const int PathOddity = 1;
+
+        /// <summary>
+        /// <see cref="PathOddity"/>
+        /// </summary>
+        private const int StartLevel = 0;
 
         private static NibblePath BuildLocalKey(in NibblePath key, byte bucket, scoped Span<byte> workingSet)
         {
@@ -445,7 +454,8 @@ public static class StorageFanOut
             var addr = Data.Addresses[index];
 
             var child = addr.IsNull
-                ? batch.GetNewCleanPage<BottomPage>(out addr, PathOddity).AsPage()
+
+                ? batch.GetNewCleanPage<BottomPage>(out addr, StartLevel).AsPage()
                 : batch.EnsureWritableCopy(ref addr);
 
             Data.Addresses[index] = addr;
