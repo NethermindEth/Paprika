@@ -60,12 +60,12 @@ public readonly unsafe struct RootPage(Page root) : IPage
         /// Storage.
         /// </summary>
         [FieldOffset(DbAddress.Size * 2 + sizeof(uint) + Metadata.Size)]
-        private DbAddressList.Of1024 StorageFanOut;
+        private DbAddressList.Of2048 StorageFanOut;
 
         public StorageFanOut.Level0 Storage => new(ref StorageFanOut);
 
         public const int AbandonedStart =
-            DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + DbAddressList.Of1024.Size;
+            DbAddress.Size * 2 + sizeof(uint) + Metadata.Size + DbAddressList.Of2048.Size;
 
         /// <summary>
         /// The start of the abandoned pages.

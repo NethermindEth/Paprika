@@ -297,4 +297,35 @@ public static class DbAddressList
 
         public static int Length => Count;
     }
+
+    [StructLayout(LayoutKind.Sequential, Pack = sizeof(byte), Size = Size)]
+    public struct Of2048 : IDbAddressList
+    {
+        public const int Count = 2048;
+        public const int Size = Count / 2 * BytesPer2Addresses;
+
+        private byte _b;
+
+        public DbAddress this[int index]
+        {
+            get
+            {
+                Debug.Assert(index is >= 0 and < Count);
+                return Get(ref _b, index);
+            }
+            set
+            {
+                Debug.Assert(index is >= 0 and < Count);
+                Set(ref _b, index, value);
+            }
+        }
+
+        public void Clear() => MemoryMarshal.CreateSpan(ref _b, Size).Clear();
+
+        public bool IsClean => IsCleanImpl(this);
+
+        public DbAddress[] ToArray() => ToArrayImpl(this);
+
+        public static int Length => Count;
+    }
 }

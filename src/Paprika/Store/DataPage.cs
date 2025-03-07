@@ -229,7 +229,10 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
     /// <summary>
     /// The highest single nibble path that will be stored in local map. 
     /// </summary>
-    private const int MerkleInMapToNibble = 3;
+    /// <remarks>
+    /// Subtract 1 for the empty key and one more for additional write caching
+    /// </remarks>
+    private const int MerkleInMapToNibble = Page.PageSize / 600 - 1 - 1;
 
     private const int MerkleInRightFromInclusive = 9;
 
@@ -500,7 +503,6 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
                 }
 
                 var child = resolver.GetAt(bucket);
-                var type = child.Header.PageType;
 
                 if (Data.IsFanOut)
                 {
@@ -511,24 +513,8 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
                     builder.Push((byte)i);
                 }
 
-                {
-                    if (type == PageType.DataPage)
-                    {
-                        new DataPage(child).Accept(ref builder, visitor, resolver, bucket);
-                    }
-                    else if (type == PageType.Bottom)
-                    {
-                        new BottomPage(child).Accept(ref builder, visitor, resolver, bucket);
-                    }
-                    else if (type == PageType.ChildBottom)
-                    {
-                        new ChildBottomPage(child).Accept(ref builder, visitor, resolver, bucket);
-                    }
-                    else
-                    {
-                        throw new InvalidOperationException($"Invalid page type {type}");
-                    }
-                }
+                child.Accept(ref builder, visitor, resolver, bucket);
+
                 builder.Pop(Data.IsFanOut ? 2 : 1);
             }
         }

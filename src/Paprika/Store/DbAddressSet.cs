@@ -16,7 +16,6 @@ public class DbAddressSet : IDisposable
 
     private const int BitsPerByte = 8;
     private const int AddressesPerPage = Page.PageSize * BitsPerByte;
-    private const int MemoryPerPage = AddressesPerPage * Page.PageSize;
 
     public DbAddressSet(DbAddress max)
     {

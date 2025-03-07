@@ -80,12 +80,6 @@ public class StatisticsVisitor : IPageVisitor
             return NoopDisposable.Instance;
         }
 
-        if (t == typeof(StorageFanOut.Level2Page))
-        {
-            StorageFanOutLevels[2] += 1;
-            return NoopDisposable.Instance;
-        }
-
         var lvl = _current.CurrentLevel;
 
         var p = page.AsPage();

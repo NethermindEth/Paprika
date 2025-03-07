@@ -134,7 +134,7 @@ public class RawStateTests
         var account2 = new Keccak(new byte[]
             { 18, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
 
-        using var db = PagedDb.NativeMemoryDb(128 * 1024, 2);
+        using var db = PagedDb.NativeMemoryDb(256 * 1024, 2);
         var merkle = new ComputeMerkleBehavior();
 
         await using var blockchain = new Blockchain(db, merkle);
@@ -358,7 +358,7 @@ public class RawStateTests
     public void ProcessProofNodesStorageWithExtension()
     {
         //setup remote trie
-        using var remoteDb = PagedDb.NativeMemoryDb(32 * 1024, 2);
+        using var remoteDb = PagedDb.NativeMemoryDb(64 * 1024, 2);
         var merkle = new ComputeMerkleBehavior();
 
         var remoteBlockchain = new Blockchain(remoteDb, merkle);

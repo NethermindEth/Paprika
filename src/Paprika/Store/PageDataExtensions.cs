@@ -67,6 +67,26 @@ public static class PageDataExtensions
         }
     }
 
+    public static void Accept(this Page page, ref NibblePath.Builder builder, IPageVisitor visitor,
+        IPageResolver resolver, DbAddress addr)
+    {
+        var type = page.Header.PageType;
+        switch (type)
+        {
+            case PageType.DataPage:
+                new DataPage(page).Accept(ref builder, visitor, resolver, addr);
+                break;
+            case PageType.Bottom:
+                new BottomPage(page).Accept(ref builder, visitor, resolver, addr);
+                break;
+            case PageType.ChildBottom:
+                new ChildBottomPage(page).Accept(ref builder, visitor, resolver, addr);
+                break;
+            default:
+                throw new InvalidOperationException($"Invalid page type {type}");
+        }
+    }
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static bool ThrowOnType(PageType type, out ReadOnlySpan<byte> result) =>
         throw new Exception($"Page type is not handled:{type}");
