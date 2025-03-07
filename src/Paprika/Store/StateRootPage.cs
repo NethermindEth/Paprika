@@ -79,17 +79,17 @@ public readonly unsafe struct StateRootPage(Page page) : IPage
             if (prefix.Length == 1)
             {
                 var idx = prefix.Nibble0 << NibblePath.NibbleShift;
-                for (int i = 0; i < 16; i++)
+                for (var i = 0; i < 16; i++)
                 {
-                    ref var addrShort = ref DeleteAll(Data.Buckets, idx + i);
+                    DeleteAll(batch, Data.Buckets, idx + i);
                 }
             }
             else if (prefix.IsEmpty)
             {
                 //can all pages be freed here?
-                for (int i = 0; i < BucketCount; i++)
+                for (var i = 0; i < BucketCount; i++)
                 {
-                    ref var addrShort = ref DeleteAll(Data.Buckets, i);
+                    DeleteAll(batch, Data.Buckets, i);
                 }
             }
 
@@ -102,21 +102,22 @@ public readonly unsafe struct StateRootPage(Page page) : IPage
 
         if (!addr.IsNull)
         {
-            addr = batch.GetAddress(new DataPage(batch.GetAt(addr)).DeleteByPrefix(sliced, batch));
+            var child = batch.EnsureWritableCopy(ref addr);
+            child.DeleteByPrefix(sliced, batch);
         }
 
         return page;
 
-        ref DbAddress DeleteAll(Span<DbAddress> buckets, int addrIndex)
+        static void DeleteAll(IBatchContext batch, Span<DbAddress> buckets, int addrIndex)
         {
-            ref var addrShort = ref buckets[addrIndex];
+            var addr = buckets[addrIndex];
+            if (addr.IsNull)
+                return;
 
-            if (!addrShort.IsNull)
-            {
-                addrShort = batch.GetAddress(new DataPage(batch.GetAt(addrShort)).DeleteByPrefix(NibblePath.Empty, batch));
-            }
+            var child = batch.EnsureWritableCopy(ref addr);
+            buckets[addrIndex] = addr;
 
-            return ref addrShort;
+            child.DeleteByPrefix(NibblePath.Empty, batch);
         }
     }
 
@@ -156,7 +157,7 @@ public readonly unsafe struct StateRootPage(Page page) : IPage
         public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
     }
 
-    public bool TryGet(IReadOnlyBatchContext batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
+    public bool TryGet(IPageResolver batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
     {
         if (key.Length < ConsumedNibbles)
         {

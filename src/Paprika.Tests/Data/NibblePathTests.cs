@@ -31,11 +31,11 @@ public class NibblePathTests
     {
         const byte first = 0xDC;
         const byte second = 0xBA;
-        Span<byte> span = stackalloc byte[2] { first, second };
+        Span<byte> span = [first, second];
 
         var path = NibblePath.FromKey(span);
 
-        Span<byte> expected = stackalloc byte[] { 0xD, 0xC, 0xB, 0xA };
+        Span<byte> expected = [0xD, 0xC, 0xB, 0xA];
 
         for (int i = 0; i < expected.Length; i++)
         {
@@ -49,11 +49,11 @@ public class NibblePathTests
         const byte first = 0xDC;
         const byte second = 0xBA;
         const byte third = 0x90;
-        Span<byte> span = stackalloc byte[3] { first, second, third };
+        Span<byte> span = [first, second, third];
 
         var path = NibblePath.FromKey(span, 1);
 
-        Span<byte> expected = stackalloc byte[] { 0xC, 0xB, 0xA, 0x9 };
+        Span<byte> expected = [0xC, 0xB, 0xA, 0x9];
 
         for (int i = 0; i < expected.Length; i++)
         {
@@ -70,8 +70,8 @@ public class NibblePathTests
     [Test]
     public void FindFirstDifferent_equal_even_even()
     {
-        var path1 = NibblePath.FromKey(stackalloc byte[] { 0xDC, 0xBA });
-        var path2 = NibblePath.FromKey(stackalloc byte[] { 0xDC, 0xBA });
+        var path1 = NibblePath.FromKey([0xDC, 0xBA]);
+        var path2 = NibblePath.FromKey([0xDC, 0xBA]);
 
         AssertDiffAt(path1, path2, 4);
     }
@@ -79,8 +79,8 @@ public class NibblePathTests
     [Test]
     public void FindFirstDifferent_diff_even_even()
     {
-        var path1 = NibblePath.FromKey(stackalloc byte[] { 0xD1, 0xBA });
-        var path2 = NibblePath.FromKey(stackalloc byte[] { 0xDC, 0xBA });
+        var path1 = NibblePath.FromKey([0xD1, 0xBA]);
+        var path2 = NibblePath.FromKey([0xDC, 0xBA]);
 
         AssertDiffAt(path1, path2, 1);
     }
@@ -88,8 +88,8 @@ public class NibblePathTests
     [Test]
     public void FindFirstDifferent_equal_even_odd()
     {
-        var path1 = NibblePath.FromKey(stackalloc byte[] { 0xDC, 0xBA });
-        var path2 = NibblePath.FromKey(stackalloc byte[] { 0x0D, 0xCB, 0xA0 }, 1).SliceTo(path1.Length);
+        var path1 = NibblePath.FromKey([0xDC, 0xBA]);
+        var path2 = NibblePath.FromKey([0x0D, 0xCB, 0xA0], 1).SliceTo(path1.Length);
 
         AssertDiffAt(path1, path2, 4);
     }
@@ -97,8 +97,8 @@ public class NibblePathTests
     [Test]
     public void FindFirstDifferent_diff_even_odd()
     {
-        var path1 = NibblePath.FromKey(stackalloc byte[] { 0xDC, 0x1A });
-        var path2 = NibblePath.FromKey(stackalloc byte[] { 0x0D, 0xCB, 0xA0 }, 1).SliceTo(path1.Length);
+        var path1 = NibblePath.FromKey([0xDC, 0x1A]);
+        var path2 = NibblePath.FromKey([0x0D, 0xCB, 0xA0], 1).SliceTo(path1.Length);
 
         AssertDiffAt(path1, path2, 2);
     }
@@ -106,8 +106,8 @@ public class NibblePathTests
     [Test]
     public void FindFirstDifferent_diff_odd_odd()
     {
-        var path1 = NibblePath.FromKey(stackalloc byte[] { 0x0D, 0xCB, 0xA0 }, 1).SliceTo(4);
-        var path2 = NibblePath.FromKey(stackalloc byte[] { 0x0D, 0x1B, 0xA0 }, 1).SliceTo(4);
+        var path1 = NibblePath.FromKey([0x0D, 0xCB, 0xA0], 1).SliceTo(4);
+        var path2 = NibblePath.FromKey([0x0D, 0x1B, 0xA0], 1).SliceTo(4);
 
         AssertDiffAt(path1, path2, 1);
     }
@@ -115,8 +115,8 @@ public class NibblePathTests
     [Test]
     public void FindFirstDifferent_diff_at_0__odd_odd()
     {
-        var path1 = NibblePath.FromKey(stackalloc byte[] { 0x0D, 0xCB, 0xA0 }, 1).SliceTo(4);
-        var path2 = NibblePath.FromKey(stackalloc byte[] { 0x01, 0xCB, 0xA0 }, 1).SliceTo(4);
+        var path1 = NibblePath.FromKey([0x0D, 0xCB, 0xA0], 1).SliceTo(4);
+        var path2 = NibblePath.FromKey([0x01, 0xCB, 0xA0], 1).SliceTo(4);
 
         AssertDiffAt(path1, path2, 0);
     }
@@ -124,10 +124,8 @@ public class NibblePathTests
     [Test]
     public void FindFirstDifferent_diff_at_last_long_even_even()
     {
-        var path1 = NibblePath.FromKey(stackalloc byte[]
-            { 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0x24, 0x56, 0xAC });
-        var path2 = NibblePath.FromKey(stackalloc byte[]
-            { 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0x24, 0x56, 0xA1 });
+        var path1 = NibblePath.FromKey([0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0x24, 0x56, 0xAC]);
+        var path2 = NibblePath.FromKey([0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0x24, 0x56, 0xA1]);
 
         AssertDiffAt(path1, path2, 19);
     }
@@ -135,10 +133,8 @@ public class NibblePathTests
     [Test]
     public void FindFirstDifferent_diff_at_1_long_even_even()
     {
-        var path1 = NibblePath.FromKey(stackalloc byte[]
-            { 0xA2, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0x24, 0x56, 0xAC });
-        var path2 = NibblePath.FromKey(stackalloc byte[]
-            { 0xAD, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0x24, 0x56, 0xAC });
+        var path1 = NibblePath.FromKey([0xA2, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0x24, 0x56, 0xAC]);
+        var path2 = NibblePath.FromKey([0xAD, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0x24, 0x56, 0xAC]);
 
         AssertDiffAt(path1, path2, 1);
     }
@@ -161,28 +157,28 @@ public class NibblePathTests
     [Test]
     public void ToString_even_even()
     {
-        var path = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56, 0x78 });
+        var path = NibblePath.FromKey([0x12, 0x34, 0x56, 0x78]);
         path.ToString().Should().Be("12345678");
     }
 
     [Test]
     public void ToString_odd_odd()
     {
-        var path = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56, 0x78 }, 1);
+        var path = NibblePath.FromKey([0x12, 0x34, 0x56, 0x78], 1);
         path.ToString().Should().Be("2345678");
     }
 
     [Test]
     public void ToString_odd_even()
     {
-        var path = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56, 0x78 }, 1).SliceTo(6);
+        var path = NibblePath.FromKey([0x12, 0x34, 0x56, 0x78], 1).SliceTo(6);
         path.ToString().Should().Be("234567");
     }
 
     [Test]
     public void ToString_even_odd()
     {
-        var path = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56, 0x78 }).SliceTo(7);
+        var path = NibblePath.FromKey([0x12, 0x34, 0x56, 0x78]).SliceTo(7);
         path.ToString().Should().Be("1234567");
     }
 
@@ -192,7 +188,7 @@ public class NibblePathTests
     [TestCase(3, true, 5)]
     public void NibbleAt(int at, bool odd, byte result)
     {
-        var path = NibblePath.FromKey(stackalloc byte[] { 0x12, 0x34, 0x56 }, odd ? 1 : 0);
+        var path = NibblePath.FromKey([0x12, 0x34, 0x56], odd ? 1 : 0);
         path.GetAt(at).Should().Be(result);
     }
 
@@ -224,8 +220,8 @@ public class NibblePathTests
     {
         const int length = 3;
 
-        var pathA = NibblePath.FromKey(new byte[] { 0x12, 0x3A }).SliceTo(length);
-        var pathB = NibblePath.FromKey(new byte[] { 0x12, 0x3B }).SliceTo(length);
+        var pathA = NibblePath.FromKey([0x12, 0x3A]).SliceTo(length);
+        var pathB = NibblePath.FromKey([0x12, 0x3B]).SliceTo(length);
 
         var writtenA = pathA.WriteTo(stackalloc byte[pathA.MaxByteLength]);
         var writtenB = pathB.WriteTo(stackalloc byte[pathB.MaxByteLength]);
@@ -243,7 +239,7 @@ public class NibblePathTests
         const byte second = 0xBA;
         const byte nibble = 0xF;
 
-        Span<byte> span = stackalloc byte[2] { first, second };
+        Span<byte> span = [first, second];
 
         var path = NibblePath.FromKey(span, from).SliceTo(length);
         var appended = path.AppendNibble(nibble, stackalloc byte[path.MaxByteLength + 1]);
@@ -260,16 +256,16 @@ public class NibblePathTests
         const byte second = 0xBA;
         const byte nibble = 0xE;
 
-        Span<byte> span = stackalloc byte[2] { first, second };
+        Span<byte> span = [first, second];
         var path = NibblePath.FromKey(span, 1);
 
         var firstNibblePath =
             NibblePath
-                .FromKey(stackalloc byte[1] { nibble << NibblePath.NibbleShift })
+                .FromKey([nibble << NibblePath.NibbleShift])
                 .SliceTo(1);
 
         var appended = firstNibblePath.Append(path, stackalloc byte[NibblePath.FullKeccakByteLength]);
-        Span<byte> expected = stackalloc byte[2] { (nibble << NibblePath.NibbleShift) | (first & 0x0F), second };
+        Span<byte> expected = [(nibble << NibblePath.NibbleShift) | (first & 0x0F), second];
 
         NibblePath.FromKey(expected).Equals(appended);
     }
@@ -280,18 +276,38 @@ public class NibblePathTests
         const byte first = 0xDC;
         const byte nibble = 0xE;
 
-        Span<byte> span = stackalloc byte[1] { first };
+        Span<byte> span = [first];
         var path = NibblePath.FromKey(span, 1);
 
         var firstNibblePath =
             NibblePath
-                .FromKey(stackalloc byte[1] { nibble << NibblePath.NibbleShift })
+                .FromKey([nibble << NibblePath.NibbleShift])
                 .SliceTo(1);
 
         var appended = firstNibblePath.Append(path, stackalloc byte[NibblePath.FullKeccakByteLength]);
-        Span<byte> expected = stackalloc byte[2] { nibble, first };
+        Span<byte> expected = [nibble, first];
 
         NibblePath.FromKey(expected).SliceFrom(1).Equals(appended);
+    }
+
+    [TestCase(true)]
+    [TestCase(false)]
+    public void Append_byte_aligned(bool oddEnd)
+    {
+        const int oddity = 1;
+
+        var first = NibblePath.Single(0xA, oddity);
+        Span<byte> bytes = [0x12, 0x34, 0x56, 0x78];
+
+        var length = oddEnd ? bytes.Length - 1 : bytes.Length;
+        var second = NibblePath.FromKey(bytes, 0, length);
+
+        var appended = first.Append(second, stackalloc byte[NibblePath.FullKeccakByteLength]);
+
+        appended.Oddity.Should().Be(oddity);
+        appended.SliceTo(1).Equals(first).Should().BeTrue();
+        appended.SliceFrom(1).Equals(second).Should().BeTrue();
+        appended.Length.Should().Be((byte)(1 + length));
     }
 
     [TestCaseSource(nameof(GetRawNibbles))]
@@ -339,7 +355,7 @@ public class NibblePathTests
     [TestCase(0, 20, TestName = "Even 5")]
     public void GetHashCode(int from, int length)
     {
-        Span<byte> span = stackalloc byte[10] { 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, 0x73, 0x64 };
+        Span<byte> span = [0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, 0x73, 0x64];
 
         var path = NibblePath.FromKey(span).SliceFrom(from).SliceTo(length);
         var hash = path.GetHashCode();
@@ -347,7 +363,7 @@ public class NibblePathTests
         _hashes.Add(hash).Should().BeTrue();
     }
 
-    private readonly HashSet<int> _hashes = new();
+    private readonly HashSet<int> _hashes = [];
 
     [Test]
     public void Double()
