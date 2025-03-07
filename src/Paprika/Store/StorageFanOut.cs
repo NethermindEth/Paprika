@@ -50,7 +50,7 @@ public static class StorageFanOut
         var lengthBits = BitOperations.Log2(length);
 
         // Bits in id. Use to calculate the max size of L0 * L1 * the rest. Current max id is 67,108,864.
-        const int maxValue = DbAddressList.Of2048.Count * DbAddressList.Of2048.Count * (Level1Page.LocalKeyNibbles * 16);
+        const int maxValue = Level0.FanOut * Level1Page.FanOut * (Level1Page.LocalKeyNibbles * 16);
         var allowedBitsInId = BitOperations.Log2(maxValue);
         var shift = allowedBitsInId - (level + 1) * lengthBits;
 
@@ -111,7 +111,7 @@ public static class StorageFanOut
         {
             using var scope = visitor.Scope(nameof(StorageFanOut));
 
-            for (var i = 0; i < DbAddressList.Of1024.Count; i++)
+            for (var i = 0; i < FanOut; i++)
             {
                 var addr = _addresses[i];
                 if (!addr.IsNull)
@@ -149,6 +149,7 @@ public static class StorageFanOut
         private const int IdConsumedNibbles = 4;
         private const int IdNibblesToShiftUp = NibblePath.NibblePerByte * sizeof(uint) - IdConsumedNibbles;
         private const int IdShift = IdNibblesToShiftUp * NibblePath.NibbleShift;
+        public const int FanOut = DbAddressList.Of2048.Count;
 
         private static uint BuildIdIndex(in NibblePath path, out NibblePath sliced)
         {
@@ -352,7 +353,7 @@ public static class StorageFanOut
 
             using (visitor.Scope(ScopeStorage))
             {
-                for (var i = 0; i < DbAddressList.Of2048.Count; i++)
+                for (var i = 0; i < FanOut; i++)
                 {
                     var bucket = Data.Storage[i];
                     if (!bucket.IsNull)
@@ -380,6 +381,8 @@ public static class StorageFanOut
         /// <see cref="PathOddity"/>
         /// </summary>
         private const int StartLevel = 0;
+
+        public const int FanOut = DbAddressList.Of2048.Count;
 
         private static NibblePath BuildLocalKey(in NibblePath key, byte bucket, scoped Span<byte> workingSet)
         {

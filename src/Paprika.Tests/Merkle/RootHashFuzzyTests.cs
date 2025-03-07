@@ -48,8 +48,8 @@ public class RootHashFuzzyTests
         AssertRoot(generator.RootHash, commit);
     }
 
-    [TestCase(nameof(Accounts_100_Storage_1), int.MaxValue, 4)]
-    [TestCase(nameof(Accounts_1_Storage_100), 11, 8)]
+    [TestCase(nameof(Accounts_100_Storage_1), int.MaxValue, 8)]
+    [TestCase(nameof(Accounts_1_Storage_100), 11, 16)]
     [TestCase(nameof(Accounts_1000_Storage_1000), int.MaxValue, 1016, Category = Categories.LongRunning)]
     public async Task In_memory_run(string test, int commitEvery, int blockchainPoolSizeMB)
     {
