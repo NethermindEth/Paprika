@@ -445,8 +445,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
                 var addr = Data.Buckets[i];
                 var child = new ChildBottomPage(batch.EnsureWritableCopy(ref addr));
                 Data.Buckets[i] = addr;
-
-                child.Map.DeleteByPrefix(prefix);
+                child.DeleteByPrefix(prefix, batch);
             }
         }
 
@@ -574,6 +573,19 @@ public readonly unsafe struct ChildBottomPage(Page page) : IPage<ChildBottomPage
 
         ArrayPool<byte>.Shared.Return(array);
 
+        return page;
+    }
+
+    public Page DeleteByPrefix(in NibblePath prefix, IBatchContext batch)
+    {
+        if (Header.BatchId != batch.BatchId)
+        {
+            // the page is from another batch, meaning, it's readonly. Copy
+            var writable = batch.GetWritableCopy(page);
+            return new ChildBottomPage(writable).DeleteByPrefix(prefix, batch);
+        }
+
+        Map.DeleteByPrefix(prefix);
         return page;
     }
 

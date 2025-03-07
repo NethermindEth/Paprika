@@ -50,7 +50,10 @@ public static class TestExtensions
 
     public static void AssertNoAccount(this IReadOnlyBatch read, in Keccak key)
     {
-        read.TryGet(Key.Account(key), out _).Should().BeFalse();
+        if (read.TryGet(Key.Account(key), out var account))
+        {
+            account.IsEmpty.Should().BeTrue();
+        }
     }
 
     public static Account GetAccount(this IReadOnlyBatch read, in Keccak key)

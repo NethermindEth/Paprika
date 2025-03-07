@@ -174,7 +174,7 @@ public class AbandonedTests : BasePageTests
     public async Task Work_proper_bookkeeping_when_lots_of_reads()
     {
         const int repeats = 1_000;
-        const int multiplier = 2 + 1; // fanout page + data page + abandoned page per commit
+        const int multiplier = 3 + 1; // fanout page + data page + abandoned page per commit
         const int historyDepth = 2;
 
         var account = Keccak.EmptyTreeHash;

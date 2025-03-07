@@ -48,11 +48,24 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             if (childAddr.IsNull == false)
             {
                 var sliced = prefix.SliceFrom(Data.ConsumedNibbles);
-                var child = batch.GetAt(childAddr);
-                child = child.Header.PageType == PageType.DataPage
-                    ? new DataPage(child).DeleteByPrefix(sliced, batch)
-                    : new BottomPage(child).DeleteByPrefix(sliced, batch);
-                buckets[index] = batch.GetAddress(child);
+                var child = batch.EnsureWritableCopy(ref childAddr);
+                buckets[index] = childAddr;
+                child.DeleteByPrefix(sliced, batch);
+            }
+        }
+        else
+        {
+            // remove all
+            for (var i = 0; i < Data.ConsumedNibbles; i++)
+            {
+                var childAddr = buckets[i];
+
+                if (childAddr.IsNull)
+                    continue;
+
+                var child = batch.EnsureWritableCopy(ref childAddr);
+                buckets[i] = childAddr;
+                child.DeleteByPrefix(NibblePath.Empty, batch);
             }
         }
 

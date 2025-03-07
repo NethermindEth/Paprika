@@ -43,6 +43,30 @@ public static class PageDataExtensions
         }
     }
 
+    public static void DeleteByPrefix(this Page page, in NibblePath prefix, IBatchContext batch)
+    {
+        Debug.Assert(batch.WasWritten(batch.GetAddress(page)));
+
+        switch (page.Header.PageType)
+        {
+            case PageType.DataPage:
+                new DataPage(page).DeleteByPrefix(prefix, batch);
+                break;
+            case PageType.StateRoot:
+                new StateRootPage(page).DeleteByPrefix(prefix, batch);
+                break;
+            case PageType.Bottom:
+                new BottomPage(page).DeleteByPrefix(prefix, batch);
+                break;
+            case PageType.ChildBottom:
+                new ChildBottomPage(page).DeleteByPrefix(prefix, batch);
+                break;
+            default:
+                ThrowOnType(page.Header.PageType, out _);
+                break;
+        }
+    }
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static bool ThrowOnType(PageType type, out ReadOnlySpan<byte> result) =>
         throw new Exception($"Page type is not handled:{type}");

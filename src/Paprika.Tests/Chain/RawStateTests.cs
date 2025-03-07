@@ -134,7 +134,7 @@ public class RawStateTests
         var account2 = new Keccak(new byte[]
             { 18, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, });
 
-        using var db = PagedDb.NativeMemoryDb(64 * 1024, 2);
+        using var db = PagedDb.NativeMemoryDb(128 * 1024, 2);
         var merkle = new ComputeMerkleBehavior();
 
         await using var blockchain = new Blockchain(db, merkle);
@@ -153,7 +153,8 @@ public class RawStateTests
         //check account 1 is still present and account 2 is deleted
         using var read = db.BeginReadOnlyBatch();
         read.TryGet(Key.Account(account1), out _).Should().BeTrue();
-        read.TryGet(Key.Account(account2), out _).Should().BeFalse();
+
+        read.AssertNoAccount(account2);
 
         //let's re-add 2nd account and delete using empty prefix
         using var raw2 = blockchain.StartRaw();
@@ -275,7 +276,7 @@ public class RawStateTests
     [Test]
     public void ProcessProofNodes()
     {
-        using var remoteDb = PagedDb.NativeMemoryDb(32 * 1024, 2);
+        using var remoteDb = PagedDb.NativeMemoryDb(128 * 1024, 2);
         var merkle = new ComputeMerkleBehavior();
 
         var remoteBlockchain = new Blockchain(remoteDb, merkle);
@@ -298,7 +299,7 @@ public class RawStateTests
         var hashAccount4 = raw.GetHash(NibblePath.Parse("02"), false);
         var hashBranch2 = raw.GetHash(NibblePath.Parse("0"), false);
 
-        using var localDb = PagedDb.NativeMemoryDb(32 * 1024, 2);
+        using var localDb = PagedDb.NativeMemoryDb(128 * 1024, 2);
         var localBlockchain = new Blockchain(localDb, merkle);
 
         using var syncRaw = localBlockchain.StartRaw();
