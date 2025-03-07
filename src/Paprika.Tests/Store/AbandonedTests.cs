@@ -82,15 +82,15 @@ public class AbandonedTests : BasePageTests
 
     private const int HistoryDepth = 2;
 
-    [TestCase(20, 1, 10_000, false, TestName = "Accounts - 1")]
-    [TestCase(428, 100, 10_000, false, TestName = "Accounts - 100")]
-    [TestCase(20067, 4000, 200, false,
+    [TestCase(24, 1, 10_000, false, TestName = "Accounts - 1")]
+    [TestCase(764, 100, 10_000, false, TestName = "Accounts - 100")]
+    [TestCase(21822, 4000, 200, false,
         TestName = "Accounts - 4000 to get a bit reuse",
         Category = Categories.LongRunning)]
-    [TestCase(51117, 10_000, 50, false,
+    [TestCase(55534, 10_000, 50, false,
         TestName = "Accounts - 10000 to breach the AbandonedPage",
         Category = Categories.LongRunning)]
-    [TestCase(118364, 20_000, 50, true,
+    [TestCase(103345, 20_000, 50, true,
         TestName = "Storage - 20_000 accounts with a single storage slot",
         Category = Categories.LongRunning)]
     public async Task Reuse_in_limited_environment(int pageCount, int accounts, int repeats, bool isStorage)
@@ -174,7 +174,7 @@ public class AbandonedTests : BasePageTests
     public async Task Work_proper_bookkeeping_when_lots_of_reads()
     {
         const int repeats = 1_000;
-        const int multiplier = 2 + 1; // fanout page + data page + abandoned page per commit
+        const int multiplier = 3 + 1; // fanout page + data page + abandoned page per commit
         const int historyDepth = 2;
 
         var account = Keccak.EmptyTreeHash;
@@ -217,7 +217,7 @@ public class AbandonedTests : BasePageTests
 
         byte[] value = [13];
 
-        using var db = PagedDb.NativeMemoryDb(2048 * Page.PageSize);
+        using var db = PagedDb.NativeMemoryDb(4096 * Page.PageSize);
 
         for (var i = 0; i < repeats; i++)
         {
