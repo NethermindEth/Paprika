@@ -197,14 +197,9 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
                 }
 
                 // The child data page is no longer needed and can be recycled with its Merkle side-cars
-                if (dp.Data.MerkleLeft.IsNull == false)
+                if (dp.Data.MerkleOverflow.IsNull == false)
                 {
-                    batch.RegisterForFutureReuse(batch.GetAt(dp.Data.MerkleLeft), true);
-                }
-
-                if (dp.Data.MerkleRight.IsNull == false)
-                {
-                    batch.RegisterForFutureReuse(batch.GetAt(dp.Data.MerkleRight), true);
+                    batch.RegisterForFutureReuse(batch.GetAt(dp.Data.MerkleOverflow), true);
                 }
 
                 batch.RegisterForFutureReuse(dp.AsPage(), true);
@@ -243,7 +238,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         var map = new SlottedArray(payload.DataSpan);
 
         // Check if deletion with empty local
-        if (data.IsEmpty && payload.MerkleLeft.IsNull)
+        if (data.IsEmpty && payload.MerkleOverflow.IsNull)
         {
             map.Delete(key);
             return;
@@ -255,83 +250,28 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             return;
         }
 
-        var left = batch.EnsureWritableOrGetNew<ChildBottomPage>(ref payload.MerkleLeft, header.Level);
+        var overflow = batch.EnsureWritableOrGetNew<ChildBottomPage>(ref payload.MerkleOverflow, header.Level);
 
-        ChildBottomPage right;
-        if (payload.MerkleRight.IsNull)
-        {
-            // Only left exist, try to move everything there.
-            foreach (var item in map.EnumerateAll())
-            {
-                // We keep these three values  
-                if (ShouldBeKeptLocalInMap(item.Key))
-                    continue;
-
-                if (left.Map.TrySet(item.Key, item.RawData))
-                {
-                    map.Delete(item);
-                }
-            }
-
-            if (map.TrySet(key, data))
-            {
-                // All good, map can hold the data.
-                return;
-            }
-
-            // Not enough space. Create the right and perform the split
-            right = batch.GetNewPage<ChildBottomPage>(out payload.MerkleRight, header.Level);
-
-            // Only left exist, try to move everything there.
-            foreach (var item in left.Map.EnumerateAll())
-            {
-                // We keep these three values  
-                if (ShouldBeKeptInRight(item.Key))
-                {
-                    right.Map.Set(item.Key, item.RawData);
-                    left.Map.Delete(item);
-                }
-            }
-        }
-
-        right = new ChildBottomPage(batch.EnsureWritableCopy(ref payload.MerkleRight));
-
-        // Redistribute keys again
+        // Move to overflow
         foreach (var item in map.EnumerateAll())
         {
             // We keep these three values  
             if (ShouldBeKeptLocalInMap(item.Key))
                 continue;
 
-            if (ShouldBeKeptInRight(item.Key))
+            if (overflow.Map.TrySet(item.Key, item.RawData))
             {
-                if (item.RawData.IsEmpty)
-                    right.Map.Delete(item.Key);
-                else
-                    right.Map.Set(item.Key, item.RawData);
+                map.Delete(item);
             }
-            else
-            {
-                if (item.RawData.IsEmpty)
-                    left.Map.Delete(item.Key);
-                else
-                    left.Map.Set(item.Key, item.RawData);
-            }
-
-            map.Delete(item);
         }
 
         if (ShouldBeKeptLocalInMap(key))
         {
             map.Set(key, data);
         }
-        else if (ShouldBeKeptInRight(key))
-        {
-            right.Map.Set(key, data);
-        }
         else
         {
-            left.Map.Set(key, data);
+            overflow.Map.Set(key, data);
         }
     }
 
@@ -360,19 +300,16 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         /// <summary>
         /// The size of the raw byte data held in this page. Must be long aligned.
         /// </summary>
-        private const int DataSize = Size - BucketSize - DbAddress.Size * 2 - sizeof(int);
+        private const int DataSize = Size - BucketSize - DbAddress.Size - sizeof(int);
 
         private const int DataOffset = Size - DataSize;
 
 
         [FieldOffset(0)] public DbAddressList.Of256 Buckets;
 
-        [FieldOffset(BucketSize)] public DbAddress MerkleLeft;
+        [FieldOffset(BucketSize)] public DbAddress MerkleOverflow;
 
         [FieldOffset(BucketSize + DbAddress.Size)]
-        public DbAddress MerkleRight;
-
-        [FieldOffset(BucketSize + DbAddress.Size * 2)]
         public int ChildDataPages;
 
         /// <summary>
@@ -388,14 +325,12 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         public void Clear()
         {
             new SlottedArray(DataSpan).Clear();
-            MerkleLeft = default;
-            MerkleRight = default;
+            MerkleOverflow = default;
             Buckets.Clear();
             ChildDataPages = 0;
         }
 
-        public bool IsClean => MerkleLeft.IsNull &&
-                               MerkleRight.IsNull &&
+        public bool IsClean => MerkleOverflow.IsNull &&
                                ChildDataPages == 0 &&
                                new SlottedArray(DataSpan).IsEmpty &&
                                Buckets.IsClean;
@@ -472,18 +407,10 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             return true;
         }
 
-        // TODO: potential IO optimization to search left only if the right does not exist or the key does not belong to the right
-        if (Data.MerkleLeft.IsNull == false && batch.GetAt(Data.MerkleLeft).TryGet(batch, key, out result))
-        {
-            return true;
-        }
+        if (Data.MerkleOverflow.IsNull)
+            return false;
 
-        if (Data.MerkleRight.IsNull == false && batch.GetAt(Data.MerkleRight).TryGet(batch, key, out result))
-        {
-            return true;
-        }
-
-        return false;
+        return batch.GetAt(Data.MerkleOverflow).TryGet(batch, key, out result);
     }
 
     public SlottedArray Map => new(Data.DataSpan);
