@@ -1,3 +1,4 @@
+using System;
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Globalization;
@@ -6,6 +7,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using Paprika.Crypto;
+using Paprika.Merkle;
 using Paprika.Utils;
 
 namespace Paprika.Data;
@@ -120,6 +122,17 @@ public readonly ref struct SlottedArray /*: IClearable */
     {
         var hash = Slot.PrepareKey(key, out var preamble, out var trimmed);
         return TrySetImpl(hash, preamble, trimmed, data);
+    }
+
+    public void Set(in NibblePath key, ReadOnlySpan<byte> data)
+    {
+        if (TrySet(key, data))
+            return;
+
+        ThrowSpace();
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        static void ThrowSpace() => throw new Exception("Map has no sufficient space");
     }
 
     public void DeleteByPrefix(in NibblePath prefix)
@@ -695,6 +708,33 @@ public readonly ref struct SlottedArray /*: IClearable */
         }
     }
 
+    /// <summary>
+    /// Gets sizes according to the bucket selector.
+    /// </summary>
+    public void GatherNonEmptySizeStats(Span<ushort> buckets, Func<NibblePath, int> bucketSelector)
+    {
+        Span<byte> bytes = stackalloc byte[96];
+
+        var to = _header.Low / Slot.TotalSize;
+        for (var i = 0; i < to; i++)
+        {
+            ref var slot = ref GetSlotRef(i);
+
+            // extract only not deleted and these which have at least one nibble
+            if (slot.IsDeleted == false && slot.HasAtLeastOneNibble)
+            {
+                var hash = GetHashRef(i);
+                var span = GetSlotPayload(i, slot);
+                var key = Slot.UnPrepareKey(hash, slot.KeyPreamble, span, bytes, out var data);
+                var bucket = bucketSelector(key);
+
+                const int hashSize = sizeof(ushort);
+                var size = (ushort)(GetSlotPayload(i, slot).Length + Slot.Size + hashSize);
+                buckets[bucket] += size;
+            }
+        }
+    }
+
     private const int KeyLengthLength = 1;
 
     private static int GetTotalSpaceRequired(byte preamble, in NibblePath key, ReadOnlySpan<byte> data)
@@ -1177,10 +1217,10 @@ public readonly ref struct SlottedArray /*: IClearable */
 
     private const int NotFound = -1;
 
-    [OptimizationOpportunity(OptimizationType.CPU,
-        "key encoding is delayed but it might be called twice, here + TrySet")]
     private int TryGetImpl(in NibblePath key, ushort hash, byte preamble, out Span<byte> data)
     {
+        // AssertHeader();
+
         var count = _header.Low / Slot.TotalSize;
         var jump = DoubleVectorSize / sizeof(ushort);
         var aligned = AlignToDoubleVectorSize(_header.Low) / sizeof(ushort);
@@ -1712,6 +1752,21 @@ public readonly ref struct SlottedArray /*: IClearable */
 
         public readonly ushort TakenAfterOneMoreSlot => (ushort)(AlignToDoubleVectorSize(Low + Slot.TotalSize) + High);
     }
+
+    // private void AssertHeader()
+    // {
+    //     if (_header.Deleted > _data.Length / Slot.Size)
+    //     {
+    //         throw new Exception("Deleted breached potential size");
+    //     }
+    //     // Debug.Assert(_header.Deleted <= _data.Length / Slot.Size, "Deleted breached the ");
+    //
+    //     if (_header.High + _header.Low > _data.Length)
+    //     {
+    //         throw new Exception("Breached HiLo");
+    //     }
+    //     // Debug.Assert(_header.High + _header.Low <= _data.Length);
+    // }
 }
 
 public readonly ref struct MapSource

@@ -16,6 +16,7 @@ public abstract class BasePageTests
 
     internal class TestBatchContext(uint batchId, Stack<DbAddress>? reusable = null) : BatchContextBase(batchId)
     {
+        private const uint StartAddress = 1U;
         private readonly Dictionary<DbAddress, Page> _address2Page = new();
         private readonly Dictionary<UIntPtr, DbAddress> _page2Address = new();
         private readonly Stack<DbAddress> _reusable = reusable ?? new Stack<DbAddress>();
@@ -23,7 +24,7 @@ public abstract class BasePageTests
 
         // data pages should start at non-null addresses
         // 0-N is take by metadata pages
-        private uint _pageCount = 1U;
+        private uint _pageCount = StartAddress;
 
         public override Page GetAt(DbAddress address) => _address2Page[address];
         public override void Prefetch(DbAddress address, PrefetchMode mode)
@@ -108,7 +109,7 @@ public abstract class BasePageTests
             return next;
         }
 
-        public uint PageCount => _pageCount;
+        public uint PageCount => _pageCount - StartAddress;
     }
 
     internal static TestBatchContext NewBatch(uint batchId) => new(batchId);

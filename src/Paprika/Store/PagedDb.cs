@@ -537,7 +537,11 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
         public void Prefetch(ReadOnlySpan<DbAddress> addresses) => db.Prefetch(addresses);
 
-        public Page GetAt(DbAddress address) => db._manager.GetAt(address);
+        public Page GetAt(DbAddress address)
+        {
+            root.Assert(address);
+            return db._manager.GetAt(address);
+        }
 
         public override string ToString() => $"{nameof(ReadOnlyBatch)}, Name: {name}, BatchId: {BatchId}";
     }
@@ -699,8 +703,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
         public override Page GetAt(DbAddress address)
         {
             // Getting a page beyond root!
-            var nextFree = _root.Data.NextFreePage;
-            Debug.Assert(address < nextFree, $"Breached the next free page, NextFree: {nextFree}, retrieved {address}");
+            _root.Assert(address);
             var page = _db.GetAt(address);
             return page;
         }

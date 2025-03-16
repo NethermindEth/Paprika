@@ -1,10 +1,9 @@
 ﻿using System.Buffers;
 using System.Diagnostics;
-using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Paprika.Data;
 using static Paprika.Data.NibbleSelector;
-using Payload = Paprika.Store.DataPage.Payload;
 
 namespace Paprika.Store;
 
@@ -26,12 +25,12 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
         using var scope = visitor.On(ref builder, this, addr);
 
-        for (var i = 0; i < ChildCount; i++)
+        for (var i = 0; i < BucketCount; i++)
         {
             var child = Data.Buckets[i];
             if (child.IsNull == false)
             {
-                new BottomPage(resolver.GetAt(child)).Accept(ref builder, visitor, resolver, child);
+                new ChildBottomPage(resolver.GetAt(child)).Accept(ref builder, visitor, resolver, child);
             }
         }
     }
@@ -54,30 +53,27 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
             return page;
         }
 
-        // Failed to add to map. Count existing children
-        var (existing, writtenThisBatch) = GatherChildrenInfo(batch);
-        if (existing == 0)
-        {
-            // No children yet. Create the first, flush there and set.
-            Debug.Assert(Data.Buckets[0].IsNull);
+        // Failed to add to map. Need to move data to child pages
 
-            var child = batch.GetNewPage<BottomPage>(out var childAddr, (byte)(Header.Level + 1));
+        if (Data.Buckets[0].IsNull)
+        {
+            // The case where the first child was not allocated yet.
+            var child = batch.GetNewPage<ChildBottomPage>(out var childAddr, (byte)(Header.Level + 1));
             Data.Buckets[0] = childAddr;
 
             // Move all down. Ensure that deletes are treated as tombstones.
             map.MoveNonEmptyKeysTo<All>(child.Map, true);
 
             // All non-empty keys moved down. The map should is ready to accept the set.
-            if (map.TrySet(key, data) == false)
-            {
-                UnableToSet();
-            }
+            map.Set(key, data);
 
             return page;
         }
 
+        var (existing, writtenThisBatch) = GatherChildrenInfo(batch);
+
         // If there are any children that were written this batch, try to write to them first.
-        if (writtenThisBatch != 0)
+        if (writtenThisBatch.HasAnySet)
         {
             // Flush down to the children written in this batch does not require COW as they were already copied during this batch.
             if (MoveToChildPages(map, batch, existing, false))
@@ -90,8 +86,8 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         }
 
         // If there are any children that exist, but weren't written this batch.
-        var childrenNotWrittenThisBatch = (ushort)(existing & ~writtenThisBatch);
-        if (childrenNotWrittenThisBatch != 0)
+        var childrenNotWrittenThisBatch = existing.AndNot(writtenThisBatch);
+        if (childrenNotWrittenThisBatch.HasAnySet)
         {
             // There are children that were not COWed during this batch. Try to move using COW now.
             if (MoveToChildPages(map, batch, existing, true))
@@ -104,8 +100,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         }
 
         // Ensure that all the children are created first before turning into the data page
-        const ushort allChildrenExist = 0b1111_1111_1111_1111;
-        while (existing != allChildrenExist)
+        while (existing.HasAllSet == false)
         {
             if (!AllocateNewChild(batch, map))
             {
@@ -130,9 +125,6 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         // The destination is set over this page.
         return page;
     }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void UnableToSet() => throw new Exception("The map should be ready to accept the write");
 
     private void Delete(in NibblePath key, IBatchContext batch)
     {
@@ -175,22 +167,18 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         child.Map.Delete(key);
     }
 
-    private (ushort existing, ushort writtenThisBatch) GatherChildrenInfo(IBatchContext batch)
+    private (BitVector.Of256 existing, BitVector.Of256 writtenThisBatch) GatherChildrenInfo(IBatchContext batch)
     {
-        ushort existing = 0;
-        ushort writtenThisBatch = 0;
+        BitVector.Of256 existing = default;
+        BitVector.Of256 writtenThisBatch = default;
 
-        for (var i = 0; i < ChildCount; i++)
+        for (var i = 0; i < BucketCount; i++)
         {
             var addr = Data.Buckets[i];
             if (addr.IsNull == false)
             {
-                var mask = (ushort)(1 << i);
-                existing |= mask;
-                if (batch.WasWritten(addr))
-                {
-                    writtenThisBatch |= mask;
-                }
+                existing[i] = true;
+                writtenThisBatch[i] = batch.WasWritten(addr);
             }
         }
 
@@ -201,7 +189,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
     {
         // Gather size stats and find the biggest one that can help.
         Span<ushort> sizes = stackalloc ushort[16];
-        map.GatherSizeStats1Nibble(sizes);
+        map.GatherNonEmptySizeStats(sizes, static key => GetBucket(key));
 
         var index = FindBestNotAllocatedChild(sizes, batch);
         if (index == ChildNotFound)
@@ -215,16 +203,19 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
         // Allocate the new child
         Debug.Assert(Data.Buckets[index].IsNull);
-        batch.GetNewPage<BottomPage>(out var addr, (byte)(Header.Level + 1));
+        batch.GetNewPage<ChildBottomPage>(out var addr, (byte)(Header.Level + 1));
         Data.Buckets[index] = addr;
 
         // Never flush down from the main map first to the child. It could be the case that it will have not enough space to handle data from the child on the left.
         // First, create the mask and migrate the data from the previously matching
-        var childMask = (ushort)(1 << index);
+        var childMask = new BitVector.Of256
+        {
+            [index] = true
+        };
 
         // Migrate from the previously matching
         var prevAddr = Data.Buckets[previouslyMatching];
-        var prevChild = new BottomPage(batch.EnsureWritableCopy(ref prevAddr));
+        var prevChild = new ChildBottomPage(batch.EnsureWritableCopy(ref prevAddr));
         Data.Buckets[previouslyMatching] = prevAddr;
 
         // Pass the previous child as the source and construct the map to only point to the new child mask. Assert that everything what is needed is copied properly.
@@ -235,27 +226,9 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         var (_, written) = GatherChildrenInfo(batch);
         MoveToChildPages(map, batch, written, false);
 
-        AssertChildrenRangeInvariant(batch);
+        //AssertChildrenRangeInvariant(batch);
 
         return true;
-    }
-
-    [Conditional("DEBUG")]
-    private void AssertChildrenRangeInvariant(IBatchContext batch)
-    {
-        for (var i = 0; i < ChildCount; i++)
-        {
-            var childAddress = Data.Buckets[i];
-            if (childAddress.IsNull == false)
-            {
-                var child = new BottomPage(batch.GetAt(childAddress));
-                foreach (var item in child.Map.EnumerateAll())
-                {
-                    Debug.Assert(item.Key.IsEmpty == false);
-                    Debug.Assert(item.Key.Nibble0 >= i);
-                }
-            }
-        }
     }
 
     private int FindBestNotAllocatedChild(Span<ushort> sizes, IBatchContext batch)
@@ -270,9 +243,9 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         // Single loop: track free ranges based solely on their start and cumulative weight.
         int i;
 
-        for (i = 0; i < ChildCount; i++)
+        for (i = 0; i < BucketCount; i++)
         {
-            if ((allocatedMask & (1 << i)) == 0)
+            if (allocatedMask[i] == false)
             {
                 if (curStart == -1)
                     curStart = i;
@@ -305,7 +278,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         var cumulative = 0;
         i = bestStart;
 
-        while (i < ChildCount && (allocatedMask & (1 << i)) == 0)
+        while (i < BucketCount && allocatedMask[i] == false)
         {
             cumulative += sizes[i];
             if (cumulative >= halfTotal)
@@ -316,7 +289,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         return i - 1; // Return the last free nibble in the range.
     }
 
-    private bool MoveToChildPages(in SlottedArray source, IBatchContext batch, ushort childIndexes, bool cow,
+    private bool MoveToChildPages(in SlottedArray source, IBatchContext batch, BitVector.Of256 childIndexes, bool cow,
         bool assertAllCopied = false)
     {
         var moved = false;
@@ -328,8 +301,6 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
                 continue;
 
             var at = GetExistingChildIndexWhereKeyBelongsTo(k, childIndexes);
-
-            Debug.Assert(at <= k.Nibble0);
 
             if (at < 0)
             {
@@ -359,9 +330,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
             var child = batch.GetAt(addr);
             Debug.Assert(batch.WasWritten(addr));
 
-            var childMap = new BottomPage(child).Map;
-
-            Debug.Assert(k.Nibble0 >= at);
+            var childMap = new ChildBottomPage(child).Map;
 
             if (item.RawData.IsEmpty)
             {
@@ -385,80 +354,66 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         return moved;
     }
 
-    private static int GetExistingChildIndexWhereKeyBelongsTo(in NibblePath key, ushort children)
+    private static int GetExistingChildIndexWhereKeyBelongsTo(in NibblePath key, in BitVector.Of256 children)
     {
-        var start = key.Nibble0;
-
-        // for 0, makes it 0b00000001
-        // for 1, makes it 0b00000011
-        // It's a mask where it can write to easily intersect.
-        var ableToWriteTo = (uint)((1 << (start + 1)) - 1);
-
-        var ushortLeadingZeroCount = BitOperations.LeadingZeroCount(children & ableToWriteTo) - 16;
-        return 15 - ushortLeadingZeroCount;
+        return children.HighestSmallerOrEqualThan(GetBucket(key));
     }
+
+    private static int GetBucket(in NibblePath key) => key.Nibble0;
 
     private DataPage TurnToDataPage(IBatchContext batch)
     {
+        // We need to turn this page into a full data page.
+        // The DataPage page should have all its children set.
+
+        // To make it work we need to ensure that invariant of the data page is preserved.
+        // The invariant is that keys that are ShouldBeKeptLocal, should be kept in the data page locally
+        // To ensure that this invariant is preserved, we copy the whole map of the main BottomPage and insert it later.
+        // Additionally, when moving children, we do select these that should be kept locally as well.
+
         // The bottom page has the same layout as the DataPage. It can be directly turned into one.
         Header.PageType = DataPage.DefaultType;
         Header.Metadata = 0; // clear metadata
 
-        // The child pages though are different because they don't have their prefix truncated.
-        // Each of them needs to be turned into a bottom page with children truncated by one nibble.
-
+        // Copy the main
         var required = Data.DataSpan.Length;
-        var array = ArrayPool<byte>.Shared.Rent(required);
-        var buffer = array.AsSpan(0, required);
-        var copy = new SlottedArray(buffer);
+        var mainArray = ArrayPool<byte>.Shared.Rent(required);
+        var mainBuffer = mainArray.AsSpan(0, required);
+        Data.DataSpan.CopyTo(mainBuffer);
+        var mainCopy = new SlottedArray(mainBuffer);
 
-        for (var i = 0; i < ChildCount; i++)
+        // Then clear the main
+        new SlottedArray(Data.DataSpan).Clear();
+
+        // Copy children as local
+        var children = Data.Buckets;
+
+        // Clear the original. It will be the DataPage that is responsible for setting things up.
+        var dp = new DataPage(page);
+        dp.Clear();
+
+        foreach (var child in children)
         {
-            if (Data.Buckets[i].IsNull)
+            if (child.IsNull)
                 continue;
 
-            copy.Clear();
-
-            var addr = Data.Buckets[i];
-            var child = new BottomPage(batch.EnsureWritableCopy(ref addr));
-            Data.Buckets[i] = addr;
-
-            foreach (var item in child.Map.EnumerateAll())
+            var childPage = new ChildBottomPage(batch.GetAt(child));
+            foreach (var item in childPage.Map.EnumerateAll())
             {
-                Debug.Assert(item.Key.IsEmpty == false);
-                var nibble0 = item.Key.Nibble0;
-
-                Debug.Assert(nibble0 >= i);
-
-                var sliced = item.Key.SliceFrom(1);
-                if (nibble0 == i)
-                {
-                    // A match on nibble, this is the value we should be writing to
-                    copy.TrySet(sliced, item.RawData);
-                }
-                else
-                {
-                    // The case, where the nibble is from a child that was not created.
-                    // Let's ensure it's created and move to the other child.
-                    var otherAddr = Data.Buckets[nibble0];
-                    var otherChild = otherAddr.IsNull
-                        ? batch.GetNewPage<BottomPage>(out otherAddr, (byte)(Header.Level + 1))
-                        : new BottomPage(batch.EnsureWritableCopy(ref otherAddr));
-                    Data.Buckets[nibble0] = otherAddr;
-
-                    // There will always be a place for it.
-                    // If the nibble is up front, don't set the sliced data there as it will be reevaluated later.
-                    otherChild.Map.TrySet(item.Key, item.RawData);
-                }
+                dp.Set(item.Key, item.RawData, batch);
             }
 
-            // Copy back the span
-            buffer.CopyTo(child.Data.DataSpan);
+            // Register for reuse. Mark as immediate to let know that nothing references it any longer.
+            batch.RegisterForFutureReuse(childPage.AsPage(), true);
         }
 
-        ArrayPool<byte>.Shared.Return(array);
+        foreach (var item in mainCopy.EnumerateAll())
+        {
+            dp.Set(item.Key, item.RawData, batch);
+        }
 
-        return new DataPage(page);
+        ArrayPool<byte>.Shared.Return(mainArray);
+        return dp;
     }
 
     public Page DeleteByPrefix(in NibblePath prefix, IBatchContext batch)
@@ -474,7 +429,7 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
         if (prefix.Length == 0)
         {
-            for (var i = 0; i < ChildCount; i++)
+            for (var i = 0; i < BucketCount; i++)
             {
                 if (Data.Buckets[i].IsNull == false)
                 {
@@ -490,21 +445,16 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
             if (i != ChildNotFound)
             {
                 var addr = Data.Buckets[i];
-                var child = new BottomPage(batch.EnsureWritableCopy(ref addr));
+                var child = new ChildBottomPage(batch.EnsureWritableCopy(ref addr));
                 Data.Buckets[i] = addr;
-
-                child.Map.DeleteByPrefix(prefix);
+                child.DeleteByPrefix(prefix, batch);
             }
         }
 
         return page;
     }
 
-    public void Clear()
-    {
-        Map.Clear();
-        Data.Buckets.Clear();
-    }
+    public void Clear() => Data.Clear();
 
     [SkipLocalsInit]
     public bool TryGet(IPageResolver batch, scoped in NibblePath key, out ReadOnlySpan<byte> result)
@@ -518,17 +468,16 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
         var i = FindMatchingChild(key);
 
 
-        return i != ChildNotFound && new BottomPage(batch.GetAt(Data.Buckets[i])).Map.TryGet(key, out result);
+        return i != ChildNotFound && new ChildBottomPage(batch.GetAt(Data.Buckets[i])).Map.TryGet(key, out result);
     }
 
     private const int ChildNotFound = -1;
-    private const int ChildCount = DbAddressList.Of16.Count;
 
-    private int FindMatchingChild(in NibblePath key) => FindMatchingChild(key.Nibble0);
+    private int FindMatchingChild(in NibblePath key) => FindMatchingChild(GetBucket(key));
 
-    private int FindMatchingChild(byte nibble)
+    private int FindMatchingChild(int index)
     {
-        int i = nibble;
+        var i = index;
         while (i >= 0 && Data.Buckets[i].IsNull)
         {
             i--;
@@ -541,5 +490,145 @@ public readonly unsafe struct BottomPage(Page page) : IPage<BottomPage>
 
     public static PageType DefaultType => PageType.Bottom;
 
-    public bool IsClean => Map.IsEmpty && Data.Buckets.IsClean;
+    public bool IsClean => Data.IsClean;
+
+    public const int BucketCount = DbAddressList.Of16.Count;
+
+    /// <summary>
+    /// Represents the data of this data page. This type of payload stores data in 16 nibble-addressable buckets.
+    /// These buckets are used to store up to <see cref="DataSize"/> entries before flushing them down as other pages
+    /// like page split.
+    /// </summary>
+    [StructLayout(LayoutKind.Explicit, Size = Size)]
+    public struct Payload
+    {
+        public const int Size = Page.PageSize - PageHeader.Size;
+        private const int BucketSize = DbAddressList.Of16.Size;
+
+        /// <summary>
+        /// The size of the raw byte data held in this page. Must be long aligned.
+        /// </summary>
+        private const int DataSize = Size - BucketSize;
+
+        private const int DataOffset = Size - DataSize;
+
+        [FieldOffset(0)] public DbAddressList.Of16 Buckets;
+
+        /// <summary>
+        /// The first item of map of frames to allow ref to it.
+        /// </summary>
+        [FieldOffset(DataOffset)] private byte DataStart;
+
+        /// <summary>
+        /// Writable area.
+        /// </summary>
+        public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
+
+        public void Clear()
+        {
+            new SlottedArray(DataSpan).Clear();
+            Buckets.Clear();
+        }
+
+        public bool IsClean => new SlottedArray(DataSpan).IsEmpty && Buckets.IsClean;
+    }
+}
+
+/// <summary>
+/// One of the bottom pages in the tree.
+/// </summary>
+[method: DebuggerStepThrough]
+public readonly unsafe struct ChildBottomPage(Page page) : IPage<ChildBottomPage>
+{
+    private ref PageHeader Header => ref page.Header;
+
+    private ref Payload Data => ref Unsafe.AsRef<Payload>(page.Payload);
+
+    public SlottedArray Map => new(Data.DataSpan);
+
+    public Page Set(in NibblePath key, in ReadOnlySpan<byte> data, IBatchContext batch)
+    {
+        Debug.Assert(batch.WasWritten(batch.GetAddress(page)), "All bottom pages should be COWed before use");
+
+        if (Map.TrySet(key, data))
+        {
+            return page;
+        }
+
+        // No space, turn into BottomPage
+        var array = ArrayPool<byte>.Shared.Rent(Data.DataSpan.Length);
+        var span = array.AsSpan(0, Data.DataSpan.Length);
+        Data.DataSpan.CopyTo(span);
+        var copy = new SlottedArray(span);
+
+        // Turn to a regular Bottom
+        Header.PageType = PageType.Bottom;
+        var bottom = new BottomPage(page);
+        bottom.Clear();
+
+        foreach (var item in copy.EnumerateAll())
+        {
+            page.Set(item.Key, item.RawData, batch);
+        }
+
+        page.Set(key, data, batch);
+
+        ArrayPool<byte>.Shared.Return(array);
+
+        return page;
+    }
+
+    public Page DeleteByPrefix(in NibblePath prefix, IBatchContext batch)
+    {
+        if (Header.BatchId != batch.BatchId)
+        {
+            // the page is from another batch, meaning, it's readonly. Copy
+            var writable = batch.GetWritableCopy(page);
+            return new ChildBottomPage(writable).DeleteByPrefix(prefix, batch);
+        }
+
+        Map.DeleteByPrefix(prefix);
+        return page;
+    }
+
+    [SkipLocalsInit]
+    public bool TryGet(IPageResolver batch, scoped in NibblePath key, out ReadOnlySpan<byte> result) =>
+        Map.TryGet(key, out result);
+
+    public void Accept(ref NibblePath.Builder builder, IPageVisitor visitor, IPageResolver resolver, DbAddress addr)
+    {
+        using var scope = visitor.On(ref builder, this, addr);
+    }
+
+    public static ChildBottomPage Wrap(Page page) => Unsafe.As<Page, ChildBottomPage>(ref page);
+
+    public static PageType DefaultType => PageType.ChildBottom;
+
+    public bool IsClean => Data.IsClean;
+
+    public void Clear() => Data.Clear();
+
+    [StructLayout(LayoutKind.Explicit, Size = Size)]
+    private struct Payload
+    {
+        public const int Size = Page.PageSize - PageHeader.Size;
+
+        /// <summary>
+        /// The size of the raw byte data held in this page. Must be long aligned.
+        /// </summary>
+        private const int DataSize = Size;
+
+        private const int DataOffset = Size - DataSize;
+
+        [FieldOffset(DataOffset)] private byte DataStart;
+
+        /// <summary>
+        /// Writable area.
+        /// </summary>
+        public Span<byte> DataSpan => MemoryMarshal.CreateSpan(ref DataStart, DataSize);
+
+        public void Clear() => new SlottedArray(DataSpan).Clear();
+
+        public bool IsClean => new SlottedArray(DataSpan).IsEmpty;
+    }
 }

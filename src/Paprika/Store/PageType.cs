@@ -25,7 +25,12 @@ public enum PageType : byte
     Bottom = 4,
 
     /// <summary>
+    /// <see cref="ChildBottomPage"/>
+    /// </summary>
+    ChildBottom = 5,
+
+    /// <summary>
     /// <see cref="StorageFanOut"/>
     /// </summary>
-    FanOutPage = 5,
+    FanOutPage = 6,
 }

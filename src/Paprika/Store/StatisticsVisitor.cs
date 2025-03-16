@@ -35,7 +35,7 @@ public class StatisticsVisitor : IPageVisitor
         public readonly int[] DataPagePageCountPerNibblePathDepth = new int[Levels];
         public readonly int[] BottomPageCountPerNibblePathDepth = new int[Levels];
 
-        public int BottomLevel = 0;
+        public int CurrentLevel = 0;
 
         /// <summary>
         /// A histogram of used space in inner <see cref="DataPage"/>.
@@ -49,7 +49,6 @@ public class StatisticsVisitor : IPageVisitor
 
         public void ReportDataPageMap(int length, in SlottedArray map) =>
             ReportMap(DataPagePercentageUsed, length, map);
-
 
         public void ReportBottomPageMap(int length, in SlottedArray map) =>
             ReportMap(BottomPagePercentageUsed, length, map);
@@ -78,55 +77,55 @@ public class StatisticsVisitor : IPageVisitor
         if (t == typeof(StorageFanOut.Level1Page))
         {
             StorageFanOutLevels[1] += 1;
+            return NoopDisposable.Instance;
         }
-        else if (t == typeof(StorageFanOut.Level2Page))
+
+        if (t == typeof(StorageFanOut.Level2Page))
         {
             StorageFanOutLevels[2] += 1;
+            return NoopDisposable.Instance;
         }
-        else if (t == typeof(StorageFanOut.Level3Page))
+
+        var lvl = _current.CurrentLevel;
+
+        var p = page.AsPage();
+
+        switch (p.Header.PageType)
         {
-            StorageFanOutLevels[3] += 1;
-        }
-        else
-        {
-            var length = prefix.Current.Length;
-
-            var p = page.AsPage();
-
-            switch (p.Header.PageType)
-            {
-                case PageType.DataPage:
-                    _current.DataPagePageCountPerNibblePathDepth[length] += 1;
-                    _current.ReportDataPageMap(length, new DataPage(p).Map);
-                    break;
-                case PageType.Bottom:
-                    var bottomLevel = _current.BottomLevel;
-                    _current.BottomPageCountPerNibblePathDepth[length + bottomLevel] += 1;
-                    _current.ReportBottomPageMap(length, new BottomPage(p).Map);
-                    return new BottomLevelUp(_current);
-                case PageType.StateRoot:
-                    break;
-                default:
-                    throw new Exception($"Not handled type {p.Header.PageType}");
-            }
+            case PageType.DataPage:
+                _current.DataPagePageCountPerNibblePathDepth[lvl] += 1;
+                _current.ReportDataPageMap(lvl, new DataPage(p).Map);
+                break;
+            case PageType.Bottom:
+                _current.BottomPageCountPerNibblePathDepth[lvl] += 1;
+                _current.ReportBottomPageMap(lvl, new BottomPage(p).Map);
+                break;
+            case PageType.ChildBottom:
+                _current.BottomPageCountPerNibblePathDepth[lvl] += 1;
+                _current.ReportBottomPageMap(lvl, new ChildBottomPage(p).Map);
+                break;
+            case PageType.StateRoot:
+                break;
+            default:
+                throw new Exception($"Not handled type {p.Header.PageType}");
         }
 
-        return NoopDisposable.Instance;
+        return new LevelUp(_current);
     }
 
-    private sealed class BottomLevelUp : IDisposable
+    private sealed class LevelUp : IDisposable
     {
         private readonly Stats _stats;
 
-        public BottomLevelUp(Stats stats)
+        public LevelUp(Stats stats)
         {
             _stats = stats;
-            _stats.BottomLevel++;
+            _stats.CurrentLevel++;
         }
 
         public void Dispose()
         {
-            _stats.BottomLevel--;
+            _stats.CurrentLevel--;
         }
     }
 

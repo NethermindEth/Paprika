@@ -50,6 +50,17 @@ public interface IBatchContext : IReadOnlyBatchContext
         return result;
     }
 
+    TPage EnsureWritableOrGetNew<TPage>(ref DbAddress addr, byte level = 0)
+        where TPage : struct, IPage<TPage>, IClearable
+    {
+        if (addr.IsNull)
+            return GetNewPage<TPage>(out addr, level);
+
+        var copy = EnsureWritableCopy(ref addr);
+        Debug.Assert(TPage.DefaultType == copy.Header.PageType);
+        return TPage.Wrap(copy);
+    }
+
     /// <summary>
     /// Gets a writable copy of the page.
     /// </summary>
