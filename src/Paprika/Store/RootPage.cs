@@ -19,11 +19,15 @@ namespace Paprika.Store;
 /// </remarks>
 public readonly unsafe struct RootPage(Page root) : IPage
 {
-    private const int StorageKeySize = Keccak.Size + Keccak.Size + 1;
-
     public ref PageHeader Header => ref root.Header;
 
     public ref Payload Data => ref Unsafe.AsRef<Payload>(root.Payload);
+
+    public void Assert(DbAddress address)
+    {
+        var nextFree = Data.NextFreePage;
+        Debug.Assert(address < nextFree, $"Breached the next free page, NextFree: {nextFree}, retrieved {address}");
+    }
 
     /// <summary>
     /// Represents the data of the page.
