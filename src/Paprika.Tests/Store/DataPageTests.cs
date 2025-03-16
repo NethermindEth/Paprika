@@ -64,10 +64,26 @@ public class DataPageTests : BasePageTests
         var batch = NewBatch(BatchId);
         var data = ((IBatchContext)batch).GetNewPage<DataPage>(out _);
 
+        const int count = 16;
+
         var path = NibblePath.Empty;
         data.Set(path, GetValue(path), batch);
 
-        const int count = 16;
+        for (byte i = 0; i < count; i++)
+        {
+            path = NibblePath.Single(i, oddity);
+            data.Set(path, GetValue(path), batch);
+        }
+
+        // next batch
+        batch = batch.Next();
+
+        data = new DataPage(batch.GetWritableCopy(data.AsPage()));
+
+        // set again
+        path = NibblePath.Empty;
+        data.Set(path, GetValue(path), batch);
+
         for (byte i = 0; i < count; i++)
         {
             path = NibblePath.Single(i, oddity);
@@ -81,7 +97,7 @@ public class DataPageTests : BasePageTests
             result.SequenceEqual(GetValue(path)).Should().BeTrue();
         }
 
-        batch.PageCount.Should().Be(3, "One for the data page and two for the Merkle children");
+        batch.PageCount.Should().Be(6, "One for the data page and two for the Merkle children");
 
         return;
         static byte[] GetValue(in NibblePath path)

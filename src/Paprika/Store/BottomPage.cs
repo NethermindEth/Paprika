@@ -566,10 +566,10 @@ public readonly unsafe struct ChildBottomPage(Page page) : IPage<ChildBottomPage
 
         foreach (var item in copy.EnumerateAll())
         {
-            bottom.Set(item.Key, item.RawData, batch);
+            page.Set(item.Key, item.RawData, batch);
         }
 
-        bottom.Set(key, data, batch);
+        page.Set(key, data, batch);
 
         ArrayPool<byte>.Shared.Return(array);
 

@@ -149,6 +149,8 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             current = childAddr;
         }
 
+        return;
+
         static bool TryTurnToFanOut(Page page, Page child, int bucket, IBatchContext batch)
         {
             if (page.Header.Level % 2 != 0 || page.Header.PageType != PageType.DataPage)
@@ -174,6 +176,8 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             var children = payload.Buckets;
             payload.Buckets.Clear();
 
+            // First, set all the grand-children right
+
             for (byte i = 0; i < Payload.NotFanOutBucketCount; i++)
             {
                 var p = batch.GetAt(children[i]);
@@ -197,14 +201,9 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
                 }
 
                 // The child data page is no longer needed and can be recycled with its Merkle side-cars
-                if (dp.Data.MerkleLeft.IsNull == false)
+                if (dp.Data.Merkle.IsNull == false)
                 {
-                    batch.RegisterForFutureReuse(batch.GetAt(dp.Data.MerkleLeft), true);
-                }
-
-                if (dp.Data.MerkleRight.IsNull == false)
-                {
-                    batch.RegisterForFutureReuse(batch.GetAt(dp.Data.MerkleRight), true);
+                    batch.RegisterForFutureReuse(batch.GetAt(dp.Data.Merkle), true);
                 }
 
                 batch.RegisterForFutureReuse(dp.AsPage(), true);
@@ -231,8 +230,6 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
     /// </summary>
     private const int MerkleInMapToNibble = 3;
 
-    private const int MerkleInRightFromInclusive = 9;
-
     private static void SetLocally(in NibblePath key, ReadOnlySpan<byte> data, IBatchContext batch, ref Payload payload,
         PageHeader header)
     {
@@ -240,7 +237,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         var map = new SlottedArray(payload.DataSpan);
 
         // Check if deletion with empty local
-        if (data.IsEmpty && payload.MerkleLeft.IsNull)
+        if (data.IsEmpty && payload.Merkle.IsNull)
         {
             map.Delete(key);
             return;
@@ -252,87 +249,23 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             return;
         }
 
-        var left = batch.EnsureWritableOrGetNew<ChildBottomPage>(ref payload.MerkleLeft, header.Level);
+        var merkle = payload.Merkle.IsNull
+            ? batch.GetNewCleanPage<ChildBottomPage>(out payload.Merkle, header.Level).AsPage()
+            : batch.EnsureWritableCopy(ref payload.Merkle);
 
-        ChildBottomPage right;
-        if (payload.MerkleRight.IsNull)
-        {
-            // Only left exist, try to move everything there.
-            foreach (var item in map.EnumerateAll())
-            {
-                // We keep these three values  
-                if (ShouldBeKeptLocalInMap(item.Key))
-                    continue;
-
-                if (left.Map.TrySet(item.Key, item.RawData))
-                {
-                    map.Delete(item);
-                }
-            }
-
-            if (map.TrySet(key, data))
-            {
-                // All good, map can hold the data.
-                return;
-            }
-
-            // Not enough space. Create the right and perform the split
-            right = batch.GetNewPage<ChildBottomPage>(out payload.MerkleRight, header.Level);
-
-            // Only left exist, try to move everything there.
-            foreach (var item in left.Map.EnumerateAll())
-            {
-                // We keep these three values  
-                if (ShouldBeKeptInRight(item.Key))
-                {
-                    right.Map.Set(item.Key, item.RawData);
-                    left.Map.Delete(item);
-                }
-            }
-        }
-
-        right = new ChildBottomPage(batch.EnsureWritableCopy(ref payload.MerkleRight));
-
-        // Redistribute keys again
+        // Move all that are not local to the Merkle page.
         foreach (var item in map.EnumerateAll())
         {
             // We keep these three values  
             if (ShouldBeKeptLocalInMap(item.Key))
                 continue;
 
-            if (ShouldBeKeptInRight(item.Key))
-            {
-                if (item.RawData.IsEmpty)
-                    right.Map.Delete(item.Key);
-                else
-                    right.Map.Set(item.Key, item.RawData);
-            }
-            else
-            {
-                if (item.RawData.IsEmpty)
-                    left.Map.Delete(item.Key);
-                else
-                    left.Map.Set(item.Key, item.RawData);
-            }
-
+            merkle.Set(item.Key, item.RawData, batch);
             map.Delete(item);
         }
 
-        if (ShouldBeKeptLocalInMap(key))
-        {
-            map.Set(key, data);
-        }
-        else if (ShouldBeKeptInRight(key))
-        {
-            right.Map.Set(key, data);
-        }
-        else
-        {
-            left.Map.Set(key, data);
-        }
+        map.Set(key, data);
     }
-
-    private static bool ShouldBeKeptInRight(in NibblePath key) => key.Nibble0 >= MerkleInRightFromInclusive;
 
     private static bool ShouldBeKeptLocal(in NibblePath key) => key.IsEmpty || key.Length == 1;
 
@@ -357,19 +290,15 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         /// <summary>
         /// The size of the raw byte data held in this page. Must be long aligned.
         /// </summary>
-        private const int DataSize = Size - BucketSize - DbAddress.Size * 2 - sizeof(int);
+        private const int DataSize = Size - BucketSize - DbAddress.Size - sizeof(int);
 
         private const int DataOffset = Size - DataSize;
 
-
         [FieldOffset(0)] public DbAddressList.Of256 Buckets;
 
-        [FieldOffset(BucketSize)] public DbAddress MerkleLeft;
+        [FieldOffset(BucketSize)] public DbAddress Merkle;
 
         [FieldOffset(BucketSize + DbAddress.Size)]
-        public DbAddress MerkleRight;
-
-        [FieldOffset(BucketSize + DbAddress.Size * 2)]
         public int ChildDataPages;
 
         /// <summary>
@@ -385,14 +314,12 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
         public void Clear()
         {
             new SlottedArray(DataSpan).Clear();
-            MerkleLeft = default;
-            MerkleRight = default;
+            Merkle = default;
             Buckets.Clear();
             ChildDataPages = 0;
         }
 
-        public bool IsClean => MerkleLeft.IsNull &&
-                               MerkleRight.IsNull &&
+        public bool IsClean => Merkle.IsNull &&
                                ChildDataPages == 0 &&
                                new SlottedArray(DataSpan).IsEmpty &&
                                Buckets.IsClean;
@@ -469,18 +396,12 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
             return true;
         }
 
-        // TODO: potential IO optimization to search left only if the right does not exist or the key does not belong to the right
-        if (Data.MerkleLeft.IsNull == false && batch.GetAt(Data.MerkleLeft).TryGet(batch, key, out result))
+        if (Data.Merkle.IsNull)
         {
-            return true;
+            return false;
         }
 
-        if (Data.MerkleRight.IsNull == false && batch.GetAt(Data.MerkleRight).TryGet(batch, key, out result))
-        {
-            return true;
-        }
-
-        return false;
+        return batch.GetAt(Data.Merkle).TryGet(batch, key, out result);
     }
 
     public SlottedArray Map => new(Data.DataSpan);
