@@ -42,7 +42,7 @@ public static class StorageFanOut
         Storage
     }
 
-    private static (uint next, int index) GetIndex(uint at, int level)
+    public static (uint next, int index) GetIndex(uint at, int level)
     {
         const int length = DbAddressList.Of1024.Count;
         const int lengthMask = length - 1;
@@ -277,10 +277,7 @@ public static class StorageFanOut
 
                 Data.Ids[normalized] = addr;
 
-                if (p.Header.PageType == PageType.Bottom)
-                    new BottomPage(p).Set(key, data, batch);
-                else
-                    new DataPage(p).Set(key, data, batch);
+                p.Set(key, data, batch);
 
                 return page;
             }
@@ -382,23 +379,25 @@ public static class StorageFanOut
         private const int LocalKeySize = NibblePath.KeccakNibbleCount + 2;
 
         /// <summary>
-        /// The path oddity that is used for the local keys so that the concatenated with ease.
+        /// The local keys prepend 1 nibble. To make it easy to concatenate the oddity is set to 1,
+        /// so that the keys are of form _N, where _ is a blank as it's an odd path, and N is a nibble.
         /// </summary>
-        /// <remarks>Not used as the level of the child page. This might be confusing at first,
-        /// but we want to have the DataPage starting at even number so that it can fan out with ease.</remarks>
         private const int PathOddity = 1;
 
         /// <summary>
-        /// <see cref="PathOddity"/>
+        /// We set the start level to be aligned with the path oddity. This is required for
+        /// the <see cref="DataPage"/> to properly fan out when it's big enough. The data page performs a fan out
+        /// on even levels and assumes the aligned oddity. If we start on even level with odd path,
+        /// it might result in some issues.
         /// </summary>
-        private const int StartLevel = 0;
+        private const int StartLevel = PathOddity;
 
         private static NibblePath BuildLocalKey(in NibblePath key, byte bucket, scoped Span<byte> workingSet)
         {
             return NibblePath.Single(bucket, PathOddity).Append(key, workingSet);
         }
 
-        private static (byte bucket, int index) GetIndex(uint at)
+        public static (byte bucket, int index) GetIndex(uint at)
         {
             Debug.Assert(at < FanOutCount * 16);
 

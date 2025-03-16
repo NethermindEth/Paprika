@@ -330,8 +330,6 @@ public readonly ref struct UShortSlottedArray
         return false;
     }
 
-    [OptimizationOpportunity(OptimizationType.CPU,
-        "key encoding is delayed but it might be called twice, here + TrySet")]
     private bool TryGetImpl(ushort key, out Span<byte> data, out int slotIndex)
     {
         var to = _header.Low;

@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using Paprika.Crypto;
+using Paprika.Merkle;
 using Paprika.Utils;
 
 namespace Paprika.Data;
@@ -1216,10 +1217,10 @@ public readonly ref struct SlottedArray /*: IClearable */
 
     private const int NotFound = -1;
 
-    [OptimizationOpportunity(OptimizationType.CPU,
-        "key encoding is delayed but it might be called twice, here + TrySet")]
     private int TryGetImpl(in NibblePath key, ushort hash, byte preamble, out Span<byte> data)
     {
+        // AssertHeader();
+
         var count = _header.Low / Slot.TotalSize;
         var jump = DoubleVectorSize / sizeof(ushort);
         var aligned = AlignToDoubleVectorSize(_header.Low) / sizeof(ushort);
@@ -1751,6 +1752,21 @@ public readonly ref struct SlottedArray /*: IClearable */
 
         public readonly ushort TakenAfterOneMoreSlot => (ushort)(AlignToDoubleVectorSize(Low + Slot.TotalSize) + High);
     }
+
+    // private void AssertHeader()
+    // {
+    //     if (_header.Deleted > _data.Length / Slot.Size)
+    //     {
+    //         throw new Exception("Deleted breached potential size");
+    //     }
+    //     // Debug.Assert(_header.Deleted <= _data.Length / Slot.Size, "Deleted breached the ");
+    //
+    //     if (_header.High + _header.Low > _data.Length)
+    //     {
+    //         throw new Exception("Breached HiLo");
+    //     }
+    //     // Debug.Assert(_header.High + _header.Low <= _data.Length);
+    // }
 }
 
 public readonly ref struct MapSource
