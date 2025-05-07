@@ -370,7 +370,7 @@ public readonly unsafe struct DataPage(Page page) : IPage<DataPage>
                 // Prefetch child page in case we go there next to reduce CPU stalls
                 bucket = dp.Data.Buckets[dp.Data.GetBucket(sliced)];
                 if (bucket.IsNull == false)
-                    batch.Prefetch(bucket);
+                    batch.Prefetch(bucket, PrefetchMode.Soft);
             }
 
             if (bucket.IsNull)
