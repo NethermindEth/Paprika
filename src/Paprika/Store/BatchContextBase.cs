@@ -43,7 +43,7 @@ abstract class BatchContextBase(uint batchId) : IBatchContext
 
     public virtual void NoticeAbandonedPageReused(Page page) { }
 
-    public abstract IDictionary<Keccak, uint> IdCache { get; }
+    public abstract IDictionary<Keccak, ContractId> IdCache { get; }
 
     /// <summary>
     /// Assigns the batch identifier to a given page, marking it writable by this batch.

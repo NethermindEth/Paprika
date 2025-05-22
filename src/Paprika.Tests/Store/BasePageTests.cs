@@ -65,7 +65,7 @@ public abstract class BasePageTests
                 .BeTrue($"Page at {addr} should not be registered as reusable before");
         }
 
-        public override Dictionary<Keccak, uint> IdCache { get; } = new();
+        public override Dictionary<Keccak, ContractId> IdCache { get; } = new();
 
         public override string ToString() => $"Batch context used {_pageCount} pages to write the data";
 

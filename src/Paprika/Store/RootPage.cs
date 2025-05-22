@@ -123,7 +123,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
 
         if (cache.TryGetValue(keccak, out var id))
         {
-            if (id == 0)
+            if (id.IsNull)
             {
                 result = default;
                 return false;
@@ -168,7 +168,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
                     Data.AccountCounter++;
 
                     // memoize in cache
-                    batch.IdCache[keccak] = id = Data.AccountCounter;
+                    batch.IdCache[keccak] = id = new ContractId(Data.AccountCounter);
 
                     // update root
                     Data.Storage.SetId(keccak, id, batch);
@@ -192,7 +192,7 @@ public readonly unsafe struct RootPage(Page root) : IPage
         var keccak = account.UnsafeAsKeccak;
 
         // Destroy the Id entry about it
-        Data.Storage.SetId(keccak, 0, batch);
+        Data.Storage.SetId(keccak, ContractId.Null, batch);
 
         // Destroy the account entry
         SetAtRoot(batch, account, ReadOnlySpan<byte>.Empty, ref Data.StateRoot);
