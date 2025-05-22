@@ -368,9 +368,11 @@ public class NibblePathTests
     [Test]
     public void Double()
     {
-        for (byte nibble0 = 0; nibble0 < 15; nibble0++)
+        const int maxNibble = 16;
+
+        for (byte nibble0 = 0; nibble0 < maxNibble; nibble0++)
         {
-            for (byte nibble1 = 0; nibble1 < 15; nibble1++)
+            for (byte nibble1 = 0; nibble1 < maxNibble; nibble1++)
             {
                 var path = NibblePath.DoubleEven(nibble0, nibble1);
 
