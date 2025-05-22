@@ -122,7 +122,7 @@ public interface IReadOnlyBatchContext : IPageResolver
     /// </summary>
     uint BatchId { get; }
 
-    IDictionary<Keccak, uint> IdCache { get; }
+    IDictionary<Keccak, ContractId> IdCache { get; }
 }
 
 /// <summary>

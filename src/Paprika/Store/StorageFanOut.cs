@@ -120,26 +120,27 @@ public static class StorageFanOut
             }
         }
 
-        public bool TryGetId(in Keccak keccak, out uint id, IPageResolver batch)
+        public bool TryGetId(in Keccak keccak, out ContractId id, IPageResolver batch)
         {
+            Unsafe.SkipInit(out id);
+
             var at = BuildIdIndex(NibblePath.FromKey(keccak), out var sliced);
 
             if (TryGet(batch, at, sliced, Type.Id, out var result))
             {
-                id = BinaryPrimitives.ReadUInt32LittleEndian(result);
+                id = new ContractId(BinaryPrimitives.ReadUInt32LittleEndian(result));
                 return true;
             }
 
-            id = default;
             return false;
         }
 
-        public void SetId(Keccak keccak, uint id, IBatchContext batch)
+        public void SetId(Keccak keccak, ContractId id, IBatchContext batch)
         {
             var at = BuildIdIndex(NibblePath.FromKey(keccak), out var sliced);
 
             Span<byte> span = stackalloc byte[4];
-            BinaryPrimitives.WriteUInt32LittleEndian(span, id);
+            BinaryPrimitives.WriteUInt32LittleEndian(span, id.Value);
 
             Set(batch, at, sliced, Type.Id, span);
         }
@@ -170,18 +171,18 @@ public static class StorageFanOut
         /// </summary>
         public static int NormalizeAtForId(uint at) => (int)(at >> IdShift);
 
-        public bool TryGetStorage(uint id, scoped in NibblePath path, out ReadOnlySpan<byte> result,
+        public bool TryGetStorage(ContractId id, scoped in NibblePath path, out ReadOnlySpan<byte> result,
             IReadOnlyBatchContext batch) =>
-            TryGet(batch, id, path, Type.Storage, out result);
+            TryGet(batch, id.Value, path, Type.Storage, out result);
 
-        public void SetStorage(uint id, scoped in NibblePath path, ReadOnlySpan<byte> data, IBatchContext batch)
+        public void SetStorage(ContractId id, scoped in NibblePath path, ReadOnlySpan<byte> data, IBatchContext batch)
         {
-            Set(batch, id, path, Type.Storage, data);
+            Set(batch, id.Value, path, Type.Storage, data);
         }
 
-        public void DeleteStorageByPrefix(uint id, scoped in NibblePath prefix, IBatchContext batch)
+        public void DeleteStorageByPrefix(ContractId id, scoped in NibblePath prefix, IBatchContext batch)
         {
-            var (next, index) = GetIndex(id, Level);
+            var (next, index) = GetIndex(id.Value, Level);
             var addr = _addresses[index];
 
             if (addr.IsNull)
@@ -453,7 +454,6 @@ public static class StorageFanOut
             var addr = Data.Addresses[index];
 
             var child = addr.IsNull
-
                 ? batch.GetNewCleanPage<BottomPage>(out addr, StartLevel).AsPage()
                 : batch.EnsureWritableCopy(ref addr);
 

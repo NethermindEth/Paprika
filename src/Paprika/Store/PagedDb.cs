@@ -471,9 +471,9 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
     private sealed class ReadOnlyBatch(PagedDb db, RootPage root, string name)
         : IVisitableReadOnlyBatch, IReadOnlyBatchContext
     {
-        [ThreadStatic] private static ConcurrentDictionary<Keccak, uint>? s_cache;
+        [ThreadStatic] private static ConcurrentDictionary<Keccak, ContractId>? s_cache;
 
-        private ConcurrentDictionary<Keccak, uint> _idCache = Interlocked.Exchange(ref s_cache, null) ?? new(
+        private ConcurrentDictionary<Keccak, ContractId> _idCache = Interlocked.Exchange(ref s_cache, null) ?? new(
             Environment.ProcessorCount,
             RootPage.IdCacheLimit);
 
@@ -522,7 +522,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 
         public uint BatchId => root.Header.BatchId;
 
-        public IDictionary<Keccak, uint> IdCache
+        public IDictionary<Keccak, ContractId> IdCache
         {
             get
             {
@@ -835,7 +835,7 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
 #endif
         }
 
-        public override Dictionary<Keccak, uint> IdCache { get; }
+        public override Dictionary<Keccak, ContractId> IdCache { get; }
 
         public void Dispose()
         {
@@ -865,11 +865,11 @@ public sealed class PagedDb : IPageResolver, IDb, IDisposable
             Page = new((byte*)NativeMemory.AlignedAlloc(Page.PageSize, (UIntPtr)UIntPtr.Size));
             Abandoned = new List<DbAddress>();
             Written = new HashSet<DbAddress>();
-            IdCache = new Dictionary<Keccak, uint>();
+            IdCache = new Dictionary<Keccak, ContractId>();
             ReusedImmediately = new Stack<DbAddress>();
         }
 
-        public Dictionary<Keccak, uint> IdCache { get; }
+        public Dictionary<Keccak, ContractId> IdCache { get; }
 
         public Page Page { get; }
 
