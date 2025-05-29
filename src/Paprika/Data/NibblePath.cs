@@ -101,7 +101,7 @@ public readonly ref struct NibblePath
     private readonly ref byte _span;
 
     private readonly int _lengthAndOdd;
-    
+
     public bool IsOdd => Odd != 0;
     public int Length => _lengthAndOdd >> LengthShift;
     public int Odd => _lengthAndOdd & OddBit;
@@ -193,7 +193,7 @@ public readonly ref struct NibblePath
         _span = ref span;
         _lengthAndOdd = (length << LengthShift) | odd;
     }
-    
+
     /// <summary>
     /// The estimate of the max length, used for stackalloc estimations.
     /// </summary>
@@ -288,7 +288,7 @@ public readonly ref struct NibblePath
     public NibblePath SliceTo(int length)
     {
         Debug.Assert(length <= Length, "Cannot slice the NibblePath beyond its Length");
-        
+
         return new NibblePath(ref _span, Odd, (byte)length);
     }
 
@@ -300,7 +300,7 @@ public readonly ref struct NibblePath
         Debug.Assert(start + length <= Length, "Cannot slice the NibblePath beyond its Length");
 
         var odd = Odd;
-        
+
         return new(ref Unsafe.Add(ref _span, (odd + start) / 2),
             (byte)((start & 1) ^ odd), (byte)length);
     }
@@ -365,7 +365,7 @@ public readonly ref struct NibblePath
 
         var length = Length;
         var odd = Odd;
-        
+
         var appended = new NibblePath(ref workingSet[PreambleLength], odd, (byte)(length + other.Length));
 
         // TODO: if aligned, can be based on bytes
@@ -447,7 +447,7 @@ public readonly ref struct NibblePath
         }
 
         var odd = Odd;
-        
+
         if (odd == other.Odd)
         {
             // The most common case in Trie.
@@ -532,7 +532,7 @@ public readonly ref struct NibblePath
         destination[0] = (byte)(isLeaf ? LeafFlag : 0x000);
 
         var odd = Odd;
-        
+
         // This is the usual fast path for leaves, as they are aligned with oddity and length.
         // length: odd, odd: 1
         // length: even, odd: 0
@@ -597,7 +597,7 @@ public readonly ref struct NibblePath
         ref var ch = ref path[0];
 
         var odd = Odd;
-        
+
         for (int i = odd; i < Length + odd; i++)
         {
             var b = Unsafe.Add(ref _span, i / 2);
@@ -623,7 +623,7 @@ public readonly ref struct NibblePath
         ref var ch = ref path[0];
 
         var odd = Odd;
-        
+
         for (int i = odd; i < Length + odd; i++)
         {
             var b = Unsafe.Add(ref _span, i / 2);
