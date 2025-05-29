@@ -202,7 +202,7 @@ public static partial class Node
         {
             Assert(path.Length >= MinimalLeafPathLength,
                 "Leaves that have empty path should not be persisted. They should be stored only in the branch");
-            Assert((path.Oddity + path.Length) % 2 == 0,
+            Assert((path.Odd + path.Length) % 2 == 0,
                 "If path is odd, length should be odd as well. If even, even");
 
             var metadata = path.IsOdd ? (byte)(OddPathMetadata | path.Nibble0) : 0;

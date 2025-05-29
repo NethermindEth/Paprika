@@ -1528,13 +1528,13 @@ public readonly ref struct SlottedArray /*: IClearable */
 
             trimmed = NibblePath.Empty;
             var length = key.Length;
-            preamble = (byte)(key.Oddity | (KeyPreambleLength3OrLess << KeyPreambleLengthShift));
+            preamble = (byte)(key.Odd | (KeyPreambleLength3OrLess << KeyPreambleLengthShift));
 
             ref var b = ref key.UnsafeSpan;
 
             ushort hash = 0;
 
-            switch ((length << 1) + key.Oddity)
+            switch ((length << 1) + key.Odd)
             {
                 case 0:
                 case 1:
@@ -1593,8 +1593,8 @@ public readonly ref struct SlottedArray /*: IClearable */
 
                 // beyond 4
                 default:
-                    preamble = (byte)(KeyPreambleWithBytes | key.Oddity);
-                    trimmed = key.Slice(KeySlice + key.Oddity, length - KeyPreambleMaxEncodedLength);
+                    preamble = (byte)(KeyPreambleWithBytes | key.Odd);
+                    trimmed = key.Slice(KeySlice + key.Odd, length - KeyPreambleMaxEncodedLength);
 
                     Debug.Assert(trimmed.IsOdd == false, "Trimmed should be always even");
 

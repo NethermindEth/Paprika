@@ -321,7 +321,7 @@ public class RawStateTests
         for (int i = proofPath.Length; i >= 0; i--)
         {
             var currentPath = proofPath.SliceTo(i);
-            packed[i * 33] = currentPath.Length;
+            packed[i * 33] = (byte)currentPath.Length;
             currentPath.RawSpan.CopyTo(packed.Slice(i * 33 + 1));
         }
         syncRaw.ProcessProofNodes(Keccak.Zero, packed, 2);
@@ -407,9 +407,9 @@ public class RawStateTests
         localHash.Should().Be(remoteStorageHash);
 
         Span<byte> packed = stackalloc byte[2 * 33];
-        packed[0 * 33] = branchPath.Length;
+        packed[0 * 33] = (byte)branchPath.Length;
         branchPath.RawSpan.CopyTo(packed.Slice(0 * 33 + 1));
-        packed[1 * 33] = NibblePath.Empty.Length;
+        packed[1 * 33] = (byte)NibblePath.Empty.Length;
         NibblePath.Empty.RawSpan.CopyTo(packed.Slice(1 * 33 + 1));
 
         syncRaw.ProcessProofNodes(accountHash, packed, 1);

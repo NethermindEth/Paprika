@@ -304,7 +304,7 @@ public class NibblePathTests
 
         var appended = first.Append(second, stackalloc byte[NibblePath.FullKeccakByteLength]);
 
-        appended.Oddity.Should().Be(oddity);
+        appended.Odd.Should().Be(oddity);
         appended.SliceTo(1).Equals(first).Should().BeTrue();
         appended.SliceFrom(1).Equals(second).Should().BeTrue();
         appended.Length.Should().Be((byte)(1 + length));
