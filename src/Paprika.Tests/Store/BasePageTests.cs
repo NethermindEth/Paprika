@@ -27,9 +27,14 @@ public abstract class BasePageTests
         private uint _pageCount = StartAddress;
 
         public override Page GetAt(DbAddress address) => _address2Page[address];
+        public override void Prefetch(DbAddress address, PrefetchMode mode)
+        {
 
-        public override void Prefetch(DbAddress address)
-        { }
+        }
+
+        public override void Prefetch(ReadOnlySpan<DbAddress> addresses)
+        {
+        }
 
         public override DbAddress GetAddress(Page page) => _page2Address[page.Raw];
 
