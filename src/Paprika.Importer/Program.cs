@@ -83,7 +83,7 @@ var dataPath = Path.Combine(dir, "db");
 var dbExists = Directory.Exists(dataPath);
 
 const long GB = 1024 * 1024 * 1024;
-var size = (path.Contains("mainnet") ? 256L : 64L) * GB;
+var size = 640L * GB;
 
 if (dbExists)
 {
@@ -177,7 +177,7 @@ DbSettings GetSettings(string dbName)
 
     if (dbName == DbNames.State)
     {
-        // pruned database, append version 
+        // pruned database, append version
         dbPath = Path.Combine(dbName, "0");
         dbName += "0";
     }
