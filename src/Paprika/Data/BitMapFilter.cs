@@ -129,6 +129,11 @@ public static class BitMapFilter
         public static int Count => 128;
     }
 
+    public struct OfNSize2 : IOfNSize
+    {
+        public static int Count => 2;
+    }
+
     public readonly struct OfN<TSize> : IAccessor<OfN<TSize>>
         where TSize : IOfNSize
     {

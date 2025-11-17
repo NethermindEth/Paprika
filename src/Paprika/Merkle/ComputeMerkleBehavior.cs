@@ -326,7 +326,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         if (workItems.Length == 1)
         {
-            // Direct work on commit as there are no other interfering work items; 
+            // Direct work on commit as there are no other interfering work items;
             workItems[0].DoWork(commit);
             return;
         }
@@ -360,7 +360,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
     public void OnAccountDestroyed(in Keccak address, ICommit commit)
     {
         // Set an empty entry as the storage root for the destroyed account.
-        // This simulates an empty storage tree. 
+        // This simulates an empty storage tree.
         // If this account has storage set, it won't try to query the database to get nothing, it will get nothing from here.
         commit.Set(Key.Merkle(NibblePath.FromKey(address)), ReadOnlySpan<byte>.Empty, EntryType.UseOnce);
     }
@@ -777,7 +777,8 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
             ctx.Commit.SetBranch(key, branch.Children, memo.Raw, EntryType.Persistent);
         }
 
-        KeccakOrRlp.FromSpan(rlp.Slice(from, end - from), out keccakOrRlp);
+        var sliced = rlp.Slice(from, end - from);
+        KeccakOrRlp.FromSpan(sliced, out keccakOrRlp);
     }
 
     /// <summary>

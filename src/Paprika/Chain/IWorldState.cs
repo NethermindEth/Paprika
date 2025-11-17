@@ -26,7 +26,7 @@ public interface IWorldState : IStateStorageAccessor, IDisposable
     void SetStorage(in Keccak address, in Keccak storage, ReadOnlySpan<byte> value);
 
     /// <summary>
-    /// Gets the storage setter, so that some of the heavy calls for the storage can be amortized. 
+    /// Gets the storage setter, so that some of the heavy calls for the storage can be amortized.
     /// </summary>
     /// <param name="address"></param>
     /// <returns></returns>

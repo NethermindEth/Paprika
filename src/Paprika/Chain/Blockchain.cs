@@ -15,7 +15,7 @@ using Paprika.Merkle;
 using Paprika.RLP;
 using Paprika.Store;
 using Paprika.Utils;
-using BitFilter = Paprika.Data.BitMapFilter<Paprika.Data.BitMapFilter.OfN<Paprika.Data.BitMapFilter.OfNSize128>>;
+using BitFilter = Paprika.Data.BitMapFilter<Paprika.Data.BitMapFilter.OfN<Paprika.Data.BitMapFilter.OfNSize2>>;
 using static Paprika.Merkle.NibbleSet;
 
 namespace Paprika.Chain;
@@ -45,7 +45,7 @@ public class Blockchain : IAsyncDisposable
     private readonly Channel<CommittedBlockState> _finalizedChannel;
     private readonly Task _flusher;
     private readonly TimeSpan _minFlushDelay;
-    private uint _lastFinalized;
+    private long _lastFinalized = -1;
     private static readonly TimeSpan DefaultFlushDelay = TimeSpan.FromSeconds(1);
 
     // metrics
@@ -113,6 +113,10 @@ public class Blockchain : IAsyncDisposable
 
         using var batch = _db.BeginReadOnlyBatch();
         _lastFinalized = batch.Metadata.BlockNumber;
+        if (batch.Metadata.StateHash == Keccak.Zero && batch.Metadata.BlockNumber == 0)
+        {
+            _lastFinalized = -1;
+        }
     }
 
     public void VerifyDbIntegrityOnCommit()
@@ -163,42 +167,43 @@ public class Blockchain : IAsyncDisposable
                 {
                     last = (block.BlockNumber, block.Hash);
 
-                    using var batch = _db.BeginNextBatch();
-
-                    if (_verify)
-                    {
-                        batch.VerifyDbPagesOnCommit();
-                    }
-
-                    // apply
-                    var application = Stopwatch.StartNew();
-
-                    flushed.Add(block.BlockNumber);
-
                     var flushedTo = block.BlockNumber;
 
-                    batch.SetMetadata(block.BlockNumber, block.Hash);
+                    using (var batch = _db.BeginNextBatch())
+                    {
+                        if (_verify)
+                        {
+                            batch.VerifyDbPagesOnCommit();
+                        }
 
-                    block.Apply(batch);
+                        // apply
+                        var application = Stopwatch.StartNew();
 
-                    // only for debugging if needed
-                    //block.Assert(batch);
+                        flushed.Add(block.BlockNumber);
 
-                    application.Stop();
-                    _flusherBlockApplicationInMs.Record((int)application.ElapsedMilliseconds);
+                        batch.SetMetadata(block.BlockNumber, block.Hash);
 
-                    // If there's something in the queue, don't flush. Flush here only where there's nothing to read from the reader.
-                    var readerCount = reader.Count;
+                        block.Apply(batch);
 
-                    _flusherQueueCount.Set(readerCount);
+                        // only for debugging if needed
+                        //block.Assert(batch);
 
-                    var noMoreBlocksToApply = readerCount == 0;
+                        application.Stop();
+                        _flusherBlockApplicationInMs.Record((int)application.ElapsedMilliseconds);
 
-                    // Commit, but flush only if there's nothing more to apply.
-                    // If there are more blocks, leave it to the external _db.Flush() called outside of this loop.
-                    await batch.Commit(noMoreBlocksToApply
-                        ? CommitOptions.FlushDataOnly
-                        : CommitOptions.DangerNoFlush);
+                        // If there's something in the queue, don't flush. Flush here only where there's nothing to read from the reader.
+                        var readerCount = reader.Count;
+
+                        _flusherQueueCount.Set(readerCount);
+
+                        var noMoreBlocksToApply = readerCount == 0;
+
+                        // Commit, but flush only if there's nothing more to apply.
+                        // If there are more blocks, leave it to the external _db.Flush() called outside of this loop.
+                        await batch.Commit(noMoreBlocksToApply
+                            ? CommitOptions.FlushDataOnly
+                            : CommitOptions.DangerNoFlush);
+                    }
 
                     // inform blocks about flushing
                     lock (_blockLock)
@@ -277,6 +282,15 @@ public class Blockchain : IAsyncDisposable
 
         lock (_blockLock)
         {
+            if (_db.HasState(state.Hash))
+            {
+                Console.Error.WriteLine($"Skip readd {state.Hash}");
+
+                state.MakeDiscardable();
+                state.Dispose();
+
+                return;
+            }
             if (_blocksByHash.TryGetValue(state.Hash, out var committed))
             {
                 if (committed.BlockNumber == state.BlockNumber)
@@ -322,7 +336,16 @@ public class Blockchain : IAsyncDisposable
                     var toFinalize = _blocksByNumber[(uint)blockNumberToFinalize];
                     if (toFinalize.Count == 1)
                     {
-                        TryFinalize(toFinalize[0].Hash);
+                        try
+                        {
+                            // Need to exit blocklock to prevent deadlock
+                            Monitor.Exit(_blockLock);
+                            TryFinalize(toFinalize[0].Hash);
+                        }
+                        finally
+                        {
+                            Monitor.Enter(_blockLock);
+                        }
                     }
                 }
             }
@@ -436,7 +459,7 @@ public class Blockchain : IAsyncDisposable
         {
             if (_blocksByHash.TryGetValue(parent, out var ancestor) == false)
             {
-                ThrowParentStateNotFound(parent);
+                ThrowParentStateNotFound(parent, batch.Metadata.StateHash);
             }
 
             ancestor.AcquireLease(); // lease it!
@@ -448,10 +471,10 @@ public class Blockchain : IAsyncDisposable
 
         [DoesNotReturn]
         [StackTraceHidden]
-        static void ThrowParentStateNotFound(in Keccak parentKeccak)
+        static void ThrowParentStateNotFound(in Keccak parentKeccak, in Keccak metaState)
         {
             throw new Exception(
-                $"Failed to build dependencies. Parent state with hash {parentKeccak} was not found");
+                $"Failed to build dependencies. Parent state with hash {parentKeccak} was not found. metastate {metaState}");
         }
     }
 
@@ -468,6 +491,11 @@ public class Blockchain : IAsyncDisposable
 
     public void Finalize(Keccak keccak)
     {
+        if (_db.HasState(keccak))
+        {
+            Console.Error.WriteLine($"Finalize {keccak} skippped, already exist");
+            return;
+        }
         if (TryFinalize(keccak) == false)
         {
             throw new Exception("Block that is marked as finalized is not present");
@@ -486,7 +514,7 @@ public class Blockchain : IAsyncDisposable
                 return false;
             }
 
-            if (block.BlockNumber <= _lastFinalized)
+            if (block.BlockNumber <= _lastFinalized && _lastFinalized != -1)
             {
                 // Block is already in the finalization queue or forgotten.
                 // Return true to confirm that the request has been accepted.
@@ -527,7 +555,8 @@ public class Blockchain : IAsyncDisposable
         return true;
     }
 
-    private BitFilter CreateBitFilter() => BitMapFilter.CreateOfN<BitMapFilter.OfNSize128>(_pool);
+    // private BitFilter CreateBitFilter() => BitMapFilter.CreateOfN<BitMapFilter.OfNSize128>(_pool);
+    private BitFilter CreateBitFilter() => BitMapFilter.CreateOfN<BitMapFilter.OfNSize2>(_pool);
 
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload.
@@ -1966,8 +1995,13 @@ public class Blockchain : IAsyncDisposable
 
     public static ulong GetHash(in Key key) => key.GetHashCodeULong();
 
+    private bool _isDisposed = false;
+
     public async ValueTask DisposeAsync()
     {
+        if (_isDisposed) return;
+        _isDisposed = true;
+
         // mark writer as complete
         _finalizedChannel.Writer.Complete();
 
@@ -2313,6 +2347,7 @@ public class Blockchain : IAsyncDisposable
 
         public bool HasState(in Keccak keccak)
         {
+            if (_disposed) return false;
             _lock.EnterReadLock();
             try
             {
@@ -2440,8 +2475,11 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
+        private bool _disposed = false;
+
         public void Dispose()
         {
+            _disposed = true;
             _lock.Dispose();
             foreach (var (key, state) in _readers)
             {

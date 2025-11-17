@@ -9,9 +9,4 @@
       <ProjectReference Include="..\Paprika\Paprika.csproj" />
     </ItemGroup>
 
-    <ItemGroup>
-      <PackageReference Include="HdrHistogram" Version="2.5.0" />
-      <PackageReference Include="Spectre.Console" Version="0.49.1" />
-    </ItemGroup>
-
 </Project>
