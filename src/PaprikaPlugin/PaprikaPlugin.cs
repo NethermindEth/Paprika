@@ -21,7 +21,6 @@ public class PaprikaPluginModule : Module
 
         builder
             .AddSingleton<IWorldStateManager, PaprikaWorldStateManager>()
-            .AddSingleton<IStateReader, PaprikaStateReader>()
             ;
     }
 }

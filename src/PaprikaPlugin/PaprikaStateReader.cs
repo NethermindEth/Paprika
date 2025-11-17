@@ -3,33 +3,39 @@
 
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
+using Nethermind.Db;
 using Nethermind.Int256;
 using Nethermind.State;
 using Nethermind.Trie;
+using Paprika.Chain;
+using Keccak = Paprika.Crypto.Keccak;
 
 namespace PaprikaPlugin;
 
-public class PaprikaStateReader: IStateReader
+public class PaprikaStateReader(IReadOnlyWorldStateAccessor readOnlyWorldStateAccessor, IDb codeDb): IStateReader
 {
+
     public bool TryGetAccount(BlockHeader? baseBlock, Address address, out AccountStruct account)
     {
-        throw new NotImplementedException();
+        Paprika.Account acc = readOnlyWorldStateAccessor.GetAccount(
+            (baseBlock?.StateRoot ?? Nethermind.Core.Crypto.Keccak.EmptyTreeHash).ToPaprikaKeccak(),
+            address.ToPaprikaKeccak());
+
+        account = acc.ToNethAccountStruct();
+        return !account.IsTotallyEmpty;
     }
 
     public ReadOnlySpan<byte> GetStorage(BlockHeader? baseBlock, Address address, in UInt256 index)
     {
-        throw new NotImplementedException();
+        Span<byte> buffer = stackalloc byte[32];
+        Keccak root = (baseBlock?.StateRoot ?? Nethermind.Core.Crypto.Keccak.EmptyTreeHash).ToPaprikaKeccak();
+        readOnlyWorldStateAccessor.GetStorage(root, address.ToPaprikaKeccak(), index.SlotToPaprikaKeccak(), buffer);
+        return buffer.IsEmpty ? null : buffer.ToArray();
     }
 
-    public byte[]? GetCode(Hash256 codeHash)
-    {
-        throw new NotImplementedException();
-    }
+    public byte[]? GetCode(Hash256 codeHash) => codeHash == Nethermind.Core.Crypto.Keccak.OfAnEmptyString ? [] : codeDb[codeHash.Bytes];
+    public byte[]? GetCode(in ValueHash256 codeHash) => codeHash == Nethermind.Core.Crypto.Keccak.OfAnEmptyString.ValueHash256 ? [] : codeDb[codeHash.Bytes];
 
-    public byte[]? GetCode(in ValueHash256 codeHash)
-    {
-        throw new NotImplementedException();
-    }
 
     public void RunTreeVisitor<TCtx>(ITreeVisitor<TCtx> treeVisitor, Hash256 stateRoot, VisitingOptions? visitingOptions = null) where TCtx : struct, INodeContext<TCtx>
     {
@@ -38,6 +44,7 @@ public class PaprikaStateReader: IStateReader
 
     public bool HasStateForBlock(BlockHeader? baseBlock)
     {
-        throw new NotImplementedException();
+        Keccak root = (baseBlock?.StateRoot ?? Nethermind.Core.Crypto.Keccak.EmptyTreeHash).ToPaprikaKeccak();
+        return readOnlyWorldStateAccessor.HasState(root);
     }
 }
