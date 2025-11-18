@@ -41,12 +41,11 @@ internal class ReadOnlyPaprikaScope(IReadOnlyWorldState paprikaWorldState, IWorl
 
     public IWorldStateScopeProvider.IWorldStateWriteBatch StartWriteBatch(int estimatedAccountNum)
     {
-        throw new Exception("rite not supported");
+        return new NoopWriteBatch();
     }
 
     public void Commit(long blockNumber)
     {
-        throw new Exception("commit not supported");
     }
 
     private class PaprikaStorageTree(IStateStorageAccessor paprikaWorldState, Paprika.Crypto.Keccak address) : IWorldStateScopeProvider.IStorageTree
@@ -67,6 +66,39 @@ internal class ReadOnlyPaprikaScope(IReadOnlyWorldState paprikaWorldState, IWorl
         public byte[] Get(in ValueHash256 hash)
         {
             return null;
+        }
+    }
+
+    private class NoopWriteBatch: IWorldStateScopeProvider.IWorldStateWriteBatch
+    {
+        public void Dispose()
+        {
+
+        }
+
+        public event EventHandler<IWorldStateScopeProvider.AccountUpdated>? OnAccountUpdated;
+        public void Set(Address key, Account? account)
+        {
+        }
+
+        public IWorldStateScopeProvider.IStorageWriteBatch CreateStorageWriteBatch(Address key, int estimatedEntries)
+        {
+            return new NoopStorageWriteBatch();
+        }
+    }
+
+    private class NoopStorageWriteBatch : IWorldStateScopeProvider.IStorageWriteBatch
+    {
+        public void Dispose()
+        {
+        }
+
+        public void Set(in UInt256 index, byte[] value)
+        {
+        }
+
+        public void Clear()
+        {
         }
     }
 }

@@ -10,11 +10,16 @@ using IWorldState = Paprika.Chain.IWorldState;
 
 namespace PaprikaPlugin;
 
-internal class PaprikaScope(IWorldState paprikaWorldState, IWorldStateScopeProvider.ICodeDb codeDb) : IWorldStateScopeProvider.IScope
+internal class PaprikaScope(
+    IWorldState paprikaWorldState,
+    IWorldStateScopeProvider.ICodeDb codeDb,
+    SemaphoreSlim scopeLock,
+    bool isReadOnly) : IWorldStateScopeProvider.IScope
 {
     public void Dispose()
     {
         paprikaWorldState.Dispose();
+        scopeLock.Release();
     }
 
     public Hash256 RootHash => paprikaWorldState.Hash.ToNethHash();
@@ -47,7 +52,10 @@ internal class PaprikaScope(IWorldState paprikaWorldState, IWorldStateScopeProvi
 
     public void Commit(long blockNumber)
     {
-        paprikaWorldState.Commit((uint)blockNumber);
+        if (!isReadOnly)
+        {
+            paprikaWorldState.Commit((uint)blockNumber);
+        }
     }
 
     private class PaprikaStorageTree(IWorldState paprikaWorldState, Paprika.Crypto.Keccak address) : IWorldStateScopeProvider.IStorageTree
@@ -75,7 +83,6 @@ internal class PaprikaScope(IWorldState paprikaWorldState, IWorldStateScopeProvi
     {
         public void Dispose()
         {
-            paprikaWorldState.Dispose();
         }
 
         public event EventHandler<IWorldStateScopeProvider.AccountUpdated>? OnAccountUpdated; // TODO: Umm....

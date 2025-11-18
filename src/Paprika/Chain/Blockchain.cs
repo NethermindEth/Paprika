@@ -15,7 +15,7 @@ using Paprika.Merkle;
 using Paprika.RLP;
 using Paprika.Store;
 using Paprika.Utils;
-using BitFilter = Paprika.Data.BitMapFilter<Paprika.Data.BitMapFilter.OfN<Paprika.Data.BitMapFilter.OfNSize128>>;
+using BitFilter = Paprika.Data.BitMapFilter<Paprika.Data.BitMapFilter.OfN<Paprika.Data.BitMapFilter.OfNSize4>>;
 using static Paprika.Merkle.NibbleSet;
 
 namespace Paprika.Chain;
@@ -527,7 +527,8 @@ public class Blockchain : IAsyncDisposable
         return true;
     }
 
-    private BitFilter CreateBitFilter() => BitMapFilter.CreateOfN<BitMapFilter.OfNSize128>(_pool);
+    // private BitFilter CreateBitFilter() => BitMapFilter.CreateOfN<BitMapFilter.OfNSize128>(_pool);
+    private BitFilter CreateBitFilter() => BitMapFilter.CreateOfN<BitMapFilter.OfNSize4>(_pool);
 
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload.
@@ -2313,6 +2314,7 @@ public class Blockchain : IAsyncDisposable
 
         public bool HasState(in Keccak keccak)
         {
+            if (_disposed) return false;
             _lock.EnterReadLock();
             try
             {
@@ -2440,8 +2442,11 @@ public class Blockchain : IAsyncDisposable
             }
         }
 
+        private bool _disposed = false;
+
         public void Dispose()
         {
+            _disposed = true;
             _lock.Dispose();
             foreach (var (key, state) in _readers)
             {

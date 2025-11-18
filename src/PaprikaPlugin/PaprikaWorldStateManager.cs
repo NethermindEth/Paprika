@@ -19,23 +19,17 @@ namespace PaprikaPlugin;
 public class PaprikaWorldStateManager: IWorldStateManager, IAsyncDisposable
 {
     private Blockchain _paprikaBlockchain;
-    private PagedDb _paprikaDb;
+    private Paprika.IDb _paprikaDb;
     private PaprikaStateReader _stateReader;
 
     private ComputeMerkleBehavior _merkleBehavior;
     private IWorldStateScopeProvider _mainScopeProvider;
     private readonly IDb _codeDb;
+    private SemaphoreSlim _scopeLock = new SemaphoreSlim(1);
 
-    public PaprikaWorldStateManager(IInitConfig initConfig, [KeyFilter(DbNames.Code)] IDb codeDb)
+    public PaprikaWorldStateManager(Paprika.IDb paprikaDb, [KeyFilter(DbNames.Code)] IDb codeDb)
     {
-        var dbPath = initConfig.BaseDbPath + "/paprika/";
-
-        _paprikaDb = PagedDb.MemoryMappedDb(
-            200.GiB(),
-            128, // TODO: CHange history depht to more than a byte
-            dbPath,
-            true);
-
+        _paprikaDb = paprikaDb;
         _codeDb = codeDb;
         _merkleBehavior = new ComputeMerkleBehavior(ComputeMerkleBehavior.ParallelismNone);
         _paprikaBlockchain = new Blockchain(
@@ -52,7 +46,7 @@ public class PaprikaWorldStateManager: IWorldStateManager, IAsyncDisposable
         _stateReader = new PaprikaStateReader(readOnlyWorldStateAccessor, codeDb);
 
         _mainScopeProvider =
-            new PaprikaWorldStateScopeProvider(_paprikaBlockchain, codeDb);
+            new PaprikaWorldStateScopeProvider(_paprikaBlockchain, codeDb, _scopeLock);
     }
 
     public IWorldStateScopeProvider GlobalWorldState => _mainScopeProvider;
@@ -61,13 +55,15 @@ public class PaprikaWorldStateManager: IWorldStateManager, IAsyncDisposable
     public IReadOnlyKeyValueStore? HashServer => null;
     public IWorldStateScopeProvider CreateResettableWorldState()
     {
-        return new PaprikaReadOnlyStateScopeProvider(_paprikaBlockchain, _codeDb);
+        return new PaprikaReadOnlyStateScopeProvider(_paprikaBlockchain, _codeDb, _scopeLock);
     }
 
     public event EventHandler<ReorgBoundaryReached>? ReorgBoundaryReached; // TODO: How?
     public IOverridableWorldScope CreateOverridableWorldScope()
     {
-        throw new NotImplementedException();
+        return new PaprikaOverridableWorldScope(
+            new PaprikaReadOnlyStateScopeProvider(_paprikaBlockchain, _codeDb, _scopeLock), _stateReader);
+
     }
 
     public bool VerifyTrie(BlockHeader stateAtBlock, CancellationToken cancellationToken)
@@ -77,13 +73,22 @@ public class PaprikaWorldStateManager: IWorldStateManager, IAsyncDisposable
 
     public void FlushCache(CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        // TODO: Flush
     }
 
     public async ValueTask DisposeAsync()
     {
         _merkleBehavior.Dispose();
         await _paprikaBlockchain.DisposeAsync();
-        _paprikaDb.Dispose();
+    }
+
+    // Just a fake one
+    private class PaprikaOverridableWorldScope(IWorldStateScopeProvider worldStateScopeProvider, IStateReader stateReader) : IOverridableWorldScope
+    {
+        public IWorldStateScopeProvider WorldState => worldStateScopeProvider;
+        public IStateReader GlobalStateReader => stateReader;
+        public void ResetOverrides()
+        {
+        }
     }
 }
