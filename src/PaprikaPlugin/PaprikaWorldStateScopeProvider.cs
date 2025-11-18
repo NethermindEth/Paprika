@@ -26,7 +26,7 @@ public class PaprikaWorldStateScopeProvider(
         IWorldState paprikaWorldState = paprikaBlockchain.StartNew(
             (baseBlock?.StateRoot ?? Nethermind.Core.Crypto.Keccak.EmptyTreeHash).ToPaprikaKeccak());
 
-        return new PaprikaScope(paprikaWorldState, new KeyValueWithBatchingBackedCodeDb(codeDb), scopeLock, false);
+        return new PaprikaScope(paprikaWorldState, new KeyValueWithBatchingBackedCodeDb(codeDb), scopeLock, false, paprikaBlockchain);
     }
 }
 
@@ -42,9 +42,9 @@ public class PaprikaReadOnlyStateScopeProvider(
 
     public IWorldStateScopeProvider.IScope BeginScope(BlockHeader? baseBlock)
     {
-        IWorldState paprikaWorldState = paprikaBlockchain.StartNew(
+        IReadOnlyWorldState paprikaWorldState = paprikaBlockchain.StartReadOnly(
             (baseBlock?.StateRoot ?? Nethermind.Core.Crypto.Keccak.EmptyTreeHash).ToPaprikaKeccak());
 
-        return new PaprikaScope(paprikaWorldState, new KeyValueWithBatchingBackedCodeDb(codeDb), scopeLock, true);
+        return new ReadOnlyPaprikaScope(paprikaWorldState, new KeyValueWithBatchingBackedCodeDb(codeDb));
     }
 }

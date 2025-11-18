@@ -163,42 +163,43 @@ public class Blockchain : IAsyncDisposable
                 {
                     last = (block.BlockNumber, block.Hash);
 
-                    using var batch = _db.BeginNextBatch();
-
-                    if (_verify)
-                    {
-                        batch.VerifyDbPagesOnCommit();
-                    }
-
-                    // apply
-                    var application = Stopwatch.StartNew();
-
-                    flushed.Add(block.BlockNumber);
-
                     var flushedTo = block.BlockNumber;
 
-                    batch.SetMetadata(block.BlockNumber, block.Hash);
+                    using (var batch = _db.BeginNextBatch())
+                    {
+                        if (_verify)
+                        {
+                            batch.VerifyDbPagesOnCommit();
+                        }
 
-                    block.Apply(batch);
+                        // apply
+                        var application = Stopwatch.StartNew();
 
-                    // only for debugging if needed
-                    //block.Assert(batch);
+                        flushed.Add(block.BlockNumber);
 
-                    application.Stop();
-                    _flusherBlockApplicationInMs.Record((int)application.ElapsedMilliseconds);
+                        batch.SetMetadata(block.BlockNumber, block.Hash);
 
-                    // If there's something in the queue, don't flush. Flush here only where there's nothing to read from the reader.
-                    var readerCount = reader.Count;
+                        block.Apply(batch);
 
-                    _flusherQueueCount.Set(readerCount);
+                        // only for debugging if needed
+                        //block.Assert(batch);
 
-                    var noMoreBlocksToApply = readerCount == 0;
+                        application.Stop();
+                        _flusherBlockApplicationInMs.Record((int)application.ElapsedMilliseconds);
 
-                    // Commit, but flush only if there's nothing more to apply.
-                    // If there are more blocks, leave it to the external _db.Flush() called outside of this loop.
-                    await batch.Commit(noMoreBlocksToApply
-                        ? CommitOptions.FlushDataOnly
-                        : CommitOptions.DangerNoFlush);
+                        // If there's something in the queue, don't flush. Flush here only where there's nothing to read from the reader.
+                        var readerCount = reader.Count;
+
+                        _flusherQueueCount.Set(readerCount);
+
+                        var noMoreBlocksToApply = readerCount == 0;
+
+                        // Commit, but flush only if there's nothing more to apply.
+                        // If there are more blocks, leave it to the external _db.Flush() called outside of this loop.
+                        await batch.Commit(noMoreBlocksToApply
+                            ? CommitOptions.FlushDataOnly
+                            : CommitOptions.DangerNoFlush);
+                    }
 
                     // inform blocks about flushing
                     lock (_blockLock)
@@ -277,6 +278,15 @@ public class Blockchain : IAsyncDisposable
 
         lock (_blockLock)
         {
+            if (_db.HasState(state.Hash))
+            {
+                Console.Error.WriteLine($"Skip readd {state.Hash}");
+
+                state.MakeDiscardable();
+                state.Dispose();
+
+                return;
+            }
             if (_blocksByHash.TryGetValue(state.Hash, out var committed))
             {
                 if (committed.BlockNumber == state.BlockNumber)
@@ -477,6 +487,12 @@ public class Blockchain : IAsyncDisposable
 
     public void Finalize(Keccak keccak)
     {
+        if (_db.HasState(keccak))
+        {
+            Console.Error.WriteLine($"Finalize {keccak} skippped, already exist");
+            // Finalize genesis. got double commit for some reason.
+            return;
+        }
         if (TryFinalize(keccak) == false)
         {
             throw new Exception("Block that is marked as finalized is not present");
@@ -495,7 +511,7 @@ public class Blockchain : IAsyncDisposable
                 return false;
             }
 
-            if (block.BlockNumber <= _lastFinalized)
+            if (block.BlockNumber <= _lastFinalized && _lastFinalized != 0)
             {
                 // Block is already in the finalization queue or forgotten.
                 // Return true to confirm that the request has been accepted.
@@ -508,6 +524,12 @@ public class Blockchain : IAsyncDisposable
             Debug.Assert(count > 0, "At least one block should be considered for finalization.");
 
             finalized = new((int)count);
+            if (block.BlockNumber == 0 && _lastFinalized == 0)
+            {
+                // Genesis
+                finalized.Push(block);
+            }
+
             for (var blockNumber = block.BlockNumber; blockNumber > _lastFinalized; blockNumber--)
             {
                 // no need to acquire lease here, the block is already leased for the blockchain before Add(block)
@@ -526,13 +548,11 @@ public class Blockchain : IAsyncDisposable
 
         while (finalized.TryPop(out var block))
         {
-            Console.Error.WriteLine($"Finalizing {block.BlockNumber}");
             if (writer.TryWrite(block) == false)
             {
                 // hard spin wait on breaching the size
                 SpinWait.SpinUntil(() => writer.TryWrite(block));
             }
-            Console.Error.WriteLine($"Finalized {block.BlockNumber}");
         }
 
         return true;

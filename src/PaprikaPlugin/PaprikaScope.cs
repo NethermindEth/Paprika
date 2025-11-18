@@ -14,7 +14,8 @@ internal class PaprikaScope(
     IWorldState paprikaWorldState,
     IWorldStateScopeProvider.ICodeDb codeDb,
     SemaphoreSlim scopeLock,
-    bool isReadOnly) : IWorldStateScopeProvider.IScope
+    bool isReadOnly,
+    Blockchain paprikaBlockchain) : IWorldStateScopeProvider.IScope
 {
     public void Dispose()
     {
@@ -26,7 +27,7 @@ internal class PaprikaScope(
 
     public void UpdateRootHash()
     {
-        // TODO: Need to call pre commit behaviour manually maybe
+        // Paprika auto update on `Hash` getter
     }
 
     public Account? Get(Address address)
@@ -55,6 +56,11 @@ internal class PaprikaScope(
         if (!isReadOnly)
         {
             paprikaWorldState.Commit((uint)blockNumber);
+
+            if (blockNumber == 0)
+            {
+                paprikaBlockchain.Finalize(paprikaWorldState.Hash);
+            }
         }
     }
 
