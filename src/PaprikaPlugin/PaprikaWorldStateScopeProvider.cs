@@ -5,6 +5,7 @@ using Nethermind.Core;
 using Nethermind.Evm.State;
 using Nethermind.State;
 using Paprika.Chain;
+using Paprika.Merkle;
 using IWorldState = Paprika.Chain.IWorldState;
 
 namespace PaprikaPlugin;
@@ -26,7 +27,16 @@ public class PaprikaWorldStateScopeProvider(
         IWorldState paprikaWorldState = paprikaBlockchain.StartNew(
             (baseBlock?.StateRoot ?? Nethermind.Core.Crypto.Keccak.EmptyTreeHash).ToPaprikaKeccak());
 
-        return new PaprikaScope(paprikaWorldState, new KeyValueWithBatchingBackedCodeDb(codeDb), scopeLock, false, paprikaBlockchain);
+        IWorldStateScopeProvider.IScope scope = new PaprikaScope(paprikaWorldState, new KeyValueWithBatchingBackedCodeDb(codeDb), scopeLock, false, paprikaBlockchain);
+        ComputeMerkleBehavior.DebugLog = false;
+        if (baseBlock?.Number == 46348)
+        {
+            ComputeMerkleBehavior.DebugLog = true;
+            Console.Error.WriteLine($"Starting root {baseBlock?.StateRoot}");
+            scope = new ScoreProviderLogger(scope);
+        }
+
+        return scope;
     }
 }
 
