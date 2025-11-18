@@ -71,7 +71,7 @@ internal class PaprikaScope(
         {
             Span<byte> buffer = stackalloc byte[32];
             Paprika.Crypto.Keccak key = index.SlotToPaprikaKeccak();
-            paprikaWorldState.GetStorage(address, key, buffer);
+            buffer = paprikaWorldState.GetStorage(address, key, buffer);
             return buffer.IsEmpty ? null : buffer.ToArray();
         }
 

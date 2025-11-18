@@ -29,7 +29,7 @@ public class PaprikaStateReader(IReadOnlyWorldStateAccessor readOnlyWorldStateAc
     {
         Span<byte> buffer = stackalloc byte[32];
         Keccak root = (baseBlock?.StateRoot ?? Nethermind.Core.Crypto.Keccak.EmptyTreeHash).ToPaprikaKeccak();
-        readOnlyWorldStateAccessor.GetStorage(root, address.ToPaprikaKeccak(), index.SlotToPaprikaKeccak(), buffer);
+        buffer = readOnlyWorldStateAccessor.GetStorage(root, address.ToPaprikaKeccak(), index.SlotToPaprikaKeccak(), buffer);
         return buffer.IsEmpty ? null : buffer.ToArray();
     }
 
