@@ -45,7 +45,7 @@ public class Blockchain : IAsyncDisposable
     private readonly Channel<CommittedBlockState> _finalizedChannel;
     private readonly Task _flusher;
     private readonly TimeSpan _minFlushDelay;
-    private uint _lastFinalized;
+    private long _lastFinalized = -1;
     private static readonly TimeSpan DefaultFlushDelay = TimeSpan.FromSeconds(1);
 
     // metrics
@@ -113,6 +113,10 @@ public class Blockchain : IAsyncDisposable
 
         using var batch = _db.BeginReadOnlyBatch();
         _lastFinalized = batch.Metadata.BlockNumber;
+        if (batch.Metadata.StateHash == Keccak.Zero && batch.Metadata.BlockNumber == 0)
+        {
+            _lastFinalized = -1;
+        }
     }
 
     public void VerifyDbIntegrityOnCommit()
@@ -490,7 +494,6 @@ public class Blockchain : IAsyncDisposable
         if (_db.HasState(keccak))
         {
             Console.Error.WriteLine($"Finalize {keccak} skippped, already exist");
-            // Finalize genesis. got double commit for some reason.
             return;
         }
         if (TryFinalize(keccak) == false)
@@ -511,7 +514,7 @@ public class Blockchain : IAsyncDisposable
                 return false;
             }
 
-            if (block.BlockNumber <= _lastFinalized && _lastFinalized != 0)
+            if (block.BlockNumber <= _lastFinalized && _lastFinalized != -1)
             {
                 // Block is already in the finalization queue or forgotten.
                 // Return true to confirm that the request has been accepted.
@@ -524,12 +527,6 @@ public class Blockchain : IAsyncDisposable
             Debug.Assert(count > 0, "At least one block should be considered for finalization.");
 
             finalized = new((int)count);
-            if (block.BlockNumber == 0 && _lastFinalized == 0)
-            {
-                // Genesis
-                finalized.Push(block);
-            }
-
             for (var blockNumber = block.BlockNumber; blockNumber > _lastFinalized; blockNumber--)
             {
                 // no need to acquire lease here, the block is already leased for the blockchain before Add(block)
