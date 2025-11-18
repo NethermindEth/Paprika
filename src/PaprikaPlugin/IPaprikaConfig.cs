@@ -16,6 +16,12 @@ public interface IPaprikaConfig: IConfig
     [ConfigItem(Description = "Paprika history depth", DefaultValue = "128", HiddenFromDocs = true)]
     public byte HistoryDepth { get; set; }
 
-    [ConfigItem(Description = "Paprika flush", DefaultValue = "128", HiddenFromDocs = true)]
+    [ConfigItem(Description = "Paprika flush", DefaultValue = "false", HiddenFromDocs = true)]
     public bool FlushToDisk { get; set; }
+
+    [ConfigItem(Description = "Paprika flush", DefaultValue = "2", HiddenFromDocs = true)]
+    int FinalizationQueueLimit { get; set; }
+
+    [ConfigItem(Description = "Automatic finalaization", DefaultValue = "2", HiddenFromDocs = true)]
+    int AutomaticallyFinalizeAfter { get; set; }
 }

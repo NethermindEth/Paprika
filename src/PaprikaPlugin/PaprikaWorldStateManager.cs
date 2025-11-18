@@ -7,6 +7,7 @@ using Nethermind.Core;
 using Nethermind.Core.Extensions;
 using Nethermind.Db;
 using Nethermind.Evm.State;
+using Nethermind.PaprikaPlugin;
 using Nethermind.State;
 using Nethermind.State.SnapServer;
 using Nethermind.Trie.Pruning;
@@ -27,7 +28,7 @@ public class PaprikaWorldStateManager: IWorldStateManager, IAsyncDisposable
     private readonly IDb _codeDb;
     private SemaphoreSlim _scopeLock = new SemaphoreSlim(1);
 
-    public PaprikaWorldStateManager(Paprika.IDb paprikaDb, [KeyFilter(DbNames.Code)] IDb codeDb)
+    public PaprikaWorldStateManager(Paprika.IDb paprikaDb, [KeyFilter(DbNames.Code)] IDb codeDb, IPaprikaConfig paprikaConfig)
     {
         _paprikaDb = paprikaDb;
         _codeDb = codeDb;
@@ -38,8 +39,8 @@ public class PaprikaWorldStateManager: IWorldStateManager, IAsyncDisposable
             minFlushDelay: TimeSpan.FromMinutes(1),
             cacheBudgetStateAndStorage: CacheBudget.Options.None,
             cacheBudgetPreCommit: CacheBudget.Options.None,
-            finalizationQueueLimit: 1000,
-            int.MaxValue,
+            finalizationQueueLimit: paprikaConfig.FinalizationQueueLimit,
+            automaticallyFinalizeAfter: paprikaConfig.AutomaticallyFinalizeAfter,
             null);
 
         var readOnlyWorldStateAccessor = _paprikaBlockchain.BuildReadOnlyAccessor();

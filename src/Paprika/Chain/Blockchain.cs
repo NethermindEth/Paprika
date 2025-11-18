@@ -15,7 +15,7 @@ using Paprika.Merkle;
 using Paprika.RLP;
 using Paprika.Store;
 using Paprika.Utils;
-using BitFilter = Paprika.Data.BitMapFilter<Paprika.Data.BitMapFilter.OfN<Paprika.Data.BitMapFilter.OfNSize4>>;
+using BitFilter = Paprika.Data.BitMapFilter<Paprika.Data.BitMapFilter.OfN<Paprika.Data.BitMapFilter.OfNSize2>>;
 using static Paprika.Merkle.NibbleSet;
 
 namespace Paprika.Chain;
@@ -322,7 +322,16 @@ public class Blockchain : IAsyncDisposable
                     var toFinalize = _blocksByNumber[(uint)blockNumberToFinalize];
                     if (toFinalize.Count == 1)
                     {
-                        TryFinalize(toFinalize[0].Hash);
+                        try
+                        {
+                            // Need to exit blocklock to prevent deadlock
+                            Monitor.Exit(_blockLock);
+                            TryFinalize(toFinalize[0].Hash);
+                        }
+                        finally
+                        {
+                            Monitor.Enter(_blockLock);
+                        }
                     }
                 }
             }
@@ -517,18 +526,20 @@ public class Blockchain : IAsyncDisposable
 
         while (finalized.TryPop(out var block))
         {
+            Console.Error.WriteLine($"Finalizing {block.BlockNumber}");
             if (writer.TryWrite(block) == false)
             {
                 // hard spin wait on breaching the size
                 SpinWait.SpinUntil(() => writer.TryWrite(block));
             }
+            Console.Error.WriteLine($"Finalized {block.BlockNumber}");
         }
 
         return true;
     }
 
     // private BitFilter CreateBitFilter() => BitMapFilter.CreateOfN<BitMapFilter.OfNSize128>(_pool);
-    private BitFilter CreateBitFilter() => BitMapFilter.CreateOfN<BitMapFilter.OfNSize4>(_pool);
+    private BitFilter CreateBitFilter() => BitMapFilter.CreateOfN<BitMapFilter.OfNSize2>(_pool);
 
     /// <summary>
     /// Represents a block that is a result of ExecutionPayload.
