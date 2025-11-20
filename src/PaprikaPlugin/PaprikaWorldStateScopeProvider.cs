@@ -29,8 +29,9 @@ public class PaprikaWorldStateScopeProvider(
 
         IWorldStateScopeProvider.IScope scope = new PaprikaScope(paprikaWorldState, new KeyValueWithBatchingBackedCodeDb(codeDb), scopeLock, false, paprikaBlockchain);
         ComputeMerkleBehavior.DebugLog = false;
-        if (baseBlock?.Number == 46348)
+        if (baseBlock?.Number == 46342)
         {
+            // Processed block 46383 (0xa7abd1...864dbe) is invalid:
             ComputeMerkleBehavior.DebugLog = true;
             Console.Error.WriteLine($"Starting root {baseBlock?.StateRoot}");
             scope = new ScoreProviderLogger(scope);

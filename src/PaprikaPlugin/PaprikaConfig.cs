@@ -11,6 +11,6 @@ public class PaprikaConfig: IPaprikaConfig
     public long SizeGb { get; set; } = 128;
     public byte HistoryDepth { get; set; } = 128;
     public bool FlushToDisk { get; set; } = false;
-    public int FinalizationQueueLimit { get; set; } = 8;
-    public int AutomaticallyFinalizeAfter { get; set; } = 5;
+    public int FinalizationQueueLimit { get; set; } = 2;
+    public int AutomaticallyFinalizeAfter { get; set; } = 4;
 }
