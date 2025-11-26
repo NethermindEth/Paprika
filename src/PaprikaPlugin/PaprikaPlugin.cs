@@ -2,12 +2,16 @@
 using Autofac.Core;
 using Nethermind.Api;
 using Nethermind.Api.Extensions;
+using Nethermind.Api.Steps;
 using Nethermind.Core;
 using Nethermind.Core.Extensions;
-using Nethermind.PaprikaPlugin;
 using Nethermind.State;
 using Paprika;
+using Paprika.Chain;
+using Paprika.Merkle;
 using Paprika.Store;
+using PaprikaPlugin.Importer;
+using Prometheus;
 
 namespace PaprikaPlugin;
 
@@ -17,10 +21,10 @@ public class PaprikaPlugin(IPaprikaConfig paprikaConfig): INethermindPlugin
     public string Description => "Paprika State Db";
     public string Author => "Nethermind";
     public bool Enabled => paprikaConfig.Enabled;
-    public IModule Module { get; } = new PaprikaPluginModule();
+    public IModule Module { get; } = new PaprikaPluginModule(paprikaConfig);
 }
 
-public class PaprikaPluginModule : Module
+public class PaprikaPluginModule(IPaprikaConfig paprikaConfig) : Module
 {
     protected override void Load(ContainerBuilder builder)
     {
@@ -29,7 +33,16 @@ public class PaprikaPluginModule : Module
         builder
             .AddSingleton<IWorldStateManager, PaprikaWorldStateManager>()
             .AddSingleton<IDb, IInitConfig, IPaprikaConfig>(ConfigureDb)
+            .AddSingleton<ComputeMerkleBehavior>((_) => new ComputeMerkleBehavior(ComputeMerkleBehavior.ParallelismNone))
+            .AddSingleton<Blockchain, IDb, ComputeMerkleBehavior, MetricsReporter>(CreatePaprikaBlockchain)
+            .AddSingleton<MetricsReporter>()
+
             ;
+
+        if (paprikaConfig.ImportFromTrieStore)
+        {
+            builder.AddStep(typeof(ImporterStep));
+        }
     }
 
     private IDb ConfigureDb(IInitConfig initConfig, IPaprikaConfig paprikaConfig)
@@ -48,5 +61,18 @@ public class PaprikaPluginModule : Module
             paprikaConfig.HistoryDepth, // TODO: CHange history depht to more than a byte
             dbPath,
             paprikaConfig.FlushToDisk);
+    }
+
+    private Blockchain CreatePaprikaBlockchain(IDb paprikaDb, ComputeMerkleBehavior merkleBehavior, MetricsReporter metricsReporter)
+    {
+        return new Blockchain(
+            paprikaDb,
+            merkleBehavior,
+            minFlushDelay: TimeSpan.FromMinutes(1),
+            cacheBudgetStateAndStorage: CacheBudget.Options.None,
+            cacheBudgetPreCommit: CacheBudget.Options.None,
+            finalizationQueueLimit: paprikaConfig.FinalizationQueueLimit,
+            automaticallyFinalizeAfter: paprikaConfig.AutomaticallyFinalizeAfter,
+            beforeMetricsDisposed: () => metricsReporter.Observe());
     }
 }

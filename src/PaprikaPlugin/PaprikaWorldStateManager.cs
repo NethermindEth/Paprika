@@ -7,7 +7,6 @@ using Nethermind.Core;
 using Nethermind.Core.Extensions;
 using Nethermind.Db;
 using Nethermind.Evm.State;
-using Nethermind.PaprikaPlugin;
 using Nethermind.State;
 using Nethermind.State.SnapServer;
 using Nethermind.Trie.Pruning;
@@ -28,20 +27,16 @@ public class PaprikaWorldStateManager: IWorldStateManager, IAsyncDisposable
     private readonly IDb _codeDb;
     private SemaphoreSlim _scopeLock = new SemaphoreSlim(1);
 
-    public PaprikaWorldStateManager(Paprika.IDb paprikaDb, [KeyFilter(DbNames.Code)] IDb codeDb, IPaprikaConfig paprikaConfig)
+    public PaprikaWorldStateManager(
+        Paprika.IDb paprikaDb,
+        [KeyFilter(DbNames.Code)] IDb codeDb,
+        ComputeMerkleBehavior computeMerkleBehavior,
+        Blockchain paprikaBlockchain)
     {
         _paprikaDb = paprikaDb;
         _codeDb = codeDb;
-        _merkleBehavior = new ComputeMerkleBehavior(ComputeMerkleBehavior.ParallelismNone);
-        _paprikaBlockchain = new Blockchain(
-            _paprikaDb,
-            _merkleBehavior,
-            minFlushDelay: TimeSpan.FromMinutes(1),
-            cacheBudgetStateAndStorage: CacheBudget.Options.None,
-            cacheBudgetPreCommit: CacheBudget.Options.None,
-            finalizationQueueLimit: paprikaConfig.FinalizationQueueLimit,
-            automaticallyFinalizeAfter: paprikaConfig.AutomaticallyFinalizeAfter,
-            null);
+        _merkleBehavior = computeMerkleBehavior;
+        _paprikaBlockchain = paprikaBlockchain;
 
         var readOnlyWorldStateAccessor = _paprikaBlockchain.BuildReadOnlyAccessor();
         _stateReader = new PaprikaStateReader(readOnlyWorldStateAccessor, codeDb);

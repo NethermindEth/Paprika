@@ -3,7 +3,7 @@
 
 using Nethermind.Config;
 
-namespace Nethermind.PaprikaPlugin;
+namespace PaprikaPlugin;
 
 public interface IPaprikaConfig: IConfig
 {
@@ -24,4 +24,7 @@ public interface IPaprikaConfig: IConfig
 
     [ConfigItem(Description = "Automatic finalaization", DefaultValue = "2", HiddenFromDocs = true)]
     int AutomaticallyFinalizeAfter { get; set; }
+
+    [ConfigItem(Description = "Import from triestore", DefaultValue = "false", HiddenFromDocs = true)]
+    bool ImportFromTrieStore { get; set; }
 }
