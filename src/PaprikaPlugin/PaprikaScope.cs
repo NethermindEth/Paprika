@@ -66,7 +66,9 @@ internal class PaprikaScope(
 
     private class PaprikaStorageTree(IWorldState paprikaWorldState, Paprika.Crypto.Keccak address) : IWorldStateScopeProvider.IStorageTree
     {
-        public Hash256 RootHash => paprikaWorldState.GetAccount(address).CodeHash.ToNethHash();
+        public Hash256 RootHash => Keccak.Zero;
+        // public Hash256 RootHash => paprikaWorldState.GetAccount(address).StorageRootHash.ToNethHash();
+
         public byte[] Get(in UInt256 index)
         {
             Span<byte> buffer = stackalloc byte[32];
@@ -87,6 +89,8 @@ internal class PaprikaScope(
 
     private class PaprikaWriteBatcher(IWorldState paprikaWorldState) : IWorldStateScopeProvider.IWorldStateWriteBatch
     {
+        private Lock _writeLock = new Lock();
+
         public void Dispose()
         {
         }
@@ -94,7 +98,16 @@ internal class PaprikaScope(
         public event EventHandler<IWorldStateScopeProvider.AccountUpdated>? OnAccountUpdated; // TODO: Umm....
         public void Set(Address key, Account? account)
         {
-            paprikaWorldState.SetAccount(key.ToPaprikaKeccak(), (account ?? Account.TotallyEmpty).ToPaprikaAccount());
+            using var _ = _writeLock.EnterScope();
+            var paprikaKeccak = key.ToPaprikaKeccak();
+            Paprika.Account originalAccount = paprikaWorldState.GetAccount(paprikaKeccak);
+            paprikaWorldState.SetAccount(key.ToPaprikaKeccak(),
+                new Paprika.Account(
+                    account?.Balance ?? originalAccount.Balance,
+                    account?.Nonce ?? originalAccount.Nonce,
+                    account?.CodeHash?.ToPaprikaKeccak() ?? originalAccount.CodeHash,
+                    originalAccount.StorageRootHash)
+            );
         }
 
         public IWorldStateScopeProvider.IStorageWriteBatch CreateStorageWriteBatch(Address key, int estimatedEntries)
@@ -102,12 +115,20 @@ internal class PaprikaScope(
             return new PaprikaStorageWriter(
                 paprikaWorldState.GetStorageSetter(key.ToPaprikaKeccak()),
                 paprikaWorldState,
-                key.ToPaprikaKeccak()
+                key.ToPaprikaKeccak(),
+                paprikaWorldState.GetAccount(key.ToPaprikaKeccak()).IsEmpty,
+                _writeLock
             );
         }
     }
 
-    private class PaprikaStorageWriter(IStorageSetter setter, IWorldState worldState, Paprika.Crypto.Keccak account) : IWorldStateScopeProvider.IStorageWriteBatch
+    private class PaprikaStorageWriter(
+        IStorageSetter setter,
+        IWorldState worldState,
+        Paprika.Crypto.Keccak account,
+        bool originallyEmpty,
+        Lock writeLock
+    ) : IWorldStateScopeProvider.IStorageWriteBatch
     {
         public void Dispose()
         {
@@ -115,11 +136,13 @@ internal class PaprikaScope(
 
         public void Set(in UInt256 index, byte[] value)
         {
+            using var _ = writeLock.EnterScope();
             setter.SetStorage(index.SlotToPaprikaKeccak(), value);
         }
 
         public void Clear()
         {
+            using var _ = writeLock.EnterScope();
             worldState.DestroyAccount(account);
         }
     }
