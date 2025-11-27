@@ -104,9 +104,6 @@ internal class PaprikaScope(
             var paprikaKeccak = key.ToPaprikaKeccak();
             Paprika.Account originalAccount = paprikaWorldState.GetAccount(paprikaKeccak);
 
-            if (account?.CodeHash != Keccak.OfAnEmptyString || account?.StorageRoot != Keccak.EmptyTreeHash)
-                Console.Error.WriteLine($"Account {key}, {account?.CodeHash}, {account?.StorageRoot}");
-
             // I dont know man.... I'm just trying things out.
             paprikaWorldState.SetAccount(key.ToPaprikaKeccak(),
                 new Paprika.Account(
@@ -144,14 +141,12 @@ internal class PaprikaScope(
         public void Set(in UInt256 index, byte[] value)
         {
             using var _ = writeLock.EnterScope();
-            Console.Error.WriteLine($"The set {account}:{index} -> {value?.ToHexString()}");
             setter.SetStorage(index.SlotToPaprikaKeccak(), value);
         }
 
         public void Clear()
         {
             using var _ = writeLock.EnterScope();
-            Console.Error.WriteLine($"Clear {account}");
             worldState.DestroyAccount(account);
         }
     }

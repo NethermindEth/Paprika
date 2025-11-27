@@ -72,10 +72,13 @@ public class PaprikaWorldStateManager: IWorldStateManager, IAsyncDisposable
         // TODO: Flush
     }
 
+    private bool _wasDisposed = false;
+
     public async ValueTask DisposeAsync()
     {
+        if (_wasDisposed) return;
+        _wasDisposed = true;
         _merkleBehavior.Dispose();
-        await _paprikaBlockchain.DisposeAsync();
     }
 
     // Just a fake one

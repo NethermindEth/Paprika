@@ -459,7 +459,7 @@ public class Blockchain : IAsyncDisposable
         {
             if (_blocksByHash.TryGetValue(parent, out var ancestor) == false)
             {
-                ThrowParentStateNotFound(parent);
+                ThrowParentStateNotFound(parent, batch.Metadata.StateHash);
             }
 
             ancestor.AcquireLease(); // lease it!
@@ -471,10 +471,10 @@ public class Blockchain : IAsyncDisposable
 
         [DoesNotReturn]
         [StackTraceHidden]
-        static void ThrowParentStateNotFound(in Keccak parentKeccak)
+        static void ThrowParentStateNotFound(in Keccak parentKeccak, in Keccak metaState)
         {
             throw new Exception(
-                $"Failed to build dependencies. Parent state with hash {parentKeccak} was not found");
+                $"Failed to build dependencies. Parent state with hash {parentKeccak} was not found. metastate {metaState}");
         }
     }
 
@@ -1995,8 +1995,13 @@ public class Blockchain : IAsyncDisposable
 
     public static ulong GetHash(in Key key) => key.GetHashCodeULong();
 
+    private bool _isDisposed = false;
+
     public async ValueTask DisposeAsync()
     {
+        if (_isDisposed) return;
+        _isDisposed = true;
+
         // mark writer as complete
         _finalizedChannel.Writer.Complete();
 

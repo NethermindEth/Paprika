@@ -15,7 +15,6 @@ public class MetricsReporter : IDisposable
         {
             InstrumentPublished = (instrument, listener) =>
             {
-                Console.Error.WriteLine($"Got meter {instrument.Meter.Name}");
                 if (ShouldReport(instrument) == false)
                     return;
 
@@ -32,8 +31,6 @@ public class MetricsReporter : IDisposable
 
                     var state = Measurement.Build(instrument);
                     dict!.Add(instrument, state);
-
-                    Console.Error.Write($"Instrument got {meter.Name}, {state}");
 
                     listener.EnableMeasurementEvents(instrument, state);
                 }
@@ -53,7 +50,6 @@ public class MetricsReporter : IDisposable
             }
         };
 
-        Console.Error.WriteLine("====== meter start===============");
         _listener.Start();
 
         _listener.SetMeasurementEventCallback<double>((i, m, l, c) => ((IMeasurement)c!).Update(m, l));
