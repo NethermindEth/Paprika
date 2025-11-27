@@ -779,17 +779,7 @@ public class ComputeMerkleBehavior : IPreCommitBehavior, IDisposable
 
         var sliced = rlp.Slice(from, end - from);
         KeccakOrRlp.FromSpan(sliced, out keccakOrRlp);
-        if (DebugLog)
-        {
-            if (key.ToString() == "D")
-            {
-                // Console.Error.WriteLine($"Calculate {key.ToString()} -> {keccakOrRlp}, {sliced.ToHexString(true)}");
-            }
-            Console.Error.WriteLine($"Calculate {key.ToString()} -> {keccakOrRlp}, {sliced.ToHexString(true)}");
-        }
     }
-
-    public static bool DebugLog = false;
 
     /// <summary>
     /// Makes the RLP writable. Should be used only after ensuring that the current <see cref="ICommit"/>
