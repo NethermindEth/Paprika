@@ -27,7 +27,18 @@ public class PaprikaWorldStateScopeProvider(
         IWorldState paprikaWorldState = paprikaBlockchain.StartNew(
             (baseBlock?.StateRoot ?? Nethermind.Core.Crypto.Keccak.EmptyTreeHash).ToPaprikaKeccak());
 
-        IWorldStateScopeProvider.IScope scope = new PaprikaScope(paprikaWorldState, new KeyValueWithBatchingBackedCodeDb(codeDb), scopeLock, false, paprikaBlockchain);
+        PaprikaScope scope = new PaprikaScope(paprikaWorldState, new KeyValueWithBatchingBackedCodeDb(codeDb), scopeLock, false, paprikaBlockchain);
+        PaprikaScope.DebugBlockNumber = baseBlock?.Number ?? 0;
+
+        if (baseBlock?.Number == 46348)
+        {
+            PaprikaScope.Debug = true;
+        }
+        else
+        {
+            PaprikaScope.Debug = false;
+        }
+
         return scope;
     }
 }

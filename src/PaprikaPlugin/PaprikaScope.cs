@@ -6,6 +6,7 @@ using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
 using Nethermind.Evm.State;
 using Nethermind.Int256;
+using Nethermind.State;
 using Paprika.Chain;
 using RocksDbSharp;
 using IWorldState = Paprika.Chain.IWorldState;
@@ -43,6 +44,10 @@ internal class PaprikaScope(
     }
 
     public IWorldStateScopeProvider.ICodeDb CodeDb => codeDb;
+    public static long DebugBlockNumber { get; set; }
+
+    public static bool Debug;
+
     public IWorldStateScopeProvider.IStorageTree CreateStorageTree(Address address)
     {
         return new PaprikaStorageTree(paprikaWorldState, address.ToPaprikaKeccak());
@@ -102,6 +107,12 @@ internal class PaprikaScope(
         {
             using var _ = _writeLock.EnterScope();
             var paprikaKeccak = key.ToPaprikaKeccak();
+            if (account.Nonce != 0)
+            {
+                Console.Error.WriteLine($"{PaprikaScope.DebugBlockNumber} Non zero nonce is {paprikaKeccak}:{key.ToAccountPath} {account}");
+            }
+
+            /*
             Paprika.Account originalAccount = paprikaWorldState.GetAccount(paprikaKeccak);
 
             // I dont know man.... I'm just trying things out.
@@ -112,6 +123,19 @@ internal class PaprikaScope(
                     account?.CodeHash?.ToPaprikaKeccak() ?? originalAccount.CodeHash,
                     originalAccount.StorageRootHash)
             );
+            */
+            if (PaprikaScope.Debug)
+            {
+                Console.Error.WriteLine($"Set {paprikaKeccak} to {account}");
+            }
+            if (account == null)
+            {
+                paprikaWorldState.DestroyAccount(paprikaKeccak);
+            }
+            else
+            {
+                paprikaWorldState.SetAccount(paprikaKeccak, account.ToPaprikaAccount());
+            }
         }
 
         public IWorldStateScopeProvider.IStorageWriteBatch CreateStorageWriteBatch(Address key, int estimatedEntries)
@@ -140,12 +164,20 @@ internal class PaprikaScope(
 
         public void Set(in UInt256 index, byte[] value)
         {
+            if (PaprikaScope.Debug)
+            {
+                Console.Error.WriteLine($"Set {account}:{index} to {value?.ToHexString()}");
+            }
             using var _ = writeLock.EnterScope();
             setter.SetStorage(index.SlotToPaprikaKeccak(), value);
         }
 
         public void Clear()
         {
+            if (PaprikaScope.Debug)
+            {
+                Console.Error.WriteLine($"destroy account {account}");
+            }
             using var _ = writeLock.EnterScope();
             worldState.DestroyAccount(account);
         }
