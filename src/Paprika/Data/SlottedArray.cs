@@ -108,7 +108,7 @@ public readonly ref struct SlottedArray /*: IClearable */
 
     private ref Slot GetSlotRef(int index)
     {
-        // Slots are at [VectorSize, VectorSize*2), then [VectorSize*3, VectorSize*4), then [VectorSize*5, VectorSize*6) 
+        // Slots are at [VectorSize, VectorSize*2), then [VectorSize*3, VectorSize*4), then [VectorSize*5, VectorSize*6)
         // To extract them extract the higher part and multiply by two, then add the lower part.
         // Additionally, add one ushorts per vector
 
@@ -796,7 +796,7 @@ public readonly ref struct SlottedArray /*: IClearable */
             var first = actual[0];
             if ((first & SpecialCaseMask) == SpecialCaseMask)
             {
-                // check lengths first, then construct a value that combines the prefix and the first nibble 
+                // check lengths first, then construct a value that combines the prefix and the first nibble
                 if (key.Length == PathLengthOf1 &&
                     first == (SingleNibbleCaseMask | key.Nibble0))
                 {
@@ -1026,7 +1026,7 @@ public readonly ref struct SlottedArray /*: IClearable */
                         break;
                     }
 
-                    // Find the new start. Look for the first unset bit beyond the last observed set bit. 
+                    // Find the new start. Look for the first unset bit beyond the last observed set bit.
                     var shifted = deletedMask >> (setBitIndex + 1);
                     var unSetBitIndex = BitOperations.TrailingZeroCount(~shifted);
 
@@ -1161,7 +1161,7 @@ public readonly ref struct SlottedArray /*: IClearable */
     }
 
     /// <summary>
-    /// Collects tombstones of entities that used to be. 
+    /// Collects tombstones of entities that used to be.
     /// </summary>
     private void CollectTombstones()
     {
@@ -1372,7 +1372,15 @@ public readonly ref struct SlottedArray /*: IClearable */
         // Not the first, calculate on the basis of the address.
         var previousSlotAddress = GetSlotRef(index - 1).ItemAddress;
         var length = previousSlotAddress - addr;
-        return _data.Slice(addr, length);
+        try
+        {
+            return _data.Slice(addr, length);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            Console.Error.WriteLine($"Argumenet wrong. {addr}: {length}");
+            throw;
+        }
     }
 
     /// <summary>
@@ -1402,7 +1410,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         public const int Size = 2;
 
         /// <summary>
-        /// The address currently allows to address 8kb of data 
+        /// The address currently allows to address 8kb of data
         /// </summary>
         public const int MaximumAddressableSize = 8 * 1024;
 
@@ -1520,7 +1528,7 @@ public readonly ref struct SlottedArray /*: IClearable */
         public readonly override string ToString() => $"{nameof(ItemAddress)}: {ItemAddress}";
 
         /// <summary>
-        /// Prepares the key for the search. 
+        /// Prepares the key for the search.
         /// </summary>
         public static ushort PrepareKey(in NibblePath key, out byte preamble, out NibblePath trimmed)
         {
@@ -1585,7 +1593,7 @@ public readonly ref struct SlottedArray /*: IClearable */
                     // odd
                     preamble = KeyPreambleOddBit | (KeyPreambleLength4 << KeyPreambleLengthShift);
                     hash = (ushort)(
-                        ((b & 0x0F) << HashByteShift) + // 0th 
+                        ((b & 0x0F) << HashByteShift) + // 0th
                         Unsafe.Add(ref b, 1) + // 1th &2nd
                         ((Unsafe.Add(ref b, 2) & 0xF0) << HashByteShift) // 3rd, encoded as the highest
                     );
@@ -1605,7 +1613,7 @@ public readonly ref struct SlottedArray /*: IClearable */
                         // Odd starting path _ABCxxxD will have its hash encoded as DABC
 
                         hash = (ushort)(
-                            ((b & 0x0F) << HashByteShift) + // 0th 
+                            ((b & 0x0F) << HashByteShift) + // 0th
                             Unsafe.Add(ref b, 1) + // 1th &2nd
                             (key.GetAt(length - 1) << (HashByteShift + shift)) // last, encoded as the highest
                         );
@@ -1615,8 +1623,8 @@ public readonly ref struct SlottedArray /*: IClearable */
                         // even starting path ABxxxCD will have its hash encoded as ABDC
                         // this is done to efficiently decode it layer by slicing the hash.
                         hash = (ushort)(
-                            (b << HashByteShift) + // 0th & 1st 
-                            (key.GetAt(length - 2) << shift) + key.GetAt(length - 1)); // last but one & last    
+                            (b << HashByteShift) + // 0th & 1st
+                            (key.GetAt(length - 2) << shift) + key.GetAt(length - 1)); // last but one & last
                     }
 
                     break;
@@ -1654,7 +1662,7 @@ public readonly ref struct SlottedArray /*: IClearable */
 
                 case KeyPreambleLength3OrLess:
                     // 1, 2, or 3
-                    // use bit-hash to get even or odd 
+                    // use bit-hash to get even or odd
                     var length = GetLengthOf123(hash, odd);
                     return length == 0 ? default : NibblePath.FromKey(workingSet, odd, length);
 
